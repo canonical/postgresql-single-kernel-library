@@ -5,6 +5,9 @@
 This module should contain the literals used in the charms (paths, enums, etc).
 """
 
+# Relations.
+PEER = "database-peers"
+
 # Users.
 BACKUP_USER = "backup"
 MONITORING_USER = "monitoring"
