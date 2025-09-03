@@ -8,8 +8,7 @@ description = "Shared and reusable code for PostgreSQL-related charms"
 readme = "README.md"
 license = "Apache-2.0"
 authors = [
-    {name = "Dragomir Penev", email = "dragomir.penev@canonical.com"},
-    {name = "Marcelo Henrique Neppel", email = "marcelo.neppel@canonical.com"}
+    {name = "Canonical Data Platform", email = "data-platform@lists.launchpad.net"}
 ]
 classifiers = [
  "Development Status :: 3 - Alpha",
