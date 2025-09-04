@@ -26,7 +26,8 @@ format = [
     "ruff==0.12.11"
 ]
 lint = [
-    "codespell==2.4.1"
+    "codespell==2.4.1",
+    "pyright==1.1.405"
 ]
 unit = [
     "coverage[toml]==7.9.1; python_version > '3.8'",
@@ -96,3 +97,13 @@ max-complexity = 10
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.pyright]
+include = ["single_kernel_postgresql"]
+pythonVersion = "3.8"
+pythonPlatform = "All"
+typeCheckingMode = "basic"
+reportIncompatibleMethodOverride = false
+reportImportCycles = false
+reportMissingModuleSource = true
+stubPath = ""

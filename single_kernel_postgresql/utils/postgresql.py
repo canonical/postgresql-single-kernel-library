@@ -408,7 +408,7 @@ class PostgreSQL:
             raise PostgreSQLCreateUserError() from e
 
     def _adjust_user_definition(
-        self, user: str, roles: Optional[List[str]], database: str, user_definition: str
+        self, user: str, roles: Optional[List[str]], database: Optional[str], user_definition: str
     ) -> Tuple[str, List[str]]:
         """Adjusts the user definition to include additional statements.
 
@@ -453,7 +453,7 @@ class PostgreSQL:
 
     def _process_extra_user_roles(
         self, user: str, extra_user_roles: Optional[List[str]] = None
-    ) -> Tuple[Optional[List[str]], Optional[List[str]]]:
+    ) -> Tuple[Optional[List[str]], Optional[Set[str]]]:
         # Separate roles and privileges from the provided extra user roles.
         roles = privileges = None
         if extra_user_roles:
@@ -489,7 +489,7 @@ class PostgreSQL:
             privileges = {
                 extra_user_role
                 for extra_user_role in extra_user_roles
-                if extra_user_role not in roles
+                if extra_user_role and extra_user_role not in roles
             }
             invalid_privileges = [
                 privilege for privilege in privileges if privilege not in valid_privileges
@@ -661,8 +661,8 @@ class PostgreSQL:
         self,
         user: str,
         database: str,
-        schematables: list[str],
-        old_schematables: list[str] | None = None,
+        schematables: List[str],
+        old_schematables: Optional[List[str]] = None,
     ) -> None:
         """Grant CONNECT privilege on database and SELECT privilege on tables.
 
@@ -705,7 +705,7 @@ class PostgreSQL:
                 connection.close()
 
     def revoke_replication_privileges(
-        self, user: str, database: str, schematables: list[str]
+        self, user: str, database: str, schematables: List[str]
     ) -> None:
         """Revoke all privileges from tables and database.
 
@@ -792,8 +792,9 @@ class PostgreSQL:
         """Get the name of the last archived wal for the current PostgreSQL cluster."""
         try:
             with self._connect_to_database() as connection, connection.cursor() as cursor:
+                # Should always be present
                 cursor.execute("SELECT last_archived_wal FROM pg_stat_archiver;")
-                return cursor.fetchone()[0]
+                return cursor.fetchone()[0]  # type: ignore
         except psycopg2.Error as e:
             logger.error(f"Failed to get PostgreSQL last archived WAL: {e}")
             raise PostgreSQLGetLastArchivedWALError() from e
@@ -803,7 +804,8 @@ class PostgreSQL:
         try:
             with self._connect_to_database() as connection, connection.cursor() as cursor:
                 cursor.execute("SELECT timeline_id FROM pg_control_checkpoint();")
-                return cursor.fetchone()[0]
+                # There should always be a timeline
+                return cursor.fetchone()[0]  # type: ignore
         except psycopg2.Error as e:
             logger.error(f"Failed to get PostgreSQL current timeline id: {e}")
             raise PostgreSQLGetCurrentTimelineError() from e
@@ -859,8 +861,8 @@ class PostgreSQL:
                 database_host=host
             ) as connection, connection.cursor() as cursor:
                 cursor.execute("SELECT version();")
-                # Split to get only the version number.
-                return cursor.fetchone()[0].split(" ")[1]
+                # Split to get only the version number. There should always be a version.
+                return cursor.fetchone()[0].split(" ")[1]  # type:ignore
         except psycopg2.Error as e:
             logger.error(f"Failed to get PostgreSQL version: {e}")
             raise PostgreSQLGetPostgreSQLVersionError() from e
@@ -880,7 +882,8 @@ class PostgreSQL:
                 database_host=self.current_host if check_current_host else None
             ) as connection, connection.cursor() as cursor:
                 cursor.execute("SHOW ssl;")
-                return "on" in cursor.fetchone()[0]
+                # SSL state should always be set
+                return "on" in cursor.fetchone()[0]  # type: ignore
         except psycopg2.Error:
             # Connection errors happen when PostgreSQL has not started yet.
             return False
@@ -1378,7 +1381,9 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             connection = self._connect_to_database(database=db)
             with connection, connection.cursor() as cursor:
                 cursor.execute(SQL("SELECT COUNT(1) FROM {};").format(Identifier(schema, table)))
-                return cursor.fetchone()[0] == 0
+                if result := cursor.fetchone():
+                    return result[0] == 0
+                return True
         except psycopg2.Error as e:
             logger.error(f"Failed to check whether table is empty: {e}")
             raise PostgreSQLIsTableEmptyError() from e
@@ -1386,7 +1391,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             if connection:
                 connection.close()
 
-    def create_publication(self, db: str, name: str, schematables: list[str]) -> None:
+    def create_publication(self, db: str, name: str, schematables: List[str]) -> None:
         """Create PostgreSQL publication."""
         connection = None
         try:
@@ -1427,7 +1432,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             if connection:
                 connection.close()
 
-    def alter_publication(self, db: str, name: str, schematables: list[str]) -> None:
+    def alter_publication(self, db: str, name: str, schematables: List[str]) -> None:
         """Alter PostgreSQL publication."""
         connection = None
         try:
@@ -1715,11 +1720,11 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             return True
 
         try:
-            group_map = self.build_postgresql_group_map(group_map)
+            parsed_group_map = self.build_postgresql_group_map(group_map)
         except ValueError:
             return False
 
-        for _, psql_group in group_map:
+        for _, psql_group in parsed_group_map:
             with self._connect_to_database() as connection, connection.cursor() as cursor:
                 query = SQL("SELECT TRUE FROM pg_roles WHERE rolname={};")
                 query = query.format(Literal(psql_group))
@@ -1740,7 +1745,9 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                         "SELECT COUNT(*) FROM pg_hba_file_rules WHERE {} = ANY(user_name);"
                     ).format(Literal(username))
                 )
-                return cursor.fetchone()[0] > 0
+                if result := cursor.fetchone():
+                    return result[0] > 0
+                return False
         except psycopg2.Error as e:
             logger.debug(f"Failed to check pg_hba: {e}")
             return False
