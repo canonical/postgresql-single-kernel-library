@@ -24,6 +24,7 @@ on:
         description: build_charm.yaml `artifact-prefix` output
         value: ${{ jobs.build.outputs.artifact-prefix }}
 
+permissions: {}
 jobs:
   # TODO install uv in reusable and re-enable
   # lint:

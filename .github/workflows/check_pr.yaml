@@ -12,6 +12,8 @@ on:
     branches:
       - main
 
+    permissions:
+      pull-requests: read  # Needed to check labels
 jobs:
   check-pr:
     name: Check pull request
