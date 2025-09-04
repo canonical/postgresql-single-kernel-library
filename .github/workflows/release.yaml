@@ -3,11 +3,24 @@
 name: Publish
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - 16/edge
+
+concurrency:
+  # Prevent race conditions (if multiple commits have been pushed since the last release)
+  group: dpw-release-python-package-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  ci-tests:
+    name: Tests
+    uses: ./.github/workflows/ci.yaml
+    secrets: inherit
   build:
     name: "Build package"
+    needs:
+      - ci-tests
     runs-on: ubuntu-latest
     outputs:
       VERSION: ${{ steps.export.outputs.VERSION }}
