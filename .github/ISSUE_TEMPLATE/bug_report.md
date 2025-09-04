@@ -35,6 +35,9 @@ Charm revision:
 <!-- Run `lxd version` -->
 LXD: 
 
+<!-- Run `microk8s version` -->
+microk8s:
+
 ## Log output
 <!-- Please enable debug logging by running `juju model-config logging-config="<root>=INFO;unit=DEBUG"` (if possible) -->
 <!-- Then, run `juju debug-log --replay > log.txt` and upload "log.txt" file here -->
