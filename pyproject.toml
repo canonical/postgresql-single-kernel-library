@@ -3,8 +3,8 @@
 
 [project]
 name = "postgresql-charms-single-kernel"
-dynamic = ["version"]
 description = "Shared and reusable code for PostgreSQL-related charms"
+version = "0.0.1"
 readme = "README.md"
 license = "Apache-2.0"
 authors = [
