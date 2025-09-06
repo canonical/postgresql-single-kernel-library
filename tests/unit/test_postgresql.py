@@ -1,22 +1,22 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
-from unittest.mock import call, patch
+from unittest.mock import call, patch, sentinel
 
 import psycopg2
 import pytest
 from ops.testing import Harness
 from psycopg2.sql import SQL, Composed, Identifier, Literal
-
 from single_kernel_postgresql.abstract_charm import AbstractPostgreSQLCharm
-from single_kernel_postgresql.config.literals import (
-    PEER,
-    SYSTEM_USERS,
-)
+from single_kernel_postgresql.config.literals import PEER, SYSTEM_USERS
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_INTERNAL,
     ACCESS_GROUPS,
+    PostgreSQL,
     PostgreSQLCreateDatabaseError,
+    PostgreSQLCreateUserError,
     PostgreSQLGetLastArchivedWALError,
+    PostgreSQLUndefinedHostError,
+    PostgreSQLUndefinedPasswordError,
 )
 
 
@@ -65,11 +65,14 @@ def test_create_access_groups(harness, users_exist):
 
 
 def test_create_database(harness):
-    with patch(
-        "single_kernel_postgresql.utils.postgresql.PostgreSQL.enable_disable_extensions"
-    ) as _enable_disable_extensions, patch(
-        "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
-    ) as _connect_to_database:
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL.enable_disable_extensions"
+        ) as _enable_disable_extensions,
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+    ):
         # Test a successful database creation.
         database = "test_database"
         plugins = ["test_plugin_1", "test_plugin_2"]
@@ -310,3 +313,215 @@ def test_validate_group_map(harness):
         assert harness.charm.postgresql.validate_group_map("ldap_group=ldap_test_group") is True
         assert harness.charm.postgresql.validate_group_map("ldap_group=ldap_test_group,") is False
         assert harness.charm.postgresql.validate_group_map("ldap_group ldap_test_group") is False
+
+
+def test_connect_to_database():
+    # Error on no host
+    pg = PostgreSQL(None, None, "operator", None, "postgres", None)
+    with pytest.raises(PostgreSQLUndefinedHostError):
+        pg._connect_to_database()
+
+    # Error on no password
+    pg = PostgreSQL("primary", "current", "operator", None, "postgres", None)
+    with pytest.raises(PostgreSQLUndefinedPasswordError):
+        pg._connect_to_database()
+
+    # Returns connection
+    pg = PostgreSQL("primary", "current", "operator", "password", "postgres", None)
+    with patch(
+        "single_kernel_postgresql.utils.postgresql.psycopg2.connect",
+        return_value=sentinel.connection,
+    ) as _connect:
+        assert pg._connect_to_database() == sentinel.connection
+        _connect.assert_called_once_with(
+            "dbname='postgres' user='operator' host='primary'password='password' connect_timeout=1"
+        )
+
+
+def test_is_user_in_hba():
+    with patch(
+        "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+    ) as _connect_to_database:
+        pg = PostgreSQL("primary", "current", "operator", "password", "postgres", None)
+        _cursor = _connect_to_database().__enter__().cursor().__enter__()
+
+        # No result
+        _cursor.fetchone.return_value = None
+        assert pg.is_user_in_hba("test-user") is False
+        _cursor.execute.assert_called_once_with(
+            Composed([
+                SQL("SELECT COUNT(*) FROM pg_hba_file_rules WHERE "),
+                Literal("test-user"),
+                SQL(" = ANY(user_name);"),
+            ])
+        )
+
+        # Exception
+        _cursor.fetchone.side_effect = psycopg2.Error
+        assert pg.is_user_in_hba("test-user") is False
+
+        # Result
+        _cursor.fetchone.side_effect = None
+        _cursor.fetchone.return_value = (1,)
+        assert pg.is_user_in_hba("test-user") is True
+
+
+def test_drop_hba_triggers():
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+        ) as _connect_to_database,
+        patch("single_kernel_postgresql.utils.postgresql.logger") as _logger,
+    ):
+        pg = PostgreSQL("primary", "current", "operator", "password", "postgres", None)
+        _cursor = _connect_to_database().__enter__().cursor().__enter__()
+        _cursor.fetchall.return_value = (("db1",), ("db2",))
+
+        pg.drop_hba_triggers()
+
+        assert _cursor.execute.call_count == 5
+        _cursor.execute.assert_any_call(
+            SQL(
+                "SELECT datname FROM pg_database WHERE datname <> 'template0' AND datname <>'postgres';"
+            )
+        )
+        _cursor.execute.assert_any_call(
+            SQL("DROP EVENT TRIGGER IF EXISTS update_pg_hba_on_create_schema;")
+        )
+        _cursor.execute.assert_any_call(
+            SQL("DROP EVENT TRIGGER IF EXISTS update_pg_hba_on_drop_schema;")
+        )
+        _cursor.execute.reset_mock()
+
+        # Exception on select
+        _cursor.execute.side_effect = psycopg2.Error
+
+        pg.drop_hba_triggers()
+
+        _cursor.execute.assert_called_once_with(
+            SQL(
+                "SELECT datname FROM pg_database WHERE datname <> 'template0' AND datname <>'postgres';"
+            )
+        )
+        _logger.warning.assert_called_once_with(
+            "Failed to get databases when removing hba trigger: "
+        )
+        _logger.warning.reset_mock()
+
+        # Exception on drop
+        _cursor.execute.side_effect = [None, psycopg2.Error, None, None]
+
+        pg.drop_hba_triggers()
+
+        _logger.warning.assert_called_once_with("Failed to remove hba trigger for db1: ")
+
+
+def test_create_user():
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+        ) as _connect_to_database,
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._process_extra_user_roles",
+        ) as _process_extra_user_roles,
+    ):
+        pg = PostgreSQL("primary", "current", "operator", "password", "postgres", None)
+        _cursor = _connect_to_database().__enter__().cursor().__enter__()
+        _process_extra_user_roles.return_value = (["role1", "role2"], ["priv1", "priv2"])
+
+        # Create user
+        _cursor.fetchone.return_value = None
+
+        pg.create_user("username", "password")
+
+        assert _cursor.execute.call_count == 8
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("SELECT TRUE FROM pg_roles WHERE rolname="),
+                Literal("username"),
+                SQL(";"),
+            ])
+        )
+        _cursor.execute.assert_any_call(SQL("RESET ROLE;"))
+        _cursor.execute.assert_any_call(SQL("BEGIN;"))
+        _cursor.execute.assert_any_call(SQL("SET LOCAL log_statement = 'none';"))
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("CREATE ROLE "),
+                Identifier("username"),
+                SQL(" WITH LOGIN ENCRYPTED PASSWORD 'password' priv1 priv2;"),
+            ])
+        )
+        _cursor.execute.assert_any_call(SQL("COMMIT;"))
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("role1"),
+                SQL(" TO "),
+                Identifier("username"),
+                SQL(";"),
+            ])
+        )
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("role2"),
+                SQL(" TO "),
+                Identifier("username"),
+                SQL(";"),
+            ])
+        )
+        _cursor.execute.reset_mock()
+        _process_extra_user_roles.reset_mock()
+
+        # Alter user
+        _cursor.fetchone.return_value = (1,)
+
+        pg.create_user("username", "password", True, True, ["role3"], "db1", True)
+
+        _process_extra_user_roles.assert_called_once_with("username", ["role3"])
+        assert _cursor.execute.call_count == 8
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("SELECT TRUE FROM pg_roles WHERE rolname="),
+                Literal("username"),
+                SQL(";"),
+            ])
+        )
+        _cursor.execute.assert_any_call(SQL("RESET ROLE;"))
+        _cursor.execute.assert_any_call(SQL("BEGIN;"))
+        _cursor.execute.assert_any_call(SQL("SET LOCAL log_statement = 'none';"))
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("ALTER ROLE "),
+                Identifier("username"),
+                SQL(
+                    ' WITH LOGIN SUPERUSER REPLICATION ENCRYPTED PASSWORD \'password\' IN ROLE "charmed_db1_admin", "charmed_db1_dml" CREATEDB priv1 priv2;'
+                ),
+            ])
+        )
+        _cursor.execute.assert_any_call(SQL("COMMIT;"))
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("role1"),
+                SQL(" TO "),
+                Identifier("username"),
+                SQL(";"),
+            ])
+        )
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("role2"),
+                SQL(" TO "),
+                Identifier("username"),
+                SQL(";"),
+            ])
+        )
+
+        # Exception
+        _cursor.execute.side_effect = psycopg2.Error
+
+        with pytest.raises(PostgreSQLCreateUserError):
+            pg.create_user("username", "password")
