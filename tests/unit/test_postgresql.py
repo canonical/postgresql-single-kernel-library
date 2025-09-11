@@ -11,9 +11,11 @@ from single_kernel_postgresql.config.literals import PEER, SYSTEM_USERS
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_INTERNAL,
     ACCESS_GROUPS,
+    ROLE_DATABASES_OWNER,
     PostgreSQL,
     PostgreSQLCreateDatabaseError,
     PostgreSQLCreateUserError,
+    PostgreSQLDatabasesSetupError,
     PostgreSQLGetLastArchivedWALError,
     PostgreSQLUndefinedHostError,
     PostgreSQLUndefinedPasswordError,
@@ -313,6 +315,105 @@ def test_validate_group_map(harness):
         assert harness.charm.postgresql.validate_group_map("ldap_group=ldap_test_group") is True
         assert harness.charm.postgresql.validate_group_map("ldap_group=ldap_test_group,") is False
         assert harness.charm.postgresql.validate_group_map("ldap_group ldap_test_group") is False
+
+
+def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.create_user") as _create_user,
+        patch("single_kernel_postgresql.utils.postgresql.change_owner") as _change_owner,
+        patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
+    ):
+        # First connection (non-context) for temp tablespace
+        execute_direct = _connect_to_database.return_value.cursor.return_value.execute
+        fetchone_direct = _connect_to_database.return_value.cursor.return_value.fetchone
+        fetchone_direct.return_value = None
+
+        # Second and third connections are context-managed
+        execute_cm = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.execute
+        fetchone_cm = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchone
+        fetchone_cm.return_value = None  # owner role missing
+
+        harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
+
+        # Ensure permission fixes applied
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+        _chmod.assert_called_once_with("/var/lib/postgresql/tmp", 0o700)
+
+        # Validate temp tablespace operations
+        execute_direct.assert_has_calls([
+            call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';"),
+            call("CREATE TABLESPACE temp LOCATION '/var/lib/postgresql/tmp';"),
+            call("GRANT CREATE ON TABLESPACE temp TO public;"),
+        ])
+
+        # create_user called for missing owner role
+        _create_user.assert_called_once_with(
+            ROLE_DATABASES_OWNER, can_create_database=True, extra_user_roles=["charmed_dml"]
+        )
+
+        # Final revokes and grants
+        system_users = harness.charm.postgresql.system_users
+        expected = [
+            call("REVOKE ALL PRIVILEGES ON DATABASE postgres FROM PUBLIC;"),
+            call("REVOKE CREATE ON SCHEMA public FROM PUBLIC;"),
+            *[
+                call(SQL("GRANT ALL PRIVILEGES ON DATABASE postgres TO {};").format(Identifier(u)))
+                for u in system_users
+            ],
+        ]
+        execute_cm.assert_has_calls(expected, any_order=False)
+
+
+def test_set_up_database_no_temp_and_existing_owner_role(harness):
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.create_user") as _create_user,
+    ):
+        # owner role exists
+        fetchone = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.fetchone
+        fetchone.return_value = True
+
+        harness.charm.postgresql.set_up_database()
+
+        _create_user.assert_not_called()
+
+        execute = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.execute
+        system_users = harness.charm.postgresql.system_users
+        execute.assert_has_calls([
+            call("REVOKE ALL PRIVILEGES ON DATABASE postgres FROM PUBLIC;"),
+            call("REVOKE CREATE ON SCHEMA public FROM PUBLIC;"),
+            *[
+                call(SQL("GRANT ALL PRIVILEGES ON DATABASE postgres TO {};").format(Identifier(u)))
+                for u in system_users
+            ],
+        ])
+
+
+def test_set_up_database_raises_wrapped_error(harness):
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+        patch("single_kernel_postgresql.utils.postgresql.change_owner"),
+        patch("single_kernel_postgresql.utils.postgresql.os.chmod"),
+    ):
+        execute_direct = _connect_to_database.return_value.cursor.return_value.execute
+        execute_direct.side_effect = psycopg2.Error
+        with pytest.raises(PostgreSQLDatabasesSetupError):
+            harness.charm.postgresql.set_up_database(temp_location="/tmp")
 
 
 def test_connect_to_database():
