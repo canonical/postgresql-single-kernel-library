@@ -1,17 +1,23 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
+# ruff: noqa: I001
 from unittest.mock import call, patch, sentinel
 
 import psycopg2
 import pytest
 from ops.testing import Harness
-from psycopg2.sql import SQL, Composed, Identifier, Literal
+from psycopg2.sql import Composed, Identifier, Literal, SQL
+
 from single_kernel_postgresql.abstract_charm import AbstractPostgreSQLCharm
-from single_kernel_postgresql.config.literals import PEER, SYSTEM_USERS
+from single_kernel_postgresql.config.literals import (
+    PEER,
+    POSTGRESQL_STORAGE_PERMISSIONS,
+    SNAP_USER,
+    SYSTEM_USERS,
+)
 from single_kernel_postgresql.utils.postgresql import (
-    ACCESS_GROUP_INTERNAL,
     ACCESS_GROUPS,
-    ROLE_DATABASES_OWNER,
+    ACCESS_GROUP_INTERNAL,
     PostgreSQL,
     PostgreSQLCreateDatabaseError,
     PostgreSQLCreateUserError,
@@ -19,6 +25,7 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLGetLastArchivedWALError,
     PostgreSQLUndefinedHostError,
     PostgreSQLUndefinedPasswordError,
+    ROLE_DATABASES_OWNER,
 )
 
 
@@ -353,7 +360,8 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", 0o700)
 
-        # Validate temp tablespace operations
+        # Validate temp tablespace operations, including DROP when permissions are fixed
+        execute_direct.assert_any_call("DROP TABLESPACE IF EXISTS temp;")
         execute_direct.assert_has_calls([
             call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';"),
             call("CREATE TABLESPACE temp LOCATION '/var/lib/postgresql/tmp';"),
@@ -376,6 +384,66 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
             ],
         ]
         execute_cm.assert_has_calls(expected, any_order=False)
+
+
+def test_set_up_database_owner_mismatch_triggers_drop_and_fix(harness):
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.change_owner") as _change_owner,
+        patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
+        patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
+        patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
+    ):
+        # Owner differs, permissions are correct
+        stat_result = type(
+            "stat_result", (), {"st_uid": 0, "st_mode": POSTGRESQL_STORAGE_PERMISSIONS}
+        )
+        _stat.return_value = stat_result
+        _getpwuid.return_value.pw_name = "root"
+
+        execute_direct = _connect_to_database.return_value.cursor.return_value.execute
+        _connect_to_database.return_value.cursor.return_value.fetchone.return_value = True
+
+        harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
+
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+        _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
+        execute_direct.assert_any_call("DROP TABLESPACE IF EXISTS temp;")
+
+
+def test_set_up_database_permissions_mismatch_triggers_drop_and_fix(harness):
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.change_owner") as _change_owner,
+        patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
+        patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
+        patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
+    ):
+        # Owner matches SNAP_USER, permissions differ
+        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 0o755})
+        _stat.return_value = stat_result
+        _getpwuid.return_value.pw_name = SNAP_USER
+
+        execute_direct = _connect_to_database.return_value.cursor.return_value.execute
+        _connect_to_database.return_value.cursor.return_value.fetchone.return_value = True
+
+        harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
+
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+        _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
+        execute_direct.assert_any_call("DROP TABLESPACE IF EXISTS temp;")
 
 
 def test_set_up_database_no_temp_and_existing_owner_role(harness):
