@@ -21,6 +21,7 @@ Any charm using this library should import the `psycopg2` or `psycopg2-binary` d
 
 import logging
 import os
+import pwd
 from collections import OrderedDict
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -28,7 +29,7 @@ import psycopg2
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
 
-from ..config.literals import BACKUP_USER, POSTGRESQL_STORAGE_PERMISSIONS, SYSTEM_USERS
+from ..config.literals import BACKUP_USER, POSTGRESQL_STORAGE_PERMISSIONS, SNAP_USER, SYSTEM_USERS
 from .filesystem import change_owner
 
 # Groups to distinguish HBA access
@@ -1074,8 +1075,14 @@ class PostgreSQL:
 
             if temp_location is not None:
                 # Fix permissions on the temporary tablespace location when a reboot happens and tmpfs is being used.
-                change_owner(temp_location)
-                os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
+                temp_location_stats = os.stat(temp_location)
+                if (
+                    pwd.getpwuid(temp_location_stats.st_uid).pw_name != SNAP_USER
+                    or temp_location_stats.st_mode != POSTGRESQL_STORAGE_PERMISSIONS
+                ):
+                    change_owner(temp_location)
+                    os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
+                    cursor.execute("DROP TABLESPACE IF EXISTS temp;")
 
                 cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
                 if cursor.fetchone() is None:
