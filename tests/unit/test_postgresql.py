@@ -329,7 +329,14 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.create_user") as _create_user,
         patch("single_kernel_postgresql.utils.postgresql.change_owner") as _change_owner,
         patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
+        patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
+        patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
     ):
+        # Simulate a temp location owned by wrong user/permissions to trigger fixup
+        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 0o755})
+        _stat.return_value = stat_result
+        _getpwuid.return_value.pw_name = "root"
+
         # First connection (non-context) for temp tablespace
         execute_direct = _connect_to_database.return_value.cursor.return_value.execute
         fetchone_direct = _connect_to_database.return_value.cursor.return_value.fetchone
