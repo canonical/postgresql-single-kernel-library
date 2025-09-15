@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 # ruff: noqa: I001
 from unittest.mock import call, patch, sentinel
+from datetime import datetime, timezone, UTC
 
 import psycopg2
 import pytest
@@ -360,9 +361,9 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", 0o700)
 
-        # Validate temp tablespace operations, including DROP when permissions are fixed
-        execute_direct.assert_any_call("DROP TABLESPACE IF EXISTS temp;")
+        # Validate temp tablespace operations: check existence and create/grant when missing
         execute_direct.assert_has_calls([
+            call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';"),
             call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';"),
             call("CREATE TABLESPACE temp LOCATION '/var/lib/postgresql/tmp';"),
             call("GRANT CREATE ON TABLESPACE temp TO public;"),
@@ -386,7 +387,7 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         execute_cm.assert_has_calls(expected, any_order=False)
 
 
-def test_set_up_database_owner_mismatch_triggers_drop_and_fix(harness):
+def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness):
     with (
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
@@ -399,6 +400,7 @@ def test_set_up_database_owner_mismatch_triggers_drop_and_fix(harness):
         patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
         patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
         patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
+        patch("single_kernel_postgresql.utils.postgresql.datetime") as _dt,
     ):
         # Owner differs, permissions are correct
         stat_result = type(
@@ -407,17 +409,23 @@ def test_set_up_database_owner_mismatch_triggers_drop_and_fix(harness):
         _stat.return_value = stat_result
         _getpwuid.return_value.pw_name = "root"
 
+        # Mock datetime.now(timezone.utc) to a fixed timestamp
+        _dt.now.return_value = datetime(2025, 1, 1, 1, 2, 3, tzinfo=UTC)
+        _dt.timezone = timezone  # ensure timezone.utc is available in the patch target
+
         execute_direct = _connect_to_database.return_value.cursor.return_value.execute
-        _connect_to_database.return_value.cursor.return_value.fetchone.return_value = True
+        fetchone_direct = _connect_to_database.return_value.cursor.return_value.fetchone
+        fetchone_direct.side_effect = [True, None]
 
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
         _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
-        execute_direct.assert_any_call("DROP TABLESPACE IF EXISTS temp;")
+        execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
+        execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_2025_01_01_01_02_03;")
 
 
-def test_set_up_database_permissions_mismatch_triggers_drop_and_fix(harness):
+def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
     with (
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
@@ -430,20 +438,27 @@ def test_set_up_database_permissions_mismatch_triggers_drop_and_fix(harness):
         patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
         patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
         patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
+        patch("single_kernel_postgresql.utils.postgresql.datetime") as _dt,
     ):
         # Owner matches SNAP_USER, permissions differ
         stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 0o755})
         _stat.return_value = stat_result
         _getpwuid.return_value.pw_name = SNAP_USER
 
+        # Mock datetime.now(timezone.utc) to a fixed timestamp
+        _dt.now.return_value = datetime(2025, 1, 1, 1, 2, 3, tzinfo=UTC)
+        _dt.timezone = timezone
+
         execute_direct = _connect_to_database.return_value.cursor.return_value.execute
-        _connect_to_database.return_value.cursor.return_value.fetchone.return_value = True
+        fetchone_direct = _connect_to_database.return_value.cursor.return_value.fetchone
+        fetchone_direct.side_effect = [True, None]
 
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
         _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
-        execute_direct.assert_any_call("DROP TABLESPACE IF EXISTS temp;")
+        execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
+        execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_2025_01_01_01_02_03;")
 
 
 def test_set_up_database_no_temp_and_existing_owner_role(harness):
