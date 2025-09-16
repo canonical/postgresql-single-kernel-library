@@ -1089,6 +1089,17 @@ class PostgreSQL:
                         new_name = f"temp_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
                         cursor.execute(f"ALTER TABLESPACE temp RENAME TO {new_name};")
 
+                        # List temp tablespaces with suffix for operator follow-up cleanup and log them.
+                        cursor.execute(
+                            "SELECT spcname FROM pg_tablespace WHERE spcname LIKE 'temp_%';"
+                        )
+                        temp_tbls = sorted([row[0] for row in cursor.fetchall()])
+                        logger.info(
+                            "There are %d temp tablespaces that should be checked and removed: %s",
+                            len(temp_tbls),
+                            ", ".join(temp_tbls),
+                        )
+
                 # Ensure a fresh temp tablespace exists at the expected location.
                 cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
                 if cursor.fetchone() is None:
