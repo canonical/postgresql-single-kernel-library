@@ -422,7 +422,7 @@ def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness):
         _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
         execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
-        execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_2025_01_01_01_02_03;")
+        execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
 
 
 def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
@@ -458,7 +458,7 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
         _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
         execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
-        execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_2025_01_01_01_02_03;")
+        execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
 
 
 def test_set_up_database_no_temp_and_existing_owner_role(harness):

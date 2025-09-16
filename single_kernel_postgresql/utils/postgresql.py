@@ -1086,9 +1086,7 @@ class PostgreSQL:
                     # Rename existing temp tablespace if it exists, instead of dropping it.
                     cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
                     if cursor.fetchone() is not None:
-                        new_name = (
-                            f"temp_{datetime.now(timezone.utc).strftime('%Y_%m_%d_%H_%M_%S')}"
-                        )
+                        new_name = f"temp_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
                         cursor.execute(f"ALTER TABLESPACE temp RENAME TO {new_name};")
 
                 # Ensure a fresh temp tablespace exists at the expected location.
