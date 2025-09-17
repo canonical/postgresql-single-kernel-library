@@ -4,7 +4,7 @@
 [project]
 name = "postgresql-charms-single-kernel"
 description = "Shared and reusable code for PostgreSQL-related charms"
-version = "16.0.0"
+version = "16.0.1"
 readme = "README.md"
 license = "Apache-2.0"
 authors = [

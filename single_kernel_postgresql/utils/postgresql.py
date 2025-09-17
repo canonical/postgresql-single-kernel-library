@@ -21,14 +21,16 @@ Any charm using this library should import the `psycopg2` or `psycopg2-binary` d
 
 import logging
 import os
+import pwd
 from collections import OrderedDict
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 import psycopg2
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
 
-from ..config.literals import BACKUP_USER, POSTGRESQL_STORAGE_PERMISSIONS, SYSTEM_USERS
+from ..config.literals import BACKUP_USER, POSTGRESQL_STORAGE_PERMISSIONS, SNAP_USER, SYSTEM_USERS
 from .filesystem import change_owner
 
 # Groups to distinguish HBA access
@@ -1074,9 +1076,31 @@ class PostgreSQL:
 
             if temp_location is not None:
                 # Fix permissions on the temporary tablespace location when a reboot happens and tmpfs is being used.
-                change_owner(temp_location)
-                os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
+                temp_location_stats = os.stat(temp_location)
+                if (
+                    pwd.getpwuid(temp_location_stats.st_uid).pw_name != SNAP_USER
+                    or temp_location_stats.st_mode != POSTGRESQL_STORAGE_PERMISSIONS
+                ):
+                    change_owner(temp_location)
+                    os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
+                    # Rename existing temp tablespace if it exists, instead of dropping it.
+                    cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
+                    if cursor.fetchone() is not None:
+                        new_name = f"temp_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+                        cursor.execute(f"ALTER TABLESPACE temp RENAME TO {new_name};")
 
+                        # List temp tablespaces with suffix for operator follow-up cleanup and log them.
+                        cursor.execute(
+                            "SELECT spcname FROM pg_tablespace WHERE spcname LIKE 'temp_%';"
+                        )
+                        temp_tbls = sorted([row[0] for row in cursor.fetchall()])
+                        logger.info(
+                            "There are %d temp tablespaces that should be checked and removed: %s",
+                            len(temp_tbls),
+                            ", ".join(temp_tbls),
+                        )
+
+                # Ensure a fresh temp tablespace exists at the expected location.
                 cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
                 if cursor.fetchone() is None:
                     cursor.execute(f"CREATE TABLESPACE temp LOCATION '{temp_location}';")
