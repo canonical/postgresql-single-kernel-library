@@ -340,8 +340,8 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
         patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
     ):
-        # Simulate a temp location owned by wrong user/permissions to trigger fixup
-        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 0o755})
+        # Simulate a temp location owned by wrong user/permissions to trigger fixup (33188 means 0o644)
+        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 33188})
         _stat.return_value = stat_result
         _getpwuid.return_value.pw_name = "root"
 
@@ -402,10 +402,8 @@ def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness):
         patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
         patch("single_kernel_postgresql.utils.postgresql.datetime") as _dt,
     ):
-        # Owner differs, permissions are correct
-        stat_result = type(
-            "stat_result", (), {"st_uid": 0, "st_mode": POSTGRESQL_STORAGE_PERMISSIONS}
-        )
+        # Owner differs, permissions are correct (16832 means 0o700)
+        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 16832})
         _stat.return_value = stat_result
         _getpwuid.return_value.pw_name = "root"
 
@@ -440,8 +438,8 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
         patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
         patch("single_kernel_postgresql.utils.postgresql.datetime") as _dt,
     ):
-        # Owner matches SNAP_USER, permissions differ
-        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 0o755})
+        # Owner matches SNAP_USER, permissions differ (33188 means 0o644)
+        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 33188})
         _stat.return_value = stat_result
         _getpwuid.return_value.pw_name = SNAP_USER
 
@@ -716,3 +714,42 @@ def test_create_user():
 
         with pytest.raises(PostgreSQLCreateUserError):
             pg.create_user("username", "password")
+
+
+def test_set_up_database_owner_and_permissions_match_no_rename_or_fix(harness):
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.change_owner") as _change_owner,
+        patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
+        patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
+        patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
+    ):
+        # Owner matches SNAP_USER and permissions are correct (16832 means 0o700)
+        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 16832})
+        _stat.return_value = stat_result
+        _getpwuid.return_value.pw_name = SNAP_USER
+
+        execute_direct = _connect_to_database.return_value.cursor.return_value.execute
+        fetchone_direct = _connect_to_database.return_value.cursor.return_value.fetchone
+        # No mismatch, so the existence check returns True and no creation/rename occurs
+        fetchone_direct.return_value = True
+
+        harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
+
+        # No permission/owner fix should be performed
+        _change_owner.assert_not_called()
+        _chmod.assert_not_called()
+
+        # It should check for temp tablespace existence
+        execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
+
+        # Ensure that no rename was attempted
+        for c in execute_direct.call_args_list:
+            if c.args:
+                assert "ALTER TABLESPACE temp RENAME TO" not in c.args[0]
