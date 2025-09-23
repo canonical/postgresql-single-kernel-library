@@ -23,14 +23,14 @@ lib = [
     "psycopg2>=2.9.10",
 ]
 format = [
-    "ruff==0.13.0"
+    "ruff==0.13.1"
 ]
 lint = [
     "codespell==2.4.1",
     "pyright==1.1.405"
 ]
 unit = [
-    "coverage[toml]==7.10.6; python_version > '3.8'",
+    "coverage[toml]==7.10.7; python_version > '3.8'",
     "pytest==8.4.2; python_version >= '3.9'"
 ]
 
