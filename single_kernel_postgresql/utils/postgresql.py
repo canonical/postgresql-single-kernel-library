@@ -30,7 +30,13 @@ import psycopg2
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
 
-from ..config.literals import BACKUP_USER, POSTGRESQL_STORAGE_PERMISSIONS, SNAP_USER, SYSTEM_USERS
+from ..config.literals import (
+    BACKUP_USER,
+    POSTGRESQL_STORAGE_PERMISSIONS,
+    ROCK_USER,
+    SNAP_USER,
+    SYSTEM_USERS,
+)
 from .filesystem import change_owner
 
 # Groups to distinguish HBA access
@@ -1079,7 +1085,7 @@ class PostgreSQL:
                 # Fix permissions on the temporary tablespace location when a reboot happens and tmpfs is being used.
                 temp_location_stats = os.stat(temp_location)
                 if (
-                    pwd.getpwuid(temp_location_stats.st_uid).pw_name != SNAP_USER
+                    pwd.getpwuid(temp_location_stats.st_uid).pw_name not in [ROCK_USER, SNAP_USER]
                     or temp_location_stats.st_mode != POSTGRESQL_STORAGE_PERMISSIONS
                 ):
                     change_owner(temp_location)

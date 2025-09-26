@@ -16,6 +16,7 @@ BACKUP_USER = "backup"
 MONITORING_USER = "monitoring"
 REPLICATION_USER = "replication"
 REWIND_USER = "rewind"
+ROCK_USER = "postgres"
 SNAP_USER = "_daemon_"
 USER = "operator"
 SYSTEM_USERS = [MONITORING_USER, REPLICATION_USER, REWIND_USER, USER]

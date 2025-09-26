@@ -7,13 +7,13 @@ import pytest
 from single_kernel_postgresql.utils.filesystem import change_owner
 
 
-def test_change_owner_calls_pwd_and_os_chown_with_daemon_user():
+def test_change_owner_calls_pwd_and_os_chown_with_rock_user():
     with (
         patch("single_kernel_postgresql.utils.filesystem.pwd.getpwnam") as getpwnam,
         patch("single_kernel_postgresql.utils.filesystem.os.chown") as chown,
         NamedTemporaryFile(delete=True) as tmp,
     ):
-        # Simulate pwd entry
+        # Simulate ROCK user entry existing
         pw_entry = MagicMock()
         pw_entry.pw_uid = 1234
         pw_entry.pw_gid = 4321
@@ -21,8 +21,30 @@ def test_change_owner_calls_pwd_and_os_chown_with_daemon_user():
 
         change_owner(tmp.name)
 
-        getpwnam.assert_called_once_with("_daemon_")
+        # The implementation should try ROCK_USER first
+        getpwnam.assert_called_once_with("postgres")
         chown.assert_called_once_with(tmp.name, uid=1234, gid=4321)
+
+
+def test_change_owner_calls_pwd_and_os_chown_with_daemon_user_when_rock_missing():
+    with (
+        patch("single_kernel_postgresql.utils.filesystem.pwd.getpwnam") as getpwnam,
+        patch("single_kernel_postgresql.utils.filesystem.os.chown") as chown,
+        NamedTemporaryFile(delete=True) as tmp,
+    ):
+        # Simulate ROCK user missing but snap daemon user present
+        pw_entry = MagicMock()
+        pw_entry.pw_uid = 2222
+        pw_entry.pw_gid = 3333
+        # First call (ROCK_USER) raises KeyError, second call (SNAP_USER) returns pw_entry
+        getpwnam.side_effect = [KeyError, pw_entry]
+
+        change_owner(tmp.name)
+
+        # Ensure getpwnam was called twice (rock then snap) and ended up using snap user
+        assert getpwnam.call_count == 2
+        getpwnam.assert_called_with("_daemon_")
+        chown.assert_called_once_with(tmp.name, uid=2222, gid=3333)
 
 
 def test_change_owner_raises_when_user_missing():
