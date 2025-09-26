@@ -60,6 +60,7 @@ ALLOWED_ROLES = {
 }
 
 INVALID_DATABASE_NAME_BLOCKING_MESSAGE = "invalid database name"
+INVALID_DATABASE_NAMES = ["databases", "postgres", "template0", "template1"]
 INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE = "invalid role(s) for extra user roles"
 
 REQUIRED_PLUGINS = {
@@ -322,7 +323,7 @@ class PostgreSQL:
         if len(database) > 49:
             logger.error(f"Invalid database name (it must not exceed 49 characters): {database}.")
             raise PostgreSQLCreateDatabaseError(INVALID_DATABASE_NAME_BLOCKING_MESSAGE)
-        if database in ["postgres", "template0", "template1"]:
+        if database in INVALID_DATABASE_NAMES:
             logger.error(f"Invalid database name: {database}.")
             raise PostgreSQLCreateDatabaseError(INVALID_DATABASE_NAME_BLOCKING_MESSAGE)
         plugins = plugins if plugins else []
