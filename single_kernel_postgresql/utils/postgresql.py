@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 import psycopg2
-from ops import ConfigData
+from ops import ConfigData, Container
 from psycopg2.sql import SQL, Identifier, Literal
 
 from ..config.literals import (
@@ -231,6 +231,7 @@ class PostgreSQL:
         password: Optional[str],
         database: str,
         system_users: Optional[List[str]] = None,
+        container: Optional[Container] = None,
     ):
         """Create a PostgreSQL helper.
 
@@ -242,6 +243,7 @@ class PostgreSQL:
             password: password for the user.
             database: default database name.
             system_users: list of system users.
+            container: optional container where PostgreSQL is running (only for K8S substrate).
         """
         self.substrate = substrate
         self.primary_host = primary_host
@@ -250,6 +252,11 @@ class PostgreSQL:
         self.password = password
         self.database = database
         self.system_users = system_users if system_users else []
+        if container is not None and self.substrate != Substrates.K8S:
+            raise ValueError("Container can only be set when the substrate is Substrates.K8S.")
+        if self.substrate == Substrates.K8S and container is None:
+            raise ValueError("Container must be set when the substrate is Substrates.K8S.")
+        self.container = container
 
     def _configure_pgaudit(self, enable: bool) -> None:
         connection = None
@@ -1103,7 +1110,7 @@ class PostgreSQL:
                     pwd.getpwuid(temp_location_stats.st_uid).pw_name != expected_owner
                     or temp_location_stats.st_mode != POSTGRESQL_STORAGE_PERMISSIONS
                 ):
-                    change_owner(temp_location, expected_owner)
+                    change_owner(temp_location, expected_owner, container=self.container)
                     os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
                     # Rename existing temp tablespace if it exists, instead of dropping it.
                     cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
