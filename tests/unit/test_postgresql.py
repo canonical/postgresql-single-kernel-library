@@ -338,13 +338,15 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.create_user") as _create_user,
         patch("single_kernel_postgresql.utils.postgresql.change_owner") as _change_owner,
         patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
-        patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
-        patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
+        patch("single_kernel_postgresql.utils.filesystem.os.stat") as _stat,
+        patch("single_kernel_postgresql.utils.filesystem.pwd.getpwnam") as _getpwnam,
     ):
         # Simulate a temp location owned by wrong user/permissions to trigger fixup
-        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 0o755})
+        stat_result = type("stat_result", (), {"st_uid": 0, "st_gid": 0, "st_mode": 0o755})
         _stat.return_value = stat_result
-        _getpwuid.return_value.pw_name = "root"
+        _getpwnam.return_value.pw_name = "root"
+        _getpwnam.return_value.pw_uid = 0
+        _getpwnam.return_value.pw_gid = 0
 
         # First connection (non-context) for temp tablespace
         execute_direct = _connect_to_database.return_value.cursor.return_value.execute
@@ -399,16 +401,22 @@ def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness):
         ),
         patch("single_kernel_postgresql.utils.postgresql.change_owner") as _change_owner,
         patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
-        patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
-        patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
+        patch("single_kernel_postgresql.utils.filesystem.os.stat") as _stat,
+        patch("single_kernel_postgresql.utils.filesystem.pwd.getpwnam") as _getpwnam,
         patch("single_kernel_postgresql.utils.postgresql.datetime") as _dt,
     ):
         # Owner differs, permissions are correct
+        # Simulate directory owned by uid 1000 while expected owner has uid 0 to force mismatch
         stat_result = type(
-            "stat_result", (), {"st_uid": 0, "st_mode": POSTGRESQL_STORAGE_PERMISSIONS}
+            "stat_result",
+            (),
+            {"st_uid": 1000, "st_gid": 1000, "st_mode": POSTGRESQL_STORAGE_PERMISSIONS},
         )
         _stat.return_value = stat_result
-        _getpwuid.return_value.pw_name = "root"
+        # The expected owner (SNAP_USER) resolves to uid 0/gid 0 for the test
+        _getpwnam.return_value.pw_name = "root"
+        _getpwnam.return_value.pw_uid = 0
+        _getpwnam.return_value.pw_gid = 0
 
         # Mock datetime.now(timezone.utc) to a fixed timestamp
         _dt.now.return_value = datetime(2025, 1, 1, 1, 2, 3, tzinfo=UTC)
@@ -437,14 +445,16 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
         ),
         patch("single_kernel_postgresql.utils.postgresql.change_owner") as _change_owner,
         patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
-        patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
-        patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
+        patch("single_kernel_postgresql.utils.filesystem.os.stat") as _stat,
+        patch("single_kernel_postgresql.utils.filesystem.pwd.getpwnam") as _getpwnam,
         patch("single_kernel_postgresql.utils.postgresql.datetime") as _dt,
     ):
         # Owner matches SNAP_USER, permissions differ
-        stat_result = type("stat_result", (), {"st_uid": 0, "st_mode": 0o755})
+        stat_result = type("stat_result", (), {"st_uid": 0, "st_gid": 0, "st_mode": 0o755})
         _stat.return_value = stat_result
-        _getpwuid.return_value.pw_name = SNAP_USER
+        _getpwnam.return_value.pw_name = SNAP_USER
+        _getpwnam.return_value.pw_uid = 0
+        _getpwnam.return_value.pw_gid = 0
 
         # Mock datetime.now(timezone.utc) to a fixed timestamp
         _dt.now.return_value = datetime(2025, 1, 1, 1, 2, 3, tzinfo=UTC)
@@ -500,7 +510,13 @@ def test_set_up_database_raises_wrapped_error(harness):
         ) as _connect_to_database,
         patch("single_kernel_postgresql.utils.postgresql.change_owner"),
         patch("single_kernel_postgresql.utils.postgresql.os.chmod"),
+        patch("single_kernel_postgresql.utils.filesystem.pwd.getpwnam") as _getpwnam,
     ):
+        # Provide a dummy passwd entry so has_correct_ownership_and_permissions does not raise
+        _getpwnam.return_value.pw_name = SNAP_USER
+        _getpwnam.return_value.pw_uid = 0
+        _getpwnam.return_value.pw_gid = 0
+
         execute_direct = _connect_to_database.return_value.cursor.return_value.execute
         execute_direct.side_effect = psycopg2.Error
         with pytest.raises(PostgreSQLDatabasesSetupError):

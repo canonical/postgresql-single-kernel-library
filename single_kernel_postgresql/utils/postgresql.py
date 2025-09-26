@@ -21,7 +21,6 @@ Any charm using this library should import the `psycopg2` or `psycopg2-binary` d
 
 import logging
 import os
-import pwd
 from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -38,7 +37,7 @@ from ..config.literals import (
     SYSTEM_USERS,
     Substrates,
 )
-from .filesystem import change_owner
+from .filesystem import change_owner, has_correct_ownership_and_permissions
 
 # Groups to distinguish HBA access
 ACCESS_GROUP_IDENTITY = "identity_access"
@@ -1104,11 +1103,9 @@ class PostgreSQL:
 
             if temp_location is not None:
                 # Fix permissions on the temporary tablespace location when a reboot happens and tmpfs is being used.
-                temp_location_stats = os.stat(temp_location)
                 expected_owner = ROCK_USER if self.substrate == Substrates.K8S else SNAP_USER
-                if (
-                    pwd.getpwuid(temp_location_stats.st_uid).pw_name != expected_owner
-                    or temp_location_stats.st_mode != POSTGRESQL_STORAGE_PERMISSIONS
+                if not has_correct_ownership_and_permissions(
+                    temp_location, expected_owner, POSTGRESQL_STORAGE_PERMISSIONS
                 ):
                     change_owner(temp_location, expected_owner, container=self.container)
                     os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
