@@ -1105,7 +1105,10 @@ class PostgreSQL:
                 # Fix permissions on the temporary tablespace location when a reboot happens and tmpfs is being used.
                 expected_owner = ROCK_USER if self.substrate == Substrates.K8S else SNAP_USER
                 if not has_correct_ownership_and_permissions(
-                    temp_location, expected_owner, POSTGRESQL_STORAGE_PERMISSIONS
+                    temp_location,
+                    expected_owner,
+                    POSTGRESQL_STORAGE_PERMISSIONS,
+                    container=self.container,
                 ):
                     change_owner(temp_location, expected_owner, container=self.container)
                     os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
