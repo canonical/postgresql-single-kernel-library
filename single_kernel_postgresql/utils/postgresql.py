@@ -36,6 +36,7 @@ from ..config.literals import (
     ROCK_USER,
     SNAP_USER,
     SYSTEM_USERS,
+    Substrates,
 )
 from .filesystem import change_owner
 
@@ -223,6 +224,7 @@ class PostgreSQL:
 
     def __init__(
         self,
+        substrate: Substrates,
         primary_host: Optional[str],
         current_host: Optional[str],
         user: str,
@@ -230,6 +232,18 @@ class PostgreSQL:
         database: str,
         system_users: Optional[List[str]] = None,
     ):
+        """Create a PostgreSQL helper.
+
+        Args:
+            substrate: substrate where the charm is running (Substrates.K8S or Substrates.VM).
+            primary_host: hostname or address for primary database host.
+            current_host: hostname or address for the current database host.
+            user: username to connect as.
+            password: password for the user.
+            database: default database name.
+            system_users: list of system users.
+        """
+        self.substrate = substrate
         self.primary_host = primary_host
         self.current_host = current_host
         self.user = user
@@ -1084,11 +1098,12 @@ class PostgreSQL:
             if temp_location is not None:
                 # Fix permissions on the temporary tablespace location when a reboot happens and tmpfs is being used.
                 temp_location_stats = os.stat(temp_location)
+                expected_owner = ROCK_USER if self.substrate == Substrates.K8S else SNAP_USER
                 if (
-                    pwd.getpwuid(temp_location_stats.st_uid).pw_name not in [ROCK_USER, SNAP_USER]
+                    pwd.getpwuid(temp_location_stats.st_uid).pw_name != expected_owner
                     or temp_location_stats.st_mode != POSTGRESQL_STORAGE_PERMISSIONS
                 ):
-                    change_owner(temp_location)
+                    change_owner(temp_location, expected_owner)
                     os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
                     # Rename existing temp tablespace if it exists, instead of dropping it.
                     cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")

@@ -28,6 +28,7 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLUndefinedPasswordError,
     ROLE_DATABASES_OWNER,
 )
+from single_kernel_postgresql.config.literals import Substrates
 
 
 @pytest.fixture(autouse=True)
@@ -358,7 +359,7 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
         # Ensure permission fixes applied
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp", SNAP_USER)
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", 0o700)
 
         # Validate temp tablespace operations: check existence and create/grant when missing
@@ -419,7 +420,7 @@ def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness):
 
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp", SNAP_USER)
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
         execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
         execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
@@ -455,7 +456,7 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
 
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp", SNAP_USER)
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
         execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
         execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
@@ -508,17 +509,17 @@ def test_set_up_database_raises_wrapped_error(harness):
 
 def test_connect_to_database():
     # Error on no host
-    pg = PostgreSQL(None, None, "operator", None, "postgres", None)
+    pg = PostgreSQL(Substrates.VM, None, None, "operator", None, "postgres", None)
     with pytest.raises(PostgreSQLUndefinedHostError):
         pg._connect_to_database()
 
     # Error on no password
-    pg = PostgreSQL("primary", "current", "operator", None, "postgres", None)
+    pg = PostgreSQL(Substrates.VM, "primary", "current", "operator", None, "postgres", None)
     with pytest.raises(PostgreSQLUndefinedPasswordError):
         pg._connect_to_database()
 
     # Returns connection
-    pg = PostgreSQL("primary", "current", "operator", "password", "postgres", None)
+    pg = PostgreSQL(Substrates.VM, "primary", "current", "operator", "password", "postgres", None)
     with patch(
         "single_kernel_postgresql.utils.postgresql.psycopg2.connect",
         return_value=sentinel.connection,
@@ -533,7 +534,9 @@ def test_is_user_in_hba():
     with patch(
         "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
     ) as _connect_to_database:
-        pg = PostgreSQL("primary", "current", "operator", "password", "postgres", None)
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
         _cursor = _connect_to_database().__enter__().cursor().__enter__()
 
         # No result
@@ -564,7 +567,9 @@ def test_drop_hba_triggers():
         ) as _connect_to_database,
         patch("single_kernel_postgresql.utils.postgresql.logger") as _logger,
     ):
-        pg = PostgreSQL("primary", "current", "operator", "password", "postgres", None)
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
         _cursor = _connect_to_database().__enter__().cursor().__enter__()
         _cursor.fetchall.return_value = (("db1",), ("db2",))
 
@@ -616,7 +621,9 @@ def test_create_user():
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._process_extra_user_roles",
         ) as _process_extra_user_roles,
     ):
-        pg = PostgreSQL("primary", "current", "operator", "password", "postgres", None)
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
         _cursor = _connect_to_database().__enter__().cursor().__enter__()
         _process_extra_user_roles.return_value = (["role1", "role2"], ["priv1", "priv2"])
 

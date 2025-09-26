@@ -5,19 +5,15 @@
 import os
 import pwd
 
-from ..config.literals import ROCK_USER, SNAP_USER
 
-
-def change_owner(path: str) -> None:
-    """Change the ownership of a file or a directory to the workload OS user.
+def change_owner(path: str, user: str) -> None:
+    """Change the ownership of a file or a directory to the specifier user.
 
     Args:
         path: path to a file or directory.
+        user: the owner username to set.
     """
-    # Get the uid/gid for the workload OS user.
-    try:
-        user_database = pwd.getpwnam(ROCK_USER)
-    except KeyError:
-        user_database = pwd.getpwnam(SNAP_USER)
+    # Get the uid/gid for the user.
+    user_database = pwd.getpwnam(user)
     # Set the correct ownership for the file or directory.
     os.chown(path, uid=user_database.pw_uid, gid=user_database.pw_gid)

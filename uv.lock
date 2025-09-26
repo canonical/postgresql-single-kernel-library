@@ -305,7 +305,7 @@ wheels = [
 
 [[package]]
 name = "postgresql-charms-single-kernel"
-version = "16.0.1"
+version = "16.1.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
