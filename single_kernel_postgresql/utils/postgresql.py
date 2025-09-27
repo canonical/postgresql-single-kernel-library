@@ -1079,7 +1079,7 @@ class PostgreSQL:
                 temp_location_stats = os.stat(temp_location)
                 if (
                     pwd.getpwuid(temp_location_stats.st_uid).pw_name != SNAP_USER
-                    or temp_location_stats.st_mode != POSTGRESQL_STORAGE_PERMISSIONS
+                    or int(temp_location_stats.st_mode & 0o777) != POSTGRESQL_STORAGE_PERMISSIONS
                 ):
                     change_owner(temp_location)
                     os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
