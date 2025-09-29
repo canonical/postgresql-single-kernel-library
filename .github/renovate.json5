@@ -18,6 +18,7 @@
       ],
       rangeStrategy: 'bump',
       matchJsonata: [
+        // Don't force version for direct lib deps
         "depType = 'dependency-groups' and managerData.depGroup != 'lib'",
       ],
       groupName: 'Python dependencies',
