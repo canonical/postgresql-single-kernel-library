@@ -3,29 +3,35 @@
   extends: [
     'github>canonical/data-platform//renovate_presets/charm.json5',
   ],
-  "enabledManagers": ["pep621", "github-actions", "regex"],
+  enabledManagers: [
+    'pep621',
+    'github-actions',
+    'custom.regex',
+  ],
   reviewers: [
     'team:data-postgresql',
   ],
   packageRules: [
     {
-      "matchManagers": ["pep621"],
-      "rangeStrategy": "bump",
-      "matchJsonata": [
-          // Don't force version for direct lib deps
-          "depType = 'dependency-groups' and managerData.depGroup != 'lib'"
+      matchManagers: [
+        'pep621',
       ],
-      "groupName": "Python dependencies"
+      rangeStrategy: 'bump',
+      matchJsonata: [
+        "depType = 'dependency-groups' and managerData.depGroup != 'lib'",
+      ],
+      groupName: 'Python dependencies',
     },
     {
-      "matchManagers": ["pep621"],
-      "rangeStrategy": "in-range-only",
-      "matchJsonata": [
-          "depType = 'dependency-groups' and managerData.depGroup = 'charm-libs'"
+      matchManagers: [
+        'pep621',
       ],
-      "groupName": "Python dependencies"
+      rangeStrategy: 'in-range-only',
+      matchJsonata: [
+        "depType = 'dependency-groups' and managerData.depGroup = 'charm-libs'",
+      ],
+      groupName: 'Python dependencies',
     },
   ],
-  customManagers: [
-  ],
+  customManagers: [],
 }
