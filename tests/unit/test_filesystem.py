@@ -4,26 +4,8 @@ from tempfile import NamedTemporaryFile
 from unittest.mock import MagicMock, patch
 
 import pytest
-from single_kernel_postgresql.config.literals import ROCK_USER, SNAP_USER
+from single_kernel_postgresql.config.literals import SNAP_USER
 from single_kernel_postgresql.utils.filesystem import change_owner
-
-
-def test_change_owner_calls_pwd_and_os_chown_with_rock_user():
-    with (
-        patch("single_kernel_postgresql.utils.filesystem.pwd.getpwnam") as getpwnam,
-        patch("single_kernel_postgresql.utils.filesystem.os.chown") as chown,
-        NamedTemporaryFile(delete=True) as tmp,
-    ):
-        pw_entry = MagicMock()
-        pw_entry.pw_uid = 1234
-        pw_entry.pw_gid = 4321
-        getpwnam.return_value = pw_entry
-
-        change_owner(tmp.name, ROCK_USER)
-
-        # Ensure getpwnam was called for ROCK_USER and ended up using snap user
-        getpwnam.assert_called_once_with(ROCK_USER)
-        chown.assert_called_once_with(tmp.name, uid=1234, gid=4321)
 
 
 def test_change_owner_calls_pwd_and_os_chown_with_daemon_user():

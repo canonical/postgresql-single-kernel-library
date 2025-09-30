@@ -361,7 +361,7 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
         # Ensure permission fixes applied
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp", SNAP_USER, container=None)
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp", SNAP_USER)
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", 0o700)
 
         # Validate temp tablespace operations: check existence and create/grant when missing
@@ -424,7 +424,7 @@ def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness):
 
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp", SNAP_USER, container=None)
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp", SNAP_USER)
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
         execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
         execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
@@ -462,7 +462,7 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
 
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp", SNAP_USER, container=None)
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp", SNAP_USER)
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
         execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
         execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
