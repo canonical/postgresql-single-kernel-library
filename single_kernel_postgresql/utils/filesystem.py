@@ -46,13 +46,15 @@ def has_correct_ownership_and_permissions(
         True if the file or directory has the correct ownership and permissions, False otherwise.
     """
     if container is not None:
-        owner = container.exec(["stat", "-c", "'%U'", path]).wait_output()[0].strip()
+        owner = container.exec(["stat", "-c", "'%U'", path]).wait_output()[0].strip().strip("'")
         logger.debug(f"Owner of {path} in container is '{owner}'")
         # Check ownership.
         if owner != user:
             return False
         # Check permissions (convert to the octal base).
-        permissions_str = container.exec(["stat", "-c", "'%a'", path]).wait_output()[0].strip()
+        permissions_str = (
+            container.exec(["stat", "-c", "'%a'", path]).wait_output()[0].strip().strip("'")
+        )
         logger.debug(f"Permissions of {path} in container are '{permissions_str}'")
         return int(permissions_str, 8) == mode
 
