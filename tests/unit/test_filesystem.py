@@ -20,7 +20,7 @@ def test_change_owner_calls_pwd_and_os_chown_with_daemon_user():
         pw_entry.pw_gid = 3333
         getpwnam.return_value = pw_entry
 
-        change_owner(tmp.name, SNAP_USER)
+        change_owner(tmp.name)
 
         # Ensure getpwnam was called for SNAP_USER and ended up using snap user
         getpwnam.assert_called_once_with(SNAP_USER)
@@ -39,4 +39,4 @@ def test_change_owner_bubbles_up_os_error():
         entry.pw_gid = 1
         getpwnam.return_value = entry
         with pytest.raises(OSError):
-            change_owner(tmp.name, SNAP_USER)
+            change_owner(tmp.name)
