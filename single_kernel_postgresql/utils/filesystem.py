@@ -5,7 +5,7 @@
 import os
 import pwd
 
-from single_kernel_postgresql.config.literals import SNAP_USER
+from ..config.literals import SNAP_USER
 
 
 def change_owner(path: str) -> None:
