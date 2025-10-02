@@ -27,6 +27,16 @@ def test_change_owner_calls_pwd_and_os_chown_with_daemon_user():
         chown.assert_called_once_with(tmp.name, uid=1234, gid=4321)
 
 
+def test_change_owner_raises_when_user_missing():
+    # When the _daemon_ user is not present, pwd.getpwnam raises KeyError
+    with (
+        patch("single_kernel_postgresql.utils.filesystem.pwd.getpwnam", side_effect=KeyError),
+        pytest.raises(KeyError),
+        NamedTemporaryFile(delete=True) as tmp,
+    ):
+        change_owner(tmp.name)
+
+
 def test_change_owner_bubbles_up_os_error():
     # Ensure we surface OSError coming from os.chown
     with (
