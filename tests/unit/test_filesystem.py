@@ -14,17 +14,17 @@ def test_change_owner_calls_pwd_and_os_chown_with_daemon_user():
         patch("single_kernel_postgresql.utils.filesystem.os.chown") as chown,
         NamedTemporaryFile(delete=True) as tmp,
     ):
-        # Simulate ROCK user missing but snap daemon user present
+        # Simulate pwd entry
         pw_entry = MagicMock()
-        pw_entry.pw_uid = 2222
-        pw_entry.pw_gid = 3333
+        pw_entry.pw_uid = 1234
+        pw_entry.pw_gid = 4321
         getpwnam.return_value = pw_entry
 
         change_owner(tmp.name)
 
         # Ensure getpwnam was called for SNAP_USER and ended up using snap user
         getpwnam.assert_called_once_with(SNAP_USER)
-        chown.assert_called_once_with(tmp.name, uid=2222, gid=3333)
+        chown.assert_called_once_with(tmp.name, uid=1234, gid=4321)
 
 
 def test_change_owner_bubbles_up_os_error():
