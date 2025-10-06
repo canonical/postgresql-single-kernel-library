@@ -4,6 +4,7 @@ from tempfile import NamedTemporaryFile
 from unittest.mock import MagicMock, patch
 
 import pytest
+from single_kernel_postgresql.config.literals import SNAP_USER
 from single_kernel_postgresql.utils.filesystem import change_owner
 
 
@@ -21,7 +22,8 @@ def test_change_owner_calls_pwd_and_os_chown_with_daemon_user():
 
         change_owner(tmp.name)
 
-        getpwnam.assert_called_once_with("_daemon_")
+        # Ensure getpwnam was called for SNAP_USER and ended up using snap user
+        getpwnam.assert_called_once_with(SNAP_USER)
         chown.assert_called_once_with(tmp.name, uid=1234, gid=4321)
 
 

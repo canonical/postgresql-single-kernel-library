@@ -5,6 +5,8 @@
 This module should contain the literals used in the charms (paths, enums, etc).
 """
 
+from enum import Enum
+
 # Permissions.
 POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 
@@ -19,3 +21,10 @@ REWIND_USER = "rewind"
 SNAP_USER = "_daemon_"
 USER = "operator"
 SYSTEM_USERS = [MONITORING_USER, REPLICATION_USER, REWIND_USER, USER]
+
+
+class Substrates(str, Enum):
+    """Possible substrates."""
+
+    K8S = "k8s"
+    VM = "vm"

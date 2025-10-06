@@ -4,7 +4,7 @@
 
 from ops.charm import CharmBase
 
-from .config.literals import SYSTEM_USERS, USER
+from .config.literals import SYSTEM_USERS, USER, Substrates
 from .utils.postgresql import PostgreSQL
 
 
@@ -15,6 +15,7 @@ class AbstractPostgreSQLCharm(CharmBase):
         super().__init__(*args)
 
         self.postgresql = PostgreSQL(
+            substrate=Substrates.VM,
             primary_host="localhost",
             current_host="localhost",
             user=USER,

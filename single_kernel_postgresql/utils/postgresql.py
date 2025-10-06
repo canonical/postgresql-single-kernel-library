@@ -30,7 +30,13 @@ import psycopg2
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
 
-from ..config.literals import BACKUP_USER, POSTGRESQL_STORAGE_PERMISSIONS, SNAP_USER, SYSTEM_USERS
+from ..config.literals import (
+    BACKUP_USER,
+    POSTGRESQL_STORAGE_PERMISSIONS,
+    SNAP_USER,
+    SYSTEM_USERS,
+    Substrates,
+)
 from .filesystem import change_owner
 
 # Groups to distinguish HBA access
@@ -60,6 +66,7 @@ ALLOWED_ROLES = {
 }
 
 INVALID_DATABASE_NAME_BLOCKING_MESSAGE = "invalid database name"
+INVALID_DATABASE_NAMES = ["databases", "postgres", "template0", "template1"]
 INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE = "invalid role(s) for extra user roles"
 
 REQUIRED_PLUGINS = {
@@ -216,6 +223,7 @@ class PostgreSQL:
 
     def __init__(
         self,
+        substrate: Substrates,
         primary_host: Optional[str],
         current_host: Optional[str],
         user: str,
@@ -223,6 +231,18 @@ class PostgreSQL:
         database: str,
         system_users: Optional[List[str]] = None,
     ):
+        """Create a PostgreSQL helper.
+
+        Args:
+            substrate: substrate where the charm is running (Substrates.K8S or Substrates.VM).
+            primary_host: hostname or address for primary database host.
+            current_host: hostname or address for the current database host.
+            user: username to connect as.
+            password: password for the user.
+            database: default database name.
+            system_users: list of system users.
+        """
+        self.substrate = substrate
         self.primary_host = primary_host
         self.current_host = current_host
         self.user = user
@@ -322,7 +342,7 @@ class PostgreSQL:
         if len(database) > 49:
             logger.error(f"Invalid database name (it must not exceed 49 characters): {database}.")
             raise PostgreSQLCreateDatabaseError(INVALID_DATABASE_NAME_BLOCKING_MESSAGE)
-        if database in ["postgres", "template0", "template1"]:
+        if database in INVALID_DATABASE_NAMES:
             logger.error(f"Invalid database name: {database}.")
             raise PostgreSQLCreateDatabaseError(INVALID_DATABASE_NAME_BLOCKING_MESSAGE)
         plugins = plugins if plugins else []
@@ -1077,7 +1097,7 @@ class PostgreSQL:
             if temp_location is not None:
                 # Fix permissions on the temporary tablespace location when a reboot happens and tmpfs is being used.
                 temp_location_stats = os.stat(temp_location)
-                if (
+                if self.substrate == Substrates.VM and (
                     pwd.getpwuid(temp_location_stats.st_uid).pw_name != SNAP_USER
                     or int(temp_location_stats.st_mode & 0o777) != POSTGRESQL_STORAGE_PERMISSIONS
                 ):
