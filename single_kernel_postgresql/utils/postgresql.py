@@ -114,6 +114,10 @@ class PostgreSQLCreateUserError(PostgreSQLBaseError):
         self.message = message
 
 
+class PostgreSQLUpdateUserError(PostgreSQLBaseError):
+    """Exception raised when creating a user fails."""
+
+
 class PostgreSQLUndefinedHostError(PostgreSQLBaseError):
     """Exception when host is not set."""
 
@@ -1905,4 +1909,4 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                     cursor.execute(statement)
         except psycopg2.Error as e:
             logger.error(f"Failed to create user: {e}")
-            raise PostgreSQLCreateUserError() from e
+            raise PostgreSQLUpdateUserError() from e
