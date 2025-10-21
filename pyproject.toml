@@ -30,8 +30,8 @@ lint = [
     "pyright==1.1.406"
 ]
 unit = [
-    "coverage[toml]==7.11.0; python_version > '3.8'",
-    "pytest==8.4.2; python_version >= '3.9'"
+    "coverage[toml]==7.11.0; python_version >= '3.10'",
+    "pytest==8.4.2; python_version >= '3.10'"
 ]
 
 # Testing tools configuration
