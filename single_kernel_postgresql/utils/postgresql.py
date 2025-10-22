@@ -476,9 +476,7 @@ class PostgreSQL:
                     )
                 )
         if roles is not None and any(
-            True
-            for role in roles
-            if role
+            role
             in [
                 ROLE_STATS,
                 ROLE_READ,
@@ -488,6 +486,7 @@ class PostgreSQL:
                 ROLE_ADMIN,
                 ROLE_DATABASES_OWNER,
             ]
+            for role in roles
         ):
             for system_database in ["postgres", "template1"]:
                 connect_statements.append(
