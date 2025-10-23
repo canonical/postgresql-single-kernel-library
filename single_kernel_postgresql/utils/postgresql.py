@@ -114,6 +114,10 @@ class PostgreSQLCreateUserError(PostgreSQLBaseError):
         self.message = message
 
 
+class PostgreSQLUpdateUserError(PostgreSQLBaseError):
+    """Exception raised when creating a user fails."""
+
+
 class PostgreSQLUndefinedHostError(PostgreSQLBaseError):
     """Exception when host is not set."""
 
@@ -144,6 +148,10 @@ class PostgreSQLGetCurrentTimelineError(PostgreSQLBaseError):
 
 class PostgreSQLGetPostgreSQLVersionError(PostgreSQLBaseError):
     """Exception raised when retrieving PostgreSQL version fails."""
+
+
+class PostgreSQLListDatabasesError(PostgreSQLBaseError):
+    """Exception raised when retrieving the databases."""
 
 
 class PostgreSQLListAccessibleDatabasesForUserError(PostgreSQLBaseError):
@@ -439,14 +447,28 @@ class PostgreSQL:
         Returns:
             A tuple containing the adjusted user definition and a list of additional statements.
         """
+        db_roles, connect_statements = self._adjust_user_roles(user, roles, database)
+        if db_roles:
+            str_roles = [f'"{role}"' for role in db_roles]
+            user_definition += f" IN ROLE {', '.join(str_roles)}"
+        return user_definition, connect_statements
+
+    def _adjust_user_roles(
+        self, user: str, roles: Optional[List[str]], database: Optional[str]
+    ) -> Tuple[List[str], List[str]]:
+        """Adjusts the user definition to include additional statements.
+
+        Returns:
+            A tuple containing the adjusted user definition and a list of additional statements.
+        """
+        db_roles = []
         connect_statements = []
         if database:
             if roles is not None and not any(
-                True
-                for role in roles
-                if role in [ROLE_STATS, ROLE_READ, ROLE_DML, ROLE_BACKUP, ROLE_DBA]
+                role in [ROLE_STATS, ROLE_READ, ROLE_DML, ROLE_BACKUP, ROLE_DBA] for role in roles
             ):
-                user_definition += f' IN ROLE "charmed_{database}_admin", "charmed_{database}_dml"'
+                db_roles.append(f"charmed_{database}_admin")
+                db_roles.append(f"charmed_{database}_dml")
             else:
                 connect_statements.append(
                     SQL("GRANT CONNECT ON DATABASE {} TO {};").format(
@@ -454,9 +476,7 @@ class PostgreSQL:
                     )
                 )
         if roles is not None and any(
-            True
-            for role in roles
-            if role
+            role
             in [
                 ROLE_STATS,
                 ROLE_READ,
@@ -466,6 +486,7 @@ class PostgreSQL:
                 ROLE_ADMIN,
                 ROLE_DATABASES_OWNER,
             ]
+            for role in roles
         ):
             for system_database in ["postgres", "template1"]:
                 connect_statements.append(
@@ -473,7 +494,7 @@ class PostgreSQL:
                         Identifier(system_database), Identifier(user)
                     )
                 )
-        return user_definition, connect_statements
+        return db_roles, connect_statements
 
     def _process_extra_user_roles(
         self, user: str, extra_user_roles: Optional[List[str]] = None
@@ -1841,3 +1862,50 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             finally:
                 if connection:
                     connection.close()
+
+    def list_databases(self, prefix: Optional[str] = None) -> List[str]:
+        """List non-system databases starting with prefix."""
+        prefix_stmt = (
+            SQL(" AND datname LIKE {}").format(Literal(prefix + "%")) if prefix else SQL("")
+        )
+        try:
+            with self._connect_to_database() as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    SQL(
+                        "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <>'postgres'{};"
+                    ).format(prefix_stmt)
+                )
+                return [row[0] for row in cursor.fetchall()]
+        except psycopg2.Error as e:
+            raise PostgreSQLListDatabasesError() from e
+        finally:
+            if connection:
+                connection.close()
+
+    def add_user_to_databases(
+        self, user: str, databases: List[str], extra_user_roles: Optional[List[str]] = None
+    ) -> None:
+        """Grant user access to database."""
+        try:
+            roles, _ = self._process_extra_user_roles(user, extra_user_roles)
+            connect_stmt = []
+            for database in databases:
+                db_roles, db_connect_stmt = self._adjust_user_roles(user, roles, database)
+                roles += db_roles
+                connect_stmt += db_connect_stmt
+            with self._connect_to_database() as connection, connection.cursor() as cursor:
+                cursor.execute(SQL("RESET ROLE;"))
+                cursor.execute(SQL("BEGIN;"))
+                cursor.execute(SQL("SET LOCAL log_statement = 'none';"))
+                cursor.execute(SQL("COMMIT;"))
+
+                # Add extra user roles to the new user.
+                for role in roles:
+                    cursor.execute(
+                        SQL("GRANT {} TO {};").format(Identifier(role), Identifier(user))
+                    )
+                for statement in connect_stmt:
+                    cursor.execute(statement)
+        except psycopg2.Error as e:
+            logger.error(f"Failed to create user: {e}")
+            raise PostgreSQLUpdateUserError() from e

@@ -24,8 +24,10 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLCreateUserError,
     PostgreSQLDatabasesSetupError,
     PostgreSQLGetLastArchivedWALError,
+    PostgreSQLListDatabasesError,
     PostgreSQLUndefinedHostError,
     PostgreSQLUndefinedPasswordError,
+    PostgreSQLUpdateUserError,
     ROLE_DATABASES_OWNER,
 )
 from single_kernel_postgresql.config.literals import Substrates
@@ -813,3 +815,110 @@ def test_set_up_database_k8s_skips_change_owner_and_chmod(harness):
         # On K8S substrate we must not attempt to change ownership or chmod the path.
         _change_owner.assert_not_called()
         _chmod.assert_not_called()
+
+
+def test_list_databases():
+    with patch(
+        "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+    ) as _connect_to_database:
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        execute = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.execute
+
+        # No prefix
+        pg.list_databases()
+        execute.assert_called_once_with(
+            Composed([
+                SQL(
+                    "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <>'postgres'"
+                ),
+                SQL(""),
+                SQL(";"),
+            ])
+        )
+        execute.reset_mock()
+
+        # With prefix
+        pg.list_databases(prefix="test")
+        execute.assert_called_once_with(
+            Composed([
+                SQL(
+                    "SELECT datname FROM pg_database WHERE datistemplate = false AND datname <>'postgres'"
+                ),
+                Composed([SQL(" AND datname LIKE "), Literal("test%")]),
+                SQL(";"),
+            ])
+        )
+        execute.reset_mock()
+
+        # Exception
+        execute.side_effect = psycopg2.Error
+        with pytest.raises(PostgreSQLListDatabasesError):
+            pg.list_databases()
+            assert False
+
+
+def test_add_user_to_databases():
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._process_extra_user_roles",
+            return_value=([], []),
+        ),
+    ):
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        execute = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.execute
+
+        pg.add_user_to_databases("test-user", ["db1", "db2"])
+        assert execute.call_count == 8
+        execute.assert_any_call(SQL("RESET ROLE;"))
+        execute.assert_any_call(SQL("BEGIN;"))
+        execute.assert_any_call(SQL("SET LOCAL log_statement = 'none';"))
+        execute.assert_any_call(SQL("COMMIT;"))
+        execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("charmed_db1_admin"),
+                SQL(" TO "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("charmed_db1_dml"),
+                SQL(" TO "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("charmed_db2_admin"),
+                SQL(" TO "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("charmed_db2_dml"),
+                SQL(" TO "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+
+        # Exception
+        execute.side_effect = psycopg2.Error
+        with pytest.raises(PostgreSQLUpdateUserError):
+            pg.add_user_to_databases("test-user", ["db1", "db2"])
+            assert False
