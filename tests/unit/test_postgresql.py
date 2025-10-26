@@ -936,7 +936,7 @@ def test_remove_user_from_databases():
         execute = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.execute
 
         pg.remove_user_from_databases("test-user", ["db1", "db2"])
-        assert execute.call_count == 2
+        assert execute.call_count == 8
         execute.assert_any_call(
             Composed([
                 SQL("REVOKE CONNECT ON DATABASE "),
@@ -950,6 +950,42 @@ def test_remove_user_from_databases():
             Composed([
                 SQL("REVOKE CONNECT ON DATABASE "),
                 Identifier("db2"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE "),
+                Identifier("charmed_db1_admin"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE "),
+                Identifier("charmed_db1_dml"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE "),
+                Identifier("charmed_db2_admin"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE "),
+                Identifier("charmed_db2_dml"),
                 SQL(" FROM "),
                 Identifier("test-user"),
                 SQL(";"),

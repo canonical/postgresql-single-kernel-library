@@ -1920,6 +1920,21 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                             Identifier(database), Identifier(user)
                         )
                     )
+                    cursor.execute(
+                        SQL("REVOKE {} FROM {};").format(
+                            Identifier(f"charmed_{database}_owner"), Identifier(user)
+                        )
+                    )
+                    cursor.execute(
+                        SQL("REVOKE {} FROM {};").format(
+                            Identifier(f"charmed_{database}_admin"), Identifier(user)
+                        )
+                    )
+                    cursor.execute(
+                        SQL("REVOKE {} FROM {};").format(
+                            Identifier(f"charmed_{database}_dml"), Identifier(user)
+                        )
+                    )
         except psycopg2.Error as e:
             logger.error(f"Failed to remove user: {e}")
             raise PostgreSQLUpdateUserError() from e
