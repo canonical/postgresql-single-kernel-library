@@ -1885,7 +1885,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
     def add_user_to_databases(
         self, user: str, databases: List[str], extra_user_roles: Optional[List[str]] = None
     ) -> None:
-        """Grant user access to database."""
+        """Grant user access to a database."""
         try:
             roles, _ = self._process_extra_user_roles(user, extra_user_roles)
             connect_stmt = []
@@ -1907,5 +1907,34 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                 for statement in connect_stmt:
                     cursor.execute(statement)
         except psycopg2.Error as e:
-            logger.error(f"Failed to create user: {e}")
+            logger.error(f"Failed to add user: {e}")
+            raise PostgreSQLUpdateUserError() from e
+
+    def remove_user_from_databases(self, user: str, databases: List[str]) -> None:
+        """Revoke user access to a database."""
+        try:
+            for database in databases:
+                with self._connect_to_database() as connection, connection.cursor() as cursor:
+                    cursor.execute(
+                        SQL("REVOKE CONNECT ON DATABASE {} FROM {};").format(
+                            Identifier(database), Identifier(user)
+                        )
+                    )
+                    cursor.execute(
+                        SQL("REVOKE {} FROM {};").format(
+                            Identifier(f"charmed_{database}_owner"), Identifier(user)
+                        )
+                    )
+                    cursor.execute(
+                        SQL("REVOKE {} FROM {};").format(
+                            Identifier(f"charmed_{database}_admin"), Identifier(user)
+                        )
+                    )
+                    cursor.execute(
+                        SQL("REVOKE {} FROM {};").format(
+                            Identifier(f"charmed_{database}_dml"), Identifier(user)
+                        )
+                    )
+        except psycopg2.Error as e:
+            logger.error(f"Failed to remove user: {e}")
             raise PostgreSQLUpdateUserError() from e

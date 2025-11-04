@@ -922,3 +922,78 @@ def test_add_user_to_databases():
         with pytest.raises(PostgreSQLUpdateUserError):
             pg.add_user_to_databases("test-user", ["db1", "db2"])
             assert False
+
+
+def test_remove_user_from_databases():
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+    ):
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        execute = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.execute
+
+        pg.remove_user_from_databases("test-user", ["db1", "db2"])
+        assert execute.call_count == 8
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE CONNECT ON DATABASE "),
+                Identifier("db1"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE CONNECT ON DATABASE "),
+                Identifier("db2"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE "),
+                Identifier("charmed_db1_admin"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE "),
+                Identifier("charmed_db1_dml"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE "),
+                Identifier("charmed_db2_admin"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("REVOKE "),
+                Identifier("charmed_db2_dml"),
+                SQL(" FROM "),
+                Identifier("test-user"),
+                SQL(";"),
+            ])
+        )
+
+        # Exception
+        execute.side_effect = psycopg2.Error
+        with pytest.raises(PostgreSQLUpdateUserError):
+            pg.remove_user_from_databases("test-user", ["db1", "db2"])
+            assert False
