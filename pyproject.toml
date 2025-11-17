@@ -4,9 +4,9 @@
 [project]
 name = "postgresql-charms-single-kernel"
 description = "Shared and reusable code for PostgreSQL-related charms"
-version = "16.1.2"
+version = "16.1.3"
 readme = "README.md"
-license = "Apache-2.0"
+license = {file = "LICENSE"}
 authors = [
     {name = "Canonical Data Platform", email = "data-platform@lists.launchpad.net"}
 ]
@@ -17,13 +17,21 @@ classifiers = [
 ]
 requires-python = ">=3.8,<4.0"
 
+[build-system]
+requires = ["uv_build>=0.9.9,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "single_kernel_postgresql"
+module-root = ""
+
 [dependency-groups]
 lib = [
     "ops>=2.0.0",
     "psycopg2>=2.9.10",
 ]
 format = [
-    "ruff==0.14.4"
+    "ruff==0.14.5"
 ]
 lint = [
     "codespell==2.4.1",
