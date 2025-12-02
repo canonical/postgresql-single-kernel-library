@@ -259,7 +259,7 @@ wheels = [
 
 [[package]]
 name = "ops"
-version = "3.3.1"
+version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.10'",
@@ -269,9 +269,9 @@ dependencies = [
     { name = "pyyaml", marker = "python_full_version >= '3.10'" },
     { name = "websocket-client", version = "1.9.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/cd/bbd4263b53bb19e87f995b05ef93f565fa4edcb90bacacec615d47c56568/ops-3.3.1.tar.gz", hash = "sha256:8dec621c32a31365d040eaf05960c0e65a2ffbcdbfa91107e03b1ee9d4d26034", size = 541783, upload-time = "2025-10-16T01:46:25.431Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/50/f0bae442ba54114c0ed4983a7bece9330f9f170dfbd04caa8284c8deb476/ops-3.4.0.tar.gz", hash = "sha256:e100d904f0616eb11345547ad35a95caf5a2d178efa8ad4beebd7f045192a64a", size = 573216, upload-time = "2025-11-27T04:45:58.852Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fd/97/c1e5447c3c0d86cab16cad802e1bb58613b2396b7184797af2e4484c2014/ops-3.3.1-py3-none-any.whl", hash = "sha256:38229bb1cc6d9c2aa4dff4495f3e33af928dbd1070e8c5d8b697dfb32dcd89a8", size = 191338, upload-time = "2025-10-16T01:46:20.038Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/e6/262240beb2e3f2fd981ebb82412148c93f830606bfe1fcabf92cdb967c56/ops-3.4.0-py3-none-any.whl", hash = "sha256:d5ea906cd9bf403fe0e83d10ee5ab9bd2307596a97c1690784f937d54d5a738c", size = 211359, upload-time = "2025-11-27T04:45:54.161Z" },
 ]
 
 [[package]]
@@ -303,7 +303,7 @@ format = [
 ]
 lib = [
     { name = "ops", version = "2.23.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
-    { name = "ops", version = "3.3.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "ops", version = "3.4.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "psycopg2", version = "2.9.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "psycopg2", version = "2.9.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
 ]
