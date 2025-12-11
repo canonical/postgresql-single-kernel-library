@@ -37,7 +37,7 @@ from ..config.literals import (
     SYSTEM_USERS,
     Substrates,
 )
-from .filesystem import change_owner
+from .filesystem import change_owner, is_tmpfs
 
 # Groups to distinguish HBA access
 ACCESS_GROUP_IDENTITY = "identity_access"
@@ -1107,8 +1107,61 @@ class PostgreSQL:
                 connection.close()
         return databases
 
+    def _handle_temp_tablespace_on_reboot(
+        self, cursor, temp_location: str, temp_tablespace_exists: bool
+    ) -> None:
+        """Handle temp tablespace when permissions need fixing after reboot.
+
+        Args:
+            cursor: Database cursor.
+            temp_location: Path to the temp tablespace location.
+            temp_tablespace_exists: Whether the temp tablespace already exists.
+        """
+        if not temp_tablespace_exists:
+            return
+
+        # Different handling based on storage type
+        if is_tmpfs(temp_location):
+            # tmpfs: Directory is empty after reboot, safe to rename and recreate
+            # Rename existing temp tablespace instead of dropping it.
+            new_name = f"temp_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            cursor.execute(f"ALTER TABLESPACE temp RENAME TO {new_name};")
+
+            # List temp tablespaces with suffix for operator follow-up cleanup
+            cursor.execute("SELECT spcname FROM pg_tablespace WHERE spcname LIKE 'temp_%';")
+            temp_tbls = sorted([row[0] for row in cursor.fetchall()])
+            logger.info(
+                "There are %d temp tablespaces that should be checked and removed: %s",
+                len(temp_tbls),
+                ", ".join(temp_tbls),
+            )
+        else:
+            # Persistent storage: Tablespace is still valid, permissions already fixed
+            # Log that we fixed permissions but didn't recreate
+            logger.info(
+                "Fixed permissions on temp tablespace directory (persistent storage), "
+                "existing tablespace remains valid"
+            )
+
     def set_up_database(self, temp_location: Optional[str] = None) -> None:
-        """Set up postgres database with the right permissions."""
+        """Set up postgres database with the right permissions.
+
+        This method configures the postgres database with appropriate permissions and
+        optionally creates a temporary tablespace.
+
+        Args:
+            temp_location: Optional path for the temp tablespace. If provided, the method
+                will ensure proper permissions and create the tablespace if it doesn't exist.
+
+        Behavior on reboot:
+            - For tmpfs storage: If permissions are incorrect after reboot, renames the old
+              tablespace and creates a new one (tmpfs directory is empty after reboot).
+            - For persistent storage: If permissions are incorrect after reboot, fixes
+              permissions but keeps the existing tablespace (directory contents persist).
+
+        Raises:
+            PostgreSQLDatabasesSetupError: If database setup fails.
+        """
         connection = None
         cursor = None
         try:
@@ -1116,30 +1169,23 @@ class PostgreSQL:
             cursor = connection.cursor()
 
             if temp_location is not None:
-                # Fix permissions on the temporary tablespace location when a reboot happens and tmpfs is being used.
+                # Fix permissions on the temporary tablespace location when a reboot happens.
                 temp_location_stats = os.stat(temp_location)
-                if self.substrate == Substrates.VM and (
+                permissions_need_fix = self.substrate == Substrates.VM and (
                     pwd.getpwuid(temp_location_stats.st_uid).pw_name != SNAP_USER
                     or int(temp_location_stats.st_mode & 0o777) != POSTGRESQL_STORAGE_PERMISSIONS
-                ):
+                )
+
+                if permissions_need_fix:
                     change_owner(temp_location)
                     os.chmod(temp_location, POSTGRESQL_STORAGE_PERMISSIONS)
-                    # Rename existing temp tablespace if it exists, instead of dropping it.
-                    cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
-                    if cursor.fetchone() is not None:
-                        new_name = f"temp_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-                        cursor.execute(f"ALTER TABLESPACE temp RENAME TO {new_name};")
 
-                        # List temp tablespaces with suffix for operator follow-up cleanup and log them.
-                        cursor.execute(
-                            "SELECT spcname FROM pg_tablespace WHERE spcname LIKE 'temp_%';"
-                        )
-                        temp_tbls = sorted([row[0] for row in cursor.fetchall()])
-                        logger.info(
-                            "There are %d temp tablespaces that should be checked and removed: %s",
-                            len(temp_tbls),
-                            ", ".join(temp_tbls),
-                        )
+                    # Check if temp tablespace exists and handle it appropriately
+                    cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
+                    temp_tablespace_exists = cursor.fetchone() is not None
+                    self._handle_temp_tablespace_on_reboot(
+                        cursor, temp_location, temp_tablespace_exists
+                    )
 
                 # Ensure a fresh temp tablespace exists at the expected location.
                 cursor.execute("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")

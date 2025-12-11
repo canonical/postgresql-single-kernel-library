@@ -406,7 +406,11 @@ def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness):
         patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
         patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
         patch("single_kernel_postgresql.utils.postgresql.datetime") as _dt,
+        patch("single_kernel_postgresql.utils.postgresql.is_tmpfs") as _is_tmpfs,
     ):
+        # Simulate tmpfs storage for this test
+        _is_tmpfs.return_value = True
+
         # Owner differs, permissions are correct (16832 means 0o700)
         # Simulate directory owned by uid 1000 while expected owner has uid 0 to force mismatch
         stat_result = type("stat_result", (), {"st_uid": 1000, "st_gid": 1000, "st_mode": 16832})
@@ -446,7 +450,11 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
         patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
         patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
         patch("single_kernel_postgresql.utils.postgresql.datetime") as _dt,
+        patch("single_kernel_postgresql.utils.postgresql.is_tmpfs") as _is_tmpfs,
     ):
+        # Simulate tmpfs storage for this test
+        _is_tmpfs.return_value = True
+
         # Owner matches SNAP_USER, permissions differ (33188 means 0o644)
         stat_result = type("stat_result", (), {"st_uid": 0, "st_gid": 0, "st_mode": 33188})
         _stat.return_value = stat_result
@@ -468,6 +476,53 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
         _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
         execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
         execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
+
+
+def test_set_up_database_persistent_storage_no_rename(harness):
+    """Test that persistent storage permissions fix doesn't rename tablespace."""
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
+        ) as _connect_to_database,
+        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.change_owner") as _change_owner,
+        patch("single_kernel_postgresql.utils.postgresql.os.chmod") as _chmod,
+        patch("single_kernel_postgresql.utils.postgresql.os.stat") as _stat,
+        patch("single_kernel_postgresql.utils.postgresql.pwd.getpwuid") as _getpwuid,
+        patch("single_kernel_postgresql.utils.postgresql.is_tmpfs") as _is_tmpfs,
+    ):
+        # Simulate persistent storage (not tmpfs)
+        _is_tmpfs.return_value = False
+
+        # Permissions need fixing (wrong owner)
+        stat_result = type("stat_result", (), {"st_uid": 1000, "st_gid": 1000, "st_mode": 16832})
+        _stat.return_value = stat_result
+        _getpwuid.return_value.pw_name = "root"
+
+        execute = _connect_to_database.return_value.cursor.return_value.execute
+        fetchone = _connect_to_database.return_value.cursor.return_value.fetchone
+        # First check: tablespace exists, second check: still exists (not renamed)
+        fetchone.side_effect = [True, True]
+
+        harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
+
+        # Permissions should be fixed
+        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+        _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
+
+        # Tablespace should NOT be renamed
+        for call in execute.call_args_list:
+            call_str = str(call)
+            assert "ALTER TABLESPACE temp RENAME" not in call_str, f"Found rename in: {call_str}"
+
+        # Should NOT try to create new tablespace (because it still exists)
+        create_calls = [
+            call for call in execute.call_args_list if "CREATE TABLESPACE temp" in str(call)
+        ]
+        assert len(create_calls) == 0, f"Unexpected CREATE TABLESPACE calls: {create_calls}"
 
 
 def test_set_up_database_no_temp_and_existing_owner_role(harness):
