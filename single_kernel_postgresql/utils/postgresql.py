@@ -1139,8 +1139,9 @@ class PostgreSQL:
             # Persistent storage: Tablespace is still valid, permissions already fixed
             # Log that we fixed permissions but didn't recreate
             logger.info(
-                "Fixed permissions on temp tablespace directory (persistent storage), "
-                "existing tablespace remains valid"
+                "Fixed permissions on temp tablespace directory at %s (persistent storage), "
+                "existing tablespace remains valid",
+                temp_location,
             )
 
     def set_up_database(self, temp_location: Optional[str] = None) -> None:
