@@ -1124,6 +1124,8 @@ class PostgreSQL:
         if is_tmpfs(temp_location):
             # tmpfs: Directory is empty after reboot, safe to rename and recreate
             # Rename existing temp tablespace instead of dropping it.
+            # Timestamp collision is not possible: the charm ensures this code runs leader-only,
+            # and it executes within a single database transaction holding exclusive locks.
             new_name = f"temp_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
             cursor.execute(f"ALTER TABLESPACE temp RENAME TO {new_name};")
 
