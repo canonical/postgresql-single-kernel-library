@@ -294,7 +294,7 @@ wheels = [
 
 [[package]]
 name = "postgresql-charms-single-kernel"
-version = "16.1.4"
+version = "16.1.5"
 source = { editable = "." }
 
 [package.dev-dependencies]
