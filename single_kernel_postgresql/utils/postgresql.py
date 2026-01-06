@@ -644,6 +644,7 @@ class PostgreSQL:
                 with self._connect_to_database(
                     database
                 ) as connection, connection.cursor() as cursor:
+                    cursor.execute(SQL("RESET ROLE;"))
                     cursor.execute(
                         SQL("REASSIGN OWNED BY {} TO {};").format(
                             Identifier(user), Identifier(self.user)
