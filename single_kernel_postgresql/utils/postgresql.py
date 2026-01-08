@@ -644,6 +644,7 @@ class PostgreSQL:
                 with self._connect_to_database(
                     database
                 ) as connection, connection.cursor() as cursor:
+                    cursor.execute(SQL("RESET ROLE;"))
                     cursor.execute(
                         SQL("REASSIGN OWNED BY {} TO {};").format(
                             Identifier(user), Identifier(self.user)
@@ -653,6 +654,7 @@ class PostgreSQL:
 
             # Delete the user.
             with self._connect_to_database() as connection, connection.cursor() as cursor:
+                cursor.execute(SQL("RESET ROLE;"))
                 cursor.execute(SQL("DROP ROLE {};").format(Identifier(user)))
         except psycopg2.Error as e:
             logger.error(f"Failed to delete user: {e}")
