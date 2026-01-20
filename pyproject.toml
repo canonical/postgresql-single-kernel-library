@@ -31,7 +31,7 @@ lib = [
     "psycopg2>=2.9.10",
 ]
 format = [
-    "ruff==0.14.11"
+    "ruff==0.14.13"
 ]
 lint = [
     "codespell==2.4.1",
