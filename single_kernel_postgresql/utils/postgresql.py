@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 import psycopg2
+import psycopg2.errors
+import psycopg2.extensions
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
 
@@ -430,11 +432,10 @@ class PostgreSQL:
                         cursor.execute(connect_statement)
 
                 # Add extra user roles to the new user.
-                if roles:
-                    for role in roles:
-                        cursor.execute(
-                            SQL("GRANT {} TO {};").format(Identifier(role), Identifier(user))
-                        )
+                for role in roles:
+                    cursor.execute(
+                        SQL("GRANT {} TO {};").format(Identifier(role), Identifier(user))
+                    )
         except psycopg2.Error as e:
             logger.error(f"Failed to create user: {e}")
             raise PostgreSQLCreateUserError() from e
@@ -498,9 +499,10 @@ class PostgreSQL:
 
     def _process_extra_user_roles(
         self, user: str, extra_user_roles: Optional[List[str]] = None
-    ) -> Tuple[Optional[List[str]], Optional[Set[str]]]:
+    ) -> Tuple[List[str], Set[str]]:
         # Separate roles and privileges from the provided extra user roles.
-        roles = privileges = None
+        roles = []
+        privileges = set()
         if extra_user_roles:
             if len(extra_user_roles) > 2 and sorted(extra_user_roles) != [
                 ROLE_ADMIN,
@@ -825,10 +827,8 @@ class PostgreSQL:
                             else f"DROP EXTENSION IF EXISTS {extension};"
                         )
             self._configure_pgaudit(ordered_extensions.get("pgaudit", False))
-        except psycopg2.errors.UniqueViolation:
+        except psycopg2.errors.UniqueViolation:  # type: ignore
             pass
-        except psycopg2.errors.DependentObjectsStillExist:
-            raise
         except psycopg2.Error as e:
             raise PostgreSQLEnableDisableExtensionError() from e
         finally:
@@ -841,7 +841,7 @@ class PostgreSQL:
             with self._connect_to_database() as connection, connection.cursor() as cursor:
                 # Should always be present
                 cursor.execute("SELECT last_archived_wal FROM pg_stat_archiver;")
-                return cursor.fetchone()[0]  # type: ignore
+                return cursor.fetchone()[0]
         except psycopg2.Error as e:
             logger.error(f"Failed to get PostgreSQL last archived WAL: {e}")
             raise PostgreSQLGetLastArchivedWALError() from e
@@ -852,7 +852,7 @@ class PostgreSQL:
             with self._connect_to_database() as connection, connection.cursor() as cursor:
                 cursor.execute("SELECT timeline_id FROM pg_control_checkpoint();")
                 # There should always be a timeline
-                return cursor.fetchone()[0]  # type: ignore
+                return cursor.fetchone()[0]
         except psycopg2.Error as e:
             logger.error(f"Failed to get PostgreSQL current timeline id: {e}")
             raise PostgreSQLGetCurrentTimelineError() from e
@@ -909,7 +909,7 @@ class PostgreSQL:
             ) as connection, connection.cursor() as cursor:
                 cursor.execute("SELECT version();")
                 # Split to get only the version number. There should always be a version.
-                return cursor.fetchone()[0].split(" ")[1]  # type:ignore
+                return cursor.fetchone()[0].split(" ")[1]
         except psycopg2.Error as e:
             logger.error(f"Failed to get PostgreSQL version: {e}")
             raise PostgreSQLGetPostgreSQLVersionError() from e
@@ -930,7 +930,7 @@ class PostgreSQL:
             ) as connection, connection.cursor() as cursor:
                 cursor.execute("SHOW ssl;")
                 # SSL state should always be set
-                return "on" in cursor.fetchone()[0]  # type: ignore
+                return "on" in cursor.fetchone()[0]
         except psycopg2.Error:
             # Connection errors happen when PostgreSQL has not started yet.
             return False
