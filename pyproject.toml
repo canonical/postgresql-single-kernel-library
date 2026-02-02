@@ -4,7 +4,7 @@
 [project]
 name = "postgresql-charms-single-kernel"
 description = "Shared and reusable code for PostgreSQL-related charms"
-version = "16.1.6"
+version = "16.1.7"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -16,6 +16,11 @@ classifiers = [
  "Operating System :: POSIX :: Linux",
 ]
 requires-python = ">=3.8,<4.0"
+dependencies = [
+    "ops>=2.0.0",
+    "psycopg2>=2.9.10",
+    "tenacity>=9.0.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.9,<0.10.0"]
@@ -26,10 +31,6 @@ module-name = "single_kernel_postgresql"
 module-root = ""
 
 [dependency-groups]
-lib = [
-    "ops>=2.0.0",
-    "psycopg2>=2.9.10",
-]
 format = [
     "ruff==0.14.14; python_version >= '3.12'"
 ]
