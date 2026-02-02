@@ -829,6 +829,8 @@ class PostgreSQL:
             self._configure_pgaudit(ordered_extensions.get("pgaudit", False))
         except psycopg2.errors.UniqueViolation:  # type: ignore
             pass
+        except psycopg2.errors.DependentObjectsStillExist:  # type: ignore
+            raise
         except psycopg2.Error as e:
             raise PostgreSQLEnableDisableExtensionError() from e
         finally:
