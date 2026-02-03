@@ -31,15 +31,15 @@ lib = [
     "psycopg2>=2.9.10",
 ]
 format = [
-    "ruff==0.14.14"
+    "ruff==0.14.14; python_version >= '3.12'"
 ]
 lint = [
-    "codespell==2.4.1",
-    "pyright==1.1.408"
+    "codespell==2.4.1; python_version >= '3.12'",
+    "ty==0.0.14; python_version >= '3.12'"
 ]
 unit = [
-    "coverage[toml]==7.13.2; python_version >= '3.10'",
-    "pytest==9.0.2; python_version >= '3.10'"
+    "coverage[toml]==7.13.2; python_version >= '3.12'",
+    "pytest==9.0.2; python_version >= '3.12'"
 ]
 
 # Testing tools configuration
@@ -102,12 +102,8 @@ max-complexity = 10
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
-[tool.pyright]
-include = ["single_kernel_postgresql"]
-pythonVersion = "3.8"
-pythonPlatform = "All"
-typeCheckingMode = "basic"
-reportIncompatibleMethodOverride = false
-reportImportCycles = false
-reportMissingModuleSource = true
-stubPath = ""
+[tool.ty.environment]
+python = ".tox/lint/"
+
+[tool.ty.src]
+exclude = ["tests"]
