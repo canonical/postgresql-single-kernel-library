@@ -1790,6 +1790,8 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                 parameter = "".join(x.capitalize() for x in parameter.split("_"))
             elif parameter.startswith("pg_stat_statements"):
                 parameter = ".".join(parameter.rsplit("_", 1))
+            elif parameter == "maximum_lag_on_failover":
+                continue
             parameters[parameter] = value
         shared_buffers_max_value_in_mb = int(available_memory * 0.4 / 10**6)
         shared_buffers_max_value = int(shared_buffers_max_value_in_mb * 10**3 / 8)

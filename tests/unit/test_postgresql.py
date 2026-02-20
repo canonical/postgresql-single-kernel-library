@@ -219,6 +219,7 @@ def test_build_postgresql_parameters(harness):
         "request_test_config_option_7": "off",
         "response_test_config_option_8": "partial",
         "vacuum_test_config_option_9": 10.5,
+        "durability-maximum-lag-on-failover": 1024,
     }
     assert harness.charm.postgresql.build_postgresql_parameters(config_options, 1000000000) == {
         "test_config_option_1": True,
