@@ -4,7 +4,7 @@
 [project]
 name = "postgresql-charms-single-kernel"
 description = "Shared and reusable code for PostgreSQL-related charms"
-version = "16.1.7"
+version = "16.1.8"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -32,16 +32,22 @@ module-root = ""
 
 [dependency-groups]
 format = [
-    "ruff==0.15.1; python_version >= '3.12'"
+    "ruff==0.15.1"
 ]
 lint = [
-    "codespell==2.4.1; python_version >= '3.12'",
-    "ty==0.0.17; python_version >= '3.12'"
+    "codespell==2.4.1",
+    "ty==0.0.17"
 ]
 unit = [
-    "coverage[toml]==7.13.4; python_version >= '3.12'",
-    "pytest==9.0.2; python_version >= '3.12'"
+    "coverage[toml]==7.13.4",
+    "pytest==9.0.2"
 ]
+
+
+[tool.uv.dependency-groups]
+unit = {requires-python = ">=3.12"}
+lint = {requires-python = ">=3.12"}
+format = {requires-python = ">=3.12"}
 
 # Testing tools configuration
 [tool.coverage.run]

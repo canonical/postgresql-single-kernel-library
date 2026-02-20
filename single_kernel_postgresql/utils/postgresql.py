@@ -1784,15 +1784,12 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                 "vacuum",
             )):
                 continue
-            if "-" in config:
-                parameter = "_".join(config.split("-")[1:])
-            else:
-                parameter = "_".join(config.split("_")[1:])
+            separator = "-" if "-" in config else "_"
+            parameter = "_".join(config.split(separator)[1:])
             if parameter in ["date_style", "time_zone"]:
-                if "-" in config:
-                    parameter = "".join(x.capitalize() for x in parameter.split("-"))
-                else:
-                    parameter = "".join(x.capitalize() for x in parameter.split("_"))
+                parameter = "".join(x.capitalize() for x in parameter.split("_"))
+            elif parameter.startswith("pg_stat_statements"):
+                parameter = ".".join(parameter.rsplit("_", 1))
             parameters[parameter] = value
         shared_buffers_max_value_in_mb = int(available_memory * 0.4 / 10**6)
         shared_buffers_max_value = int(shared_buffers_max_value_in_mb * 10**3 / 8)
