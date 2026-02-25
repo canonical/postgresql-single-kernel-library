@@ -211,13 +211,16 @@ def test_build_postgresql_parameters(harness):
         "logging_test_config_option_3": "on",
         "memory_test_config_option_4": 1024,
         "optimizer_test_config_option_5": "scheduled",
+        "optimizer_pg_stat_statements_max": 2,
+        "optimizer-pg-stat-statements-track-utility": True,
         "other_test_config_option_6": "test-value",
         "profile": "production",
         "request_date_style": "ISO, DMY",
-        "request_time_zone": "UTC",
+        "request-time-zone": "UTC",
         "request_test_config_option_7": "off",
         "response_test_config_option_8": "partial",
         "vacuum_test_config_option_9": 10.5,
+        "durability-maximum-lag-on-failover": 1024,
     }
     assert harness.charm.postgresql.build_postgresql_parameters(config_options, 1000000000) == {
         "test_config_option_1": True,
@@ -230,6 +233,8 @@ def test_build_postgresql_parameters(harness):
         "TimeZone": "UTC",
         "test_config_option_8": "partial",
         "test_config_option_9": 10.5,
+        "pg_stat_statements.max": 2,
+        "pg_stat_statements.track_utility": True,
         "shared_buffers": f"{250 * 128}",
         "effective_cache_size": f"{750 * 128}",
     }
