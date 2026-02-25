@@ -1789,7 +1789,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             if parameter in ["date_style", "time_zone"]:
                 parameter = "".join(x.capitalize() for x in parameter.split("_"))
             elif parameter.startswith("pg_stat_statements"):
-                parameter = ".".join(parameter.rsplit("_", 1))
+                parameter = "pg_stat_statements." + parameter.removeprefix("pg_stat_statements_")
             elif parameter == "maximum_lag_on_failover":
                 continue
             parameters[parameter] = value

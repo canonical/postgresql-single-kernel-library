@@ -212,6 +212,7 @@ def test_build_postgresql_parameters(harness):
         "memory_test_config_option_4": 1024,
         "optimizer_test_config_option_5": "scheduled",
         "optimizer_pg_stat_statements_max": 2,
+        "optimizer-pg-stat-statements-track-utility": True,
         "other_test_config_option_6": "test-value",
         "profile": "production",
         "request_date_style": "ISO, DMY",
@@ -233,6 +234,7 @@ def test_build_postgresql_parameters(harness):
         "test_config_option_8": "partial",
         "test_config_option_9": 10.5,
         "pg_stat_statements.max": 2,
+        "pg_stat_statements.track_utility": True,
         "shared_buffers": f"{250 * 128}",
         "effective_cache_size": f"{750 * 128}",
     }
