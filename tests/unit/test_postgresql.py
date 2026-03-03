@@ -752,7 +752,7 @@ def test_create_user():
         pg.create_user("username", "password", True, True, ["role3"], "db1", True)
 
         _process_extra_user_roles.assert_called_once_with("username", ["role3"])
-        assert _cursor.execute.call_count == 8
+        assert _cursor.execute.call_count == 10
         _cursor.execute.assert_any_call(
             Composed([
                 SQL("SELECT TRUE FROM pg_roles WHERE rolname="),
@@ -767,12 +767,28 @@ def test_create_user():
             Composed([
                 SQL("ALTER ROLE "),
                 Identifier("username"),
-                SQL(
-                    ' WITH LOGIN SUPERUSER REPLICATION ENCRYPTED PASSWORD \'password\' IN ROLE "charmed_db1_admin", "charmed_db1_dml" CREATEDB priv1 priv2;'
-                ),
+                SQL(" WITH LOGIN SUPERUSER REPLICATION ENCRYPTED PASSWORD 'password';"),
             ])
         )
         _cursor.execute.assert_any_call(SQL("COMMIT;"))
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("charmed_db1_admin"),
+                SQL(" TO "),
+                Identifier("username"),
+                SQL(";"),
+            ])
+        )
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("GRANT "),
+                Identifier("charmed_db1_dml"),
+                SQL(" TO "),
+                Identifier("username"),
+                SQL(";"),
+            ])
+        )
         _cursor.execute.assert_any_call(
             Composed([
                 SQL("GRANT "),
