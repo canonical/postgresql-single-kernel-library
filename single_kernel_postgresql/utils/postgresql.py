@@ -412,16 +412,22 @@ class PostgreSQL:
                 )
                 if cursor.fetchone() is not None:
                     user_definition = "ALTER ROLE {} "
+                    altering = True
                 else:
                     user_definition = "CREATE ROLE {} "
+                    altering = False
                 user_definition += f"WITH LOGIN{' SUPERUSER' if admin else ''}{' REPLICATION' if replication else ''} ENCRYPTED PASSWORD '{password}'"
-                user_definition, connect_statements = self._adjust_user_definition(
-                    user, roles, database, user_definition
-                )
-                if can_create_database:
-                    user_definition += " CREATEDB"
-                if privileges:
-                    user_definition += f" {' '.join(privileges)}"
+                if not altering:
+                    user_definition, connect_statements = self._adjust_user_definition(
+                        user, roles, database, user_definition
+                    )
+                    if can_create_database:
+                        user_definition += " CREATEDB"
+                    if privileges:
+                        user_definition += f" {' '.join(privileges)}"
+                else:
+                    db_roles, connect_statements = self._adjust_user_roles(user, roles, database)
+                    roles = [*db_roles, *roles]
                 cursor.execute(SQL("RESET ROLE;"))
                 cursor.execute(SQL("BEGIN;"))
                 cursor.execute(SQL("SET LOCAL log_statement = 'none';"))
