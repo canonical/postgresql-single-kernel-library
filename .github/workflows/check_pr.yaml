@@ -10,10 +10,9 @@ on:
       - unlabeled
       - edited
     branches:
-      - main
+      - '*/edge'
 
-    permissions:
-      pull-requests: read  # Needed to check labels
+permissions: {}
 jobs:
   check-pr:
     name: Check pull request
