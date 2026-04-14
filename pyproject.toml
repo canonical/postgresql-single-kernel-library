@@ -32,7 +32,7 @@ module-root = ""
 
 [dependency-groups]
 format = [
-    "ruff==0.15.9"
+    "ruff==0.15.10"
 ]
 lint = [
     "codespell==2.4.2",
