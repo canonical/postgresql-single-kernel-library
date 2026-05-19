@@ -5,7 +5,7 @@
 This module should contain the literals used in the charms (paths, enums, etc).
 """
 
-from enum import Enum
+from enum import StrEnum
 
 # Permissions.
 POSTGRESQL_STORAGE_PERMISSIONS = 0o700
@@ -23,7 +23,7 @@ USER = "operator"
 SYSTEM_USERS = [MONITORING_USER, REPLICATION_USER, REWIND_USER, USER]
 
 
-class Substrates(str, Enum):
+class Substrates(StrEnum):
     """Possible substrates."""
 
     K8S = "k8s"
