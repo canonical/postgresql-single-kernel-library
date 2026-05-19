@@ -31,6 +31,10 @@ from psycopg2.sql import SQL, Identifier, Literal
 from ..compat.postgresql import (
     ACCESS_GROUP_RELATION,
     ALLOWED_ROLES,
+    INVALID_DATABASE_NAME_BLOCKING_MESSAGE,  # noqa: F401
+    INVALID_DATABASE_NAMES,  # noqa: F401
+    INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE,  # noqa: F401
+    REQUIRED_PLUGINS,  # noqa: F401
     ROLE_ADMIN,
     ROLE_BACKUP,
     ROLE_DATABASES_OWNER,
