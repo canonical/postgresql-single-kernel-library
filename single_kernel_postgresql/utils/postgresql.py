@@ -48,6 +48,7 @@ from ..compat.postgresql import (
     PostgreSQLCreateUserError,  # noqa: F401
     PostgreSQLDeleteUserError,  # noqa: F401
     PostgreSQLEnableDisableExtensionError,  # noqa: F401
+    PostgreSQLGetPostgreSQLVersionError,  # noqa: F401
     PostgreSQLListUsersError,
     PostgreSQLUndefinedHostError,  # noqa: F401
     PostgreSQLUndefinedPasswordError,  # noqa: F401
@@ -95,10 +96,6 @@ class PostgreSQLGetLastArchivedWALError(PostgreSQLBaseError):
 
 class PostgreSQLGetCurrentTimelineError(PostgreSQLBaseError):
     """Exception raised when retrieving current timeline id for the PostgreSQL unit fails."""
-
-
-class PostgreSQLGetPostgreSQLVersionError(PostgreSQLBaseError):
-    """Exception raised when retrieving PostgreSQL version fails."""
 
 
 class PostgreSQLListDatabasesError(PostgreSQLBaseError):
@@ -493,25 +490,6 @@ class PostgreSQL(PostgreSQLBase):
             cursor.execute("SELECT amname FROM pg_am WHERE amtype = 't';")
             access_methods = cursor.fetchall()
             return {access_method[0] for access_method in access_methods}
-
-    def get_postgresql_version(self, current_host=True) -> str:
-        """Returns the PostgreSQL version.
-
-        Returns:
-            PostgreSQL version number.
-        """
-        host = self.current_host if current_host else None
-        try:
-            with (
-                self._connect_to_database(database_host=host) as connection,
-                connection.cursor() as cursor,
-            ):
-                cursor.execute("SELECT version();")
-                # Split to get only the version number. There should always be a version.
-                return cursor.fetchone()[0].split(" ")[1]
-        except psycopg2.Error as e:
-            logger.error(f"Failed to get PostgreSQL version: {e}")
-            raise PostgreSQLGetPostgreSQLVersionError() from e
 
     def is_tls_enabled(self, check_current_host: bool = False) -> bool:
         """Returns whether TLS is enabled.

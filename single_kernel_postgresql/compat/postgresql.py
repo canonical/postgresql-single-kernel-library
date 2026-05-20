@@ -106,6 +106,10 @@ class PostgreSQLListUsersError(PostgreSQLBaseError):
     """Exception raised when retrieving PostgreSQL users list fails."""
 
 
+class PostgreSQLGetPostgreSQLVersionError(PostgreSQLBaseError):
+    """Exception raised when retrieving PostgreSQL version fails."""
+
+
 class PostgreSQLEnableDisableExtensionError(PostgreSQLBaseError):
     """Exception raised when enabling/disabling an extension fails."""
 
@@ -495,6 +499,24 @@ class PostgreSQLBase:
         finally:
             if connection is not None:
                 connection.close()
+
+    def get_postgresql_version(self, current_host=True) -> str:
+        """Returns the PostgreSQL version.
+
+        Returns:
+            PostgreSQL version number.
+        """
+        host = self.current_host if current_host else None
+        try:
+            with self._connect_to_database(
+                database_host=host
+            ) as connection, connection.cursor() as cursor:
+                cursor.execute("SELECT version();")
+                # Split to get only the version number. There should always be a version.
+                return cursor.fetchone()[0].split(" ")[1]
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get PostgreSQL version: {e}")
+            raise PostgreSQLGetPostgreSQLVersionError() from e
 
     def list_users(self, group: Optional[str] = None, current_host=False) -> Set[str]:
         """Returns the list of PostgreSQL database users.
