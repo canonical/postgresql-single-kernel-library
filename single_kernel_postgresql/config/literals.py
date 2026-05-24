@@ -22,6 +22,8 @@ SNAP_USER = "_daemon_"
 USER = "operator"
 SYSTEM_USERS = [MONITORING_USER, REPLICATION_USER, REWIND_USER, USER]
 
+API_REQUEST_TIMEOUT = 5
+
 
 class Substrates(str, Enum):
     """Possible substrates."""

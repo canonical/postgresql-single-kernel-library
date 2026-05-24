@@ -4,7 +4,7 @@
 [project]
 name = "postgresql-charms-single-kernel"
 description = "Shared and reusable code for PostgreSQL-related charms"
-version = "16.1.12"
+version = "16.2.1"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -21,6 +21,9 @@ dependencies = [
     "psycopg2>=2.9.10",
     "tenacity>=9.0.0",
 ]
+
+[project.optional-dependencies]
+postgresql = ["httpx; python_version >= '3.12'"]
 
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]
