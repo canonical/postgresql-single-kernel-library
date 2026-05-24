@@ -142,12 +142,16 @@ def _change_owner(substrate: Substrates, path: str) -> None:
         substrate: Charm substrate.
         path: path to a file or directory.
     """
-    # Get the uid/gid for the _daemon_ user.
-    user_database = (
-        pwd.getpwnam("_daemon_") if substrate == Substrates.VM else pwd.getpwnam("postgres")
-    )
-    # Set the correct ownership for the file or directory.
-    os.chown(path, uid=user_database.pw_uid, gid=user_database.pw_gid)
+    try:
+        # Get the uid/gid for the _daemon_ user.
+        user_database = (
+            pwd.getpwnam("_daemon_") if substrate == Substrates.VM else pwd.getpwnam("postgres")
+        )
+        # Set the correct ownership for the file or directory.
+        os.chown(path, uid=user_database.pw_uid, gid=user_database.pw_gid)
+    except KeyError:
+        # Ignore non existing user error when it wasn't created yet.
+        pass
 
 
 async def _httpx_get_request(
