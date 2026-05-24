@@ -15,7 +15,7 @@ from typing import Any
 
 from httpx import AsyncClient, BasicAuth, HTTPError
 
-from ..config.literals import API_REQUEST_TIMEOUT
+from ..config.literals import API_REQUEST_TIMEOUT, Substrates
 
 
 def new_password() -> str:
@@ -25,7 +25,7 @@ def new_password() -> str:
        A random password string.
     """
     choices = string.ascii_letters + string.digits
-    password = "".join([secrets.choice(choices) for i in range(16)])
+    password = "".join([secrets.choice(choices) for _ in range(16)])
     return password
 
 
@@ -92,13 +92,16 @@ def label2name(label: str) -> str:
     Returns:
         The converted name.
     """
-    return label.rsplit("-", 1)[0] + "/" + label.rsplit("-", 1)[1]
+    return "/".join(label.rsplit("-", 1))
 
 
-def render_file(path: str, content: str, mode: int, change_owner: bool = True) -> None:
+def render_file(
+    substrate: Substrates, path: str, content: str, mode: int, change_owner: bool = True
+) -> None:
     """Write a content rendered from a template to a file.
 
     Args:
+        substrate: Charm substrate.
         path: the path to the file.
         content: the data to be written to the file.
         mode: access permission mask applied to the
@@ -114,13 +117,14 @@ def render_file(path: str, content: str, mode: int, change_owner: bool = True) -
     # Ensure correct permissions are set on the file.
     os.chmod(path, mode)
     if change_owner:
-        _change_owner(path)
+        _change_owner(substrate, path)
 
 
-def create_directory(path: str, mode: int) -> None:
+def create_directory(substrate: Substrates, path: str, mode: int) -> None:
     """Creates a directory.
 
     Args:
+        substrate: Charm substrate.
         path: the path of the directory that should be created.
         mode: access permission mask applied to the
           directory using chmod (e.g. 0o640).
@@ -128,17 +132,20 @@ def create_directory(path: str, mode: int) -> None:
     os.makedirs(path, mode=mode, exist_ok=True)
     # Ensure correct permissions are set on the directory.
     os.chmod(path, mode)
-    _change_owner(path)
+    _change_owner(substrate, path)
 
 
-def _change_owner(path: str) -> None:
+def _change_owner(substrate: Substrates, path: str) -> None:
     """Change the ownership of a file or a directory to the postgres user.
 
     Args:
+        substrate: Charm substrate.
         path: path to a file or directory.
     """
     # Get the uid/gid for the _daemon_ user.
-    user_database = pwd.getpwnam("_daemon_")
+    user_database = (
+        pwd.getpwnam("_daemon_") if substrate == Substrates.VM else pwd.getpwnam("postgres")
+    )
     # Set the correct ownership for the file or directory.
     os.chown(path, uid=user_database.pw_uid, gid=user_database.pw_gid)
 

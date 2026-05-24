@@ -4,15 +4,20 @@
 import re
 from unittest.mock import mock_open, patch
 
+from single_kernel_postgresql.config.literals import Substrates
 from single_kernel_postgresql.utils import (
     any_cpu_to_cores,
     any_memory_to_bytes,
+    create_directory,
+    label2name,
     new_password,
     render_file,
 )
 
 
 def test_any_memory_to_bytes():
+    assert any_memory_to_bytes(1024) == 1024
+
     assert any_memory_to_bytes("1KI") == 1024
 
     try:
@@ -20,6 +25,10 @@ def test_any_memory_to_bytes():
         assert False
     except ValueError as e:
         assert str(e) == "Invalid memory definition in 'KI'"
+
+
+def test_label2name():
+    assert label2name("postgresql-k8s-1") == "postgresql-k8s/1"
 
 
 def test_any_cpu_to_cores():
@@ -57,7 +66,7 @@ def test_render_file():
             _pwnam.return_value.pw_uid = 35
             _pwnam.return_value.pw_gid = 35
             # Call the method using a temporary configuration file.
-            render_file(filename, "rendered-content", 0o640)
+            render_file(Substrates.VM, filename, "rendered-content", 0o640)
 
         # Check the rendered file is opened with "w+" mode.
         assert mock.call_args_list[0][0] == (filename, "w+")
@@ -74,7 +83,25 @@ def test_render_file():
         _chmod.reset_mock()
         _chown.reset_mock()
         with patch("builtins.open", mock, create=True):
-            render_file(filename, "rendered-content", 0o640, change_owner=False)
+            render_file(Substrates.VM, filename, "rendered-content", 0o640, change_owner=False)
         _pwnam.assert_not_called()
         _chmod.assert_called_once_with(filename, 0o640)
         _chown.assert_not_called()
+
+
+def test_create_directory():
+    with (
+        patch("os.chmod") as _chmod,
+        patch("os.chown") as _chown,
+        patch("os.makedirs") as _makedirs,
+        patch("pwd.getpwnam") as _pwnam,
+    ):
+        _pwnam.return_value.pw_uid = 35
+        _pwnam.return_value.pw_gid = 35
+
+        create_directory(Substrates.K8S, "test", 0o640)
+
+        _makedirs.assert_called_once_with("test", mode=0o640, exist_ok=True)
+        _chmod.assert_called_once_with("test", 0o640)
+        _chown.assert_called_once_with("test", uid=35, gid=35)
+        _pwnam.assert_called_with("postgres")
