@@ -164,7 +164,9 @@ async def _httpx_get_request(
     else:
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = CERT_NONE
-    async with AsyncClient(auth=auth, timeout=API_REQUEST_TIMEOUT, verify=ssl_ctx) as client:
+    async with AsyncClient(
+        auth=auth, timeout=API_REQUEST_TIMEOUT, verify=ssl_ctx, trust_env=False
+    ) as client:
         try:
             return (await client.get(url)).raise_for_status().json()
         except (HTTPError, ValueError):
