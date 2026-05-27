@@ -1381,14 +1381,14 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             parameters[parameter] = value
         shared_buffers_max_value_in_mb = int(available_memory * 0.4 / 10**6)
         shared_buffers_max_value = int(shared_buffers_max_value_in_mb * 10**3 / 8)
-        if parameters.get("shared_buffers", 0) > shared_buffers_max_value:
+        if int(parameters.get("shared_buffers", 0)) > shared_buffers_max_value:
             raise Exception(
                 f"Shared buffers config option should be at most 40% of the available memory, which is {shared_buffers_max_value_in_mb}MB"
             )
         if profile == "production":
             if "shared_buffers" in parameters:
                 # Convert to bytes to use in the calculation.
-                shared_buffers = parameters["shared_buffers"] * 8 * 10**3
+                shared_buffers = int(parameters["shared_buffers"]) * 8 * 10**3
             else:
                 # Use 25% of the available memory for shared_buffers.
                 # and the remaining as cache memory.
