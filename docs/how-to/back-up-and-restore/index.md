@@ -1,4 +1,11 @@
-# Back up and restore
+---
+myst:
+  html_meta:
+    description: "How-to guides for backing up and restoring Charmed PostgreSQL, covering S3 configuration, creating backups, restoring, and cluster migration."
+---
+
+(back-up-and-restore)=
+# How to back up and restore
 
 ```{toctree}
 :titlesonly:

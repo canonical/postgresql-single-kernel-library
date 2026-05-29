@@ -1,36 +1,46 @@
+---
+myst:
+  html_meta:
+    description: "Configure the s3-integrator charm to use Ceph RadosGW S3-compatible storage for Charmed MySQL backups using the MinIO client."
+---
+
+(configure-s3-radosgw)=
 # Configure S3 for RadosGW
 
 A PostgreSQL backup can be stored on any S3-compatible storage. S3 access and configurations are managed with the [s3-integrator charm](https://charmhub.io/s3-integrator).
 
-This guide will teach you how to deploy and configure the s3-integrator charm on Ceph via [RadosGW](https://docs.ceph.com/en/quincy/man/8/radosgw/), send the configuration to a Charmed PostgreSQL application, and update it. 
+This guide will teach you how to deploy and configure the s3-integrator charm on Ceph via [RadosGW](https://docs.ceph.com/en/quincy/man/8/radosgw/), send the configuration to a Charmed PostgreSQL application, and update it.
 
-> See also: [](/how-to/back-up-and-restore/configure-s3-aws)
+```{seealso}
+{ref}`configure-s3-aws`
+```
 
-```{note}
+```{caution}
 The Charmed PostgreSQL backup tool ([pgBackRest](https://pgbackrest.org/)) can currently only interact with S3-compatible storage if they work with [SSL/TLS](https://github.com/pgbackrest/pgbackrest/issues/2340).
 
 Backup via the plain HTTP is currently not supported.
 ```
 
-## Configure s3-integrator
+## Configure `s3-integrator`
 
 First, install the MinIO client and create a bucket:
 
-```text
+```shell
 mc config host add dest https://radosgw.mycompany.fqdn <access-key> <secret-key> --api S3v4 --lookup path
 mc mb dest/backups-bucket
 ```
 
 Then, deploy and run the charm:
 
-```text
+```shell
 juju deploy s3-integrator
-juju run s3-integrator/leader sync-s3-credentials access-key=<access-key> secret-key=<secret-key> 
+juju run s3-integrator/leader sync-s3-credentials access-key=<access-key> secret-key=<secret-key>
 ```
+<!--TODO: s3-integrator secrets?-->
 
 Lastly, use `juju config` to add your configuration parameters. For example:
 
-```text
+```shell
 juju config s3-integrator \
     endpoint="https://radosgw.mycompany.fqdn" \
     bucket="backups-bucket" \
@@ -45,23 +55,47 @@ juju config s3-integrator \
 
 To pass these configurations to Charmed PostgreSQL, integrate the two applications:
 
-```text
-juju integrate s3-integrator postgresql
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+    juju integrate s3-integrator postgresql
 ```
+
+```{tab-item} K8s
+:sync: k8s
+
+    juju integrate s3-integrator postgresql-k8s
+```
+````
 
 You can create, list, and restore backups now:
 
-```text
-juju run postgresql/leader list-backups 
-juju run postgresql/leader create-backup 
-juju run postgresql/leader list-backups 
-juju run postgresql/leader restore backup-id=<backup-id-here> 
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+    juju run postgresql/leader list-backups
+    juju run postgresql/leader create-backup
+    juju run postgresql/leader list-backups
+    juju run postgresql/leader restore backup-id=<backup-id>
 ```
 
-You can also update your S3 configuration options after integrating using
-```text
+```{tab-item} K8s
+:sync: k8s
+
+    juju run postgresql-k8s/leader list-backups
+    juju run postgresql-k8s/leader create-backup
+    juju run postgresql-k8s/leader list-backups
+    juju run postgresql-k8s/leader restore backup-id=<backup-id>
+```
+````
+
+You can also update your S3 configuration options after relating:
+
+```shell
 juju config s3-integrator <option>=<value>
 ```
 
-The s3-integrator charm [accepts many configurations](https://charmhub.io/s3-integrator/configure) - enter whatever configurations are necessary for your S3 storage.
+See the [s3-integrator charm on Charmhub](https://charmhub.io/s3-integrator/configure) for a list of all its configuration parameters.
 
