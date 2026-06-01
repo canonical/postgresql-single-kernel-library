@@ -11,6 +11,7 @@ from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from ops.pebble import Error as PebbleError
 from ops import ModelError
+from pathlib import Path
 
 from single_kernel_postgresql.workload.paths.base import Paths
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
@@ -19,6 +20,15 @@ from single_kernel_postgresql.config.literals import DIR_PERMISSIONS_READONLY
 # --- Base Workload
 class BaseWorkload(ABC):
     """Base interface for common workload operations."""
+
+    def __init__(self, charm_dir: Path):
+        """Initialize K8s workload.
+
+        Args:
+            charm_dir: the path to charm code.
+        """
+        super().__init__()
+        self.charm_dir = charm_dir
 
     @property
     @abstractmethod

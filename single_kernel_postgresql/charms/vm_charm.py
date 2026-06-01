@@ -49,7 +49,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         Returns:
             BaseWorkload: The VMWorkload instance for this charm
         """
-        return VMWorkload(root=pathops.Path("/"))
+        return VMWorkload(charm_dir=self.charm_dir)
 
     @property
     def substrate(self) -> Substrates:

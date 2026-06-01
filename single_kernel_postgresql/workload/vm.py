@@ -6,6 +6,7 @@
 import logging
 from contextlib import contextmanager
 from types import SimpleNamespace
+from pathlib import Path
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.paths.vm import VMPaths
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 class VMWorkload(BaseWorkload):
     """Machine PostgreSQL Workload."""
+
+    def __init__(self, charm_dir: Path):
+        super().__init__(charm_dir)
 
     def install(self) -> None:
         """Install the workload."""

@@ -7,6 +7,7 @@ import logging
 from types import SimpleNamespace
 import uuid
 from contextlib import contextmanager
+from pathlib import Path
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.paths.k8s import K8sPaths
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
@@ -24,13 +25,14 @@ class K8sWorkload(BaseWorkload):
     """Kubernetes PostgreSQL Workload."""
 
 
-    def __init__(self, container: Container | None = None):
+    def __init__(self, charm_dir: Path, container: Container | None = None):
         """Initialize K8s workload.
 
         Args:
+            charm_dir: the path to charm code.
             container: the Container instance.
         """
-        super().__init__()
+        super().__init__(charm_dir=charm_dir)
         if not container:
             raise AttributeError("Container is required.")
         self.container = container

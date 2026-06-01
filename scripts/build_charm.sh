@@ -102,7 +102,6 @@ for directory in "${TEST_CHARMS[@]}"; do
         poetry add "${LIB_PATH}/"
         poetry lock
 
-        python3 -c 'import pathlib; import shutil; import subprocess; git_hash=subprocess.run(["git", "describe", "--always", "--dirty"], capture_output=True, check=True, encoding="utf-8").stdout; file = pathlib.Path("charm_version"); shutil.copy(file, pathlib.Path("charm_version.backup")); version = file.read_text().strip(); file.write_text(f"{version}+{git_hash}")'
 
         # Pack the charm
         pack_charm
@@ -110,7 +109,6 @@ for directory in "${TEST_CHARMS[@]}"; do
         # Cleanup
         echo "removing copied files from single kernel charm."
         rm -rf "${LIB_PATH}"
-        mv charm_version.backup charm_version
         mv pyproject.toml.backup pyproject.toml
         mv poetry.lock.backup poetry.lock
 

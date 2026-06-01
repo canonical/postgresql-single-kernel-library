@@ -47,7 +47,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         Returns:
             BaseWorkload: The K8sWorkload instance for this charm
         """
-        return K8sWorkload(container=self.unit.get_container(CONTAINER_NAME))
+        return K8sWorkload(charm_dir=self.charm_dir, container=self.unit.get_container(CONTAINER_NAME))
 
     @property
     def substrate(self) -> Substrates:

@@ -26,6 +26,6 @@ DIR_PERMISSIONS_READONLY = 0o750
 
 
 # Container name for K8s deployments
-CONTAINER_NAME = "posqtgresql"
+CONTAINER_NAME = "postgresql"
 
 API_REQUEST_TIMEOUT = 5

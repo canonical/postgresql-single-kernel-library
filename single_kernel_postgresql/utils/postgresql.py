@@ -56,8 +56,8 @@ from ..compat.postgresql import (
 from ..config.literals import (
     POSTGRESQL_STORAGE_PERMISSIONS,
     SNAP_USER,
-    Substrates,
 )
+from ..config.enums import Substrates
 from .filesystem import change_owner, is_tmpfs
 
 # Groups to distinguish HBA access
