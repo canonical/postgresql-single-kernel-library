@@ -57,8 +57,9 @@ Deploy a cluster on a cloud using different availability zones:
 
 ```{toctree}
 :titlesonly:
+:maxdepth: 2
 
-Multi-AZ <multi-az>
+Multi-AZ <multi-az/index>
 ```
 
 ## Terraform
@@ -69,6 +70,16 @@ Deploy PostgreSQL and automate your infrastructure with the Juju Terraform Provi
 :titlesonly:
 
 Terraform <terraform>
+```
+
+## Airgapped
+
+Install PostgreSQL in an airgapped environment via Charmhub and the Snap Store Proxy:
+
+```{toctree}
+:titlesonly:
+
+Air-gapped <air-gapped>
 ```
 
 ## Networking and TLS encryption
@@ -87,16 +98,6 @@ Configure Juju spaces to separate network traffic:
 :titlesonly:
 
 Juju spaces <juju-spaces>
-```
-
-## Airgapped
-
-Install PostgreSQL in an airgapped environment via Charmhub and the Snap Store Proxy:
-
-```{toctree}
-:titlesonly:
-
-Air-gapped <air-gapped>
 ```
 
 ## Juju storage
