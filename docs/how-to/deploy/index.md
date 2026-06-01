@@ -1,11 +1,15 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL via Juju CLI or Terraform on VM or Kubernetes clouds, with guides for multi-AZ and airgapped environments."
+---
+
 (deploy)=
 # How to deploy
 
-The basic requirements for deploying a charm are the [**Juju client**](https://documentation.ubuntu.com/juju/3.6/) and a machine [**cloud**](https://juju.is/docs/juju/cloud).
+The basic requirements for deploying a charm are the [**Juju client**](https://documentation.ubuntu.com/juju/3.6/) and a machine [**cloud**](https://juju.is/docs/juju/cloud). For more details, see {ref}`system-requirements`.
 
-For more details, see {ref}`system-requirements`.
-
-If you are not sure where to start, or would like a more guided walkthrough for setting up your environment, see the {ref}`tutorial`.
+If you are not sure where to start, or would like a more guided walkthrough for setting up your environment, start with the {ref}`tutorial`.
 
 (deploy-quickstart)=
 ## Quickstart
@@ -37,12 +41,10 @@ Then, use the [`juju deploy`](https://canonical-juju.readthedocs-hosted.com/en/l
 
 To deploy via **Terraform**, see the {ref}`Terraform guide <terraform>`.
 
-If you are not sure where to start or would like a more guided walkthrough for setting up your environment, see the {ref}`tutorial`.
-
 (deploy-clouds)=
 ## Clouds
 
-Charmed MySQL can be deployed on several machine and Kubernetes cloud services.
+Charmed PostgreSQL can be deployed on several machine and Kubernetes cloud services.
 
 ```{toctree}
 :titlesonly:
