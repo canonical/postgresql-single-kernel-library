@@ -78,15 +78,15 @@ Instructions for performing an in-place application refresh:
 Refresh (upgrade) <refresh>
 ```
 
-### Cross-regional (cluster-cluster) async replication
+### Cluster-cluster async replication
 
-Walkthrough of a cluster-cluster deployment and its essential operations:
+Walkthrough of a cross-regional, cluster-cluster deployment and its essential operations:
 
 ```{toctree}
 :maxdepth: 2
 :titlesonly:
 
-Cross-regional async replication <cross-regional-async-replication/index>
+Custer-cluster replication <cluster-cluster-replication/index>
 ```
 
 ### Logical replication
