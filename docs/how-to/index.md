@@ -22,19 +22,17 @@ Essential operations to configure and manage a PostgreSQL cluster:
 :titlesonly:
 
 Scale <scale-replicas>
-Integrate <integrate-with-another-application>
+Integrate <integrate/index>
 Manage passwords <manage-passwords>
-Enable TLS <enable-tls>
-Enable plugins/extensions <enable-plugins-extensions>
+Network and encryption <network-and-encryption/index>
+Enable extensions <enable-extensions>
 ```
 
-Advanced networking, credential management, and disaster recovery:
+Disaster recovery:
 
 ```{toctree}
 :titlesonly:
 
-External network access <external-network-access>
-Enable LDAP <enable-ldap>
 Switchover/failover <switchover-failover>
 ```
 
@@ -99,17 +97,3 @@ Replicate a subset of data to another PostgreSQL cluster:
 
 Logical replication <logical-replication/index>
 ```
-
-## Charm development
-
-For charm developers looking to support PostgreSQL integrations with their charm
-
-```{toctree}
-:titlesonly:
-
-Integrate PostgreSQL with your charm <integrate-with-your-charm>
-```
-
-Other relevant guides:
-* {ref}`migrate-data-via-pg-dump`
-* {ref}`migrate-data-via-backup-restore`

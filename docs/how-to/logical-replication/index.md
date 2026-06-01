@@ -7,7 +7,7 @@ Under the hood, it uses the publication and subscriptions mechanisms from the [P
 
 ## Prerequisites
 * Juju `v.3.6.8+`
-* Make sure your machine(s) fulfil the [](/reference/system-requirements)
+* Make sure your machine(s) fulfil the {ref}`system-requirements`
 
 ## Guides
 
