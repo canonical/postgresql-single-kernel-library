@@ -20,6 +20,7 @@ dependencies = [
     "ops>=2.0.0",
     "psycopg2>=2.9.10",
     "tenacity>=9.0.0",
+    "data-platform-helpers>=0.1.7"
 ]
 
 [project.optional-dependencies]

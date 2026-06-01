@@ -2,16 +2,14 @@
 # See LICENSE file for licensing details.
 """Literal string for the different charms.
 
-This module should contain the literals used in the charms (paths, enums, etc).
+This module should contain the literals used in the charms (paths, relation names, etc).
 """
-
-from enum import Enum
-
 # Permissions.
 POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 
-# Relations.
-PEER = "database-peers"
+# Relations
+PEER_RELATION = "database-peers"
+STATUS_PEERS_RELATION = "status-peers"
 
 # Users.
 BACKUP_USER = "backup"
@@ -22,11 +20,12 @@ SNAP_USER = "_daemon_"
 USER = "operator"
 SYSTEM_USERS = [MONITORING_USER, REPLICATION_USER, REWIND_USER, USER]
 
+# File permissions as octal
+# standard directory permissions
+DIR_PERMISSIONS_READONLY = 0o750
+
+
+# Container name for K8s deployments
+CONTAINER_NAME = "posqtgresql"
+
 API_REQUEST_TIMEOUT = 5
-
-
-class Substrates(str, Enum):
-    """Possible substrates."""
-
-    K8S = "k8s"
-    VM = "vm"

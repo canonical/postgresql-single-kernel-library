@@ -9,7 +9,7 @@ import pytest
 from ops.testing import Harness
 from psycopg2.sql import Composed, Identifier, Literal, SQL
 
-from single_kernel_postgresql.abstract_charm import AbstractPostgreSQLCharm
+from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
 from single_kernel_postgresql.config.literals import (
     PEER,
     POSTGRESQL_STORAGE_PERMISSIONS,
