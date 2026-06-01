@@ -1,6 +1,6 @@
 (vm-clouds)=
-
 # VM clouds
+{{vm}}
 
 ```{toctree}
 :titlesonly:

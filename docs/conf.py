@@ -216,6 +216,13 @@ linkcheck_retries = 3
 #   - linkify
 # myst_enable_extensions = set()
 
+# MyST substitutions
+
+myst_substitutions = {
+    "vm": "![postgresql](https://img.shields.io/badge/vm-orange)",
+    "k8s": "![postgresql-k8s](https://img.shields.io/badge/k8s-blue)"
+}
+
 # Custom Sphinx extensions; see
 # https://www.sphinx-doc.org/en/master/usage/extensions/index.html
 extensions = [
@@ -241,9 +248,10 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx_sitemap",
     # Custom extensions
-    "sphinx_new_tab_link"
+    "sphinx_new_tab_link",
 ]
 
+# sphinx_new_tab_link configuration
 new_tab_link_show_external_link_icon = True
 
 # Excludes files or directories from processing

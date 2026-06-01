@@ -1,6 +1,6 @@
 (k8s-clouds)=
-
 # Kubernetes clouds
+{{k8s}}
 
 ```{toctree}
 :titlesonly:

@@ -1,5 +1,6 @@
 (canonical-k8s)=
-# How to deploy on Canonical Kubernetes
+# How to deploy on Canonical K8s
+{{k8s}}
 
 [Canonical Kubernetes](https://ubuntu.com/kubernetes) is a Kubernetes service built on Ubuntu and optimised for most major public clouds.
 

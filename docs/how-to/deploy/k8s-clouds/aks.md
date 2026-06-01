@@ -1,5 +1,6 @@
 (aks)=
 # How to deploy on AKS
+{{k8s}}
 
 [Azure Kubernetes Service](https://learn.microsoft.com/en-us/azure/aks/) (AKS) allows you to quickly deploy a production ready Kubernetes cluster in Azure. To access the AKS Web interface, go to [https://portal.azure.com/](https://portal.azure.com/).
 

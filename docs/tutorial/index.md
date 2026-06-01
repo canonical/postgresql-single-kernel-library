@@ -1,5 +1,6 @@
 (tutorial)=
 # Tutorial
+{{vm}}
 
 This hands-on tutorial aims to help you learn how to deploy Charmed PostgreSQL and become familiar with its available operations.
 
