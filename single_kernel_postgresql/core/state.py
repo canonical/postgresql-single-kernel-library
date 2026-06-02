@@ -64,7 +64,7 @@ class CharmState(Object):
         """Fetch the list of units for the current app."""
         if not self.peer_relation:
             return []
-        return list(self.peer_relation.units.union({self.peer.unit}))
+        return [u for u in self.peer_relation.units.union({self.peer.unit}) if isinstance(u, Unit)]
 
     @property
     def application_peers(self) -> list[PostgreSQLPeer]:

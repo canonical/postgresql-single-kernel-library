@@ -48,11 +48,11 @@ class K8sWorkload(BaseWorkload):
 
         Set paused=True if the process was intentionally paused.
         """
-        ...
+        raise NotImplementedError
 
     def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
-        ...
+        raise NotImplementedError
 
     def run_cmd(
         self,
@@ -62,11 +62,11 @@ class K8sWorkload(BaseWorkload):
         stdin: str | None = None,
     ) -> SimpleNamespace:
         """Run Command in CLI."""
-        ...
+        raise NotImplementedError
 
     def is_failed(self) -> bool:
         """Check if snap service failed."""
-        ...
+        raise NotImplementedError
 
     def stop(self) -> None:
         """Stop the PostgreSQL service."""
@@ -164,4 +164,4 @@ class K8sWorkload(BaseWorkload):
     @property
     def workload_present(self) -> bool:
         """Flag to check if workload is present and ready."""
-        ...
+        raise NotImplementedError
