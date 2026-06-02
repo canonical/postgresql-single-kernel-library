@@ -1,2 +1,2 @@
 (alert-rules)=
-# Alert rules
+# Awesome Alert rules

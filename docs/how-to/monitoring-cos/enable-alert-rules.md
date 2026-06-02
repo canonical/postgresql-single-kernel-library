@@ -1,23 +1,27 @@
 (enable-alert-rules)=
-# How to enable COS Alert Rules
+# How to enable COS alert rules
 
-This guide will show how to set up [Pushover](https://pushover.net/) to receive alert notifications from the COS Alert Manager with [Awesome Alert Rules](https://samber.github.io/awesome-prometheus-alerts/).
-
-Charmed PostgreSQL K8s ships a pre-configured and pre-enabled [list of Awesome Alert Rules].
+Charmed PostgreSQL ships a pre-configured and pre-enabled list of {ref}`Awesome Alert Rules <alert-rules>`.
 
 <details><summary>Screenshot of alert rules in the Grafana web interface</summary>
 
 ![Alert rules Grafana web UI|690x439](alert-rules-grafana-ui.png)
 </details>
 
+This guide will show how to set up [Pushover](https://pushover.net/) to receive alert notifications from the COS Alert Manager with [Awesome Alert Rules](https://samber.github.io/awesome-prometheus-alerts/).
+
 For information about accessing and managing COS Alert Rules, refer to the [COS documentation](https://charmhub.io/cos-lite).
+
+```{seealso}
+* {ref}`alert-rules`
+* [Observability documentation > Add alert
+rules](https://documentation.ubuntu.com/observability/latest/how-to/integrate/adding-alert-rules/)
+```
 
 ## Prerequisites
 
-* A deployed Charmed PostgreSQL K8s operator
-  * See: [](/how-to/deploy/index)
-* A deployed [`cos-lite` bundle](https://charmhub.io/topics/canonical-observability-stack/tutorials/install-microk8s)
-* Fully configured [COS Monitoring](/how-to/monitoring-cos/enable-monitoring) 
+* Fully configured monitoring with COS
+  * See {ref}`enable-monitoring`
 
 ## Enable COS alerts for Pushover
 
@@ -26,6 +30,7 @@ The following section is an example of the [Pushover](https://pushover.net/) ale
 The first step is to create a new account on Pushover (or use an existing one). The goal is to have the 'user key' and 'token' to authorise alerts for the Pushover application. Follow this straightforward [Pushover guide](https://support.pushover.net/i175-how-to-get-a-pushover-api-or-pushover-application-token).
 
 Next, create a new [COS Alert Manager](https://charmhub.io/alertmanager-k8s) config (replace `user_key` and `token` with yours):
+
 ```text
 cat > myalert.yaml << EOF
 ```
@@ -59,12 +64,12 @@ EOF
 
 Upload and apply newly the created alert manager config:
 
-```text
-juju switch <k8s_cos_controller>:<cos_model_name>
+```shell
+juju switch <cos_k8s_controller>:<cos_model>
 juju config alertmanager config_file=@myalert.yaml
 ```
 
-At this stage, the COS Alert Manager will start sending alert notifications to Pushover. Users can receive them on all supported [Pushover clients/apps](https://pushover.net/clients). 
+At this stage, the COS Alert Manager will start sending alert notifications to Pushover. Users can receive them on all supported [Pushover clients/apps](https://pushover.net/clients).
 
 The image below shows an example of the Pushover web client:
 
@@ -73,13 +78,5 @@ The image below shows an example of the Pushover web client:
 ## Alert receivers
 
 The similar way as above, COS alerts can be send to the long [list of supported receivers](https://prometheus.io/docs/alerting/latest/configuration/#receiver-integration-settings).
-
-Do you have questions? [Contact us](/reference/contacts)!
-
-<!-- Links -->
-
-[Contact us]: /reference/contacts
-[COS Monitoring]: /how-to/monitoring-cos/enable-monitoring
-[list of Awesome Alert Rules]: /reference/alert-rules
 
 
