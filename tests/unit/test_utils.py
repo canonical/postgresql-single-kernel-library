@@ -2,15 +2,18 @@
 # See LICENSE file for licensing details.
 
 import re
-from unittest.mock import mock_open, patch
+from asyncio import run as arun
+from unittest.mock import Mock, mock_open, patch
 
 from single_kernel_postgresql.config.literals import Substrates
 from single_kernel_postgresql.utils import (
+    _httpx_get_request,
     any_cpu_to_cores,
     any_memory_to_bytes,
     create_directory,
     label2name,
     new_password,
+    parallel_patroni_get_request,
     render_file,
 )
 
@@ -105,3 +108,49 @@ def test_create_directory():
         _chmod.assert_called_once_with("test", 0o640)
         _chown.assert_called_once_with("test", uid=35, gid=35)
         _pwnam.assert_called_with("postgres")
+
+
+def test_httpx_get_request():
+    with patch("single_kernel_postgresql.utils.AsyncClient") as _async_client:
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = mock_response
+        mock_response.json.return_value = {"members": []}
+
+        mock_client = _async_client.return_value.__aenter__.return_value
+        mock_client.get.return_value = mock_response
+
+        result = arun(_httpx_get_request("https://1.1.1.1:8008/cluster", "/ca.pem"))
+        assert result == {"members": []}
+
+        _async_client.assert_called_once()
+        call_kwargs = _async_client.call_args.kwargs
+        assert call_kwargs["trust_env"] is False
+        assert call_kwargs["timeout"] == 5
+
+
+def test_httpx_get_request_returns_none_on_error():
+    with patch("single_kernel_postgresql.utils.AsyncClient") as _async_client:
+        from httpx import HTTPError
+
+        mock_client = _async_client.return_value.__aenter__.return_value
+        mock_client.get.side_effect = HTTPError("connection failed")
+
+        result = arun(_httpx_get_request("https://1.1.1.1:8008/cluster", "/ca.pem"))
+        assert result is None
+
+
+def test_parallel_patroni_get_request():
+    with patch("single_kernel_postgresql.utils.AsyncClient") as _async_client:
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = mock_response
+        mock_response.json.return_value = {"members": [{"name": "unit-0", "role": "leader"}]}
+
+        mock_client = _async_client.return_value.__aenter__.return_value
+        mock_client.get.return_value = mock_response
+
+        result = parallel_patroni_get_request("/cluster", ["1.1.1.1"], "/ca.pem")
+        assert result == {"members": [{"name": "unit-0", "role": "leader"}]}
+
+        _async_client.assert_called()
+        call_kwargs = _async_client.call_args.kwargs
+        assert call_kwargs["trust_env"] is False
