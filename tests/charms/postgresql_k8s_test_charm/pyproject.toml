@@ -20,6 +20,7 @@ psycopg2 = "^2.9.12"
 charmlibs-interfaces-tls-certificates = "^1.8.1"
 charm-refresh = "^3.1.1.2"
 charmlibs-pathops = "^1.0.1"
+data-platform-helpers = "^0.1.7"
 postgresql-charms-single-kernel = {path = "single_kernel_postgresql"}
 
 [tool.poetry.group.charm-libs.dependencies]

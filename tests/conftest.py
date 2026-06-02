@@ -1,13 +1,14 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+from typing import Literal
+
 import pytest
 from _pytest.config.argparsing import Parser
 
-from typing import Literal, TypeAlias
-
 # To separate vm and k8s tests
-Substrate: TypeAlias = Literal["vm", "k8s"]
+type Substrate = Literal["vm", "k8s"]
+
 
 def pytest_addoption(parser: Parser):
     parser.addoption(
@@ -17,6 +18,7 @@ def pytest_addoption(parser: Parser):
         choices=("vm", "k8s"),
         default="vm",
     )
+
 
 @pytest.fixture(scope="session")
 def substrate(request) -> Substrate:

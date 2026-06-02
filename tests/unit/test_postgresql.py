@@ -35,7 +35,7 @@ from single_kernel_postgresql.config.enums import Substrates
 
 @pytest.fixture(autouse=True)
 def harness(substrate, test_charm_path):
-    with open(test_charm_path+"/metadata.yaml") as meta_file:
+    with open(test_charm_path + "/metadata.yaml") as meta_file:
         meta = meta_file.read()
     if substrate == "vm":
         harness = Harness(vm_charm.PostgreSQLVMCharm, meta=meta)
@@ -378,7 +378,6 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness, su
         else:
             _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
             _chmod.assert_called_once_with("/var/lib/postgresql/tmp", 0o700)
-        
 
         # Validate temp tablespace operations: check existence and create/grant when missing
         if substrate == "k8s":
@@ -456,7 +455,9 @@ def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness, substra
             execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
         else:
             _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
-            _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
+            _chmod.assert_called_once_with(
+                "/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS
+            )
             execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
             execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
 
@@ -502,7 +503,9 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness, s
             execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
         else:
             _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
-            _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
+            _chmod.assert_called_once_with(
+                "/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS
+            )
             execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
             execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
 
@@ -544,7 +547,9 @@ def test_set_up_database_persistent_storage_no_rename(harness, substrate):
             _chmod.assert_not_called()
         else:
             _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
-            _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
+            _chmod.assert_called_once_with(
+                "/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS
+            )
 
         # Tablespace should NOT be renamed
         for call in execute.call_args_list:
