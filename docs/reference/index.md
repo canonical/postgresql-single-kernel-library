@@ -33,7 +33,7 @@ Available plugins and extensions, Prometheus alert rules, and testing informatio
 ```{toctree}
 :titlesonly:
 
-Plugins/extensions <plugins-extensions>
+Supported extensions <supported-extensions>
 Alert rules <alert-rules>
 Software testing <software-testing>
 ```

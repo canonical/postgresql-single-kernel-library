@@ -25,7 +25,7 @@ Scale <scale-replicas>
 Integrate <integrate/index>
 Manage passwords <manage-passwords>
 Network and encryption <network-and-encryption/index>
-Enable extensions <enable-extensions>
+PostgreSQL extensions <extensions/index>
 ```
 
 Disaster recovery:

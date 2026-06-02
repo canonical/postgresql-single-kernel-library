@@ -1,0 +1,2 @@
+(supported-extensions)=
+# Supported extensions
