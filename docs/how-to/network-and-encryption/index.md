@@ -1,7 +1,6 @@
 (network-and-encryption)=
 # Network and encryption
 
-
 ```{toctree}
 :titlesonly:
 
