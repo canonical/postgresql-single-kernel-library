@@ -6,6 +6,7 @@ myst:
 
 (back-up-and-restore)=
 # How to back up and restore
+{{vm}} {{k8s}}
 
 ```{toctree}
 :titlesonly:

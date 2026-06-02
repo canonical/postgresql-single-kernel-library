@@ -6,6 +6,7 @@ myst:
 
 (restore-a-backup)=
 # How to restore a local backup
+{{vm}} {{k8s}}
 
 This is a guide on how to restore a locally made backup.
 

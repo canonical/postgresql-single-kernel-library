@@ -76,9 +76,9 @@ Instructions for performing an in-place application refresh:
 Refresh (upgrade) <refresh>
 ```
 
-### Cluster-cluster async replication
+### High availability & replication
 
-Walkthrough of a cross-regional, cluster-cluster deployment and its essential operations:
+Walkthrough of a cross-regional, cluster-cluster deployment and disaster recovery operations:
 
 ```{toctree}
 :maxdepth: 2
@@ -87,13 +87,11 @@ Walkthrough of a cross-regional, cluster-cluster deployment and its essential op
 Custer-cluster replication <cluster-cluster-replication/index>
 ```
 
-### Logical replication
-
-Replicate a subset of data to another PostgreSQL cluster:
+Use logical replication to copy a subset of data to another PostgreSQL cluster:
 
 ```{toctree}
 :maxdepth: 2
 :titlesonly:
 
-Logical replication <logical-replication/index>
+Logical replication <logical-replication>
 ```

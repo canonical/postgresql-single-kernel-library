@@ -6,6 +6,7 @@ myst:
 
 (manage-backup-retention)=
 # Manage backup retention
+{{vm}} {{k8s}}
 
 Charmed PostgreSQL backups can be managed via a retention policy. This retention can be set by the user in the form of a configuration parameter in the charm [`s3-integrator`](https://charmhub.io/s3-integrator) via the config option  [`experimental-delete-older-than-days`](https://charmhub.io/s3-integrator/configuration?channel=latest/edge#experimental-delete-older-than-days). <!--TODO: s3-integrator channel -->
 
