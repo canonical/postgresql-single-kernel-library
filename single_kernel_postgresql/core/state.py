@@ -3,13 +3,16 @@
 
 
 """Object representing the global state of PostgreSQL Charm."""
+import re
 from ops import Object, Relation, Unit, JujuVersion
-from typing import TYPE_CHECKING
-from data_platform_helpers.advanced_statuses import StatusesState
+from typing import TYPE_CHECKING, Any, get_args
+from data_platform_helpers.advanced_statuses import StatusesState, StatusObject, AdvancedStatusesScope
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS_RELATION
+from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS_RELATION, SCOPES, APP_SCOPE, UNIT_SCOPE
 from single_kernel_postgresql.core.peer_relation import PostgreSQLPeer, PostgreSQLApplication
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import DataPeerUnitData, DataPeerData
+from single_kernel_postgresql.utils.status import format_status
+from single_kernel_postgresql.utils.secrets import translate_field_to_secret_key
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
@@ -88,6 +91,136 @@ class CharmState(Object):
     def implements_secrets(self):
         """Property to cache results from a Juju call."""
         return JujuVersion.from_environ().has_secrets
+
+
+    # -- Secrets 
+    # TODO: This is temporary till data interfaces v1 is integrated
+    def get_secret(self, scope: SCOPES, key: str) -> str | None:
+        """Get secret from the secret storage."""
+        if scope not in get_args(SCOPES):
+            raise RuntimeError("Unknown secret scope.")
+
+        if not self.peer_relation:
+            return None
+        secret_key = translate_field_to_secret_key(key)
+        if scope == APP_SCOPE:
+            return self.application.get_secret(secret_key)
+        else:
+            return self.peer.get_secret(secret_key)
+
+
+    # -- Statuses
+    def add_status_if_not_present(
+        self,
+        status: StatusObject,
+        scope: AdvancedStatusesScope,
+        component: str,
+        dynamic_params: dict[str, Any] | None = None,
+        search_parameters: dict[str, Any] | None = None,
+    ) -> None:
+        """Add charm status if not present already.
+
+        Args:
+            status: charm status to be added.
+            scope: scope of the added charm status.
+            component: name of the responsible component of the added status.
+            dynamic_params: params to format added status message with.
+            search_parameters: params to format searched status message with prior to interpolated
+                search. Helps to differentiate between statuses with multiple dynamic parameters.
+                For example, if one of the parameters is a relation id, you want for search to be
+                performed only through specific relation, while other parameters should be loosen
+                by search regex. E.g. if you have a two parameters `relation_id` and `exception`,
+                you may want to add a status with {"relation_id": 1, "exception": "err"} but with
+                search parameters {"relation_id": 1, "exception": "{}"} in order to not override
+                the same statuses from different relations. Note: "{}" placeholder makes
+                parameter loosen.
+        """
+        if scope == "app" and not self.peer.is_app_leader:
+            return
+
+        present_statuses = self.statuses.get(scope, component)
+
+        if not dynamic_params and status not in present_statuses:
+            self.statuses.add(status, scope, component)
+
+        if dynamic_params and (
+            not (
+                present_status := self._search_interpolated_status(
+                    status, scope, component, search_parameters
+                )
+            )
+            or present_status.message != format_status(status, dynamic_params).message
+        ):
+            # Updates dynamic params if status already present.
+            self.remove_status_if_present(status, scope, component, interpolated=True)
+            self.statuses.add(format_status(status, dynamic_params), scope, component)
+
+
+    def remove_status_if_present(
+        self,
+        status: StatusObject,
+        scope: AdvancedStatusesScope,
+        component: str,
+        interpolated: bool = False,
+        search_parameters: dict[str, Any] | None = None,
+    ) -> None:
+        """Remove charm status if it is present.
+
+        Args:
+            status: charm status to be removed.
+            scope: scope of the removed charm status.
+            component: name of the responsible component of the removed status.
+            interpolated: perform a regex search by the status message to find
+                statuses formatted with dynamic parameters.
+            search_parameters: params to format searched status message with prior to interpolated
+                search. Helps to differentiate between statuses with multiple dynamic parameters.
+                Note: "{}" placeholder makes parameter loosen.
+        """
+        if scope == "app" and not self.peer.is_app_leader:
+            return
+
+        present_statuses = self.statuses.get(scope, component)
+
+        if not interpolated and status in present_statuses:
+            self.statuses.delete(status, scope, component)
+
+        if interpolated and (
+            present_status := self._search_interpolated_status(
+                status, scope, component, search_parameters
+            )
+        ):
+            self.statuses.delete(present_status, scope, component)
+
+    def _search_interpolated_status(
+        self,
+        status: StatusObject,
+        scope: AdvancedStatusesScope,
+        component: str,
+        interpolated_parameters: dict[str, Any] | None = None,
+    ) -> StatusObject | None:
+        """Remove charm status if it is present.
+
+        Args:
+            status: charm status to be removed.
+            scope: scope of the removed charm status.
+            component: name of the responsible component of the removed status.
+            interpolated_parameters: params to format searched status message with prior to
+                interpolated search. Helps to differentiate between statuses with multiple
+                dynamic parameters. Note: "{}" placeholder makes parameter loosen.
+
+        Returns:
+            status if it was found.
+        """
+        regex_pattern = re.sub(
+            r"\{.*?\}",
+            r"(?s:.*?)",
+            format_status(status, interpolated_parameters).message,
+        )
+        for present_status in self.statuses.get(scope, component):
+            if re.fullmatch(regex_pattern, present_status.message) is not None:
+                return present_status
+        return None
+
 
 
 

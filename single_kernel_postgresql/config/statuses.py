@@ -12,6 +12,9 @@ class GeneralStatuses(Enum):
     """Collection of common charm statuses."""
 
     ACTIVE_IDLE = StatusObject(status="active", message="")
+    WAITING_DIRECTORY_NOT_ATTACHED = StatusObject(status="waiting", message="Data directory not attached.")
+    MAINTAINENANCE_INSTALLING = StatusObject(status="maintenance", message="installing PostgreSQL")
+    WAITING_POSTGRESQL_START = StatusObject(status="waiting", message="waiting to start PostgreSQL")
 
 
 # Manager specific statuses

@@ -4,6 +4,8 @@
 
 This module should contain the literals used in the charms (paths, relation names, etc).
 """
+from typing import Literal
+
 # Permissions.
 POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 
@@ -19,6 +21,27 @@ REWIND_USER = "rewind"
 SNAP_USER = "_daemon_"
 USER = "operator"
 SYSTEM_USERS = [MONITORING_USER, REPLICATION_USER, REWIND_USER, USER]
+
+# Paths
+## VM Paths
+BASE_SNAP_DIR = "/var/snap/postgresql"
+SNAP_DATA = "current"
+SNAP_COMMON = "common"
+SNAP = "/snap/postgresql/current"
+
+## Shared Paths
+DATA_PATH = "/var/lib/postgresql"
+
+# Scopes
+SCOPES = Literal["app", "unit"]
+APP_SCOPE = "app"
+UNIT_SCOPE = "unit"
+
+
+# Secrets
+SECRET_KEY_OVERRIDES = {"ca": "cauth"}
+
+
 
 # File permissions as octal
 # standard directory permissions

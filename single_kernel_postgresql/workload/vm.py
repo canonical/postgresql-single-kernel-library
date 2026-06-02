@@ -13,7 +13,13 @@ from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from charmlibs.pathops import PathProtocol
 from charmlibs import pathops
 from typing import Generator
+import subprocess
 import tempfile
+import platform
+import tomli
+import pathlib
+from charmlibs import snap
+import charm_refresh
 
 
 logger = logging.getLogger(__name__)
@@ -24,9 +30,68 @@ class VMWorkload(BaseWorkload):
     def __init__(self, charm_dir: Path):
         super().__init__(charm_dir)
 
+
+
+    def is_storage_attached(self) -> bool:
+        """Returns if storage is attached.
+
+        This is VM specific. 
+        """
+        try:
+            # Storage path is constant
+            subprocess.check_call(["/usr/bin/mountpoint", "-q", self.paths.data])  # noqa: S603 #type: ignore
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
     def install(self) -> None:
         """Install the workload."""
-        pass
+
+    def create_snap_alias(self, alias_name: str) -> None:
+        """Create alias for the snap binary."""
+        cache = snap.SnapCache()
+        postgres_snap = cache[charm_refresh.snap_name()]
+        try:
+            postgres_snap.alias(alias_name)
+        except snap.SnapError:
+            logger.warning("Unable to create %s alias", alias_name)
+
+    def install_snap_package(
+        self, *, revision: str | None, refresh: charm_refresh.Machines | None = None
+    ) -> None:
+        """Installs PostgreSQL snap.
+
+        Args:
+            revision: snap revision to install.
+            refresh: refresh class; will refresh installed snap if not `None`
+        """
+        if revision is None:
+            if refresh is not None:
+                raise ValueError
+            # TODO: consider using `self.refresh.pinned_snap_revision` instead (requires waiting
+            # for refresh peer relation to be ready before installing snap)
+            with pathlib.Path("refresh_versions.toml").open("rb") as file:
+                revisions = tomli.load(file)["snap"]["revisions"]
+            try:
+                revision = revisions[platform.machine()]
+            except KeyError:
+                logger.error("Unavailable snap architecture %s", platform.machine())
+                raise
+        try:
+            snap_cache = snap.SnapCache()
+            snap_package = snap_cache[charm_refresh.snap_name()]
+            if not snap_package.present or refresh is not None:
+                snap_package.ensure(snap.SnapState.Present, revision=revision)
+                if refresh is not None:
+                    refresh.update_snap_revision()
+                snap_package.hold()
+        except (snap.SnapError, snap.SnapNotFoundError) as e:
+            logger.error(
+                "An exception occurred when installing %s. Reason: %s",
+                charm_refresh.snap_name(),
+                str(e),
+            )
+            raise
 
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service and JVM process are running.

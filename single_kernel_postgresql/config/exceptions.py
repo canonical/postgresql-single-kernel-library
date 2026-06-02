@@ -7,3 +7,6 @@ from single_kernel_postgresql.compat.postgresql import PostgreSQLBaseError
 
 class PostgreSQLFileOperationError(PostgreSQLBaseError):
     """Exception thrown when file operations related to PostgreSQL fail."""
+
+class StorageUnavailableError(Exception):
+    """Cannot find storage mountpoint."""

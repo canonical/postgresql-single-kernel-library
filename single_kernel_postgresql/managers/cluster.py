@@ -30,6 +30,8 @@ class ClusterManager(BaseManager):
         super().__init__(state, workload, "cluster_manager", client)
 
 
+
+
     
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
