@@ -1,10 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+"""PostgreSQL Machine Paths."""
 
 from charmlibs.pathops import PathProtocol
-from single_kernel_postgresql.workload.paths.base import Paths
 
-"""PostgreSQL Machine Paths"""
+from single_kernel_postgresql.workload.paths.base import Paths
 
 
 class VMPaths(Paths):
@@ -40,5 +40,3 @@ class VMPaths(Paths):
     def tmp(self) -> PathProtocol:
         """Path to the temporary directory for JNA."""
         return self.root / "tmp"
-
-

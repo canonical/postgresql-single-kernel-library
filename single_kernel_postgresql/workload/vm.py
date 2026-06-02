@@ -4,19 +4,21 @@
 """Machine Workload."""
 
 import logging
-from contextlib import contextmanager
-from types import SimpleNamespace
-from pathlib import Path
-from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.workload.paths.vm import VMPaths
-from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
-from charmlibs.pathops import PathProtocol
-from charmlibs import pathops
-from typing import Generator
 import tempfile
+from collections.abc import Generator
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
 
+from charmlibs import pathops
+from charmlibs.pathops import PathProtocol
+
+from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
+from single_kernel_postgresql.workload.paths.vm import VMPaths
 
 logger = logging.getLogger(__name__)
+
 
 class VMWorkload(BaseWorkload):
     """Machine PostgreSQL Workload."""
@@ -46,9 +48,8 @@ class VMWorkload(BaseWorkload):
         use_errors_replace: bool = False,
         stdin: str | None = None,
     ) -> SimpleNamespace:
-        """Run Command in CLI"""
+        """Run Command in CLI."""
         ...
-
 
     def is_failed(self) -> bool:
         """Check if snap service failed."""
@@ -62,7 +63,6 @@ class VMWorkload(BaseWorkload):
         """Start the PostgreSQL service."""
         ...
 
-
     def get_workload_version(self) -> str:
         """Get the workload version."""
         raise NotImplementedError
@@ -73,7 +73,7 @@ class VMWorkload(BaseWorkload):
         mode="w+b",
         data: str | None = None,
         encoding: str | None = None,
-        dir: PathProtocol | None = None,
+        directory: PathProtocol | None = None,
         delete: bool = True,
         chown: str | None = None,
         *,
@@ -81,10 +81,10 @@ class VMWorkload(BaseWorkload):
         suffix: str | None = None,
     ) -> Generator[PathProtocol, None, None]:
         """Create a temporary file and return the file, clean it once context is closed."""
-        f = tempfile.NamedTemporaryFile(
+        f = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode=mode,
             encoding=encoding,
-            dir=dir.as_posix() if dir else None,
+            dir=directory.as_posix() if directory else None,
             delete=False,
             errors=errors,
             suffix=suffix,
@@ -108,7 +108,7 @@ class VMWorkload(BaseWorkload):
 
     @property
     def paths(self) -> BasePaths:
-        """Return Workload's paths"""
+        """Return Workload's paths."""
         return VMPaths(self.root)
 
     @property

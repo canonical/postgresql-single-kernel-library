@@ -3,13 +3,19 @@
 
 
 """Object representing the global state of PostgreSQL Charm."""
-from ops import Object, Relation, Unit, JujuVersion
+
 from typing import TYPE_CHECKING
+
 from data_platform_helpers.advanced_statuses import StatusesState
+from ops import JujuVersion, Object, Relation, Unit
+
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS_RELATION
-from single_kernel_postgresql.core.peer_relation import PostgreSQLPeer, PostgreSQLApplication
-from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import DataPeerUnitData, DataPeerData
+from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication, PostgreSQLPeer
+from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
+    DataPeerData,
+    DataPeerUnitData,
+)
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
@@ -41,7 +47,6 @@ class CharmState(Object):
     def status_peers_relation(self) -> Relation | None:
         """Get status peers relation."""
         return self.model.get_relation(STATUS_PEERS_RELATION)
-    
 
     # -- Core State Components
 
@@ -51,7 +56,7 @@ class CharmState(Object):
         return PostgreSQLPeer(
             relation=self.peer_relation,
             data_interface=self.peer_unit_interface,
-            component=self.model.unit
+            component=self.model.unit,
         )
 
     @property
@@ -82,12 +87,9 @@ class CharmState(Object):
             component=self.model.app,
         )
 
-    # -- Cluster State Properties 
+    # -- Cluster State Properties
 
     @property
     def implements_secrets(self):
         """Property to cache results from a Juju call."""
         return JujuVersion.from_environ().has_secrets
-
-
-

@@ -5,23 +5,22 @@
 """PostgreSQL Kubernetes Charm."""
 
 import logging
-from single_kernel_postgresql.charms.abstract_charm import PostgreSQL, AbstractPostgreSQLCharm
+
+from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
+from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.literals import CONTAINER_NAME, SYSTEM_USERS, USER
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.k8s import K8sWorkload
-from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import USER, SYSTEM_USERS, CONTAINER_NAME
-
 
 logger = logging.getLogger(__name__)
 
 
 class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
-    """PostgreSQL VM Charm"""
+    """PostgreSQL VM Charm."""
 
     def __init__(self, *args):
         """Initialize the PostgreSQL Kubernetes Charm."""
         super().__init__(*args)
-
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -37,7 +36,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             database="test-database",
             system_users=SYSTEM_USERS,
         )
-    
+
     @property
     def workload(self) -> BaseWorkload:
         """Access current workload instance.
@@ -47,7 +46,9 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         Returns:
             BaseWorkload: The K8sWorkload instance for this charm
         """
-        return K8sWorkload(charm_dir=self.charm_dir, container=self.unit.get_container(CONTAINER_NAME))
+        return K8sWorkload(
+            charm_dir=self.charm_dir, container=self.unit.get_container(CONTAINER_NAME)
+        )
 
     @property
     def substrate(self) -> Substrates:
@@ -56,4 +57,4 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         Returns:
             Substrates: always Substrates.VM for this charm
         """
-        return Substrates.VM    
+        return Substrates.VM

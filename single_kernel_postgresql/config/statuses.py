@@ -5,8 +5,11 @@
 
 This module defines various status enums that represent the state of the charm.
 """
+
 from enum import Enum
+
 from data_platform_helpers.advanced_statuses import StatusObject
+
 
 class GeneralStatuses(Enum):
     """Collection of common charm statuses."""

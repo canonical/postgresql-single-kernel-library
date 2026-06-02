@@ -3,9 +3,11 @@
 # See LICENSE file for licensing details.
 
 """Handler for General PostgreSQL charm events."""
-from typing import TYPE_CHECKING
-from ops import Object, InstallEvent, StartEvent
+
 import logging
+from typing import TYPE_CHECKING
+
+from ops import InstallEvent, Object, StartEvent
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
@@ -24,12 +26,10 @@ class PostgreSQLEventsHandler(Object):
         self.framework.observe(self.charm.on.install, self._on_install)
         self.framework.observe(self.charm.on.start, self._on_start)
 
-    
-
     def _on_install(self, event: InstallEvent) -> None:
         """Event handler for install event."""
         logger.info("Handling install event")
 
-    def _on_start(self, event: StartEvent) -> None:  
+    def _on_start(self, event: StartEvent) -> None:
         """Event handler for start event."""
         ...

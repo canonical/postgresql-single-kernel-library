@@ -3,19 +3,22 @@
 # See LICENSE file for licensing details.
 
 """Base interface for common workload operations."""
+
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Generator
+
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
-from ops.pebble import Error as PebbleError
 from ops import ModelError
-from pathlib import Path
+from ops.pebble import Error as PebbleError
 
-from single_kernel_postgresql.workload.paths.base import Paths
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import DIR_PERMISSIONS_READONLY
+from single_kernel_postgresql.workload.paths.base import Paths
+
 
 # --- Base Workload
 class BaseWorkload(ABC):
@@ -44,7 +47,7 @@ class BaseWorkload(ABC):
     @property
     @abstractmethod
     def paths(self) -> Paths:
-        """Return the Workload's paths"""
+        """Return the Workload's paths."""
         pass
 
     @property
@@ -53,7 +56,6 @@ class BaseWorkload(ABC):
         """Flag to check if workload is present and ready."""
         pass
 
-
     def write_text(
         self, content: str, path: pathops.PathProtocol, mode: int | None = None
     ) -> None:
@@ -61,7 +63,7 @@ class BaseWorkload(ABC):
 
         Args:
             content (str): The content to be written.
-            path (str): The file path where the content should be written.
+            path (pathops.PathProtocol): The file path where the content should be written.
             mode (int, optional): The mode/permissions to use when writing the file.
 
         Raises:
@@ -77,13 +79,13 @@ class BaseWorkload(ABC):
             pathops.PebbleConnectionError,
             ValueError,
         ) as e:
-            raise PostgreSQLFileOperationError(e)
+            raise PostgreSQLFileOperationError(e) from e
 
     def read_text(self, path: pathops.PathProtocol) -> str:
         """Read content from a file on disk.
 
         Args:
-            path (str): The file path to read from.
+            path (pathops.PathProtocol): The file path to read from.
 
         Returns:
             str: The content read from the file.
@@ -98,7 +100,7 @@ class BaseWorkload(ABC):
             ModelError,
             pathops.PebbleConnectionError,
         ) as e:
-            raise PostgreSQLFileOperationError(e)
+            raise PostgreSQLFileOperationError(e) from e
 
     def mkdir(
         self,
@@ -110,7 +112,7 @@ class BaseWorkload(ABC):
         """Create a directory on disk.
 
         Args:
-            path (str): The directory path to create.
+            path (pathops.PathProtocol): The directory path to create.
             mode (int): The mode/permissions to use for the new directory.
             parents (bool): Whether to create parent directories if they do not exist.
             exist_ok (bool): Whether to ignore the error if the directory already exists.
@@ -128,13 +130,13 @@ class BaseWorkload(ABC):
             pathops.PebbleConnectionError,
             ValueError,
         ) as e:
-            raise PostgreSQLFileOperationError(e)
+            raise PostgreSQLFileOperationError(e) from e
 
     def exists(self, path: pathops.PathProtocol) -> bool:
         """Check if a file or directory exists on disk.
 
         Args:
-            path (str): The file or directory path to check.
+            path (pathops.PathProtocol): The file or directory path to check.
 
         Returns:
             bool: True if the file or directory exists, False otherwise.
@@ -145,13 +147,13 @@ class BaseWorkload(ABC):
         try:
             return path.exists()
         except (PermissionError, pathops.PebbleConnectionError) as e:
-            raise PostgreSQLFileOperationError(e)
+            raise PostgreSQLFileOperationError(e) from e
 
     def unlink(self, path: pathops.PathProtocol, missing_ok: bool = False) -> None:
         """Remove a file from disk.
 
         Args:
-            path (str): The file path to remove.
+            path (pathops.PathProtocol): The file path to remove.
             missing_ok (bool): Whether to ignore the error if the file does not exist.
         """
         try:
@@ -162,7 +164,7 @@ class BaseWorkload(ABC):
             PermissionError,
             pathops.PebbleConnectionError,
         ) as e:
-            raise PostgreSQLFileOperationError(e)
+            raise PostgreSQLFileOperationError(e) from e
 
     @contextmanager
     @abstractmethod
@@ -171,7 +173,7 @@ class BaseWorkload(ABC):
         mode: str = "w+b",
         data: str | None = None,
         encoding: str | None = None,
-        dir: PathProtocol | None = None,
+        directory: PathProtocol | None = None,
         delete: bool = True,
         chown: str | None = None,
         *,
@@ -189,7 +191,6 @@ class BaseWorkload(ABC):
         """
         pass
 
-
     @abstractmethod
     def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
@@ -203,9 +204,8 @@ class BaseWorkload(ABC):
         use_errors_replace: bool = False,
         stdin: str | None = None,
     ) -> SimpleNamespace:
-        """Run Command in CLI"""
+        """Run Command in CLI."""
         pass
-
 
     @abstractmethod
     def is_failed(self) -> bool:
@@ -221,7 +221,6 @@ class BaseWorkload(ABC):
     def start_service(self):
         """Start the PostgreSQL service."""
         pass
-
 
     @abstractmethod
     def get_workload_version(self) -> str:

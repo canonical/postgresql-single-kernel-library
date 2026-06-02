@@ -1,29 +1,26 @@
 #!/usr/bin/env python3
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
-    
+
 """PostgreSQL VM Charm."""
 
-
-
 import logging
-from single_kernel_postgresql.charms.abstract_charm import PostgreSQL, AbstractPostgreSQLCharm
+
+from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
+from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.literals import SYSTEM_USERS, USER
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
-from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import USER, SYSTEM_USERS
-
 
 logger = logging.getLogger(__name__)
 
 
 class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
-    """PostgreSQL VM Charm"""
+    """PostgreSQL VM Charm."""
 
     def __init__(self, *args):
         """Initialize the PostgreSQL VM Charm."""
         super().__init__(*args)
-
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -39,7 +36,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
             database="test-database",
             system_users=SYSTEM_USERS,
         )
-    
+
     @property
     def workload(self) -> BaseWorkload:
         """Access current workload instance.
@@ -58,4 +55,4 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         Returns:
             Substrates: always Substrates.VM for this charm
         """
-        return Substrates.VM    
+        return Substrates.VM

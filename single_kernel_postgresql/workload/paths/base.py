@@ -1,10 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+"""PostgreSQL Paths."""
 
 from abc import ABC, abstractmethod
+
 from charmlibs.pathops import PathProtocol
 
-"""PostgreSQL Paths"""
 
 class Paths(ABC):
     """This class represents the set of Paths that need to be exposed.
@@ -18,8 +19,7 @@ class Paths(ABC):
     """
 
     def __init__(self, root: PathProtocol):
-        """
-        Initialize the Paths.
+        """Initialize the Paths.
 
         Args:
             root: The root path for the PostgreSQL installation.
@@ -50,5 +50,3 @@ class Paths(ABC):
     def tmp(self) -> PathProtocol:
         """Path to the temporary directory for JNA."""
         pass
-
-

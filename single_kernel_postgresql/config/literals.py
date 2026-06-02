@@ -4,6 +4,7 @@
 
 This module should contain the literals used in the charms (paths, relation names, etc).
 """
+
 # Permissions.
 POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 

@@ -3,15 +3,16 @@
 """Skeleton for the abstract charm."""
 
 from abc import ABC, abstractmethod
+
 from ops.charm import CharmBase
 
+from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.managers.cluster import ClusterManager
+from single_kernel_postgresql.workload.base import BaseWorkload
 
 from ..config.enums import Substrates
 from ..utils.postgresql import PostgreSQL
-from single_kernel_postgresql.core.state import CharmState
-from single_kernel_postgresql.workload.base import BaseWorkload
 
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
@@ -24,15 +25,14 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         self.state = CharmState(charm=self, substrate=self.substrate)
 
         # Managers
-        self.cluster_manager = ClusterManager(state=self.state, workload=self.workload, client=self.postgresql)
+        self.cluster_manager = ClusterManager(
+            state=self.state, workload=self.workload, client=self.postgresql
+        )
 
         # Events Handler
         self.postgresql_events_handler = PostgreSQLEventsHandler(self)
 
-
-
-
-    # Postgresql Client 
+    # Postgresql Client
     @property
     @abstractmethod
     def postgresql(self) -> PostgreSQL:
@@ -45,7 +45,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def workload(self) -> BaseWorkload:
         """Access current workload."""
         pass
-    
+
     # Postgresql Substrate
     @property
     @abstractmethod

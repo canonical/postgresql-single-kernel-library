@@ -1,10 +1,10 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+"""PostgreSQL Kubernetes Paths."""
 
 from charmlibs.pathops import PathProtocol
-from single_kernel_postgresql.workload.paths.base import Paths
 
-"""PostgreSQL Kubernetes Paths"""
+from single_kernel_postgresql.workload.paths.base import Paths
 
 
 class K8sPaths(Paths):
@@ -40,4 +40,3 @@ class K8sPaths(Paths):
     def tmp(self) -> PathProtocol:
         """Path to the temporary directory for JNA."""
         return self.root / "tmp"
-
