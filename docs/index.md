@@ -15,13 +15,13 @@ Charmed PostgreSQL is made for anyone looking for a comprehensive database manag
 
 ## In this documentation
 
-This documentation contains practical information about installing and operating Charmed PostgreSQL. It covers instructions for both VM and K8s substrates. 
+This documentation contains practical information about installing and operating Charmed PostgreSQL. It covers instructions for both VM and K8s substrates.
 
 ### Get started
 
 Learn about what's in the charm, how to set up your environment, and perform the most common operations.
 
-* **Charm overview**: {ref}`system-requirements` • {ref}`architecture` 
+* **Charm overview**: {ref}`system-requirements` • {ref}`architecture`
 * **Deploy PostgreSQL**: {ref}`Guided tutorial <tutorial>` • {ref}`deploy-quickstart` • {ref}`Set up a cloud <deploy-clouds>`
 * **Key operations**: {ref}`Scale your cluster <scale-replicas>` • {ref}`Connect to a client <integrate-with-another-application>` • {ref}`Create a backup <create-a-backup>`
 
@@ -81,4 +81,6 @@ explanation/index
 :maxdepth: 1
 
 release-notes/index
+Contribute <contribute>
+Contact <contacts>
 ```

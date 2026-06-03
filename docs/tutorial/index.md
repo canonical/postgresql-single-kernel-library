@@ -843,5 +843,5 @@ multipass delete --purge my-vm
 - Check out our other database charms, like [MySQL](https://charmhub.io/mysql) and [Kafka](https://charmhub.io/kafka?channel=edge)
 - Read about [high availability best practices](https://canonical.com/blog/database-high-availability)
 - [Report](https://github.com/canonical/postgresql-operator/issues) any problems you encountered
-- [Give us your feedback](/reference/contacts)
+- {ref}`Give us your feedback <contacts>`
 - [Contribute to the code base](https://github.com/canonical/postgresql-operator)

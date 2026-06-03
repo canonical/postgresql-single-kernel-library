@@ -7,6 +7,7 @@ This guide contains the steps to enable profiling with [Parca](https://www.parca
 Read the {ref}`prerequisites` section carefully if you are deploying PostgreSQL in an **LXD model** or if your **base is `ubuntu@22.04`**.
 ```
 
+(prerequisites)=
 ## Prerequisites
 
 * A PostgreSQL deployment on a VM/machine cloud (K8s is not supported)

@@ -23,21 +23,27 @@ juju bootstrap <cloud name> <controller name>
 juju add-model <model name>
 ```
 
-Then, use the [`juju deploy`](https://canonical-juju.readthedocs-hosted.com/en/latest/user/reference/juju-cli/list-of-juju-cli-commands/deploy/) command:
+Then, use the `juju deploy` command:
 
 ````{tab-set}
 ```{tab-item} VM
 :sync: vm
 
     juju deploy postgresql --channel 16/stable
+
+See all available config options for the charm with `juju config postgresql --format json`.
 ```
 
 ```{tab-item} K8s
 :sync: k8s
 
     juju deploy postgresql-k8s --channel 16/stable --trust
+
+See all available config options for the charm with `juju config postgresql-k8s --format json`.
 ```
 ````
+
+See all available Juju flags in the [`juju deploy` CLI reference](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/deploy/). For example, you can set CPU and memory constraints with `--constraints`.
 
 To deploy via **Terraform**, see the {ref}`Terraform guide <terraform>`.
 

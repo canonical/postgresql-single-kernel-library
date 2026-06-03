@@ -1,45 +1,14 @@
 (reference)=
 # Reference
 
-Information about releases, charm options, technical specifications, and other reference material for quick lookup. 
-
-## Releases
-
-All stable revisions of Charmed PostgreSQL 16 for bare metal/virtual machines:
-
-```{toctree}
-:titlesonly:
-
-Releases <releases>
-```
-
-## Requirements and operations
-
-Technical specifications, performance guidance, software testing approaches, and troubleshooting resources.
+Information about releases, charm options, technical specifications, and other reference material for quick lookup.
 
 ```{toctree}
 :titlesonly:
 
 System requirements <system-requirements>
-Performance and resources <performance-and-resources>
-Troubleshooting <troubleshooting/index>
+Configuration <configuration>
 Charm statuses <charm-statuses>
-```
-
-## Integrations
-
-Available plugins and extensions, Prometheus alert rules, and testing information.
-
-```{toctree}
-:titlesonly:
-
 Supported extensions <supported-extensions>
 Alert rules <alert-rules>
-Software testing <software-testing>
-```
-
-```{toctree}
-:hidden:
-
-Contacts <contacts>
 ```

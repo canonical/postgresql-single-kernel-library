@@ -25,15 +25,6 @@ Scale <scale-replicas>
 Integrate <integrate/index>
 Manage passwords <manage-passwords>
 Network and encryption <network-and-encryption/index>
-PostgreSQL extensions <extensions/index>
-```
-
-Disaster recovery:
-
-```{toctree}
-:titlesonly:
-
-Switchover/failover <switchover-failover>
 ```
 
 ### Backups and data migration
@@ -54,16 +45,6 @@ Other data migration guides:
 :maxdepth: 2
 
 Data migration <data-migration/index>
-```
-
-### Monitoring (COS)
-
-Set up observability services like Grafana, Prometheus, Loki, and Tempo through the Canonical Observability Stack (COS):
-
-```{toctree}
-:maxdepth: 2
-
-Monitoring (COS) <monitoring-cos/index>
 ```
 
 ### Refresh (upgrade)
@@ -95,3 +76,31 @@ Use logical replication to copy a subset of data to another PostgreSQL cluster:
 
 Logical replication <logical-replication>
 ```
+
+### Monitoring (COS)
+
+Set up observability services like Grafana, Prometheus, Loki, and Tempo through the Canonical Observability Stack (COS):
+
+```{toctree}
+:maxdepth: 2
+
+Monitoring (COS) <monitoring-cos/index>
+```
+
+## Extensions (plugins)
+
+```{toctree}
+:maxdepth: 2
+:titlesonly:
+
+PostgreSQL extensions <extensions/index>
+```
+
+## Troubleshooting and disaster recovery
+
+```{toctree}
+:titlesonly:
+
+Troubleshooting <troubleshooting/index>
+```
+
