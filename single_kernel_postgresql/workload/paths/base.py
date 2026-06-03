@@ -14,7 +14,7 @@ class Paths(ABC):
             conf: Path to the config folder of PostgreSQL
             data: Path to the data folder of PostgreSQL
             logs: Path to the logs folder of PostgreSQL
-            tmp: JNA temporary directory
+            tmp: Temporary directory
             bin: Path to the bin/ folder
     """
 
@@ -48,5 +48,5 @@ class Paths(ABC):
     @property
     @abstractmethod
     def tmp(self) -> PathProtocol:
-        """Path to the temporary directory for JNA."""
+        """Path to the temporary directory."""
         pass

@@ -27,7 +27,7 @@ class K8sWorkload(BaseWorkload):
     """Kubernetes PostgreSQL Workload."""
 
     def __init__(self, charm_dir: Path, container: Container | None = None):
-        """Initialize K8s workload.
+        """Initialize workload.
 
         Args:
             charm_dir: the path to charm code.
@@ -44,7 +44,7 @@ class K8sWorkload(BaseWorkload):
         pass
 
     def is_service_started(self, paused: bool | None = False) -> bool:
-        """Check if the snap service and JVM process are running.
+        """Check if the snap service is running.
 
         Set paused=True if the process was intentionally paused.
         """

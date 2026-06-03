@@ -31,7 +31,7 @@ class VMWorkload(BaseWorkload):
         pass
 
     def is_service_started(self, paused: bool | None = False) -> bool:
-        """Check if the snap service and JVM process are running.
+        """Check if the snap service is running.
 
         Set paused=True if the process was intentionally paused.
         """

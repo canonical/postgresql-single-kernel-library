@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
-    """PostgreSQL VM Charm."""
+    """PostgreSQL K8s Charm."""
 
     def __init__(self, *args):
         """Initialize the PostgreSQL Kubernetes Charm."""
@@ -55,6 +55,6 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         """Access current substrate type.
 
         Returns:
-            Substrates: always Substrates.VM for this charm
+            Substrates: always Substrates.K8S for this charm
         """
-        return Substrates.VM
+        return Substrates.K8S

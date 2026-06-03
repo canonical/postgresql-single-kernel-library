@@ -14,7 +14,7 @@ class K8sPaths(Paths):
             conf: Path to the config folder of PostgreSQL
             data: Path to the data folder of PostgreSQL
             logs: Path to the logs folder of PostgreSQL
-            tmp: JNA temporary directory
+            tmp: Temporary directory
             bin: Path to the bin/ folder
     """
 
@@ -38,5 +38,5 @@ class K8sPaths(Paths):
 
     @property
     def tmp(self) -> PathProtocol:
-        """Path to the temporary directory for JNA."""
+        """Path to the temporary directory."""
         return self.root / "tmp"
