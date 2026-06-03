@@ -4,7 +4,7 @@ from sys import modules
 from unittest.mock import Mock
 
 from ops.pebble import ConnectionError as PebbleConnectionError
-from single_kernel_postgresql.config.literals import PEER
+from single_kernel_postgresql.config.literals import PEER_RELATION
 
 # Need to mock the module before importing the tested module
 modules["charms.certificate_transfer_interface.v0.certificate_transfer"] = Mock()
@@ -18,7 +18,7 @@ def test_on_ca_certificate_added():
     mock_charm = Mock()
     mock_charm.model.get_relation.return_value.app.name = "testname"
     mock_event = Mock()
-    tls_transfer = TLSTransfer(mock_charm, PEER)
+    tls_transfer = TLSTransfer(mock_charm, PEER_RELATION)
 
     # Happy scenario
     tls_transfer._on_certificate_available(mock_event)
@@ -64,7 +64,7 @@ def test_on_ca_certificate_removed():
     mock_charm = Mock()
     mock_charm.model.get_relation.return_value.app.name = "testname"
     mock_event = Mock()
-    tls_transfer = TLSTransfer(mock_charm, PEER)
+    tls_transfer = TLSTransfer(mock_charm, PEER_RELATION)
 
     # Happy scenario
     tls_transfer._on_certificate_removed(mock_event)

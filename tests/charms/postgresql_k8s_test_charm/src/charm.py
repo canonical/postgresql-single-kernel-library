@@ -6,7 +6,6 @@
 """Charmed Kubernetes Operator for PostgreSQL."""
 
 from ops.main import main
-
 from single_kernel_postgresql.charms.k8s_charm import PostgreSQLK8sCharm
 
 if __name__ == "__main__":

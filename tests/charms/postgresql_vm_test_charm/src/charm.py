@@ -6,7 +6,6 @@
 """Charmed Machine Operator for PostgreSQL."""
 
 from ops.main import main
-
 from single_kernel_postgresql.charms.vm_charm import PostgreSQLVMCharm
 
 if __name__ == "__main__":

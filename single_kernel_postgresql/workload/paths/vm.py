@@ -1,11 +1,12 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
+"""PostgreSQL Machine Paths."""
 
 from charmlibs.pathops import PathProtocol
 from single_kernel_postgresql.workload.paths.base import Paths
 from single_kernel_postgresql.config.literals import BASE_SNAP_DIR, SNAP_DATA, SNAP_COMMON, SNAP, DATA_PATH
 
-"""PostgreSQL Machine Paths"""
+from single_kernel_postgresql.workload.paths.base import Paths
 
 
 class VMPaths(Paths):
@@ -15,7 +16,7 @@ class VMPaths(Paths):
             conf: Path to the config folder of PostgreSQL
             data: Path to the data folder of PostgreSQL
             logs: Path to the logs folder of PostgreSQL
-            tmp: JNA temporary directory
+            tmp: Temporary directory
             bin: Path to the bin/ folder
     """
 
@@ -59,7 +60,5 @@ class VMPaths(Paths):
 
     @property
     def tmp(self) -> PathProtocol:
-        """Path to the temporary directory for JNA."""
+        """Path to the temporary directory."""
         return self.root / "tmp"
-
-

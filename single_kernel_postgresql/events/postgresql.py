@@ -37,7 +37,6 @@ class PostgreSQLEventsHandler(Object):
         self.framework.observe(self.charm.on.install, self._on_install)
         self.framework.observe(self.charm.on.start, self._on_start)
 
-    
     def _on_install(self, event: InstallEvent) -> None:
         """Install prerequisites for the application."""
         logger.debug("Install start time: %s", datetime.now())
@@ -66,7 +65,7 @@ class PostgreSQLEventsHandler(Object):
             component=self.cluster_manager.name
         )
 
-    def _on_start(self, event: StartEvent) -> None:  
+    def _on_start(self, event: StartEvent) -> None:
         """Event handler for start event."""
         if not self._can_start(event):
             return

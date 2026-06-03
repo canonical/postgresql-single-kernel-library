@@ -22,7 +22,9 @@ from charmlibs import snap
 import charm_refresh
 
 
+
 logger = logging.getLogger(__name__)
+
 
 class VMWorkload(BaseWorkload):
     """Machine PostgreSQL Workload."""
@@ -94,15 +96,15 @@ class VMWorkload(BaseWorkload):
             raise
 
     def is_service_started(self, paused: bool | None = False) -> bool:
-        """Check if the snap service and JVM process are running.
+        """Check if the snap service is running.
 
         Set paused=True if the process was intentionally paused.
         """
-        ...
+        raise NotImplementedError
 
     def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
-        ...
+        raise NotImplementedError
 
     def run_cmd(
         self,
@@ -111,13 +113,12 @@ class VMWorkload(BaseWorkload):
         use_errors_replace: bool = False,
         stdin: str | None = None,
     ) -> SimpleNamespace:
-        """Run Command in CLI"""
-        ...
-
+        """Run Command in CLI."""
+        raise NotImplementedError
 
     def is_failed(self) -> bool:
         """Check if snap service failed."""
-        ...
+        raise NotImplementedError
 
     def stop(self) -> None:
         """Stop the PostgreSQL service."""
@@ -126,7 +127,6 @@ class VMWorkload(BaseWorkload):
     def start_service(self):
         """Start the PostgreSQL service."""
         ...
-
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
@@ -138,7 +138,7 @@ class VMWorkload(BaseWorkload):
         mode="w+b",
         data: str | None = None,
         encoding: str | None = None,
-        dir: PathProtocol | None = None,
+        directory: PathProtocol | None = None,
         delete: bool = True,
         chown: str | None = None,
         *,
@@ -146,10 +146,10 @@ class VMWorkload(BaseWorkload):
         suffix: str | None = None,
     ) -> Generator[PathProtocol, None, None]:
         """Create a temporary file and return the file, clean it once context is closed."""
-        f = tempfile.NamedTemporaryFile(
+        f = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode=mode,
             encoding=encoding,
-            dir=dir.as_posix() if dir else None,
+            dir=directory.as_posix() if directory else None,
             delete=False,
             errors=errors,
             suffix=suffix,
@@ -173,7 +173,7 @@ class VMWorkload(BaseWorkload):
 
     @property
     def paths(self) -> BasePaths:
-        """Return Workload's paths"""
+        """Return Workload's paths."""
         return VMPaths(self.root)
 
     @property
@@ -184,4 +184,4 @@ class VMWorkload(BaseWorkload):
     @property
     def workload_present(self) -> bool:
         """Flag to check if workload is present and ready."""
-        ...
+        raise NotImplementedError

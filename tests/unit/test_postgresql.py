@@ -9,9 +9,9 @@ import pytest
 from ops.testing import Harness
 from psycopg2.sql import Composed, Identifier, Literal, SQL
 
-from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
+from single_kernel_postgresql.charms import k8s_charm, vm_charm
 from single_kernel_postgresql.config.literals import (
-    PEER,
+    PEER_RELATION,
     POSTGRESQL_STORAGE_PERMISSIONS,
     SNAP_USER,
     SYSTEM_USERS,
@@ -30,17 +30,20 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLUpdateUserError,
     ROLE_DATABASES_OWNER,
 )
-from single_kernel_postgresql.config.literals import Substrates
+from single_kernel_postgresql.config.enums import Substrates
 
 
 @pytest.fixture(autouse=True)
-def harness():
-    with open("single_kernel_postgresql/charmcraft.yaml") as meta_file:
+def harness(substrate, test_charm_path):
+    with open(test_charm_path + "/metadata.yaml") as meta_file:
         meta = meta_file.read()
-    harness = Harness(AbstractPostgreSQLCharm, meta=meta)
+    if substrate == "vm":
+        harness = Harness(vm_charm.PostgreSQLVMCharm, meta=meta)
+    else:
+        harness = Harness(k8s_charm.PostgreSQLK8sCharm, meta=meta)
 
     # Set up the initial relation and hooks.
-    peer_rel_id = harness.add_relation(PEER, "postgresql-single-kernel")
+    peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
     harness.begin()
     yield harness
@@ -333,7 +336,7 @@ def test_validate_group_map(harness):
         assert harness.charm.postgresql.validate_group_map("ldap_group ldap_test_group") is False
 
 
-def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
+def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness, substrate):
     with (
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
@@ -368,16 +371,28 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
         # Ensure permission fixes applied
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
-        _chmod.assert_called_once_with("/var/lib/postgresql/tmp", 0o700)
+        if substrate == "k8s":
+            _change_owner.assert_not_called()
+            _chmod.assert_not_called()
+            print(execute_direct.call_args_list)
+        else:
+            _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+            _chmod.assert_called_once_with("/var/lib/postgresql/tmp", 0o700)
 
         # Validate temp tablespace operations: check existence and create/grant when missing
-        execute_direct.assert_has_calls([
-            call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';"),
-            call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';"),
-            call("CREATE TABLESPACE temp LOCATION '/var/lib/postgresql/tmp';"),
-            call("GRANT CREATE ON TABLESPACE temp TO public;"),
-        ])
+        if substrate == "k8s":
+            execute_direct.assert_has_calls([
+                call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';"),
+                call("CREATE TABLESPACE temp LOCATION '/var/lib/postgresql/tmp';"),
+                call("GRANT CREATE ON TABLESPACE temp TO public;"),
+            ])
+        else:
+            execute_direct.assert_has_calls([
+                call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';"),
+                call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';"),
+                call("CREATE TABLESPACE temp LOCATION '/var/lib/postgresql/tmp';"),
+                call("GRANT CREATE ON TABLESPACE temp TO public;"),
+            ])
 
         # create_user called for missing owner role
         _create_user.assert_called_once_with(
@@ -397,7 +412,7 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness):
         execute_cm.assert_has_calls(expected, any_order=False)
 
 
-def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness):
+def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness, substrate):
     with (
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
@@ -434,14 +449,20 @@ def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness):
         fetchone_direct.side_effect = [True, None]
 
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
+        if substrate == "k8s":
+            _change_owner.assert_not_called()
+            _chmod.assert_not_called()
+            execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
+        else:
+            _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+            _chmod.assert_called_once_with(
+                "/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS
+            )
+            execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
+            execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
 
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
-        _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
-        execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
-        execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
 
-
-def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
+def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness, substrate):
     with (
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
@@ -476,14 +497,20 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness):
         fetchone_direct.side_effect = [True, None]
 
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
+        if substrate == "k8s":
+            _change_owner.assert_not_called()
+            _chmod.assert_not_called()
+            execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
+        else:
+            _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+            _chmod.assert_called_once_with(
+                "/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS
+            )
+            execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
+            execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
 
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
-        _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
-        execute_direct.assert_any_call("SELECT TRUE FROM pg_tablespace WHERE spcname='temp';")
-        execute_direct.assert_any_call("ALTER TABLESPACE temp RENAME TO temp_20250101010203;")
 
-
-def test_set_up_database_persistent_storage_no_rename(harness):
+def test_set_up_database_persistent_storage_no_rename(harness, substrate):
     """Test that persistent storage permissions fix doesn't rename tablespace."""
     with (
         patch(
@@ -515,8 +542,14 @@ def test_set_up_database_persistent_storage_no_rename(harness):
         harness.charm.postgresql.set_up_database(temp_location="/var/lib/postgresql/tmp")
 
         # Permissions should be fixed
-        _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
-        _chmod.assert_called_once_with("/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS)
+        if substrate == "k8s":
+            _change_owner.assert_not_called()
+            _chmod.assert_not_called()
+        else:
+            _change_owner.assert_called_once_with("/var/lib/postgresql/tmp")
+            _chmod.assert_called_once_with(
+                "/var/lib/postgresql/tmp", POSTGRESQL_STORAGE_PERMISSIONS
+            )
 
         # Tablespace should NOT be renamed
         for call in execute.call_args_list:
@@ -856,12 +889,16 @@ def test_set_up_database_owner_and_permissions_match_no_rename_or_fix(harness):
                 assert "ALTER TABLESPACE temp RENAME TO" not in c.args[0]
 
 
-def test_set_up_database_k8s_skips_change_owner_and_chmod(harness):
+def test_set_up_database_k8s_skips_change_owner_and_chmod(harness, substrate):
     """When running on the K8S substrate, filesystem ownership/permission fixes should be skipped.
 
     Even if the on-disk owner/permissions appear incorrect, change_owner and os.chmod must
     not be called for Substrates.K8S.
     """
+    # Skip test if not running on k8s
+    if substrate != "k8s":
+        pytest.skip("Test only applicable for K8S substrate")
+
     with (
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"

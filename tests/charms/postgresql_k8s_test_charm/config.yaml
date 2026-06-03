@@ -751,7 +751,7 @@ options:
     description: |
       Sets the transaction isolation level of each new transaction.
       Allowed values are one of 'serializable', 'repeatable read', 'read committed', 'read uncommitted'.
-      Read commited or read uncommited is a statement can only see rows committed before it began.
+      Read committed or read uncommitted is a statement can only see rows committed before it began.
       Repeatable read is all statements of the current transaction can only see rows committed before 
       the first query or data-modification statement was executed in this transaction.
       Serializable is all statements of the current transaction can only see rows committed before the first 

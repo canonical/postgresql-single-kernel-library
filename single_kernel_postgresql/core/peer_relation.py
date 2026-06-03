@@ -4,6 +4,9 @@
 # See LICENSE file for licensing details.
 
 """State objects for database-peers relation."""
+
+from ops import Application, Relation, Unit
+
 from single_kernel_postgresql.core.relation_state import RelationState
 from ops import Relation, Unit, Application
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import DataPeerUnitData, DataPeerData
@@ -11,7 +14,7 @@ from ops import BlockedStatus
 
 
 class PostgreSQLPeer(RelationState):
-    """State/Relation data collection for a PostgreSQL unit"""
+    """State/Relation data collection for a PostgreSQL unit."""
 
     def __init__(
         self,
@@ -39,8 +42,6 @@ class PostgreSQLPeer(RelationState):
     def is_blocked(self) -> bool:
         """Returns whether the unit is in a blocked state."""
         return isinstance(self.unit.status, BlockedStatus)
-
-
 
 
 class PostgreSQLApplication(RelationState):

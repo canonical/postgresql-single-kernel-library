@@ -4,15 +4,19 @@
 # See LICENSE file for licensing details.
 
 """Base class for charm relations."""
+
+import contextlib
 import enum
 import json
 import logging
-from ops.model import Application, Relation, Unit
 from typing import Any
+
+from ops.model import Application, Relation, Unit
+
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import Data
 
-
 logger = logging.getLogger(__name__)
+
 
 class RelationState:
     """Relation state object."""
@@ -54,11 +58,8 @@ class RelationState:
                     f"Field '{field}' not found in relation data for deletion. Skipping deletion for this field."
                 )
             else:
-                # use del instead of pop here because of error with dataplatform-libs
-                try:
+                with contextlib.suppress(KeyError):
                     del self.relation_data[field]
-                except KeyError:
-                    pass
 
     def get_object(self, key: str) -> dict[str, Any] | None:
         """Get dict / json object from the relation data store."""
@@ -97,7 +98,7 @@ class RelationState:
             # Return the value as is for non-dict, non-list types
             return payload
 
-    @staticmethod 
+    @staticmethod
     def _default_encoder(o: Any) -> Any:
         """Default encoder for json dumps."""
         if isinstance(o, enum.Enum):

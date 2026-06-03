@@ -12,7 +12,7 @@ from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS
 from single_kernel_postgresql.core.peer_relation import PostgreSQLPeer, PostgreSQLApplication
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import DataPeerUnitData, DataPeerData
 from single_kernel_postgresql.utils.status import format_status
-from single_kernel_postgresql.utils.secrets import translate_field_to_secret_key
+from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
@@ -44,7 +44,6 @@ class CharmState(Object):
     def status_peers_relation(self) -> Relation | None:
         """Get status peers relation."""
         return self.model.get_relation(STATUS_PEERS_RELATION)
-    
 
     # -- Core State Components
 
@@ -54,7 +53,7 @@ class CharmState(Object):
         return PostgreSQLPeer(
             relation=self.peer_relation,
             data_interface=self.peer_unit_interface,
-            component=self.model.unit
+            component=self.model.unit,
         )
 
     @property
@@ -62,7 +61,7 @@ class CharmState(Object):
         """Fetch the list of units for the current app."""
         if not self.peer_relation:
             return []
-        return list(self.peer_relation.units.union({self.peer.unit}))
+        return [u for u in self.peer_relation.units.union({self.peer.unit}) if isinstance(u, Unit)]
 
     @property
     def application_peers(self) -> list[PostgreSQLPeer]:
@@ -85,7 +84,7 @@ class CharmState(Object):
             component=self.model.app,
         )
 
-    # -- Cluster State Properties 
+    # -- Cluster State Properties
 
     @property
     def implements_secrets(self):

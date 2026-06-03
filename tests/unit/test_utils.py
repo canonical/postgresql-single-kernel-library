@@ -4,7 +4,7 @@
 import re
 from unittest.mock import mock_open, patch
 
-from single_kernel_postgresql.config.literals import Substrates
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.utils import (
     any_cpu_to_cores,
     any_memory_to_bytes,
