@@ -95,6 +95,33 @@ class VMWorkload(BaseWorkload):
             )
             raise
 
+    def start_patroni(self) -> bool:
+        """Start Patroni service using snap.
+
+        Returns:
+            Whether the service started successfully.
+        """
+        try:
+            logger.debug("Starting Patroni...")
+            cache = snap.SnapCache()
+            selected_snap = cache["charmed-postgresql"]
+            selected_snap.start(services=["patroni"])
+            return selected_snap.services["patroni"]["active"]
+        except snap.SnapError as e:
+            error_message = "Failed to start patroni snap service"
+            logger.exception(error_message, exc_info=e)
+            return False
+
+    def is_patroni_running(self) -> bool:
+        """Check if the Patroni service is running."""
+        try:
+            cache = snap.SnapCache()
+            selected_snap = cache["charmed-postgresql"]
+            return selected_snap.services["patroni"]["active"]
+        except snap.SnapError as e:
+            logger.debug(f"Failed to check Patroni service: {e}")
+            return False
+
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service is running.
 

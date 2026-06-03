@@ -12,3 +12,9 @@ class PostgreSQLFileOperationError(PostgreSQLBaseError):
 
 class StorageUnavailableError(Exception):
     """Cannot find storage mountpoint."""
+
+class ErrorSettingSystemPassword(PostgreSQLBaseError):
+    """Exception thrown when setting the system password fails."""
+
+class PostgreSQLCannotConnectError(Exception):
+    """Cannot run smoke check on connected Database."""

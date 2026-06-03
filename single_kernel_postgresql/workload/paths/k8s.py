@@ -5,6 +5,7 @@
 from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.workload.paths.base import Paths
+from single_kernel_postgresql.config.literals import POSTGRESQL_CONF_FILE, POSTGRESQL_CONF_PATH
 
 
 class K8sPaths(Paths):
@@ -22,7 +23,7 @@ class K8sPaths(Paths):
     def conf(self) -> PathProtocol:
         """Path to the config folder of PostgreSQL."""
         # TODO: Update path
-        return self.root / "config"
+        return self.root / POSTGRESQL_CONF_PATH
 
     @property
     def data(self) -> PathProtocol:
@@ -40,3 +41,8 @@ class K8sPaths(Paths):
     def tmp(self) -> PathProtocol:
         """Path to the temporary directory."""
         return self.root / "tmp"
+
+    @property
+    def postgresql_conf(self) -> PathProtocol:
+        """Path to the postgresql.conf file."""
+        return self.conf / POSTGRESQL_CONF_FILE

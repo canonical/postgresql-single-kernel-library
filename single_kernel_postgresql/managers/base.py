@@ -9,7 +9,7 @@ import logging
 from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
-from single_kernel_postgresql.compat.postgresql import PostgreSQLBase as PostgreSQLClient
+from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.workload.base import BaseWorkload

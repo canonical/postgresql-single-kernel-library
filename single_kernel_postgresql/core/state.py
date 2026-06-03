@@ -4,8 +4,9 @@
 
 """Object representing the global state of PostgreSQL Charm."""
 import re
-from ops import Object, Relation, Unit, JujuVersion
+from ops import Object, Relation, Unit, JujuVersion, ModelError, SecretNotFoundError
 from typing import TYPE_CHECKING, Any, get_args
+from functools import cached_property
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject, AdvancedStatusesScope
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS_RELATION, SCOPES, APP_SCOPE, UNIT_SCOPE
@@ -13,6 +14,7 @@ from single_kernel_postgresql.core.peer_relation import PostgreSQLPeer, PostgreS
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import DataPeerUnitData, DataPeerData
 from single_kernel_postgresql.utils.status import format_status
 from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
+from single_kernel_postgresql.core.config import CharmConfig
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
@@ -33,6 +35,23 @@ class CharmState(Object):
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
 
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
+
+
+    # -- Charm Config
+    @cached_property
+    def config(self) -> CharmConfig:
+        """Return a config instance validated and parsed using the provided pydantic class."""
+        config = {
+            # Prefer value of option name with dash (-) and fallback to name with underscore (_)
+            config_option: self.model.config.get(
+                config_option.replace("_", "-"), self.model.config.get(config_option)
+            )
+            for config_option in CharmConfig.keys()  # noqa: SIM118
+        }
+        config: dict[str, Any] = {
+            config_option: value for config_option, value in config.items() if value is not None
+        }
+        return CharmConfig(**config)
 
     # -- Relations
     @property
@@ -91,6 +110,31 @@ class CharmState(Object):
         """Property to cache results from a Juju call."""
         return JujuVersion.from_environ().has_secrets
 
+    @property
+    def internal_peer_ca_common_name(self) -> str:
+        """Return the common name for the internally generated peer CA."""
+        return f"{self.model.app.name}-{self.model.uuid}"
+
+    @property
+    def unit_ip(self) -> str | None:
+        """Current unit ip."""
+        if binding := self.model.get_binding(PEER_RELATION):
+            return str(binding.network.bind_address)
+
+    @property
+    def peer_members_ips(self) -> set[str]:
+        """Fetch current list of peer members IPs.
+
+        Returns:
+            A list of peer members addresses (strings).
+        """
+        # Get all members IPs and remove the current unit IP from the list.
+        addresses = self.application.members_ips
+        current_unit_ip = self.unit_ip
+        if current_unit_ip in addresses:
+            addresses.remove(current_unit_ip)
+        return addresses
+
 
     # -- Secrets 
     # TODO: This is temporary till data interfaces v1 is integrated
@@ -106,6 +150,54 @@ class CharmState(Object):
             return self.application.get_secret(secret_key)
         else:
             return self.peer.get_secret(secret_key)
+
+    def set_secret(self, scope: SCOPES, key: str, value: str | None) -> str | None:
+        """Set secret from the secret storage."""
+        if scope not in get_args(SCOPES):
+            raise RuntimeError("Unknown secret scope.")
+
+        if not value:
+            return self.remove_secret(scope, key)
+
+        if not self.peer_relation:
+            return None
+        secret_key = translate_field_to_secret_key(key)
+        if scope == APP_SCOPE:
+            self.application.set_secret(secret_key, value)
+        else:
+            self.peer.set_secret(secret_key, value)
+
+    def remove_secret(self, scope: SCOPES, key: str) -> None:
+        """Removing a secret."""
+        if scope not in get_args(SCOPES):
+            raise RuntimeError("Unknown secret scope.")
+
+        if not self.peer_relation:
+            return None
+        secret_key = translate_field_to_secret_key(key)
+        if scope == APP_SCOPE:
+            self.application.remove_secret(secret_key)
+        else:
+            self.peer.remove_secret(secret_key)
+
+    def get_secret_from_id(self, secret_id: str) -> dict[str, str]:
+        """Resolve the given id of a Juju secret and return the content as a dict.
+
+        This method can be used to retrieve any secret, not just those used via the peer relation.
+        If the secret is not owned by the charm, it has to be granted access to it.
+
+        Args:
+            secret_id (str): The id of the secret.
+
+        Returns:
+            dict: The content of the secret.
+        """
+        try:
+            secret_content = self.model.get_secret(id=secret_id).get_content(refresh=True)
+        except (SecretNotFoundError, ModelError):
+            raise
+
+        return secret_content
 
 
     # -- Statuses
