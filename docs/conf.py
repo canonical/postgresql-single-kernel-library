@@ -249,11 +249,15 @@ extensions = [
     "sphinx_sitemap",
     # Custom extensions
     "sphinx_new_tab_link",
-    "sphinx_datatables"
+    "sphinx_datatables",
+    "hoverxref.extension"
 ]
 
 # sphinx_new_tab_link configuration
 new_tab_link_show_external_link_icon = True
+
+# hoverxref configuration
+hoverxref_roles = ['term']
 
 # Excludes files or directories from processing
 exclude_patterns = [

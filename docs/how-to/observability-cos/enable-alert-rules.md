@@ -1,5 +1,6 @@
 (enable-alert-rules)=
 # How to enable COS alert rules
+{{vm}} {{k8s}}
 
 Charmed PostgreSQL ships a pre-configured and pre-enabled list of {ref}`Awesome Alert Rules <alert-rules>`.
 
@@ -10,12 +11,12 @@ Charmed PostgreSQL ships a pre-configured and pre-enabled list of {ref}`Awesome 
 
 This guide will show how to set up [Pushover](https://pushover.net/) to receive alert notifications from the COS Alert Manager with [Awesome Alert Rules](https://samber.github.io/awesome-prometheus-alerts/).
 
-For information about accessing and managing COS Alert Rules, refer to the [COS documentation](https://charmhub.io/cos-lite).
+For information about accessing and managing COS Alert Rules, refer to the [Observability documentation](https://documentation.ubuntu.com/observability/latest/how-to/integrate/adding-alert-rules/).
 
 ```{seealso}
-* {ref}`alert-rules`
-* [Observability documentation > Add alert
-rules](https://documentation.ubuntu.com/observability/latest/how-to/integrate/adding-alert-rules/)
+Source files for PostgreSQL, PgBouncer, Patroni, and PgBackrest alert rules:
+* [PostgreSQL K8s](https://github.com/canonical/postgresql-k8s-operator/tree/16/edge/src/prometheus_alert_rules)
+* [PostgreSQL VM](https://github.com/canonical/postgresql-operator/tree/16/edge/src/prometheus_alert_rules)
 ```
 
 ## Prerequisites

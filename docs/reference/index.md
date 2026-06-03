@@ -10,5 +10,5 @@ System requirements <system-requirements>
 Configuration <configuration>
 Charm statuses <charm-statuses>
 Supported extensions <supported-extensions>
-Alert rules <alert-rules>
+Glossary <glossary>
 ```

@@ -82,5 +82,5 @@ explanation/index
 
 release-notes/index
 Contribute <contribute>
-Contact <contacts>
+Contact <contact>
 ```

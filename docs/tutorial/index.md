@@ -79,7 +79,7 @@ The files `/var/log/cloud-init.log` and `/var/log/cloud-init-output.log` contain
 
 ### Set up Juju
 
-Since `my-vm` already has Juju and LXD installed, we can go ahead and [bootstrap](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/bootstrap/#details) a cloud. In this tutorial, we will use a local LXD [controller](https://documentation.ubuntu.com/juju/3.6/reference/controller/). 
+Since `my-vm` already has Juju and LXD installed, we can go ahead and [bootstrap](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/bootstrap/#details) a cloud. In this tutorial, we will use a local LXD [controller](https://documentation.ubuntu.com/juju/3.6/reference/controller/).
 
 We will call our new controller “overlord”, but you can give it any name you’d like:
 
@@ -843,5 +843,5 @@ multipass delete --purge my-vm
 - Check out our other database charms, like [MySQL](https://charmhub.io/mysql) and [Kafka](https://charmhub.io/kafka?channel=edge)
 - Read about [high availability best practices](https://canonical.com/blog/database-high-availability)
 - [Report](https://github.com/canonical/postgresql-operator/issues) any problems you encountered
-- {ref}`Give us your feedback <contacts>`
+- {ref}`Give us your feedback <contact>`
 - [Contribute to the code base](https://github.com/canonical/postgresql-operator)

@@ -11,7 +11,7 @@ It combines the following guides, where you can find more detailed information:
 
 ## Requirements
 
-Although Canonical does not prescribe how you should set up your environment, we can provide recommendations. Consider {ref}`contacting us <contacts>` for support with your use-case.
+Although Canonical does not prescribe how you should set up your environment, we can provide recommendations. Consider {ref}`contacting us <contact>` for support with your use-case.
 
 The basic requirements to follow along with this example setup are the following:
 

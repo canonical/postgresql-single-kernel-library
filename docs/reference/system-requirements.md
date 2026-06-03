@@ -7,7 +7,22 @@ The following are the minimum software and hardware requirements to run Charmed 
 
 ## Software
 
-* Ubuntu 24.04 (Noble) or later.
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+* Ubuntu 24.04 LTS (Noble) or later
+```
+
+```{tab-item} K8s
+:sync: k8s
+
+* Ubuntu 24.04 LTS (Noble) or later
+* Kubernetes 1.27+
+* Canonical MicroK8s 1.27+
+  * snap channel `1.27-strict/stable` and newer
+```
+````
 
 ### Juju
 
@@ -19,14 +34,19 @@ Charmed PostgreSQL 16 supports several Juju releases from 3.6 LTS onward. The ta
 
 ## Hardware
 
-profile    testing     production
-vCPU         2+             4+
-RAM          2GiB+         8GiB+
-Disk         10GiB+       20GiB+
+Minimum recommended hardware for a **production** deployment:
+* vCPU: 4
+* RAM: 8GB
+* Disk: 20GB
 
-Actual hardware requirements will depend on the workload you are running against your database.
+Minimum recommended hardware for **testing**:
+* vCPU: 2
+* RAM: 2GB
+* Disk: 10GB
 
-The charm is based on the [charmed-postgresql snap](https://snapcraft.io/charmed-postgresql) and [rock]()
+Actual hardware requirements will depend on the workload you are running against your database. See: {ref}`performance-and-resources`.
+
+The charm is based on the [charmed-postgresql snap](https://snapcraft.io/charmed-postgresql).
 
 It currently supports the following architectures:
 * `amd64`

@@ -292,7 +292,7 @@ In the command above, replace `postgresql` with the name of the Juju application
 
 Next, assess the situation and plan the recovery. Often, the safest recovery path is to {ref}`roll back <roll-back>`.
 
-Consider {ref}`contacting us <contacts>` for guidance.
+Consider {ref}`contacting us <contact>` for guidance.
 
 (roll-back)=
 ## Roll back
@@ -314,7 +314,7 @@ The procedure for the rollback is the same as described in {ref}`monitor-the-ref
 
 After the application has been rolled back and you have confirmed that service has been fully restored, investigate what went wrong.
 
-If applicable, please file a {ref}`bug report <contacts>`.
+If applicable, please file a {ref}`bug report <contact>`.
 
 Once you understand what went wrong and have tested that it has been fixed, the refresh can be attempted again.
 

@@ -77,14 +77,14 @@ Use logical replication to copy a subset of data to another PostgreSQL cluster:
 Logical replication <logical-replication>
 ```
 
-### Monitoring (COS)
+### Observability (COS)
 
 Set up observability services like Grafana, Prometheus, Loki, and Tempo through the Canonical Observability Stack (COS):
 
 ```{toctree}
 :maxdepth: 2
 
-Monitoring (COS) <monitoring-cos/index>
+Observability (COS) <observability-cos/index>
 ```
 
 ## Extensions (plugins)

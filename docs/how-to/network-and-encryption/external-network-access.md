@@ -34,4 +34,4 @@ To connect the Charmed PostgreSQL K8s database from outside the Kubernetes clust
 
 The client application is a Juju application outside the database deployment - such as a hybrid Juju deployment with different VM clouds/controllers, or mixed VM and K8s applications.
 
-In this case, a cross-hybrid or cross-controller relation is necessary. Please {ref}`contact <contacts>` the Data team to discuss possible options for your use case.
+In this case, a cross-hybrid or cross-controller relation is necessary. Please {ref}`contact <contact>` the Data team to discuss possible options for your use case.

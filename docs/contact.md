@@ -1,5 +1,5 @@
-(contacts)=
-# Contacts
+(contact)=
+# Contact
 
 Submit an issue or feature request on [GitHub](https://github.com/canonical/postgresql-single-kernel-library/issues/new/choose)
 

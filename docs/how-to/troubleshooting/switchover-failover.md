@@ -1,5 +1,5 @@
 (switchover-failover)=
-# Switchover / failover
+# How to perform a switchover/failover
 {{vm}}
 <!--TODO: verify K8s -->
 

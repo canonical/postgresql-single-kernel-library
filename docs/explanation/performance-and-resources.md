@@ -1,7 +1,3 @@
----
-orphan: True
----
-
 (performance-and-resources)=
 # Performance and testing
 

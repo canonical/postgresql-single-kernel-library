@@ -27,6 +27,7 @@ Users <users>
 Roles <roles>
 Logs <logs>
 Connection pooling <connection-pooling>
+Performane and resources <performance-and-resources>
 ```
 
 ## Security

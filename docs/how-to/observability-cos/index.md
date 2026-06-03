@@ -1,5 +1,5 @@
-(monitoring-cos)=
-# Monitoring (COS)
+(observability-cos)=
+# Observability (COS)
 
 ```{toctree}
 :titlesonly:
