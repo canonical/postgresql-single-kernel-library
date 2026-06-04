@@ -1,6 +1,6 @@
 (enable-extension)=
 # How to enable an extension
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 This guide outlines the steps for enabling an extension (plugin) in a Charmed PostgreSQL deployment.
 

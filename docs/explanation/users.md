@@ -1,6 +1,6 @@
 (users)=
 # Users
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 There are three types of users in PostgreSQL:
 

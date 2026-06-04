@@ -1,6 +1,6 @@
 (scale-replicas)=
 # How to scale replicas
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 Replication in PostgreSQL is the process of creating copies of the stored data. This provides redundancy, which means the application can provide self-healing capabilities in case one replica fails. In this context, each replica is equivalent to one juju unit.
 

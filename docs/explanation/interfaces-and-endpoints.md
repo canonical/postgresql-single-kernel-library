@@ -1,6 +1,6 @@
 (interfaces-and-endpoints)=
 # Interfaces/endpoints
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 <!--TODO: update for PG 16? -->
 

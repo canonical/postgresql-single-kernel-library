@@ -1,6 +1,6 @@
 (manage-passwords)=
 # How to manage passwords
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 <!--TODO: rename to manage secrets? -->
 

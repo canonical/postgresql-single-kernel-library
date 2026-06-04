@@ -1,6 +1,6 @@
 (logs)=
 # Logs
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 This explanation goes over the types of logging in PostgreSQL and the configuration parameters for log
 rotation.

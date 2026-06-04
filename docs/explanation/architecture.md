@@ -4,7 +4,7 @@ relatedlinks: "[Charmhub&#32;|&#32;PostgreSQL&#32;VM](https://charmhub.io/postgr
 
 (architecture)=
 # Architecture
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 Charmed PostgreSQL is a Juju-based operator to deploy and operate [PostgreSQL](https://www.postgresql.org/) on machines or Kubernetes. It is based on [PostgreSQL Community Edition](https://www.postgresql.org/community/), and uses [Patroni](https://github.com/zalando/patroni) to manage PostgreSQL cluster via [synchronous replication](https://patroni.readthedocs.io/en/latest/replication_modes.html#postgresql-synchronous-replication).
 

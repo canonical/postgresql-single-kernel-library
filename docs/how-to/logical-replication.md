@@ -1,6 +1,6 @@
 (logical-replication)=
 # How to enable logical replication
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 Logical replication is a feature that allows replicating a subset of one PostgreSQL cluster data to another PostgreSQL cluster.
 

@@ -1,6 +1,6 @@
 (enable-timescaledb)=
 # How to enable TimescaleDB
-{{vm}}{{k8s}}
+{{vm_k8s}}
 <!--TODO: add K8S -->
 
 Charmed PostgreSQL separates TimescaleDB editions for different [Charmhub tracks](https://canonical-charmcraft.readthedocs-hosted.com/en/stable/howto/manage-channels/):

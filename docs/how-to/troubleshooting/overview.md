@@ -1,6 +1,6 @@
 (troubleshooting-overview)=
 # How to troubleshoot
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 This page goes over some recommended tools and approaches to troubleshooting the charm.
 

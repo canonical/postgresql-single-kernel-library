@@ -1,6 +1,6 @@
 (cryptography)=
 # Cryptography
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 This document describes the cryptography used by Charmed PostgreSQL.
 

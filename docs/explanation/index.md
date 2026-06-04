@@ -1,6 +1,6 @@
 (explanation)=
 # Explanation
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 Additional context about the PostgreSQL charm, including design, legacy information, and security.
 

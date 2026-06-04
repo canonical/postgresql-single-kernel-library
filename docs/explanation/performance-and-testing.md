@@ -1,6 +1,6 @@
 (performance-and-testing)=
 # Performance and testing
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 <!--TODO: intro -->
 

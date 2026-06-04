@@ -1,6 +1,6 @@
 (enable-ldap)=
 # How to enable LDAP authentication
-{{vm}}{{k8s}}
+{{vm_k8s}}
 <!--TODO: check this whole guide for correctness (I removed the cross-controller relation on K8s to simplify) -->
 
 The Lightweight Directory Access Protocol (LDAP) enables centralised authentication for PostgreSQL clusters, reducing the overhead of managing local credentials and access policies.

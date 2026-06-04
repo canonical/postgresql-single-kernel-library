@@ -4,7 +4,7 @@ relatedlinks: https://documentation.ubuntu.com/juju/3.6/reference/relation/, [po
 
 (integrate-with-another-application)=
 # How to integrate with a client application
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 [Integrations](https://juju.is/docs/juju/relation), also known as “relations” are connections between two applications with compatible endpoints. These connections simplify the creation and management of users, passwords, and other shared data.
 

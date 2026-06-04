@@ -1,6 +1,6 @@
 (extensions)=
 # PostgreSQL extensions
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 ```{toctree}
 :titlesonly:

@@ -1,6 +1,6 @@
 (charm-statuses)=
 # Charm statuses
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 The charm follows [standard Juju applications statuses](https://documentation.ubuntu.com/juju/3.6/reference/status/#application-status). Here you can find the expected end-users reaction on different statuses.
 

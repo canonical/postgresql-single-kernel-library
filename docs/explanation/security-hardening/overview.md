@@ -1,6 +1,6 @@
 (security-hardening-overview)=
 # Security hardening overview
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 This document provides an overview of security features and guidance for hardening the security of Charmed PostgreSQL deployments, including setting up and managing a secure environment.
 
@@ -101,7 +101,11 @@ Charmed PostgreSQL and Charmed PgBouncer run on top of Ubuntu 22.04. Deploy a [L
 
 New versions (revisions) of the charmed operators can be released to update the operator's code, workloads, or both. It is important to refresh the charms regularly to make sure the workloads are as secure as possible.
 
-For more information on upgrading Charmed PostgreSQL, see the [How to upgrade PostgreSQL](https://canonical.com/data/docs/postgresql/iaas/h-upgrade) and [How to upgrade PgBouncer](https://charmhub.io/pgbouncer/docs/h-upgrade) guides, as well as the respective Release notes for [PostgreSQL](https://canonical.com/data/docs/postgresql/iaas/r-releases) and [PgBouncer](https://charmhub.io/pgbouncer/docs/r-releases).
+For more information on upgrading Charmed PostgreSQL, see:
+* {ref}`How to upgrade PostgreSQL <refresh>`
+* [How to upgrade PgBouncer](https://charmhub.io/pgbouncer/docs/h-upgrade)
+* {ref}`PostgreSQL release notes <release-notes>`
+* [PgBouncer release notes](https://charmhub.io/pgbouncer/docs/r-releases)
 
 ### Encryption
 
@@ -119,7 +123,7 @@ Charmed PostgreSQL supports the password-based `scram-sha-256` authentication me
 * Internal connections between members of cluster
 * PgBouncer connections
 
-For more implementation details, see the [PostgreSQL documentation](https://www.postgresql.org/docs/16/auth-password.html).
+For more implementation details, see the [upstream PostgreSQL documentation](https://www.postgresql.org/docs/16/auth-password.html).
 
 ### Monitoring and auditing
 
@@ -162,7 +166,12 @@ Charmed PostgreSQL K8s and Charmed PgBouncer K8s run on top of rockcraft-based i
 
 New versions (revisions) of the charmed operators can be released to update the operator's code, workloads, or both. It is important to refresh the charms regularly to make sure the workloads are as secure as possible.
 
-For more information on upgrading Charmed PostgreSQL K8s, see the [How to upgrade PostgreSQL K8s](https://canonical.com/data/docs/postgresql/k8s/h-upgrade) and [How to upgrade PgBouncer K8s](https://charmhub.io/pgbouncer-k8s/docs/h-upgrade) guides, as well as the respective {ref}`release notes for Charmed PostgreSQL <release-notes>` and [PgBouncer](https://charmhub.io/pgbouncer-k8s/docs/r-releases).
+For more information on upgrading Charmed PostgreSQL K8s, see:
+
+* {ref}`How to upgrade PostgreSQL <refresh>`
+* [How to upgrade PgBouncer](https://charmhub.io/pgbouncer-k8s/docs/h-upgrade)
+* {ref}`PostgreSQL release notes <release-notes>`
+* [PgBouncer release notes](https://charmhub.io/pgbouncer/docs-k8s/r-releases)
 
 ### Encryption
 
@@ -184,9 +193,9 @@ For more implementation details, see the [PostgreSQL documentation](https://www.
 
 ### Monitoring and auditing
 
-Charmed PostgreSQL K8s provides native integration with the [Canonical Observability Stack (COS)](https://charmhub.io/topics/canonical-observability-stack). To reduce the blast radius of infrastructure disruptions, the general recommendation is to deploy COS and the observed application into separate environments, isolated from one another. Refer to the [COS production deployments best practices](https://charmhub.io/topics/canonical-observability-stack/reference/best-practices) for more information or see the How to guides for PostgreSQL [monitoring](https://canonical.com/data/docs/postgresql/k8s/h-enable-monitoring), [alert rules](https://canonical.com/data/docs/postgresql/k8s/h-enable-alert-rules), and [tracing](https://canonical.com/data/docs/postgresql/k8s/h-enable-tracing) for practical instructions.
+Charmed PostgreSQL K8s provides native integration with the [Canonical Observability Stack (COS)](https://charmhub.io/topics/canonical-observability-stack). To reduce the blast radius of infrastructure disruptions, the general recommendation is to deploy COS and the observed application into separate environments, isolated from one another. Refer to the [COS production deployments best practices](https://charmhub.io/topics/canonical-observability-stack/reference/best-practices) for more information, see the how-to guides about {ref}`observability-cos`.
 
-PostgreSQL logs are stored in `/var/lib/pg/logs/16/main/pg_logs` within the `postgresql` container of each unit. The legacy `/var/log/postgresql` path is kept as a compatibility symlink to that directory. It’s recommended to integrate the charm with [COS](https://canonical.com/data/docs/postgresql/k8s/h-enable-monitoring), from where the logs can be easily persisted and queried using [Loki](https://charmhub.io/loki-k8s)/[Grafana](https://charmhub.io/grafana).
+PostgreSQL logs are stored in `/var/lib/pg/logs/16/main/pg_logs` within the `postgresql` container of each unit. The legacy `/var/log/postgresql` path is kept as a compatibility symlink to that directory. It’s recommended to integrate the charm with {ref}`COS <enable-monitoring>, from where the logs can be easily persisted and queried using [Loki](https://charmhub.io/loki-k8s)/[Grafana](https://charmhub.io/grafana).
 
 ### Security event logging
 

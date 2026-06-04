@@ -1,6 +1,6 @@
 (roles)=
 # Roles
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 There are several definitions of roles in Charmed PostgreSQL:
 * Predefined PostgreSQL roles

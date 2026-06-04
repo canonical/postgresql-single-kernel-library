@@ -1,6 +1,6 @@
 (refresh)=
 # Refresh (upgrade)
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 <!--TODO: verify K8s instructions and any important differences in behavior-->
 

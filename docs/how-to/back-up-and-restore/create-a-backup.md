@@ -6,7 +6,7 @@ myst:
 
 (create-a-backup)=
 # How to create a backup
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 This guide contains recommended steps and useful commands for creating and managing backups to ensure smooth restores.
 

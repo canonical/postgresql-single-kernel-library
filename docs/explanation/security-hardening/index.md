@@ -1,6 +1,6 @@
 (security-hardening)=
 # Security hardening
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 ```{toctree}
 Overview <overview>

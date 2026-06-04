@@ -219,8 +219,9 @@ linkcheck_retries = 3
 # MyST substitutions
 
 myst_substitutions = {
-    "vm": "![postgresql](https://img.shields.io/badge/vm-orange?style=flat-square)",
-    "k8s": "![postgresql-k8s](https://img.shields.io/badge/k8s-blue?style=flat-square)"
+    "vm": "![vm](https://img.shields.io/badge/VM_only-orange?style=flat-square)",
+    "k8s": "![k8s](https://img.shields.io/badge/K8s_only-blue?style=flat-square)",
+    "vm_k8s": "![vm](https://img.shields.io/badge/VM-orange?style=flat-square)![k8s](https://img.shields.io/badge/K8s-blue?style=flat-square)"
 }
 
 # Custom Sphinx extensions; see

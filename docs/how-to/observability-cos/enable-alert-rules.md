@@ -1,6 +1,6 @@
 (enable-alert-rules)=
 # How to enable COS alert rules
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 Charmed PostgreSQL ships a pre-configured and pre-enabled list of [Awesome Alert Rules](https://samber.github.io/awesome-prometheus-alerts/) for PostgreSQL, PgBouncer, Patroni, and pgBackRest:
 

@@ -6,7 +6,7 @@ myst:
 
 (migrate-a-cluster)=
 # How to migrate a cluster
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 This is a guide on how to restore a backup that was made from a different cluster, (i.e. cluster migration via restore).
 
