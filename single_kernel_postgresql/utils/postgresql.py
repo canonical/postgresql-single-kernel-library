@@ -53,10 +53,10 @@ from ..compat.postgresql import (
     PostgreSQLUndefinedHostError,  # noqa: F401
     PostgreSQLUndefinedPasswordError,  # noqa: F401
 )
+from ..config.enums import Substrates
 from ..config.literals import (
     POSTGRESQL_STORAGE_PERMISSIONS,
     SNAP_USER,
-    Substrates,
 )
 from .filesystem import change_owner, is_tmpfs
 

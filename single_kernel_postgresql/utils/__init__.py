@@ -15,7 +15,8 @@ from typing import Any
 
 from httpx import AsyncClient, BasicAuth, HTTPError
 
-from ..config.literals import API_REQUEST_TIMEOUT, Substrates
+from ..config.enums import Substrates
+from ..config.literals import API_REQUEST_TIMEOUT
 
 
 def new_password() -> str:
