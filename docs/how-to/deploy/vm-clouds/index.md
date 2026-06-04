@@ -1,5 +1,5 @@
 (vm-clouds)=
-# VM clouds
+# Deploy on a VM cloud
 {{vm}}
 
 ```{toctree}

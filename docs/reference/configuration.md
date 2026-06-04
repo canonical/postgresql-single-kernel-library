@@ -24,6 +24,7 @@ The full list can be accessed on [Charmhub](https://charmhub.io/postgresql-k8s/c
 
 This page contains additional context about some categories of configuration parameters. Note that this is not a comprehensive list - always use `juju config` to see all available configurations.
 
+(system-profiling)=
 ## System profiling
 
 Options dedicated to defining the performance profile and creating dedicated memory pools for shared caching, sorting, and utility operations.

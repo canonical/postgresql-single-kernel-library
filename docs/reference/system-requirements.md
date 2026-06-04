@@ -32,6 +32,7 @@ Charmed PostgreSQL 16 supports several Juju releases from 3.6 LTS onward. The ta
 |:-------------------|:-------------------------|:---------------------------|
 | ![3.6 LTS]         | `3.6.1+`                 | All                        |
 
+(hardware)=
 ## Hardware
 
 Minimum recommended hardware for a **production** deployment:

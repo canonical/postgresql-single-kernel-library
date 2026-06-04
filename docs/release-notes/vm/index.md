@@ -6,3 +6,10 @@ myst:
 
 (release-notes-vm)=
 # Release notes (VM)
+
+```{toctree}
+:titlesonly:
+
+1046-1047
+1088-1089
+```

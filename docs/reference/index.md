@@ -8,7 +8,8 @@ Information about releases, charm options, technical specifications, and other r
 
 System requirements <system-requirements>
 Configuration <configuration>
-Charm statuses <charm-statuses>
 Supported extensions <supported-extensions>
+Charm statuses <charm-statuses>
+Charm events <charm-event-flowcharts/index>
 Glossary <glossary>
 ```

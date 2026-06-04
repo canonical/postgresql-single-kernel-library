@@ -3,7 +3,7 @@
 
 Charmed PostgreSQL can restore backups of itself stored on S3-compatible storage (See: {ref}`restore-a-backup`). A similar restore approach is applicable for backups made by a different Charmed PostgreSQL installation or even another PostgreSQL charm. (See: {ref}`migrate-a-cluster`).
 
-This is a guide for migrating data from modern charms. To migrate {ref}`legacy charms <legacy-charm>` data, refer to the guide {ref}`migrate-data-via-pg-dump`.
+This is a guide for migrating data from modern charms. To migrate legacy charm data, refer to the guide {ref}`migrate-data-via-pg-dump`.
 
 <!--TODO: clarify difference between:
 * back-up-and-restore/restore-a-backup

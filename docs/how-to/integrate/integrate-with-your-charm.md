@@ -1,6 +1,6 @@
 (integrate-with-your-charm)=
 # How to integrate PostgreSQL with your charm
-{{vm}} {{k8s}}
+{{vm}}{{k8s}}
 
 Charmed PostgreSQL can be integrated with any charmed application that supports its interfaces. This page provides some guidance and resources for charm developers to develop, integrate, and troubleshoot their charm so that it may connect with PostgreSQL.
 
@@ -11,14 +11,14 @@ First, we recommend that you check {ref}`the supported interfaces <interfaces-an
 
 Most existing charms currently use [ops-lib-pgsql](https://github.com/canonical/ops-lib-pgsql) interface (legacy). For new charms, **Canonical recommends using [data-platform-libs](https://github.com/canonical/data-platform-libs).** <!--TODO: clarify interface compatibility in PG 16 (no legacy at all?) -->
 
-For more information, see {ref}`legacy-charm`.
+For more information, see {ref}`charm-versions`.
 
 ## Integrate your charm with PostgreSQL
 
 **For an introduction** to the concepts of Juju integrations, see [Juju | Integration](https://documentation.ubuntu.com/juju/3.6/reference/relation/).
 
 **For some practical examples**, take a look at the following:
-* {{vm}} {{k8s}} [postgresql-test-app](https://github.com/canonical/postgresql-test-app)
+* {{vm}}{{k8s}} [postgresql-test-app](https://github.com/canonical/postgresql-test-app)
 * {{vm}} [Discourse | How to migrate Nextcloud to new PostgreSQL](https://discourse.charmhub.io/t/nextcloud-postgresql-how-to-migrate-nextcloud-to-new-postgresql-vm-charms/10969)
 * {{k8s}} [Ops | Integrate your charm with PostgreSQL](https://ops.readthedocs.io/en/latest/tutorial/from-zero-to-hero-write-your-first-kubernetes-charm/integrate-your-charm-with-postgresql.html)
 

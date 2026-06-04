@@ -1,6 +1,8 @@
 (manage-passwords)=
 # How to manage passwords
-{{vm}} {{k8s}}
+{{vm}}{{k8s}}
+
+<!--TODO: rename to manage secrets? -->
 
 Charmed PostgreSQL 16 uses [Juju secrets](https://documentation.ubuntu.com/juju/latest/reference/secret/#secret) to manage passwords.
 

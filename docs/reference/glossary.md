@@ -1,5 +1,7 @@
 # Glossary
 
+<!--TODO: definitions and apply {term} label throughout docs -->
+
 ```{glossary}
 Canonical Observability Stack
     A set of charms that facilitates integration with open-source telemetry tools like Grafana, Prometheus, and Loki.

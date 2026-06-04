@@ -219,8 +219,8 @@ linkcheck_retries = 3
 # MyST substitutions
 
 myst_substitutions = {
-    "vm": "![postgresql](https://img.shields.io/badge/vm-orange)",
-    "k8s": "![postgresql-k8s](https://img.shields.io/badge/k8s-blue)"
+    "vm": "![postgresql](https://img.shields.io/badge/vm-orange?style=flat-square)",
+    "k8s": "![postgresql-k8s](https://img.shields.io/badge/k8s-blue?style=flat-square)"
 }
 
 # Custom Sphinx extensions; see
@@ -249,15 +249,11 @@ extensions = [
     "sphinx_sitemap",
     # Custom extensions
     "sphinx_new_tab_link",
-    "sphinx_datatables",
-    "hoverxref.extension"
+    "sphinx_datatables"
 ]
 
 # sphinx_new_tab_link configuration
 new_tab_link_show_external_link_icon = True
-
-# hoverxref configuration
-hoverxref_roles = ['term']
 
 # Excludes files or directories from processing
 exclude_patterns = [

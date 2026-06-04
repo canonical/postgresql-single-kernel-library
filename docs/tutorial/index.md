@@ -20,6 +20,7 @@ While this tutorial intends to guide you as you deploy Charmed PostgreSQL for th
 - Virtualisation support
 - `amd64` or `arm64` architecture
 
+<!--TODO: Update requirements and add testing profile to deployment. Test whole tutorial once. -->
 ---
 
 ## Set up the environment

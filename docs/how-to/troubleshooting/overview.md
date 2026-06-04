@@ -1,16 +1,18 @@
 (troubleshooting-overview)=
 # How to troubleshoot
-{{vm}} {{k8s}}
+{{vm}}{{k8s}}
 
 This page goes over some recommended tools and approaches to troubleshooting the charm.
-
-Before anything, always run `juju status` and check the {ref}`recommended fixes <charm-statuses>`. This alone may already solve your issue.
 
 ```{caution}
 At the moment, there is no support for [pausing an operator](https://warthogs.atlassian.net/browse/DPE-2545).
 
 Make sure your activity will not interfere with the operator itself!
 ```
+
+## Check charm status
+
+Before anything, always run `juju status` and check the {ref}`recommended fixes <charm-statuses>`. This alone may already solve your issue.
 
 ## Check logs
 

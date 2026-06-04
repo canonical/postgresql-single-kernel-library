@@ -6,3 +6,9 @@ myst:
 
 (release-notes-k8s)=
 # Release notes (K8s)
+
+```{toctree}
+:titlesonly:
+
+901-902
+```

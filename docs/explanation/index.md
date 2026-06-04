@@ -12,7 +12,7 @@ Core concepts about the history and high-level design of Charmed PostgreSQL:
 
 Architecture <architecture>
 Interfaces and endpoints <interfaces-and-endpoints>
-Charm versions <charm-versions/index>
+Charm versions <charm-versions>
 ```
 
 ## Operation
@@ -27,7 +27,7 @@ Users <users>
 Roles <roles>
 Logs <logs>
 Connection pooling <connection-pooling>
-Performane and resources <performance-and-resources>
+Performance and resources <performance-and-resources>
 ```
 
 ## Security
@@ -37,5 +37,5 @@ Overview of security features in the charm and hardening guidance:
 ```{toctree}
 :titlesonly:
 
-Security <security/index>
+Security hardening <security-hardening/index>
 ```

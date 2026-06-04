@@ -6,7 +6,7 @@ myst:
 
 (configure-s3-aws)=
 # Configure S3 for AWS
-{{vm}} {{k8s}}
+{{vm}}{{k8s}}
 
 A Charmed PostgreSQL backup can be stored on any S3-compatible storage. S3 access and configurations are managed with the [s3-integrator charm](https://charmhub.io/s3-integrator).
 

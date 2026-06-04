@@ -6,7 +6,7 @@ myst:
 
 (enable-monitoring)=
 # How to enable monitoring
-{{vm}} {{k8s}}
+{{vm}}{{k8s}}
 
 To enable monitoring and observability, {term}`COS <Canonical Observability Stack>` should be deployed in a separate Juju controller and model from PostgreSQL.
 

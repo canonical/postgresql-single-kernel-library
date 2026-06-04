@@ -1,6 +1,8 @@
 (integrate)=
 # Integrate
 
+<!--TODO: rewrite into single page, like MongoDB -->
+
 ```{toctree}
 :titlesonly:
 

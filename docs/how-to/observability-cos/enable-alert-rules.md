@@ -1,6 +1,6 @@
 (enable-alert-rules)=
 # How to enable COS alert rules
-{{vm}} {{k8s}}
+{{vm}}{{k8s}}
 
 Charmed PostgreSQL ships a pre-configured and pre-enabled list of {ref}`Awesome Alert Rules <alert-rules>`.
 

@@ -1,13 +1,7 @@
 (integrate-with-a-client-app)=
 # Integrate with a client application
 
-This guide will show you how to integrate a client application with a cluster-cluster async setup using an example PostgreSQL deployment with two servers: one in Rome and one in Lisbon.
-
-## Prerequisites
-
-* A cluster-cluster replication setup. See: {ref}`How to set up clusters <set-up-clusters>`.
-
----
+This guide describes how to integrate a client application with a cluster-cluster async setup using an example PostgreSQL deployment with two servers: one in Rome and one in Lisbon.
 
 ## Configure database endpoints
 

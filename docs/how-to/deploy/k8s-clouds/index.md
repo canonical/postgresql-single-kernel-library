@@ -1,5 +1,5 @@
 (k8s-clouds)=
-# Kubernetes clouds
+# Deploy on a Kubernetes cloud
 {{k8s}}
 
 ```{toctree}

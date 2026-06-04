@@ -1,5 +1,6 @@
 (units)=
 # PostgreSQL units
+{{vm}}
 
 ## Primary vs. leader unit
 
