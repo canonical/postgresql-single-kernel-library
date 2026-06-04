@@ -4,16 +4,19 @@
 
 """Object representing the global state of PostgreSQL Charm."""
 import re
+import socket
 from ops import Object, Relation, Unit, JujuVersion, ModelError, SecretNotFoundError
 from typing import TYPE_CHECKING, Any, get_args
 from functools import cached_property
-from data_platform_helpers.advanced_statuses import StatusesState, StatusObject, AdvancedStatusesScope
+from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS_RELATION, SCOPES, APP_SCOPE, UNIT_SCOPE
 from single_kernel_postgresql.core.peer_relation import PostgreSQLPeer, PostgreSQLApplication
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import DataPeerUnitData, DataPeerData
 from single_kernel_postgresql.utils.status import format_status
 from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
+from single_kernel_postgresql.utils import unit_name_to_pod_name
 from single_kernel_postgresql.core.config import CharmConfig
 
 if TYPE_CHECKING:
@@ -101,7 +104,21 @@ class CharmState(Object):
             relation=self.peer_relation,
             data_interface=self.peer_app_interface,
             component=self.model.app,
+            substrate=self.substrate,
         )
+
+    # -- Cluster state utilities
+    def _get_hostname_from_unit(self, member: str) -> str:
+        """Create a DNS name for a PostgreSQL/Patroni cluster member.
+
+        Args:
+            member: the Patroni member name, e.g. "postgresql-k8s-0".
+
+        Returns:
+            A string representing the hostname of the PostgreSQL unit.
+        """
+        unit_id = member.split("-")[-1]
+        return f"{self.model.app.name}-{unit_id}.{self.model.app.name}-endpoints"
 
     # -- Cluster State Properties
 
@@ -122,6 +139,41 @@ class CharmState(Object):
             return str(binding.network.bind_address)
 
     @property
+    def fqdn(self) -> str | None:
+        """Current unit fqdn."""
+        if self.substrate == Substrates.K8S:
+            return self._get_hostname_from_unit(unit_name_to_pod_name(self.model.unit.name))
+        else:
+            return socket.getfqdn()
+
+    @property
+    def endpoint(self) -> str | None:
+        """Current unit endpoint."""
+        if self.substrate == Substrates.K8S:
+            return self.fqdn
+        else:
+            return self.unit_ip
+
+    @property
+    def endpoints(self) -> set[str]:
+        """Returns the list of endpoints of the current members of the cluster."""
+        if self.peer_relation:
+            return self.application.endpoints
+        else:
+            return set([self.endpoint]) if self.endpoint else set()
+
+    @property
+    def model_name(self) -> str:
+        """Current model name."""
+        return self.model.name
+
+    @cached_property
+    def patroni_url(self) -> str:
+        """Patroni REST API URL."""
+        return f"https://{self.unit_ip}:8007"
+
+
+    @property
     def peer_members_ips(self) -> set[str]:
         """Fetch current list of peer members IPs.
 
@@ -134,6 +186,22 @@ class CharmState(Object):
         if current_unit_ip in addresses:
             addresses.remove(current_unit_ip)
         return addresses
+
+
+    @property
+    def host(self) -> str:
+        """Current unit host."""
+        return f"{self.model.app.name}-{self.peer.unit_id}"
+
+    @property
+    def common_hosts(self) -> set[str]:
+        """Common hosts to be used in TLS certificate SANs."""
+        return {self.host, self.fqdn} if self.fqdn else {self.host}
+
+    @property
+    def peer_common_name(self) -> str:
+        """Return the common name for the internally generated peer certificate."""
+        return self.peer.database_peers_address or self.host
 
 
     # -- Secrets 

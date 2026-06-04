@@ -16,7 +16,7 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from requests.auth import HTTPBasicAuth
 
 from tenacity import Retrying, stop_after_delay, wait_fixed, RetryError
-from single_kernel_postgresql.compat.postgresql import PostgreSQLBase as PostgreSQLClient
+from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.statuses import GeneralStatuses, PatroniStatuses
 from single_kernel_postgresql.core.state import CharmState
@@ -86,7 +86,7 @@ class PatroniManager(BaseManager):
         for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(7)):
             with attempt:
                 r = requests.get(
-                    f"{self._patroni_url}/health",
+                    f"{self.state.patroni_url}/health",
                     verify=self.verify,
                     timeout=API_REQUEST_TIMEOUT,
                     auth=self._patroni_auth,
@@ -96,10 +96,6 @@ class PatroniManager(BaseManager):
         return r.json()
 
 
-    @cached_property
-    def _patroni_url(self) -> str:
-        """Patroni REST API URL."""
-        return f"https://{self.state.unit_ip}:8008"
 
     @cached_property
     def _patroni_auth(self) -> HTTPBasicAuth | None:

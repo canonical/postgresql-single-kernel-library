@@ -18,3 +18,6 @@ class ErrorSettingSystemPassword(PostgreSQLBaseError):
 
 class PostgreSQLCannotConnectError(Exception):
     """Cannot run smoke check on connected Database."""
+
+class TlsError(Exception):
+    """TLS implementation internal exception."""

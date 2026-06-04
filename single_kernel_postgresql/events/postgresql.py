@@ -4,7 +4,7 @@
 
 """Handler for General PostgreSQL charm events."""
 from typing import TYPE_CHECKING
-from ops import Object, InstallEvent, StartEvent, LeaderElectedEvent, ModelError
+from ops import Object, InstallEvent, StartEvent, LeaderElectedEvent, ModelError, WorkloadEvent, WaitingStatus
 from datetime import datetime
 import logging
 from tenacity import Retrying, stop_after_attempt, wait_fixed
@@ -22,6 +22,7 @@ from single_kernel_postgresql.config.exceptions import StorageUnavailableError, 
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
+    from single_kernel_postgresql.charms.k8s_charm import PostgreSQLK8sCharm
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,9 @@ class PostgreSQLEventsHandler(Object):
         # Charm events
         self.framework.observe(self.charm.on.install, self._on_install)
         self.framework.observe(self.charm.on.start, self._on_start)
+        self.framework.observe(self.charm.on.leader_elected, self._on_leader_elected)
+        if self.state.substrate == Substrates.K8S:
+            self.framework.observe(self.on.postgresql_pebble_ready, self._on_postgresql_pebble_ready)
 
     def _on_install(self, event: InstallEvent) -> None:
         """Install prerequisites for the application."""
@@ -93,6 +97,49 @@ class PostgreSQLEventsHandler(Object):
 
         self.cluster_manager.expose_ip_and_port()
 
+        self._start_primary(event)
+
+    def _on_postgresql_pebble_ready(self, event: WorkloadEvent) -> None:
+        """Event handler for PostgreSQL container on PebbleReadyEvent."""
+        assert isinstance(self.charm, PostgreSQLK8sCharm), "Charm must be an instance of PostgreSQLK8sCharm"
+        # TODO: Safeguard against refresh 
+        if self.state.endpoint in self.state.endpoints:
+            # TODO: Fix pod by adding services 
+            pass
+
+        # TODO: move this code to an "_update_layer" method in order to also utilize it in
+        # config-changed hook.
+        # Get the postgresql container so we can configure/manipulate it.
+        container = event.workload
+        if not container.can_connect():
+            logger.debug(
+                "Defer on_postgresql_pebble_ready: Waiting for container to become available"
+            )
+            event.defer()
+            return
+        # Create the PostgreSQL data directory. This is needed on cloud environments
+        # where the volume is mounted with more restrictive permissions.
+        # TODO: Create pgdata
+
+        if not self.state.application.internal_ca:
+            logger.info("leader not elected and/or internal CA not yet generated")
+            event.defer()
+            return
+        if not self.state.peer.internal_cert:
+            self.tls_manager.configure_internal_peer_cert()
+
+        # Start the database service
+        self.charm.k8s_manager.update_pebble_layers()
+
+        # Assert the member is up and running before marking it as initialised.
+        if not self.patroni_manager.member_started:
+            logger.debug("Deferring on_start: awaiting for member to start")
+            event.defer()
+            return
+
+
+
+
 
 
 
@@ -114,6 +161,8 @@ class PostgreSQLEventsHandler(Object):
 
 
         # TODO: Add next steps of leader elected 
+
+    
 
     def _can_start(self, event: StartEvent) -> bool:
         """Returns whether the workload can be started on this unit."""
@@ -165,19 +214,11 @@ class PostgreSQLEventsHandler(Object):
 
         Workaround for lxd containers not getting storage attached on startups.
         """
+        cached_status = self.charm.unit.status
         for attempt in Retrying(stop=stop_after_attempt(10), wait=wait_fixed(1), reraise=True):
             with attempt:
                 if not workload.is_storage_attached():
                     logger.error("Data directory not attached.")
-                    self.state.add_status_if_not_present(
-                        GeneralStatuses.WAITING_DIRECTORY_NOT_ATTACHED,
-                        scope="unit",
-                        component=self.cluster_manager.name
-                    )
+                    self.charm.unit.status = WaitingStatus("Data directory not attached")
                     raise StorageUnavailableError()
-
-        self.state.remove_status_if_present(
-            GeneralStatuses.WAITING_DIRECTORY_NOT_ATTACHED,
-            scope="unit",
-            component=self.cluster_manager.name
-        )
+        self.charm.unit.status = cached_status

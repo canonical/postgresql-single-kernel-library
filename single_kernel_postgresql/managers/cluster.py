@@ -14,7 +14,7 @@ from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
 from tenacity import Retrying, stop_after_delay, wait_fixed, RetryError
-from single_kernel_postgresql.compat.postgresql import PostgreSQLBase as PostgreSQLClient
+from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
@@ -100,7 +100,6 @@ class ClusterManager(BaseManager):
     def expose_ip_and_port(self) -> None:
         """Expose the unit's IP and port to the peer relation."""
         self.state.peer.ip = self.state.unit_ip
-        self.unit_peer_data.update({"ip": self.state.unit_ip})
 
         # Open port
         try:

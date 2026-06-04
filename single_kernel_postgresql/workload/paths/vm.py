@@ -4,7 +4,7 @@
 
 from charmlibs.pathops import PathProtocol
 from single_kernel_postgresql.workload.paths.base import Paths
-from single_kernel_postgresql.config.literals import BASE_SNAP_DIR, SNAP_DATA, SNAP_COMMON, SNAP, DATA_PATH, POSTGRESQL_CONF_FILE, POSTGRESQL_CONF_PATH, PATRONI_CONF_PATH
+from single_kernel_postgresql.config.literals import BASE_SNAP_DIR, SNAP_DATA, SNAP_COMMON, SNAP, VM_DATA_PATH, POSTGRESQL_CONF_FILE, POSTGRESQL_CONF_PATH, PATRONI_CONF_PATH
 
 from single_kernel_postgresql.workload.paths.base import Paths
 
@@ -62,9 +62,10 @@ class VMPaths(Paths):
         """Path to the patroni.yaml file."""
         return self.snap_current / PATRONI_CONF_PATH 
 
+    @property
     def data(self) -> PathProtocol:
         """Path to the data folder of PostgreSQL."""
-        return self.snap_common / DATA_PATH
+        return self.snap_common / VM_DATA_PATH
 
     @property
     def logs(self) -> PathProtocol:

@@ -7,19 +7,22 @@
 Responsible for managing the TLS configuration of the PostgreSQL instance.
 """
 import logging
-from ops import ModelError, SecretNotFoundError
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from charmlibs.interfaces.tls_certificates import (
     generate_ca,
     generate_private_key,
+    generate_certificate,
+    PrivateKey,
+    Certificate,
+    generate_csr,
 )
 from datetime import timedelta
 
-from single_kernel_postgresql.compat.postgresql import PostgreSQLBase as PostgreSQLClient
-from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.config.statuses import GeneralStatuses
+from single_kernel_postgresql.config.exceptions import TlsError
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.workload.base import BaseWorkload
@@ -53,7 +56,32 @@ class TLSManager(BaseManager):
 
     def generate_internal_peer_cert(self) -> None:
         """Generate internal peer certificate using the tls lib."""
-        raise NotImplementedError()
+        if not (ca_key_secret := self.state.application.internal_ca_key):
+            raise TlsError("No CA key content.")
+        ca_key = PrivateKey.from_string(ca_key_secret)
+        if not (ca_secret := self.state.application.internal_ca):
+            raise TlsError("No CA cert content.")
+        ca = Certificate.from_string(ca_secret)
+        private_key = generate_private_key()
+        csr = generate_csr(
+            private_key,
+            common_name=self.state.peer_common_name,
+            sans_ip=frozenset(self.state.peer.peer_addresses),
+            sans_dns=frozenset({
+                *self.state.common_hosts,
+                # IP address need to be part of the DNS SANs list due to
+                # https://github.com/pgbackrest/pgbackrest/issues/1977.
+                *self.state.peer.peer_addresses,
+            }),
+        )
+        cert = generate_certificate(csr, ca, ca_key, validity=timedelta(days=7300))
+        self.state.peer.internal_cert = str(cert)
+        self.state.peer.internal_key = str(private_key)
+
+        #self.charm.push_tls_files_to_workload()
+        logger.info(
+            "Internal peer certificate generated. Please use a proper TLS operator if possible."
+        )
 
     def generate_internal_peer_ca(self) -> None:
         """Generate internal peer CA using the tls lib."""
