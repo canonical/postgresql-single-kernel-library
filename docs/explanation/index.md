@@ -1,5 +1,6 @@
 (explanation)=
 # Explanation
+{{vm}}{{k8s}}
 
 Additional context about the PostgreSQL charm, including design, legacy information, and security.
 
@@ -27,7 +28,7 @@ Users <users>
 Roles <roles>
 Logs <logs>
 Connection pooling <connection-pooling>
-Performance and resources <performance-and-resources>
+Performance and testing <performance-and-testing>
 ```
 
 ## Security

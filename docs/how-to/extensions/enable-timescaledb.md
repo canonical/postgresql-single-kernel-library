@@ -1,5 +1,7 @@
 (enable-timescaledb)=
 # How to enable TimescaleDB
+{{vm}}{{k8s}}
+<!--TODO: add K8S -->
 
 Charmed PostgreSQL separates TimescaleDB editions for different [Charmhub tracks](https://canonical-charmcraft.readthedocs-hosted.com/en/stable/howto/manage-channels/):
 
@@ -7,43 +9,79 @@ Charmed PostgreSQL separates TimescaleDB editions for different [Charmhub tracks
 
 ## Enable TimescaleDB
 
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
 To enable TimescaleDB plugin/extension simply run:
 
-```shell
-juju config postgresql plugin-timescaledb-enable=true
-```
+	juju config postgresql plugin-timescaledb-enable=true
 
 The plugin has been enabled on all units once the config-change event finished and all units reports idle:
 
-```shell
-$ juju status
-...
-Unit           Workload  Agent      Machine  Public address  Ports     Message
-postgresql/3*  active    executing  3        10.189.210.124  5432/tcp  (config-changed) Primary
-postgresql/5   active    executing  5        10.189.210.166  5432/tcp  (config-changed)
-postgresql/6   active    executing  6        10.189.210.150  5432/tcp  (config-changed)
-...
-Unit           Workload  Agent  Machine  Public address  Ports     Message
-postgresql/3*  active    idle   3        10.189.210.124  5432/tcp  Primary
-postgresql/5   active    idle   5        10.189.210.166  5432/tcp
-postgresql/6   active    idle   6        10.189.210.150  5432/tcp
-...
+	$ juju status
+	...
+	Unit           Workload  Agent      Machine  Public address  Ports     Message
+	postgresql/3*  active    executing  3        10.189.210.124  5432/tcp  (config-changed) Primary
+	postgresql/5   active    executing  5        10.189.210.166  5432/tcp  (config-changed)
+	postgresql/6   active    executing  6        10.189.210.150  5432/tcp  (config-changed)
+	...
+	Unit           Workload  Agent  Machine  Public address  Ports     Message
+	postgresql/3*  active    idle   3        10.189.210.124  5432/tcp  Primary
+	postgresql/5   active    idle   5        10.189.210.166  5432/tcp
+	postgresql/6   active    idle   6        10.189.210.150  5432/tcp
+	...
 ```
+```{tab-item} K8s
+:sync: k8s
+
+To enable TimescaleDB plugin/extension simply run:
+
+	juju config postgresql-k8s plugin-timescaledb-enable=true
+
+The plugin has been enabled on all units once the config-change event finished and all units reports idle:
+
+	$ juju status
+	...
+	Unit               Workload  Agent      Public address  Ports     Message
+	postgresql-k8s/0*  active    executing  10.1.142.171		      (config-changed) Primary
+	postgresql-k8s/1   active    executing  10.1.142.169		      (config-changed)
+	postgresql-k8s/2   active    executing  10.1.142.170		      (config-changed)
+	...
+	Unit               Workload  Agent  Public address  Ports     Message
+	postgresql-k8s/0*  active    idle   10.1.142.171              Primary
+	postgresql-k8s/1   active    idle   10.1.142.169
+	postgresql-k8s/2   active    idle   10.1.142.170
+	...
+```
+````
 
 ## Disable TimescaleDB
 
 To disable it explicitly, simply run:
 
-```shell
-juju config postgresql plugin-timescaledb-enable=false
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+	juju config postgresql plugin-timescaledb-enable=false
+
 ```
+```{tab-item} K8s
+:sync: k8s
 
-The plugin has been disabled on all units once the config-change event finished and all units reports idle (same example as above).
+	juju config postgresql-k8s plugin-timescaledb-enable=false
+```
+````
 
-The extension will NOT be disable when database objects uses/depends on plugin is being disabled (clean the database to disable the plugin):
+The plugin has been disabled on all units once the config-change event finishes and all units reports idle.
+
+The extension will NOT be disable when database objects uses/depends on plugin is being disabled (clean the database to disable the plugin).
+
+For example:
 
 ```shell
-> juju status
+$ juju status
 ...
 Unit           Workload  Agent  Machine  Public address  Ports     Message
 postgresql/3*  blocked   idle   3        10.189.210.124  5432/tcp  Cannot disable plugins: Existing objects depend on it. See logs
@@ -52,9 +90,19 @@ postgresql/3*  blocked   idle   3        10.189.210.124  5432/tcp  Cannot disabl
 
 Another option is to reset the manually enabled config option (as it is disabled by default):
 
-```shell
-juju config postgresql --reset plugin-timescaledb-enable
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+	juju config postgresql --reset plugin-timescaledb-enable
+
 ```
+```{tab-item} K8s
+:sync: k8s
+
+	juju config postgresql-k8s --reset plugin-timescaledb-enable
+```
+````
 
 ## Test TimescaleDB status
 

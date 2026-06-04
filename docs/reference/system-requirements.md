@@ -45,7 +45,7 @@ Minimum recommended hardware for **testing**:
 * RAM: 2GB
 * Disk: 10GB
 
-Actual hardware requirements will depend on the workload you are running against your database. See: {ref}`performance-and-resources`.
+Actual hardware requirements will depend on the workload you are running against your database. See: {ref}`performance-and-testing`.
 
 The charm is based on the [charmed-postgresql snap](https://snapcraft.io/charmed-postgresql).
 

@@ -1,4 +1,4 @@
-(performance-and-resources)=
+(performance-and-testing)=
 # Performance and testing
 {{vm}}{{k8s}}
 
@@ -58,11 +58,14 @@ Juju constraints can be set together with the charm's profile:
 ```
 ````
 
-## Benchmarking
+(testing)=
+## Testing
+
+### Benchmarking
 
 For performance testing and benchmarking charms, we recommend using the [Charmed Sysbench](https://charmhub.io/sysbench) operator. This is a tool for benchmarking database applications that includes monitoring and CPU/RAM/IO performance measurement.
 
-## Smoke test
+### Smoke test
 
 This type of test ensures that basic functionality works over a short amount of time.
 
@@ -144,7 +147,7 @@ watch -n1 -x juju run postgresql-test-app/leader run-sql dbname=${db} query="${q
 watch -n1 -x juju ssh --container postgresql postgresql-k8s/leader "psql postgresql://${user}:${pass}@${ip}:5432/${db} -c \"${query}\""
 -->
 
-## System test
+### System test
 
 To perform a system test, deploy the PostgreSQL charm bundle ([VM](https://charmhub.io/postgresql-bundle) | [K8s](https://charmhub.io/postgresql-k8s-bundle)). This charm bundle automatically deploys and tests all the necessary parts at once.
 

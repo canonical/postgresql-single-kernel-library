@@ -1,5 +1,6 @@
 (troubleshooting)=
 # Troubleshooting
+{{vm}}{{k8s}}
 
 ```{toctree}
 :titlesonly:

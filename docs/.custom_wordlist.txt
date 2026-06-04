@@ -102,6 +102,7 @@ npm
 Numpy
 Open Graph
 openapi
+optimizer*
 otf
 Parca
 Parca's

@@ -1,5 +1,6 @@
 (how-to)=
 # How-to guides
+{{vm}}{{k8s}}
 
 The following guides cover key processes and common tasks for setting up and managing Charmed PostgreSQL on bare metal and virtual machines.
 

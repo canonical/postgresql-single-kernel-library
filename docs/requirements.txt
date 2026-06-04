@@ -36,3 +36,4 @@ vale~=3.13
 # Custom dependencies
 sphinx-new-tab-link
 sphinx-datatables
+sphinxcontrib-mermaid

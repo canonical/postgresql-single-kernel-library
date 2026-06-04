@@ -7,7 +7,7 @@ Charmed PostgreSQL uses the [Juju storage](https://documentation.ubuntu.com/juju
 
 [Charmed PostgreSQL 16](https://charmhub.io/postgresql?channel=16/stable) supports multiple storage types: `archive`, `data`, `logs` and `temp`.
 
-The {ref}`legacy PostgreSQL charm <charm-versions` in track [`latest`](https://charmhub.io/postgresql?channel=latest/stable)" does **not** support the Juju storage abstraction.
+The {ref}`legacy PostgreSQL charm <charm-versions>` in track [`latest`](https://charmhub.io/postgresql?channel=latest/stable)" does **not** support the Juju storage abstraction.
 
 ## Check Juju storage details
 

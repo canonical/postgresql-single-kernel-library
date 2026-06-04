@@ -249,7 +249,8 @@ extensions = [
     "sphinx_sitemap",
     # Custom extensions
     "sphinx_new_tab_link",
-    "sphinx_datatables"
+    "sphinx_datatables",
+    "sphinxcontrib.mermaid"
 ]
 
 # sphinx_new_tab_link configuration

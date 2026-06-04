@@ -7,4 +7,4 @@ Report a security issue on [GitHub](https://github.com/canonical/postgresql-sing
 
 Chat with the Data team directly on [Matrix](https://matrix.to/#/#charmhub-data-platform:ubuntu.com)
 
-Contact the sales team about your use-case through our [business form](https://canonical.com/data/postgresql#get-in-touch)
+Contact the sales team about your use-case through our [business form](https://canonical.com/data/postgresql)

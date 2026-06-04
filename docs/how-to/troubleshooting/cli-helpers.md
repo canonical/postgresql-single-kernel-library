@@ -1,13 +1,14 @@
 (cli-helpers)=
 # How to use CLI helpers
 {{vm}}
+<!--TODO: check for K8s -->
 
 This page describes some useful low-level tools shipped withing Charmed PostgreSQL for advanced troubleshooting.
 
 ```{caution}
 **These tools can be dangerous in a production environment if they are not used correctly.**
 
-When in doubt, {ref}`contact us <contacts>`.
+When in doubt, {ref}`contact us <contact>`.
 ```
 
 ## Patroni
@@ -17,7 +18,7 @@ Troubleshooting tools include:
 * The Patroni REST API
 * The Raft library
 
-Learn more about Patroni in the [Architecture](/explanation/architecture) page.
+Learn more about Patroni in {ref}`architecture`.
 
 ### `patronictl`
 

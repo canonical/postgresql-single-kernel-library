@@ -109,7 +109,7 @@ To utilise encryption at transit for all internal and external cluster connectio
 
 Encryption in transit for backups is provided by the storage service (Charmed PostgreSQL is a client for an S3-compatible storage).
 
-For more information on encryption, see {ref}`cryptography` and {ref}`networking-and-encryption`.
+For more information on encryption, see {ref}`cryptography` and {ref}`network-and-encryption`.
 
 ### Authentication
 
@@ -119,13 +119,13 @@ Charmed PostgreSQL supports the password-based `scram-sha-256` authentication me
 * Internal connections between members of cluster
 * PgBouncer connections
 
-For more implementation details, see the [PostgreSQL documentation](https://www.postgresql.org/docs/14/auth-password.html).
+For more implementation details, see the [PostgreSQL documentation](https://www.postgresql.org/docs/16/auth-password.html).
 
 ### Monitoring and auditing
 
-Charmed PostgreSQL provides native integration with the [Canonical Observability Stack (COS)](https://charmhub.io/topics/canonical-observability-stack). To reduce the blast radius of infrastructure disruptions, the general recommendation is to deploy COS and the observed application into separate environments, isolated from one another. Refer to the [COS production deployments best practices](https://charmhub.io/topics/canonical-observability-stack/reference/best-practices) for more information or see the How to guides for PostgreSQL [monitoring](https://canonical.com/data/docs/postgresql/iaas/h-enable-monitoring), [alert rules](https://canonical.com/data/docs/postgresql/iaas/h-enable-alert-rules), and [tracing](https://canonical.com/data/docs/postgresql/iaas/h-enable-tracing) for practical instructions.
+Charmed PostgreSQL provides native integration with the [Canonical Observability Stack (COS)](https://charmhub.io/topics/canonical-observability-stack). To reduce the blast radius of infrastructure disruptions, the general recommendation is to deploy COS and the observed application into separate environments, isolated from one another. Refer to the [COS production deployments best practices](https://charmhub.io/topics/canonical-observability-stack/reference/best-practices) for more information, see the how-to guides about {ref}`observability-cos`.
 
-PostgreSQL logs are stored in `/var/snap/charmed-postgresql/common/var/log/postgresql` within the PostgreSQL container of each unit. It’s recommended to integrate the charm with [COS](/how-to/monitoring-cos/enable-monitoring), from where the logs can be easily persisted and queried using [Loki](https://charmhub.io/loki-k8s)/[Grafana](https://charmhub.io/grafana).
+PostgreSQL logs are stored in `/var/snap/charmed-postgresql/common/var/log/postgresql` within the PostgreSQL container of each unit. It’s recommended to integrate the charm with {ref}`COS <enable-monitoring>`, from where the logs can be easily persisted and queried using [Loki](https://charmhub.io/loki-k8s)/[Grafana](https://charmhub.io/grafana).
 
 ### Security event logging
 
@@ -142,9 +142,9 @@ Other events, like connections and disconnections, are logged depending on the v
 
 Also, all operations performed by the charm as a result of user actions — such as enabling or disabling plugins, managing TLS, creating or restoring backups, and configuring replication between clusters (asynchronous or logical) — are executed through the underlying workload components (PostgreSQL, Patroni, or pgBackRest). Consequently, these operations are recorded in the respective workload log files, which are accessible in the directories below and also forwarded to COS:
 
-* /var/snap/charmed-postgresql/common/var/log/patroni
-* /var/snap/charmed-postgresql/common/var/log/pgbackrest
-* /var/snap/charmed-postgresql/common/var/log/postgresql
+* `/var/snap/charmed-postgresql/common/var/log/patroni`
+* `/var/snap/charmed-postgresql/common/var/log/pgbackrest`
+* `/var/snap/charmed-postgresql/common/var/log/postgresql`
 
 No secrets are logged.
 
@@ -162,7 +162,7 @@ Charmed PostgreSQL K8s and Charmed PgBouncer K8s run on top of rockcraft-based i
 
 New versions (revisions) of the charmed operators can be released to update the operator's code, workloads, or both. It is important to refresh the charms regularly to make sure the workloads are as secure as possible.
 
-For more information on upgrading Charmed PostgreSQL K8s, see the [How to upgrade PostgreSQL K8s](https://canonical.com/data/docs/postgresql/k8s/h-upgrade) and [How to upgrade PgBouncer K8s](https://charmhub.io/pgbouncer-k8s/docs/h-upgrade) guides, as well as the respective Release notes for [PostgreSQL](https://canonical.com/data/docs/postgresql/k8s/r-releases) and [PgBouncer](https://charmhub.io/pgbouncer-k8s/docs/r-releases).
+For more information on upgrading Charmed PostgreSQL K8s, see the [How to upgrade PostgreSQL K8s](https://canonical.com/data/docs/postgresql/k8s/h-upgrade) and [How to upgrade PgBouncer K8s](https://charmhub.io/pgbouncer-k8s/docs/h-upgrade) guides, as well as the respective {ref}`release notes for Charmed PostgreSQL <release-notes>` and [PgBouncer](https://charmhub.io/pgbouncer-k8s/docs/r-releases).
 
 ### Encryption
 
@@ -170,7 +170,7 @@ To utilise encryption at transit for all internal and external cluster connectio
 
 Encryption in transit for backups is provided by the storage service (Charmed PostgreSQL K8s is a client for an S3-compatible storage).
 
-For more information on encryption, see [](/explanation/security/cryptography) and [](/how-to/enable-tls).
+For more information on encryption, see {ref}`cryptography` and {ref}`enable-tls`.
 
 ### Authentication
 

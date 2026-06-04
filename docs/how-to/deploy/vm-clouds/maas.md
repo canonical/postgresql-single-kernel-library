@@ -137,9 +137,7 @@ Machine  State    Address     Inst id        Base          AZ       Message
 0        started  10.10.10.5  wanted-dassie  ubuntu@22.04  default  Deployed
 ```
 
-## Test your Charmed PostgreSQL deployment
-
-Check the [Testing](/reference/software-testing) reference to test your deployment.
+See {ref}`testing` for guidance about the different ways to test your deployment.
 
 ## Clean up the environment
 
@@ -163,5 +161,5 @@ To completely delete your VM and all its data, run:
 multipass delete --purge maas
 ```
 
-If you expect having several concurrent connections frequently, it is highly recommended to deploy [PgBouncer](https://charmhub.io/pgbouncer?channel=1/stable) alongside PostgreSQL. For more information, read our explanation about [Connection pooling](/explanation/connection-pooling).
+If you expect having several concurrent connections frequently, it is highly recommended to deploy [PgBouncer](https://charmhub.io/pgbouncer?channel=1/stable) alongside PostgreSQL. For more information, read our explanation about {ref}`connection-pooling`.
 

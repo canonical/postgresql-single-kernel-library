@@ -1,5 +1,6 @@
 (enable-tls)=
 # How to enable TLS encryption
+{{vm}}{{k8s}}
 
 This guide will show how to enable TLS/SSL on a PostgreSQL cluster using the [`self-signed-certificates` operator](https://github.com/canonical/self-signed-certificates-operator) as an example.
 
