@@ -26,7 +26,7 @@ dependencies = [
 postgresql = [
     "httpx; python_version >= '3.12'",
     "data-platform-helpers>=0.1.7; python_version >= '3.12'",
-    "charmlibs-pathops>=1.0.1; python_version >= '3.10'",
+    "charmlibs-pathops>=1.0.1; python_version >= '3.12'",
  ]
 
 [build-system]
