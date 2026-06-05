@@ -4,13 +4,13 @@
 
 [Azure](https://azure.com/) is a cloud computing platform developed by Microsoft. It has management, access and development of applications and services to individuals, companies, and governments through its global infrastructure. Access the Azure web console at [portal.azure.com](https://portal.azure.com/).
 
-## Set up Juju and Azure tooling
+## Prerequisites
 
-```{caution}
 The `Azure interactive` method (with web browser authentication `service-principal-secret-via-browser`) described here is only supported starting Juju `3.6-rc1+`!
-```
 
-### Install Juju and Azure CLI
+---
+
+## Install Juju and Azure CLI
 
 Install Juju via snap:
 
@@ -39,7 +39,7 @@ azure-mgmt-resource               23.1.1
 Your CLI is up-to-date.
 ```
 
-### Authenticate
+## Authenticate
 
 Please follow [the official Juju Azure documentation](https://juju.is/docs/juju/microsoft-azure) and check [the extra explanation about possible options](https://discourse.charmhub.io/t/how-to-use-juju-with-microsoft-azure/15219). Choose the authentication method which fits you best.
 
@@ -54,6 +54,7 @@ juju add-credential azure
 ```
 
 This will start a script that will help you set up the credentials, where you will be asked to fill in a set of parameters:
+
 * `credential-name`: Fill this with a sensible name that will help you identify the credential set, say `<CREDENTIAL_NAME>`
 * `region`: Select any default region that is more convenient for you to deploy your controller and applications. Note that credentials are not region-specific.
 * `auth type`: select `interactive`, which is the recommended way to authenticate to Azure using Juju
@@ -119,7 +120,7 @@ Credential "azure-test-credentials1" added locally for cloud "azure".
 ```
 </details>
 
-### Bootstrap Juju controller
+## Bootstrap Juju controller
 
 Once successfully completed, bootstrap the new Juju controller on Azure:
 
@@ -241,8 +242,13 @@ If it is necessary to access the database from outside of Azure, open the Azure 
 juju expose postgresql
 ```
 
-```{caution}
-Be wary that opening ports to the public is risky.
+```{dropdown} Be wary of opening ports to the public
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+Make sure you understand the risks before doing this in production.
 ```
 
 Once exposed, you can connect your database using the same credentials as above. This time use the Azure VM public IP assigned to the PostgreSQL instance. You can see this with `juju status`:
@@ -294,9 +300,7 @@ juju unexpose postgresql
 
 ## Clean up
 
-```{caution}
-Always clean Azure resources that are no longer necessary -  they could be costly!
-```
+Always clean cloud resources that are no longer necessary; they could be costly!
 
 See all controllers in your machine with the following command:
 

@@ -5,7 +5,7 @@ myst:
 ---
 
 (air-gapped)=
-# Deploy in an offline or air-gapped environment
+# How to deploy in an offline or air-gapped environment
 {{vm_k8s}}
 
 An air-gapped environment refers to a system that does not have access to the public internet.
@@ -50,16 +50,18 @@ To learn how to manually exports snaps, follow the official Enterprise Store doc
 
 * [Offline Charmhub > Export snap resources](https://documentation.ubuntu.com/enterprise-store/main/how-to/airgap-charmhub/#export-snap-resources).
 
-```{caution}
-Always use the `snap.yaml` and `bundle.yaml` from the same Git commit!
-
-The [`snap.yaml`](https://github.com/canonical/postgresql-bundle/blob/main/releases/latest/) shipped by the PostgreSQL bundle is mapped to the published [`bundle.yaml`](https://github.com/canonical/postgresql-bundle/blob/main/releases/latest/).
-```
-
 For example:
 
 ```shell
 store-admin export snaps --from-yaml snaps.yaml
+```
+
+```{dropdown} Always use the <code>snap.yaml</code> and <code>bundle.yaml</code> from the same Git commit!
+:color: warning
+:icon: commit
+:class-title: sd-font-weight-normal
+
+The [`snap.yaml`](https://github.com/canonical/postgresql-bundle/blob/main/releases/latest/) shipped by the PostgreSQL bundle is mapped to the published [`bundle.yaml`](https://github.com/canonical/postgresql-bundle/blob/main/releases/latest/).
 ```
 
 ### Export OCI images (K8s only)
@@ -179,7 +181,12 @@ Deploy and operate Juju charms normally:
 ```
 ````
 
-```{caution}
+```{dropdown} Artifact store revisions
+:open:
+:color: warning
+:icon: tag
+:class-title: sd-font-weight-normal
+
 All the charm, snap, and OCI revisions deployed in the airgapped environment must match the official Charmhub and Snap Store revisions.
 
 Use the official {ref}`release notes <release-notes>` as a reference.

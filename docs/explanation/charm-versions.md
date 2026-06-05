@@ -1,6 +1,6 @@
 (charm-versions)=
 # PostgreSQL major versions
-{{vm_k8s}}
+{{vm}}{{k8s}}
 
 ````{tab-set}
 ```{tab-item} VM
@@ -32,7 +32,7 @@ Modern charm
 : `14/stable` provides legacy endpoints and new `database` endpoint for the `postgresql_client` interface.
 : `16/stable` **does not** provide legacy endpoints - only the new `database` `database` endpoint for the `postgresql_client` interface.
 
-See also: {ref}`interfaces-and-endpoints`
+{{seealso}} {ref}`interfaces-and-endpoints`
 
 ## Choosing a version
 

@@ -14,6 +14,8 @@ PostgreSQL extension
 
 PostgreSQL plugin
     (also "extension") A modular package that adds new functionality to PostgreSQL. {ref}`Several plugins <supported-extensions>` are included in the charm.
+
+Split-brain scenario
 ```
 
 <!--

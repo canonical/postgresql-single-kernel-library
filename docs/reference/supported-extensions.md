@@ -3,9 +3,8 @@
 
 List of PostgreSQL extensions (aka plugins) supported by the charm.
 
-```{seealso}
-{ref}`enable-extension`
-```
+{{seealso}} {ref}`enable-extension`
+
 
 `````{tab-set}
 ````{tab-item} VM

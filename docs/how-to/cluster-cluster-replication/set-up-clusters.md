@@ -87,7 +87,6 @@ juju add-unit db1 -n 2 -m rome
 juju add-unit db2 -n 2 -m lisbon
 ```
 
-```{note}
-Scaling is possible before and after the asynchronous replication is established.
-```
+Scaling is possible both before and after the asynchronous replication is established.
+
 

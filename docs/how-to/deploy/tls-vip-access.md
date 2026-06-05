@@ -1,5 +1,4 @@
 (tls-vip-access)=
-
 # How to deploy for external TLS VIP access
 {{vm}}
 
@@ -23,10 +22,6 @@ The basic requirements to follow along with this example setup are the following
 * DNS record pointing to VIP above (`my-tls-example-db.local` is used as an example here)
 
 ## Design
-
-```{caution}
-This setup is applicable for VM/machine charms only. Do **not** use it as a reference for Kubernetes deployments.
-```
 
 ![PostgreSQL TLS VIP|631x562](tls-vip-setup.png)
 
@@ -159,19 +154,13 @@ Ensure your DNS records points to the virtual IP and that it is routable/reachab
 psql postgresql://relation_id_9:V7kHqHyapIphkUS0cHoOtP3j@my-tls-example-db.local:6432/mytestdb
 ```
 
-## (Optional) Add monitoring
+## Add monitoring
 
-Consider adding the [Canonical Observability Stack (COS)](https://charmhub.io/topics/canonical-observability-stack) to your setup for monitoring, alert rules, logs, and tracing.
+We recommend adding the [Canonical Observability Stack (COS)](https://charmhub.io/topics/canonical-observability-stack) to your setup for monitoring, alert rules, logs, and tracing.
 
-See: {ref}`enable-monitoring`, [PgBouncer | How to enable monitoring](https://discourse.charmhub.io/t/pgbouncer-how-to-enable-monitoring/12308).
+{{seealso}} {ref}`enable-monitoring` and [How to enable monitoring (PgBouncer)](https://discourse.charmhub.io/t/pgbouncer-how-to-enable-monitoring/12308).
 
 ## High availability
-
-```{caution}
-In production environments, deploy different units into separate availability zones (AZ).
-
-See: {ref}`multi-az`
-```
 
 At this point, Juju is responsible for the health of the clusters/applications:
 * The PostgreSQL charm will restart the workload if PostgreSQL is not healthy.
@@ -180,3 +169,14 @@ At this point, Juju is responsible for the health of the clusters/applications:
 * The HA Cluster charm will make sure the VIP is always reachable and routes to a single PgBouncer.
 * PgBouncer will balance incoming connections and makes sure write traffic goes to the primary PostgreSQL unit.
 * The TLS operator (in this example, the `self-signed-certificates` charm) is responsible for providing all components with signed ready-to-use TLS artifacts.
+
+```{dropdown} Multiple availability zones
+:open:
+:color: light
+:icon: light-bulb
+:class-title: sd-font-weight-normal
+
+In production environments, deploy different units into separate availability zones (AZ).
+
+See: {ref}`multi-az`
+```

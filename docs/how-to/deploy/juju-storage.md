@@ -1,5 +1,4 @@
 (juju-storage)=
-
 # How to deploy on Juju storage
 {{vm}} <!--TODO: check if available for K8s -->
 
@@ -7,15 +6,24 @@ Charmed PostgreSQL uses the [Juju storage](https://documentation.ubuntu.com/juju
 
 [Charmed PostgreSQL 16](https://charmhub.io/postgresql?channel=16/stable) supports multiple storage types: `archive`, `data`, `logs` and `temp`.
 
-The {ref}`legacy PostgreSQL charm <charm-versions>` in track [`latest`](https://charmhub.io/postgresql?channel=latest/stable)" does **not** support the Juju storage abstraction.
+## Prerequisites
+
+If deploying on Terraform, note that the Juju Terraform Provider introduced storage support in version [0.13](https://github.com/juju/terraform-provider-juju/releases/tag/v0.13.0)
+
+---
 
 ## Check Juju storage details
 
-Check the [`metadata.yaml`](https://github.com/canonical/postgresql-operator/blob/16/edge/metadata.yaml) for find Juju storage name and tech details:
+Charmed PostgreSQL 16 supports multiple storage types: `archive` , `data` , `logs` and `temp`. Check the [`metadata.yaml`](https://github.com/canonical/postgresql-operator/blob/16/edge/metadata.yaml) to find more technical details.
 
-<details><summary>Charmed PostgreSQL 16 storage list</summary>
+````{dropdown} Charmed PostgreSQL 16 storage list
+:open:
+:color: light
+:icon: list-unordered
+:class-title: sd-font-weight-normal
+:class-body: sd-py-0
 
-```shell
+```
 storage:
   archive:
     type: filesystem
@@ -30,12 +38,13 @@ storage:
     type: filesystem
     location: /var/snap/charmed-postgresql/common/data/temp
 ```
-</details>
+````
 
-Charmed PostgreSQL 16 supports multiple storage types: `archive` , `data` , `logs` and `temp` . See the deployment examples below.
-
-```{warning}
-The charm only supports using tmpfs as a storage provider for `temp` storage.
+```{dropdown} The charm only supports using tmpfs as a storage provider for <code>temp</code> storage.
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
 
 Using tmpfs for `archive`, `data`, or `logs` storage is not supported. These storage types must be backed by persistent filesystems.
 ```

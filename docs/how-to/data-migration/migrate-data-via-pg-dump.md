@@ -15,8 +15,12 @@ A minor difference in commands might be necessary for different revisions and/or
 * Add relation to modern charm
 * Validate results and remove legacy charm
 
-```{caution}
-Always test migration in a safe environment before performing it in production!
+```{dropdown} Always try this in a test environment before performing it in production!
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+{ref}`Contact us <contact>` for more guidance.
 ```
 
 ## Prerequisites
@@ -87,9 +91,7 @@ NEW_DB_PASS=<your password>
 
 Use the credentials and information obtained in previous steps to perform the database migration with the following procedure.
 
-```{note}
-Make sure no new connections were made and that the database has not been altered!
-```
+Make sure no new connections were made and that the database has not been altered.
 
 ### Create dump from legacy charm
 

@@ -124,10 +124,6 @@ Sample output:
 
 ## Bootstrap Juju on EKS
 
-```{caution}
-There is a known bug for `juju v.3.1` users: bugs.launchpad.net/juju/+bug/2007848
-```
-
 Add Juju k8s clouds:
 
 ```shell
@@ -190,9 +186,7 @@ ip-192-168-78-167.eu-west-3.compute.internal   Ready    <none>   19m   v1.27.5-e
 
 ## Clean up
 
-```{caution}
-Always clean EKS resources that are no longer necessary -  they could be costly!
-```
+Always clean cloud resources that are no longer necessary; they could be costly!
 
 To clean the EKS cluster, resources and juju cloud, run the following commands:
 

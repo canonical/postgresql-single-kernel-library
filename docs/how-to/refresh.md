@@ -1,14 +1,21 @@
 (refresh)=
 # Refresh (upgrade)
 {{vm_k8s}}
-
 <!--TODO: verify K8s instructions and any important differences in behavior-->
 
-```{admonition} Emergency stop button
-:class: attention
-Use `juju config <app name> pause-after-unit-refresh=all` to halt an in-progress refresh.
-Then, consider [rolling back](#roll-back)
+````{dropdown} Emergency stop button
+:open:
+:color: danger
+:icon: no-entry-fill
+
+Halt an in-progress refresh with
+
 ```
+juju config <app name> pause-after-unit-refresh=all
+```
+
+Then, consider {ref}`rolling back <roll-back>`.
+````
 
 Charmed PostgreSQL supports minor version in-place refresh via the [`juju refresh`](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/refresh/#details) command.
 
@@ -172,8 +179,11 @@ While a unit is restarting, the performance of the cluster will be degraded.
 
 To ensure that the cluster can handle all traffic during the refresh, consider scaling up the application by 1 unit.
 
-```{note}
-The PostgreSQL charm does not currently support scaling up while a refresh is in progress.
+```{dropdown} The PostgreSQL charm does not support scaling up while a refresh is in progress.
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
 
 If you anticipate that the refresh will be in progress for an extended duration (e.g. days, weeks), scale up the application before the refresh so that it can handle the maximum load during that period.
 ```
@@ -238,7 +248,12 @@ For example:
 ```
 ````
 
-```{note}
+```{dropdown} Automatic pause on health check failure
+:open:
+:color: info
+:icon: info
+:class-title: sd-font-weight-normal
+
 If the charm's automatic health checks fail, the refresh will be paused (until those health checks succeed) regardless of the value of the `pause-after-unit-refresh` config option.
 ```
 

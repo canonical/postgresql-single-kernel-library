@@ -14,7 +14,12 @@ For charm developer information about how to integrate your own charmed applicat
 
 Integrations with charmed applications are supported via the modern [`postgresql_client`](https://github.com/canonical/charm-relation-interfaces/blob/main/interfaces/postgresql_client/v0/README.md) interface, and the legacy `psql` interface from the [original version](https://launchpad.net/postgresql-charm) of the charm.
 
-```{note}
+```{dropdown} Compatible integrations
+:open:
+:color: info
+:icon: info
+:class-title: sd-font-weight-normal
+
 You can see which existing charms are compatible with PostgreSQL in the {guilabel}`Integrations` tab on Charmhub:
 * [VM charm integrations](https://charmhub.io/postgresql/integrations)
 * [K8s charm integrations](https://charmhub.io/postgresql-k8s/integrations)

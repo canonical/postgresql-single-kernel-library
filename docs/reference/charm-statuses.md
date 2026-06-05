@@ -6,7 +6,12 @@ The charm follows [standard Juju applications statuses](https://documentation.ub
 
 For more information about troubleshooting in general, see {ref}`troubleshooting-overview`.
 
-```{caution}
+```{dropdown} Caution
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
 This reference is a work in progress and may not reflect the latest statuses.
 ```
 <!--TODO: still a work in progress? Should this be updated or automated?-->

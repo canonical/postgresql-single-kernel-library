@@ -14,16 +14,17 @@ This guide goes through an example deployment of PostgreSQL K8s on GKE (Google K
 
 A cloud service that supports and provides availability zones concepts such as the K8s label `topology.kubernetes.io/zone`.
 
-```{note}
-Multi-availability zones are enabled by default on EC2/GCE and supported by LXD and MicroCloud.
-```
-
 ## Set up Kubernetes on Google Cloud
 
 Let's deploy a {ref}`PostgreSQL Cluster on GKE (us-east4) <gke>` using all 3 zones there (`us-east4-a`, `us-east4-b`, `us-east4-c`) and make sure all pods always sits in the dedicated zones only.
 
-```{caution}
-Creating the following GKE resources may cost you money - be sure to monitor your Google Cloud costs.
+```{dropdown} Creating the following resources may cost you money
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+Be sure to monitor your Google Cloud costs.
 ```
 
 Log into Google Cloud and bootstrap nine nodes of managed K8s:
@@ -291,9 +292,7 @@ To survive a complete cloud outage, we recommend setting up {ref}`cluster-cluste
 
 ## Remove GKE setup
 
-```{caution}
-Do not forget to remove your GKE test setup - it can be costly!
-```
+Always clean cloud resources that are no longer necessary; they could be costly!
 
 ```shell
 gcloud container clusters list

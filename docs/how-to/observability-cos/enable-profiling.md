@@ -143,13 +143,11 @@ juju integrate parca-agent parca
 
 This section goes through the steps for enabling profiling with Polar Signals Cloud (PSC) as the backend.
 
-```{note}
-With PSC, `cos-lite` and `parca-k8s` are not required.
+With PSC, **`cos-lite` and `parca-k8s` are not required**
 
 This section goes through the recommended setup, where `polar-signals-cloud-integrator` is deployed in the same model as `postgresql`, and `parca-agent` is used to relay traffic to PSC.
 
 If you would like to use `parca-k8s` to relay traffic to PSC instead, refer to [Steps 1 and 2](#deploy-cos-lite-and-parca-k8s) in the Charmed Parca K8s section.
-```
 
 #### 1. Deploy and integrate `parca-agent` with `postgresql`
 

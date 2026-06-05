@@ -4,19 +4,23 @@
 
 This guide will show how to enable TLS/SSL on a PostgreSQL cluster using the [`self-signed-certificates` operator](https://github.com/canonical/self-signed-certificates-operator) as an example.
 
+```{dropdown} Do **not** use self-signed certificates in production.
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+In this guide, we use [self-signed certificates](https://en.wikipedia.org/wiki/Self-signed_certificate) provided by the [`self-signed-certificates` operator](https://github.com/canonical/self-signed-certificates-operator).
+
+**This is not recommended for a production environment.**
+
+Check the collection of [Charmhub operators](https://charmhub.io/?q=tls-certificates) that implement the `tls-certificate` interface.
+```
+
 This guide assumes everything is deployed within the same network and Juju model.
 
-```{seealso}
-{ref}`tls-vip-access`
-```
+{{seealso}} {ref}`tls-vip-access`
 
 ## Enable TLS
-
-```{caution}
-**[Self-signed certificates](https://en.wikipedia.org/wiki/Self-signed_certificate) are not recommended for a production environment.**
-
-Check [this guide about X.509 certificates](https://discourse.charmhub.io/t/security-with-x-509-certificates/11664) for an overview of all the TLS certificate charms available.
-```
 
 First, deploy the TLS charm:
 

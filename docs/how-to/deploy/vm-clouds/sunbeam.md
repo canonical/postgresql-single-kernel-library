@@ -67,8 +67,13 @@ Machine  State    Address          Inst id                               Base   
 
 Follow the official guide: [Accessing the OpenStack dashboard].
 
-````{note}
-When using a Multipass VM, you may need to manually route OpenStack IPs. For example:
+```{dropdown} When using a Multipass VM, you may need to manually route OpenStack IPs.
+:open:
+:color: info
+:icon: info
+:class-title: sd-font-weight-normal
+
+For example:
 
 ```shell
 sudo ip route add 10.10.10.0/24 via 10.76.203.210
@@ -80,10 +85,6 @@ where `10.76.203.210` is the IP of the Multipass VM and  `10.10.10.0` is the net
 The image below is an example of the OpenStack dashboard view (bastion + juju controller + 3 `postgresql` nodes):
 
 ![Sunbeam OpenStack dashboard|690x225](sunbeam-dashboard.png)
-
-```{seealso}
-To learn more about deploying and operating PostgreSQL, see the {ref}`tutorial`.
-```
 
 <!-- Links-->
 

@@ -45,7 +45,6 @@ Deploy one unit of Charmed PostgreSQL 16. This will simplify the migration and c
 ```
 ````
 
-
 Define the following variables for the new database:
 
 ```shell
@@ -60,9 +59,7 @@ Migrate the following charm features from the old 14 charm to the new 16 charm:
 * any necessary charm config options
 * enabled charm extensions/plugins
 
-```{note}
-Config options and extensions *must* be migrated before restoring the data dump
-```
+Config options and extensions must be migrated **before restoring** the data dump.
 
 ## Create a new database on PostgreSQL 16
 

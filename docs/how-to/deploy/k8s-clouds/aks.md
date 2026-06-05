@@ -196,9 +196,7 @@ aks-nodepool1-31246187-vmss000000   Ready    agent   11m   v1.28.9
 
 ## Clean up
 
-```{caution}
-Always clean AKS resources that are no longer necessary -  they could be costly!
-```
+Always clean cloud resources that are no longer necessary; they could be costly!
 
 To clean the AKS cluster, resources and juju cloud, run the following commands:
 

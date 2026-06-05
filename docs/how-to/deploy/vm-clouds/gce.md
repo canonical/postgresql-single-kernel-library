@@ -228,9 +228,7 @@ juju unexpose postgresql
 
 ## Clean up
 
-```{caution}
-Always clean GCE resources that are no longer necessary -  they could be costly!
-```
+Always clean cloud resources that are no longer necessary; they could be costly!
 
 To destroy the Juju controller and remove GCE instance (warning: all your data will be permanently removed):
 
@@ -281,8 +279,13 @@ Finally, remove GCloud JSON file user credentials to prevent any credential leak
 rm -f /var/snap/juju/common/sa-private-key.json
 ```
 
-```{note}
-If you expect having several concurrent connections frequently, it is highly recommended to deploy PgBouncer ([VM]((https://charmhub.io/pgbouncer?channel=1/stable) or [K8s](https://charmhub.io/pgbouncer-k8s?channel=1/stable)) alongside PostgreSQL.
+```{dropdown} PgBouncer
+:open:
+:color: info
+:icon: light-bulb
+:class-title: sd-font-weight-normal
+
+If you expect having several concurrent connections frequently, it is highly recommended to deploy [PgBouncer](https://charmhub.io/pgbouncer?channel=1/stable) alongside PostgreSQL.
 
 For more information, read our explanation about {ref}`connection-pooling`.
 ```

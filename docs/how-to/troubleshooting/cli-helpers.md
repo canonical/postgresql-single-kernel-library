@@ -5,8 +5,10 @@
 
 This page describes some useful low-level tools shipped withing Charmed PostgreSQL for advanced troubleshooting.
 
-```{caution}
-**These tools can be dangerous in a production environment if they are not used correctly.**
+```{dropdown} These tools can be dangerous in a production environment.
+:open:
+:color: danger
+:icon: flame
 
 When in doubt, {ref}`contact us <contact>`.
 ```
@@ -214,8 +216,15 @@ $ curl 10.189.210.55:8008/cluster | jq # where 10.189.210.55 is IP of Charmed Po
 ```
 </details>
 
-```{note}
-The Patroni REST API can be accessed anonymously in read-only mode only. The Juju secret `patroni-password` is mandatory to apply any chances via Patroni REST API.
+```{dropdown} Patroni REST API access
+:open:
+:color: info
+:icon: info
+:class-title: sd-font-weight-normal
+
+The Patroni REST API can be accessed anonymously in read-only mode only.
+
+The Juju secret `patroni-password` is mandatory to apply any chances via Patroni REST API.
 ```
 
 Example of authenticated changes via Patroni REST API:

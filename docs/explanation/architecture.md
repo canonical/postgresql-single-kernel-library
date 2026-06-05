@@ -21,7 +21,7 @@ Example Charmed PostgreSQL deployment with 3 replicas. Integrations include PgBo
 ````{tab-item} VM
 :sync: vm
 
-TODO
+<!--TODO -->
 
 ````
 ````{tab-item} K8s
@@ -45,10 +45,11 @@ postgresql-k8s-0    2/2     Running   0          65m
 
 This shows there are 2 containers in the pod: `charm` and `workload` mentioned above.
 
-And if you run `kubectl describe pod postgresql-k8s-0`, all the containers will have as Command `/charm/bin/pebble`. That’s because Pebble is responsible for the processes startup as explained above (see {ref}`troubleshooting` for more details.).
+And if you run `kubectl describe pod postgresql-k8s-0`, all the containers will have as Command `/charm/bin/pebble`. That’s because Pebble is responsible for the processes startup as explained above.
 ````
 `````
 
+{octicon}`arrow-right` See the {ref}`troubleshooting` guide for more information.
 
 ## High-level design
 
@@ -58,8 +59,11 @@ And if you run `kubectl describe pod postgresql-k8s-0`, all the containers will 
 
 The charm design leverages on the [charmed-postgresql](https://snapcraft.io/charmed-postgresql) snap, which is deployed by Juju on the specified VM/MAAS/bare-metal machine based on Ubuntu Noble/24.04. The snap allows to run PostgreSQL service(s) in a secure and isolated environment. For more information, see this blog post about [strict confinement](https://ubuntu.com/blog/demystifying-snap-confinement).
 
-```{note}
-The charmed-postgresql snap installs `14/stable` by default.
+```{dropdown} The charmed-postgresql snap installs <code>14/stable</code> by default.
+:open:
+:color: info
+:icon: info
+:class-title: sd-font-weight-normal
 
 For `16/stable`, use the `--channel` flag when installing or refreshing the snap.
 ```
@@ -106,18 +110,22 @@ The `pgbackrest` snap service is a backup framework for PostgreSQL. It is disabl
 
 The `prometheus-postgres-exporter` service is activated after integration with {ref}`COS monitoring <enable-monitoring>` only.
 
-```{caution}
-It is **not recommended** to start, stop, and restart snap services manually in order to avoid a split-brain scenario with a charm state machine.
-```
-
 The charmed-postgresql snap also ships list of tools used by charm:
 * `charmed-postgresql.psql` (alias `psq`) - is PostgreSQL interactive terminal.
 * `charmed-postgresql.patronictl` - a tool to monitor and manage Patroni.
 * `charmed-postgresql.pgbackrest` - a tool to backup/restore PostgreSQL DB.
 
-```{warning}
-All snap resources must be executed under the special snap user `_daemon_` only!
+```{dropdown} Managing snap services manually
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+To avoid a {term}`split-brain scenario`, we recommend you do **not** start, stop, and restart snap services manually. <!--TODO: meaning of "manually"? -->
+
+All snap resources must be executed under the special **snap user `_daemon_`** only!
 ```
+
 ````
 ````{tab-item} K8s
 :sync: k8s
@@ -154,10 +162,15 @@ The `postgresql` is a main Pebble service which is normally up and running right
 
 All `metrics_server` Pebble service is only activated after integrating with {ref}`COS Monitoring <enable-monitoring>`.
 
-```{caution}
-It is possible to star/stop/restart pebble services manually but it is NOT recommended to avoid a split brain with a charm state machine! Do it with a caution!!!
+```{dropdown} Managing Pebble services manually
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
 
-All pebble resources must be executed under the proper user (defined in  user:group options of pebble layer)!
+To avoid a {term}`split-brain scenario`, we recommend you do **not** start, stop, and restart Pebble services manually.
+
+All Pebble resources must be executed with the proper user defined in the `user:group` options of the Pebble layer.
 ```
 
 The rock "charmed-postgresql" also ships list of tools used by charm:
@@ -166,6 +179,8 @@ The rock "charmed-postgresql" also ships list of tools used by charm:
 * `pgbackrest` - a framework to backup and restore PostgreSQL.
 ````
 `````
+
+{octicon}`arrow-right` See the {ref}`troubleshooting` guide for more information.
 
 ## Integrations
 
@@ -180,19 +195,19 @@ The following charms can be integrated with PostgreSQL out of the box.
 
 The [TLS Certificates](https://charmhub.io/tls-certificates-operator) charm is responsible for distributing certificates through Juju configs. For test deployments, the [self-signed certificates](https://charmhub.io/self-signed-certificates) charm is available as well.
 
-See also: {ref}`enable-tls`
+{{seealso}} {ref}`enable-tls`
 
 ### S3 integrator
 
 [S3 Integrator](https://charmhub.io/s3-integrator) is an integrator charm for providing S3 credentials to Charmed PostgreSQL to access shared S3 data. Store the credentials centrally in the integrator charm and relate consumer charms as needed.
 
-See also: {ref}`configure-s3-aws`
+{{seealso}} {ref}`configure-s3-aws`
 
 ### Data integrator
 
 The [data integrator](https://charmhub.io/data-integrator) charm requests credentials for non-native Juju applications. Not all applications implement a `data_interfaces` relation, but do allow setting credentials via config. Additionally, some of applications are run outside of juju. This integrator charm allows receiving credentials which can be passed into application config directly without implementing a Juju-native relation.
 
-See also: {ref}`integrate-with-another-application`
+{{seealso}} {ref}`integrate-with-another-application`
 
 ### PostgreSQL test app
 
@@ -206,19 +221,19 @@ The [PostgreSQL Test App](https://charmhub.io/postgresql-test-app) charm is a Ca
 
 [Grafana](https://grafana.com/) is an open-source visualisation tools that allows to query, visualise, alert on, and visualise metrics from mixed data sources in configurable dashboards for observability. This charms is shipped with its own Grafana dashboard and supports integration with the [Grafana Operator](https://charmhub.io/grafana-k8s) to simplify observability.
 
-See also: {ref}`enable-monitoring`
+{{seealso}} {ref}`enable-monitoring`
 
 #### Loki
 
 [Loki](https://grafana.com/docs/loki/latest/) is an open-source fully-featured logging system. This charms is shipped with support for the [Loki Operator](https://charmhub.io/loki-k8s) to collect the generated logs.
 
-See also: {ref}`enable-monitoring`
+{{seealso}} {ref}`enable-monitoring`
 
 ### Prometheus
 
 [Prometheus](https://prometheus.io/docs/introduction/overview/) is an open-source systems monitoring and alerting toolkit with a dimensional data model, flexible query language, efficient time series database and modern alerting approach. Charmed PostgreSQL is shipped with a Prometheus exporters, alerts and support for integrating with the [Prometheus charm](https://charmhub.io/prometheus-k8s) to automatically scrape the targets.
 
-See also: {ref}`enable-monitoring` and {ref}`enable-alert-rules`.
+{{seealso}} {ref}`enable-monitoring` and {ref}`enable-alert-rules`.
 
 ## LLD (Low Level Design)
 

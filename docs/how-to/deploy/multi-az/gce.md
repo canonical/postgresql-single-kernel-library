@@ -14,8 +14,13 @@ This guide goes through an example deployment of PostgreSQL on GCE (Google Cloud
 
 Let's deploy the {ref}`PostgreSQL Cluster on GCE (us-east4) <gce>` using all 3 zones there (`us-east4-a`, `us-east4-b`, `us-east4-c`) and make sure all pods always sits in the dedicated zones only.
 
-```{caution}
-Creating the following GCE resources may cost you money - be sure to monitor your Google Cloud costs.
+```{dropdown} Creating the following resources may cost you money
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+Be sure to monitor your Google Cloud costs.
 ```
 
 Log into Google Cloud and bootstrap GCE:
@@ -163,9 +168,7 @@ Machine  State    Address        Inst id        Base          AZ          Messag
 
 ## Remove GCE setup
 
-```{caution}
-Do not forget to remove your test setup - it can be costly!
-```
+Always clean cloud resources that are no longer necessary; they could be costly!
 
 Check the list of currently running GCE instances:
 

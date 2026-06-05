@@ -24,7 +24,7 @@ The full list of internal users is available in charm [source code](https://gith
 
 The full dump of internal users (on the newly installed charm):
 
-```text
+```shell
 postgres=# \du
                                       List of roles
   Role name  |                         Attributes                         |  Member of
@@ -37,11 +37,9 @@ postgres=# \du
  rewind      |                                                            | {}
 ```
 
-```{note}
-It is forbidden to use/manage described above users, as they are dedicated to the operator's logic.
+These users cannot be managed directly, as they are dedicated to the operator's logic.
 
 Use the [data-integrator](https://charmhub.io/data-integrator) charm to generate, manage, and remove external credentials.
-```
 
 Passwords for internal users can be managed using Juju secrets. See {ref}`manage-passwords`.
 
@@ -52,7 +50,7 @@ The operator created a dedicated user for every application related/integrated w
 ```text
 postgres=# \du
                                       List of roles
-  Role name  |                         Attributes                         |  Member of   
+  Role name  |                         Attributes                         |  Member of
 -------------+------------------------------------------------------------+--------------
  ..
  relation-6  |                                                            | {}

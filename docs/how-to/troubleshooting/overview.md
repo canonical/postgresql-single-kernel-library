@@ -4,10 +4,21 @@
 
 This page goes over some recommended tools and approaches to troubleshooting the charm.
 
-```{caution}
-At the moment, there is no support for [pausing an operator](https://warthogs.atlassian.net/browse/DPE-2545).
+<!--TODO: ticket is resolved?
+Make sure your troubleshooting activity does not interfere with the operator itself.
 
-Make sure your activity will not interfere with the operator itself!
+There is no support for [pausing an operator](https://warthogs.atlassian.net/browse/DPE-2545).
+-->
+
+```{dropdown} To avoid split-brain scenarios:
+:open:
+:color: light
+:icon: light-bulb
+:class-title: sd-font-weight-normal
+
+Do not manage users, credentials, databases, and schema directly.
+
+Avoid restarting services directly. If you see the problem with a unit, consider {ref}`removing the failing unit and adding a new unit <scale-replicas>` to recover the cluster state.
 ```
 
 ## Check charm status
@@ -168,14 +179,8 @@ juju secrets # to find secret ID
 juju show-secret --reveal <secret ID> | grep operator
 ```
 
-See also: {ref}`manage-passwords`
+{{seealso}} {ref}`manage-passwords`
 
-```{caution}
-To avoid split-brain scenarios:
-
-* Do not manage users, credentials, databases, and schema directly.
-* Avoid restarting services directly. If you see the problem with a unit, consider {ref}`removing the failing unit and adding a new unit <scale-replicas>` to recover the cluster state.
-```
 ````
 ````{tab-item} K8s
 :sync: k8s
@@ -320,14 +325,6 @@ juju ssh --container postgresql postgresql-k8s/0 bash
 >           |          |          |         |         | backup=CTc/operator    +
 ...
 ```
-
-```{caution}
-To avoid split-brain scenarios:
-
-* Do not manage users, credentials, databases, and schema directly.
-* Avoid restarting services directly. If you see the problem with a unit, consider {ref}`removing the failing unit and adding a new unit <scale-replicas>` to recover the cluster state.
-```
-
 ````
 `````
 

@@ -1,5 +1,5 @@
 (juju-spaces)=
-# Deploy on Juju spaces
+# How to deploy on Juju spaces
 {{vm}}
 
 The Charmed PostgreSQL operator supports [Juju spaces](https://documentation.ubuntu.com/juju/latest/reference/space/index.html) to separate network traffic for:
@@ -35,8 +35,13 @@ juju deploy postgresql --channel 16/stable \
   --bind "database-peers=peers database=client"
 ```
 
-```{caution}
-Currently there's no support for the juju  `bind` command. Network space binding must be defined at deploy time only.
+```{dropdown} There is no support for the juju <code>bind</code> command.
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+Network space binding must be defined at deploy time only.
 ```
 
 Consequently, a client application must use the `client` space on the model, or a space for the same subnet in another model, for example:
@@ -64,8 +69,11 @@ The Charmed PostgreSQL operator endpoints are:
 | replication-offer, replication | Cluster-replication  |
 | s3-parameters                  | Backup               |
 
+```{dropdown} Using spaces for backup traffic
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
 
-```{note}
 If using a network space for the backup traffic, the user is responsible for ensuring that the target object storage URL traffic is routed via the specified network space.
 ```
-

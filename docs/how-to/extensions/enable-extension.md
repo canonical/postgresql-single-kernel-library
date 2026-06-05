@@ -2,11 +2,9 @@
 # How to enable an extension
 {{vm_k8s}}
 
-This guide outlines the steps for enabling an extension (plugin) in a Charmed PostgreSQL deployment.
+This guide outlines the steps for enabling an extension (also "plugin") in a Charmed PostgreSQL deployment.
 
-```{seealso}
-* {ref}`List of supported extensions <supported-extensions>`
-```
+{{seealso}} {ref}`List of supported extensions <supported-extensions>`
 
 ## Enable extension
 
@@ -24,10 +22,6 @@ Enable the extension by setting `True` as the value of its respective config opt
     juju config postgresql-k8s plugin-<extension name>-enable=True
 ```
 ````
-
-```{note}
-The word "plugin" is used interchangeably with "extension". Both words refer to PostgreSQL extensions.
-```
 
 ## Integrate your application
 
@@ -71,7 +65,5 @@ After enabling the needed extensions through the config options, the charm will 
 
 If the application charm uses the new `postgresql_client` interface, it can use the [is_postgresql_plugin_enabled](https://charmhub.io/data-platform-libs/libraries/data_interfaces) helper method from the data interfaces library to check whether the plugin/extension is already enabled in the database.
 
-```{seealso}
-{ref}`List of supported extensions <supported-extensions>`
-```
+{{seealso}} {ref}`List of supported extensions <supported-extensions>`
 

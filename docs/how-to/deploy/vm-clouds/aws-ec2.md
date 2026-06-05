@@ -190,8 +190,13 @@ To access the database from outside of AWS open the AWS firewall using the [`juj
 juju expose postgresql
 ```
 
-```{caution}
-Be wary that opening ports to the public is risky.
+```{dropdown} Be wary of opening ports to the public
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+Make sure you understand the risks before doing this in production.
 ```
 
 Once exposed, you can connect your database using the same credentials as above. This time, **use the EC2 Public IP assigned to the PostgreSQL instance**:
@@ -218,9 +223,7 @@ juju unexpose postgresql
 
 ## Clean up
 
-```{caution}
-Always clean AWS resources that are no longer necessary -  they could be costly!
-```
+Always clean cloud resources that are no longer necessary; they could be costly!
 
 To destroy the Juju controller and remove AWS instance (all your data will be permanently removed!):
 
@@ -277,9 +280,13 @@ Finally, remove AWS CLI user credentials (to avoid forgetting and leaking):
 rm -f ~/.aws/credentials.yaml
 ```
 
-```{note}
-If you expect having several concurrent connections frequently, it is highly recommended to deploy PgBouncer ([VM]((https://charmhub.io/pgbouncer?channel=1/stable) or [K8s](https://charmhub.io/pgbouncer-k8s?channel=1/stable)) alongside PostgreSQL.
+```{dropdown} PgBouncer
+:open:
+:color: info
+:icon: light-bulb
+:class-title: sd-font-weight-normal
+
+If you expect having several concurrent connections frequently, it is highly recommended to deploy [PgBouncer](https://charmhub.io/pgbouncer?channel=1/stable) alongside PostgreSQL.
 
 For more information, read our explanation about {ref}`connection-pooling`.
 ```
-

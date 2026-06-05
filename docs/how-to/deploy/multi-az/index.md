@@ -5,7 +5,7 @@ myst:
 ---
 
 (multi-az)=
-# Deploy on multiple availability zones (AZ)
+# How to deploy on multiple availability zones (AZ)
 {{vm_k8s}}
 
 During the deployment to hardware/VMs, it is important to spread all the database copies (Juju units) to different hardware servers, or even better, to different [availability zones](https://en.wikipedia.org/wiki/Availability_zone) (AZ). This will guarantee no shared service-critical components across the database cluster (eliminate the case with all eggs in the same basket).

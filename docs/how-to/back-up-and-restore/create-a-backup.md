@@ -74,10 +74,7 @@ Copy the secret URI, and use it in the following command:
 juju show-secret --reveal <secret URI> --format=json | jq '.[].content.Data | with_entries(select(.key|contains("password")))'
 ```
 
-```{seealso}
-* {ref}`manage-passwords`
-* [Juju | How to view secrets](https://documentation.ubuntu.com/juju/latest/howto/manage-secrets/#view-all-the-available-secrets)
-```
+{{seealso}} {ref}`manage-passwords`
 
 ## Create a backup
 

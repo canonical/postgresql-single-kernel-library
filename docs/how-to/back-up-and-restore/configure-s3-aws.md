@@ -12,9 +12,7 @@ A Charmed PostgreSQL backup can be stored on any S3-compatible storage. S3 acces
 
 This guide will teach you how to deploy and configure the s3-integrator charm for [AWS S3](https://aws.amazon.com/s3/), send the configurations to the Charmed PostgreSQL application, and update it.
 
-```{seealso}
-{ref}`configure-s3-radosgw`
-```
+{{seealso}} {ref}`configure-s3-radosgw`.
 
 ## Set up `s3-integrator`
 
@@ -35,10 +33,15 @@ juju config s3-integrator \
 There is an experimental configuration option that sets up a retention time (in days) for backups stored in S3: [`experimental-delete-older-than-days`](https://charmhub.io/s3-integrator/configuration?channel=latest/edge#experimental-delete-older-than-days). See: {ref}`manage-backup-retention`.
 
 
-```{note}
-The Amazon S3 endpoint must be specified as `s3.<region>.amazonaws.com ` within the first 24 hours of creating the bucket. For older buckets, the endpoint `s3.amazonaws.com` can be used.
+```{dropdown} The S3 endpoint must be specified as <code>s3.\<region\>.amazonaws.com</code> within the **first 24 hours** of creating the bucket.
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
 
-See [this post](https://repost.aws/knowledge-center/s3-http-307-response) for more information.
+For older buckets, the endpoint `s3.amazonaws.com` can be used.
+
+See [this post in the AWS forum](https://repost.aws/knowledge-center/s3-http-307-response) for more information.
 ```
 
 ## Integrate with Charmed PostgreSQL

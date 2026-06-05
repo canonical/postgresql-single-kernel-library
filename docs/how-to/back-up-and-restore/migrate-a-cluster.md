@@ -10,12 +10,9 @@ myst:
 
 This is a guide on how to restore a backup that was made from a different cluster, (i.e. cluster migration via restore).
 
-```{seealso}
-To perform a basic restore from a *local* backup, see {ref}`restore-a-backup`.
-```
+{octicon}`arrow-right` See {ref}`restore-a-backup` to perform a basic restore from a *local* backup
 
 ## Prerequisites
-
 
 * A PostgreSQL deployment {ref}`scaled down <scale-replicas>` to one unit (scale it up again after the backup is restored)
 * A {ref}`backup <create-a-backup>` from the previous cluster in your S3 storage

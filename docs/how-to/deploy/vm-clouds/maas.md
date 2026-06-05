@@ -39,9 +39,7 @@ multipass list
 </details>
 </br>
 
-```{note}
-Make sure you are downloading 22.04 images as well (20.04 is the current default).
-```
+Make sure you are downloading *22.04* images as well. <!--TODO: update? -->
 
 The LXD machine will be up and running after the images downloading and sync is completed.
 <details>
@@ -50,17 +48,20 @@ The LXD machine will be up and running after the images downloading and sync is 
 ![MAAS interface - create tag](maas-create-tag.png)
 </details>
 
-```{note}
-**A note on DHCP**
+```{dropdown} Make sure to enable DHCP service inside the MAAS VM only.
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
 MAAS uses DHCP to boot and install new machines. You must enable DHCP manually if you see this banner on MAAS pages:
 ![DHCP banner|690x46](maas-dhcp-banner.png)
-
-**Make sure to enable DHCP service inside the MAAS VM only.**
 
 Use the internal VM network `fabric-1` on `10.10.10.0/24` and choose a range (e.g. `10.10.10.100-10.10.10.120`). Check the [official MAAS manual](https://maas.io/docs/enabling-dhcp) for more information about enabling DHCP.
 ```
 
 **6.** Finally, dump MAAS admin user API key to add as Juju credentials later:
+
 ```shell
 multipass exec maas -- sudo maas apikey --username admin
 ```
@@ -68,6 +69,7 @@ multipass exec maas -- sudo maas apikey --username admin
 ## Register MAAS with Juju
 
 **1.** Enter the Multipass shell and install juju:
+
 ```shell
 multipass shell maas
 sudo snap install juju
@@ -75,6 +77,7 @@ sudo snap install juju
 **2.** Add MAAS cloud and credentials into juju.
 
 These commands are interactive, so the following code block shows the commands followed by a sample output. **Make sure to enter your own information when prompted by juju.**
+
 ```shell
 juju add-cloud
 
@@ -149,8 +152,13 @@ multipass stop maas
 
 If you're done with testing and would like to free up resources on your machine, you can remove the VM entirely.
 
-```{warning}
-When you remove the VM as shown below, **you will lose all the data** in PostgreSQL and any other applications inside it!
+```{dropdown} When you remove the VM **you will lose all the data** inside it.
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+This includes all data in PostgreSQL and any other applications.
 
 For more information, see the docs for [`multipass delete`](https://multipass.run/docs/delete-command).
 ```
@@ -161,5 +169,13 @@ To completely delete your VM and all its data, run:
 multipass delete --purge maas
 ```
 
-If you expect having several concurrent connections frequently, it is highly recommended to deploy [PgBouncer](https://charmhub.io/pgbouncer?channel=1/stable) alongside PostgreSQL. For more information, read our explanation about {ref}`connection-pooling`.
+```{dropdown} PgBouncer
+:open:
+:color: info
+:icon: light-bulb
+:class-title: sd-font-weight-normal
 
+If you expect having several concurrent connections frequently, it is highly recommended to deploy [PgBouncer](https://charmhub.io/pgbouncer?channel=1/stable) alongside PostgreSQL.
+
+For more information, read our explanation about {ref}`connection-pooling`.
+```

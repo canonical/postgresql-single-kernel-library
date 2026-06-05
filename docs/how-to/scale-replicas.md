@@ -57,6 +57,4 @@ In Kubernetes, scaling operations are performed using `juju scale-application` a
 ```
 ````
 
-```{seealso}
-{ref}`units`
-```
+{{seealso}} {ref}`units`

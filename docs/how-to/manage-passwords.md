@@ -6,9 +6,7 @@
 
 Charmed PostgreSQL 16 uses [Juju secrets](https://documentation.ubuntu.com/juju/latest/reference/secret/#secret) to manage passwords.
 
-```{seealso}
-[Juju | How to manage secrets](https://documentation.ubuntu.com/juju/latest/howto/manage-secrets/#manage-secrets)
-```
+{{seealso}} [Juju | How to manage secrets](https://documentation.ubuntu.com/juju/latest/howto/manage-secrets/#manage-secrets)
 
 ## Create a secret
 
@@ -79,4 +77,4 @@ In this example,
 * `user_c`'s password was updated from an auto-generated password to `password_c`
 * `user_b`'s password remains as it was when the secret was added, but **`user_b` is no longer part of the secret**.
 
-See also: {ref}`users`
+{{seealso}} {ref}`users`

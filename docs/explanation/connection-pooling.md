@@ -12,7 +12,12 @@ A way to achieve this with Charmed PostgreSQL is by integrating with the [PgBoun
 
 If using PgBouncer is not enough to handle the connections load of your application, you can increase the amount of connections that PostgreSQL can open via the `experimental-max-connections` config parameter ([VM charm](https://charmhub.io/postgresql/configurations?channel=16/edge#experimental-max-connections)| [K8s charm](https://charmhub.io/postgresql/configurations?channel=16/edge#experimental-max-connections)).
 
-```{caution}
+```{dropdown} Resource usage warning
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
 Each connection opened by PostgreSQL spawns a new process, which is resource-intensive. Use this option as a last resort.
 
 {ref}`Contact us <contact>` for more guidance for your use-case.

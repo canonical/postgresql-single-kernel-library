@@ -27,8 +27,13 @@ While this tutorial intends to guide you as you deploy Charmed PostgreSQL for th
 
 First, we will set up a cloud environment using [Multipass](https://multipass.run/) with [LXD](https://documentation.ubuntu.com/lxd/latest/) and [Juju](https://documentation.ubuntu.com/juju/3.6/). This is the quickest and easiest way to get your machine ready for using Charmed PostgreSQL.
 
-```{seealso}
-To learn about other types of deployment environments and methods, see [](/how-to/deploy/index).
+```{dropdown} Learn more
+:open:
+:color: light
+:icon: book
+:class-title: sd-font-weight-normal
+
+{ref}`How-to guides > Deploy <deploy>` contains instructions for several other types of deployment environments and methods, like specific VM and K8s clouds, using Terraform instead of the Juju CLI, or setting up an airgapped environment. 
 ```
 
 ### Create a Multipass VM
@@ -167,12 +172,14 @@ You can also watch juju logs with the [`juju debug-log`](https://juju.is/docs/ju
 
 In this section, you will learn how to get the credentials of your deployment, connect to the PostgreSQL instance, view its default databases, and finally, create your own new database.
 
-This is where we are introduced to internal database [users](/explanation/users). 
+This is where we are introduced to internal database [users](/explanation/users).
 
-```{caution}
 This part of the tutorial accesses PostgreSQL via the charm's `operator` user. This is a superuser with permissions to create roles, databases, and more.
 
-**Do not directly interface with the `operator` user in a production environment.**
+```{dropdown} Do **not** directly interface with the <code>operator</code> user in a production environment.
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
 
 In a later section, we will cover how to access PostgreSQL more safely.
 ```
@@ -200,10 +207,6 @@ secret:d1ohj30ek0fco390bt9g
 juju grant-secret tutorial postgresql
 ```
 
-```{seealso}
-For more information about password management with Juju secrets, see [](/how-to/manage-passwords)
-```
-
 One more step is needed for the charm to update the passwords of its internal users based on our new Juju secret: we need to update the charm's `system-users` config option:
 
 ```{terminal}
@@ -215,7 +218,7 @@ juju config postgresql system-users=secret:d1ohj30ek0fco390bt9g
 ```
 
 ```{tip}
-Remember to replace the secret URI above with yours! 
+Remember to replace the secret URI above with yours!
 ```
 
 Now we have all the information required to access PostgreSQL. Run the command below to enter the leader unit's shell:
@@ -232,14 +235,14 @@ juju ssh --container postgresql postgresql/leader bash
 
 The easiest way to interact with PostgreSQL is via [PostgreSQL interactive terminal `psql`](https://www.postgresql.org/docs/14/app-psql.html), which is already installed on the host you're connected to.
 
-We'll need the IP address associated with the specific application unit we want to interact with. You can find it with `juju status`. 
+We'll need the IP address associated with the specific application unit we want to interact with. You can find it with `juju status`.
 
 Since we will use the leader unit to connect to PostgreSQL, we are interested in the address for the unit marked with `*`, like in the output below:
 
 ```text
 ...
-Unit           Workload  Agent  Machine  Public address  Ports     Message    
-postgresql/0*  active    idle   0        10.26.224.154   5432/tcp  Primary 
+Unit           Workload  Agent  Machine  Public address  Ports     Message
+postgresql/0*  active    idle   0        10.26.224.154   5432/tcp  Primary
 ...
 ```
 
@@ -261,7 +264,7 @@ You will now see the list of default databases in the unit. `postgres` is the de
 
 ```text
                                                           List of databases
-   Name    |  Owner   | Encoding | Locale Provider | Collate |  Ctype  | ICU Locale | ICU Rules |         Access privileges          
+   Name    |  Owner   | Encoding | Locale Provider | Collate |  Ctype  | ICU Locale | ICU Rules |         Access privileges
 -----------+----------+----------+-----------------+---------+---------+------------+-----------+------------------------------------
  postgres  | operator | UTF8     | libc            | C.UTF-8 | C.UTF-8 |            |           | operator=CTc/operator             +
            |          |          |                 |         |         |            |           | backup=c/operator                 +
@@ -297,14 +300,14 @@ After submitting the password, you'll enter an interactive terminal like this:
 psql (16.9 (Ubuntu 16.9-0ubuntu0.24.04.1))
 Type "help" for help.
 
-postgres=# 
+postgres=#
 ```
 
 Now you are successfully logged in the `psql` interactive terminal. Here it is possible to execute commands to PostgreSQL directly using PostgreSQL SQL Queries. For example, to show which version of PostgreSQL is installed, run the following command:
 
 ```text
 postgres=# SELECT version();
-                                                               version                                                                
+                                                               version
 --------------------------------------------------------------------------------------------------------------------------------------
  PostgreSQL 16.9 (Ubuntu 16.9-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0, 64-bit
 (1 row)
@@ -371,21 +374,30 @@ When you’re ready to leave the PostgreSQL shell, you can just type `exit`. Thi
 
 The Charmed PostgreSQL operator for machines uses a [PostgreSQL Patroni-based cluster](https://patroni.readthedocs.io/en/latest/) for scaling. It provides features such as automatic membership management, fault tolerance, and automatic failover. The charm uses PostgreSQL’s [synchronous replication](https://patroni.readthedocs.io/en/latest/replication_modes.html) with Patroni to handle replication.
 
-```{seealso}
-Learn more about how Juju units work in the context of PostgreSQL replication in [](/explanation/units)
+```{dropdown} Learn more
+:open:
+:color: light
+:icon: book
+:class-title: sd-font-weight-normal
+
+{ref}`Explanation > Units <units>` explains how Juju units work in the context of PostgreSQL replication
 ```
 
-```{caution}
-This tutorial hosts all replicas on the same machine. 
+```{dropdown} Do **not** host all replicas on the same machine in a production environment.
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
 
-**This should not be done in a production environment.** 
+This tutorial hosts all replicas on the same machine.
+
+**This should not be done in a production environment.**
 
 To enable high availability in a production environment, replicas should be hosted on different servers to [maintain isolation](https://canonical.com/blog/database-high-availability).
 ```
 
 ### Add units
 
-Currently, your deployment has only one Juju unit, known in juju as the **leader unit**. For each cluster replica, a new Juju unit is created. 
+Currently, your deployment has only one Juju unit, known in juju as the **leader unit**. For each cluster replica, a new Juju unit is created.
 
 All units are members of the same database cluster.
 
@@ -694,10 +706,16 @@ Typically, enabling TLS internally within a highly available database or between
 
 TLS is enabled by integrating Charmed PostgreSQL with the [Self-signed certificates charm](https://charmhub.io/self-signed-certificates). This charm centralises TLS certificate management consistently and handles operations like providing, requesting, and renewing TLS certificates.
 
-```{caution}
-**[Self-signed certificates](https://en.wikipedia.org/wiki/Self-signed_certificate) are not recommended for a production environment.**
+```{dropdown} Do **not** use self-signed certificates in a production environment.
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
 
-Check [this guide](https://discourse.charmhub.io/t/security-with-x-509-certificates/11664) for an overview of the TLS certificates charms available. 
+In this guide, we use [self-signed certificates](https://en.wikipedia.org/wiki/Self-signed_certificate) provided by the [`self-signed-certificates` operator](https://github.com/canonical/self-signed-certificates-operator).
+
+**This is not recommended for a production environment.**
+
+Check the collection of [Charmhub operators](https://charmhub.io/?q=tls-certificates) that implement the `tls-certificate` interface.
 ```
 
 Before enabling TLS on Charmed PostgreSQL, we must deploy the `self-signed-certificates` charm:
@@ -822,8 +840,13 @@ multipass stop my-vm
 
 If you're done with testing and would like to free up resources on your machine, you can remove the VM entirely.
 
-```{warning}
-When you remove VM as shown below, you will lose all the data in PostgreSQL and any other applications inside Multipass VM! 
+```{dropdown} When you remove the VM **you will lose all the data** inside it.
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+This includes all data in PostgreSQL and any other applications.
 
 For more information, see the docs for [`multipass delete`](https://multipass.run/docs/delete-command).
 ```

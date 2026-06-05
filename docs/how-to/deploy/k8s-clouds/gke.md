@@ -81,7 +81,12 @@ juju bootstrap gke-jun-9
 juju add-model welcome-model
 ```
 
-```{note}
+```{dropdown} K8s credentials on Juju
+:open:
+:color: info
+:icon: info
+:class-title: sd-font-weight-normal
+
 [This known issue](https://bugs.launchpad.net/juju/+bug/2007575) forces non-snap Juju usage to add-k8s credentials on Juju.
 ```
 
@@ -145,9 +150,7 @@ Sample output:
 
 ## Clean up
 
-```{caution}
-Always clean GKE resources that are no longer necessary -  they could be costly!
-```
+Always clean cloud resources that are no longer necessary; they could be costly!
 
 To clean GKE clusters and juju clouds, use:
 

@@ -31,13 +31,13 @@ Advanced users can still execute it using {ref}`patronictl and the Patroni REST 
 
 ## Raft re-initialisation
 
-```{caution}
 This is the worst possible recovery case scenario when Primary and ALL Sync Standby units lost simultaneously and their data cannot be recovered from the disc.
 
 In this case, Patroni cannot perform automatic failover for the only available Replica(s) units. Still Patroni provides the read-only access to the data.
 
-A manual failover procedure cannot guarantee the latest SQL transactions' availability on the replica unit(s) due to the {ref}`lag distance <units>` to the primary. Additionally, Raft cluster consensus is not possible when one unit is left in a three-unit cluster.
-```
+A manual failover procedure **cannot guarantee the availability of the latest SQL transactions** on the replica unit(s) due to the {ref}`lag distance <units>` to the primary.
+
+Additionally, Raft cluster **consensus is not possible** when one unit is left in a three-unit cluster.
 
 The command to re-initialise the Raft cluster should be executed when charm is ready:
 * the last Juju unit is available in Juju application

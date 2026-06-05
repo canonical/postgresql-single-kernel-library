@@ -6,13 +6,17 @@
 
 The charm supports modern `postgresql_client` and legacy `pgsql` interfaces (in a backward compatible mode).
 
-```{caution}
-Do **not** relate both modern and legacy interfaces simultaneously!
+```{dropdown} Do **not** relate both modern and legacy interfaces simultaneously!
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+This may lead to a `blocked` application status. Use one interface at a time.
 ```
 
 ## Modern interfaces
 
-This charm provides modern ['postgresql_client' interface](https://github.com/canonical/charm-relation-interfaces). Applications can easily connect PostgreSQL using ['data_interfaces' ](https://charmhub.io/data-platform-libs/libraries/data_interfaces) library from ['data-platform-libs'](https://github.com/canonical/data-platform-libs/).
+This charm provides the modern ['postgresql_client' interface](https://github.com/canonical/charm-relation-interfaces). Applications can easily connect PostgreSQL using ['data_interfaces' ](https://charmhub.io/data-platform-libs/libraries/data_interfaces) library from ['data-platform-libs'](https://github.com/canonical/data-platform-libs/).
 
 ### Modern `postgresql_client` interface (`database` endpoint):
 
@@ -61,17 +65,16 @@ For example:
 ```
 ````
 
-Find more details about default and additional database user roles in {ref}`users`.
+{octicon}`arrow-right` See the {ref}`users` page for more details about default and additional database user roles.
 
 ## Legacy interfaces
 
-```{note}
 Legacy relations are deprecated and will be discontinued on future releases. Their usage should be avoided.
 
 Check the legacy interfaces implementation limitations in {ref}`charm-versions`.
-```
 
 ### Legacy `pgsql` interface (`db` and `db-admin` endpoints):
+<!--TODO: remove this section?-->
 
 This charm supports legacy interface `pgsql` from the previous [PostgreSQL charm](https://launchpad.net/postgresql-charm):
 
@@ -91,6 +94,13 @@ This charm supports legacy interface `pgsql` from the previous [PostgreSQL charm
 ```
 ````
 
-```{note}
-The endpoint `db-admin` provides the same legacy interface `pgsql` with PostgreSQL admin-level privileges. It is NOT recommended to use it due to security limitations.
+```{dropdown} <code>db-admin</code> security limitations
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+The endpoint `db-admin` provides the same legacy interface `pgsql` with PostgreSQL admin-level privileges.
+
+Its usage is **not** recommended due to security limitations.
 ```

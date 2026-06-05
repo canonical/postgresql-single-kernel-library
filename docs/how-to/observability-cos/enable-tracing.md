@@ -4,9 +4,9 @@
 
 This guide contains the steps to enable tracing with [Grafana Tempo](https://grafana.com/docs/tempo/latest/) for your PostgreSQL application.
 
-```{caution}
-This is feature is in development. It is **not recommended** for production environments. <!--TODO: warning still applies? -->
-```
+<!--TODO: warning still applies?
+This is feature is in development. It is **not recommended** for production environments.
+-->
 
 ## Prerequisites
 
@@ -172,8 +172,12 @@ Wait until the model settles. The following is an example of the `juju status --
 ```
 ````
 
-```{note}
-All traces are exported to Tempo using HTTP. Support for sending traces via HTTPS is an upcoming feature.
+```{dropdown} All traces are exported to Tempo using HTTP.
+:color: info
+:icon: info
+:class-title: sd-font-weight-normal
+
+Support for sending traces via HTTPS is an upcoming feature.
 ```
 
 ## View traces

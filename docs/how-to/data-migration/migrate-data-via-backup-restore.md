@@ -12,10 +12,14 @@ This is a guide for migrating data from modern charms. To migrate legacy charm d
 * data-migration/migrate-data-via-pg-dump
 -->
 
-```{caution}
-The Canonical Data Team describes here the general approach and does NOT support nor guarantee restoration results.
+```{dropdown} Always try this in a test environment before performing it in production!
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
 
-Always test a migration in a test environment before performing it in production!
+This page describes the general approach for data migration. Canonical does not guarantee restoration results.
+
+{ref}`Contact us <contact>` for more guidance.
 ```
 
 ## Prerequisites
@@ -37,9 +41,7 @@ Below is the *general approach* to the migration:
 
     Ensure the version is compatible with pgBackRest in the new Charmed PostgreSQL revision you are going to deploy! See examples in the [pgBackRest user guide](https://pgbackrest.org/user-guide.html#installation).
 
-   ```{note}
    You can use the `charmed-postgresql` [snap](https://snapcraft.io/charmed-postgresql) (VM) or [rock](https://github.com/canonical/charmed-postgresql-rock) (K8s) directly.
-   ```
 
 3. Configure storage for database backup (local or remote, S3-based is recommended).
 

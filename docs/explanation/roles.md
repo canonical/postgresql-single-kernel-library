@@ -8,9 +8,7 @@ There are several definitions of roles in Charmed PostgreSQL:
   *  LDAP-specific roles
 * Extra user roles relation flag
 
-```{seealso}
-{ref}`users`
-```
+{{seealso}} {ref}`users`
 
 ## PostgreSQL 16 roles
 
