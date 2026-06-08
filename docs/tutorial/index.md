@@ -33,7 +33,7 @@ First, we will set up a cloud environment using [Multipass](https://multipass.ru
 :icon: book
 :class-title: sd-font-weight-normal
 
-{ref}`How-to guides > Deploy <deploy>` contains instructions for several other types of deployment environments and methods, like specific VM and K8s clouds, using Terraform instead of the Juju CLI, or setting up an airgapped environment. 
+{ref}`How-to guides > Deploy <deploy>` contains instructions for several other types of deployment environments and methods, like specific VM and K8s clouds, using Terraform instead of the Juju CLI, or setting up an airgapped environment.
 ```
 
 ### Create a Multipass VM

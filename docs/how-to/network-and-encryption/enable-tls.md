@@ -51,9 +51,12 @@ To check the certificates in use by PostgreSQL, run
 openssl s_client -starttls postgres -connect <leader_unit_IP>:<port> | grep issuer
 ```
 
-## Manage keys
+<!-- Hide temporarily. See:
+* https://github.com/canonical/postgresql-k8s-operator/pull/1116/changes#diff-ac0f9c9b30ee833f0e17ba061702fbe3cb698f1e3e08806b45a95c144e5a8e71
+* https://warthogs.atlassian.net/browse/DPE-7348
+* https://warthogs.atlassian.net/browse/DPE-10344
 
-<!--TODO: verify if this section is K8s-only-->
+## Manage keys
 
 Updates to private keys for certificate signing requests (CSR) can be made via the `set-tls-private-key` action. Note that passing keys to external/internal keys should *only be done with* `base64 -w0`, *not* `cat`.
 
@@ -74,6 +77,7 @@ openssl genrsa -out external-key-2.pem 3072
 ```
 
 Apply both private keys to each unit. The shared internal key will be applied only to the juju leader.
+-->
 
 ````{tab-set}
 ```{tab-item} VM

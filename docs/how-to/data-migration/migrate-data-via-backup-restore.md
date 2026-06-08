@@ -3,14 +3,7 @@
 
 Charmed PostgreSQL can restore backups of itself stored on S3-compatible storage (See: {ref}`restore-a-backup`). A similar restore approach is applicable for backups made by a different Charmed PostgreSQL installation or even another PostgreSQL charm. (See: {ref}`migrate-a-cluster`).
 
-This is a guide for migrating data from modern charms. To migrate legacy charm data, refer to the guide {ref}`migrate-data-via-pg-dump`.
-
-<!--TODO: clarify difference between:
-* back-up-and-restore/restore-a-backup
-* back-up-and-restore/migrate-a-cluster
-* data-migration/migrate-data-via-backup-restore
-* data-migration/migrate-data-via-pg-dump
--->
+This is a guide for migrating data from modern charms.
 
 ```{dropdown} Always try this in a test environment before performing it in production!
 :color: warning
@@ -24,7 +17,7 @@ This page describes the general approach for data migration. Canonical does not 
 
 ## Prerequisites
 
-* **Check [your application's compatibility](charm-versions)** with Charmed PostgreSQL before migrating production data from legacy charm
+* **Check [your application's compatibility](charm-versions)** with Charmed PostgreSQL before migrating production data
 * Make sure **PostgreSQL versions are identical** before the migration
 
 ---
@@ -33,11 +26,11 @@ This page describes the general approach for data migration. Canonical does not 
 
 Below is the *general approach* to the migration:
 
-1. Retrieve root/admin level credentials from legacy charm. <!--TODO: is "legacy" the right term here? -->
+1. Retrieve root/admin level credentials from the older charm.
 
    See examples in {ref}`migrate-data-via-pg-dump`.
 
-2. Install [pgBackRest](https://pgbackrest.org/) inside the old charm OR nearby.<!--TODO: clarify "nearby"-->
+2. Install [pgBackRest](https://pgbackrest.org/) inside the old charm OR nearby.
 
     Ensure the version is compatible with pgBackRest in the new Charmed PostgreSQL revision you are going to deploy! See examples in the [pgBackRest user guide](https://pgbackrest.org/user-guide.html#installation).
 

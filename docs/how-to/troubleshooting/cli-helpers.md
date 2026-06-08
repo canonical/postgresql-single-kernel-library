@@ -1,7 +1,8 @@
 (cli-helpers)=
 # How to use CLI helpers
 {{vm}}
-<!--TODO: check for K8s -->
+<!--TODO: update for K8s same stuff except Raft section (VM-only
+$ patronictl ...patroni.yaml -->
 
 This page describes some useful low-level tools shipped withing Charmed PostgreSQL for advanced troubleshooting.
 
@@ -74,8 +75,8 @@ $  sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.y
 ```
 </details>
 
-#### Switchover/failover
-<!--TODO: relationship with switchover-failover guide? -->
+(low-level-switchover-failover)=
+#### Low-level Switchover and failover
 
 Patroni can perform a low-level [switchover/failover](https://patroni.readthedocs.io/en/latest/patronictl.html#patronictl-switchover) inside one cluster.
 

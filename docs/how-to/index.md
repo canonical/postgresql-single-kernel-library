@@ -23,7 +23,7 @@ Essential operations to configure and manage a PostgreSQL cluster:
 :titlesonly:
 
 Scale <scale-replicas>
-Integrate <integrate/index>
+Manage integrations <manage-integrations>
 Manage passwords <manage-passwords>
 Network and encryption <network-and-encryption/index>
 ```

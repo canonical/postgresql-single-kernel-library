@@ -18,9 +18,8 @@ This guide will teach you how to deploy and configure the s3-integrator charm fo
 
 Deploy and configure the `s3-integrator` charm for AWS S3:
 
-<!--TODO: Check if s3-integrator needs juju secrets-->
 ```shell
-juju deploy s3-integrator
+juju deploy s3-integrator --channel=1/stable
 juju run s3-integrator/leader sync-s3-credentials access-key=<access-key-here> secret-key=<secret-key-here>
 
 juju config s3-integrator \
@@ -28,6 +27,16 @@ juju config s3-integrator \
     bucket="postgresql-test-bucket-1" \
     path="/postgresql-test" \
     region="us-west-2"
+```
+
+```{dropdown} We recommend using the <code>1/stable</code> channel of the S3 integrator charm.
+:color: light
+:icon: light-bulb
+:class-title: sd-font-weight-normal
+
+The latest version of the S3 integrator charm is in `2/stable`, and adds support for Juju secrets.
+
+The PostgreSQL charm is not yet using the latest version of the S3 integrator library, so we recommend using `1/stable` for guaranteed compatibility.
 ```
 
 There is an experimental configuration option that sets up a retention time (in days) for backups stored in S3: [`experimental-delete-older-than-days`](https://charmhub.io/s3-integrator/configuration?channel=latest/edge#experimental-delete-older-than-days). See: {ref}`manage-backup-retention`.

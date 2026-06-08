@@ -125,7 +125,6 @@ In this case, there are  several records created to:
  * `pgbouncer_auth_relation_14` - to authenticate end-users, which connects PgBouncer
 
 ## Escalation and switching identity
-<!--TODO: this was only in the K8s docs. Applies to VM too? -->
 
 Regular relation users can temporarily escalate their privileges to other predefined roles using PostgreSQL's role-switching features. There are two approaches:
 

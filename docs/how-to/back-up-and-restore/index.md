@@ -8,6 +8,22 @@ myst:
 # How to back up and restore
 {{vm_k8s}}
 
+<!--
+TODO: clarify difference between:
+
+`back-up-and-restore/restore-a-backup`
+
+`back-up-and-restore/migrate-a-cluster`
+
+`data-migration/migrate-data-via-backup-restore`
+
+`data-migration/migrate-data-via-pg-dump`
+
+Backup today explains payload (bc juju backup involves everthing, like secrets)
+
+Migration is for multiplying your instances elsewhere. Can be done via backup and other methods like pg-dump.
+-->
+
 ```{toctree}
 :titlesonly:
 

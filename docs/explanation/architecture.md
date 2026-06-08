@@ -21,13 +21,16 @@ Example Charmed PostgreSQL deployment with 3 replicas. Integrations include PgBo
 ````{tab-item} VM
 :sync: vm
 
-<!--TODO -->
+The machine charm leverages the [charmed-postgresql](https://snapcraft.io/charmed-postgresql) snap, which is deployed by Juju on the specified VM/MAAS/bare-metal machine based on Ubuntu Noble/24.04.
 
+The snap runs PostgreSQL service(s) in a secure and isolated environment. For more information, see this blog post about [strict confinement](https://ubuntu.com/blog/demystifying-snap-confinement).
+
+Since both the charm code and workload run in the same host machine, they can communicate with one another without the need of an intermediate layer (unlike the Kubernetes charm, which uses Pebble)
 ````
 ````{tab-item} K8s
 :sync: k8s
 
-The charm design leverages the [sidecar](https://kubernetes.io/blog/2015/06/the-distributed-system-toolkit-patterns/#example-1-sidecar-containers) pattern to allow multiple containers in each pod with [Pebble](https://documentation.ubuntu.com/juju/3.6/reference/pebble/) running as the workload container’s entrypoint.
+The Kubernetes charm leverages the [sidecar](https://kubernetes.io/blog/2015/06/the-distributed-system-toolkit-patterns/#example-1-sidecar-containers) pattern to allow multiple containers in each pod with [Pebble](https://documentation.ubuntu.com/juju/3.6/reference/pebble/) running as the workload container’s entrypoint.
 
 Pebble is a lightweight, API-driven process supervisor that is responsible for configuring processes to run in a container and controlling those processes throughout the workload lifecycle.
 
@@ -49,15 +52,11 @@ And if you run `kubectl describe pod postgresql-k8s-0`, all the containers will 
 ````
 `````
 
-{octicon}`arrow-right` See the {ref}`troubleshooting` guide for more information.
-
 ## High-level design
 
 `````{tab-set}
 ````{tab-item} VM
 :sync: vm
-
-The charm design leverages on the [charmed-postgresql](https://snapcraft.io/charmed-postgresql) snap, which is deployed by Juju on the specified VM/MAAS/bare-metal machine based on Ubuntu Noble/24.04. The snap allows to run PostgreSQL service(s) in a secure and isolated environment. For more information, see this blog post about [strict confinement](https://ubuntu.com/blog/demystifying-snap-confinement).
 
 ```{dropdown} The charmed-postgresql snap installs <code>14/stable</code> by default.
 :open:
@@ -67,14 +66,6 @@ The charm design leverages on the [charmed-postgresql](https://snapcraft.io/char
 
 For `16/stable`, use the `--channel` flag when installing or refreshing the snap.
 ```
-
-<!-- TODO: update sample output for 16/stable snap
-```shell
-juju ssh postgresql/0 snap list charmed-postgresql
-Name                Version  Rev  Tracking       Publisher        Notes
-charmed-postgresql  16.10    TODO TODO/edge      dataplatformbot  held
-```
--->
 
 The snap ships the following components:
 
@@ -102,7 +93,7 @@ charmed-postgresql.prometheus-postgres-exporter  enabled   active   -
 charmed-postgresql.pgbackrest-exporter           enabled   active   -
 ```
 
-<!-- TODO: The `ldap-sync` service is... -->
+The `ldap-sync` service starts a background process synchronizing LDAP server usernames into PostgreSQL usernames, assigning mapped roles in the process.
 
 The `patroni` snap service is a main PostgreSQL instance which is normally up and running right after the charm deployment.
 
@@ -121,7 +112,7 @@ The charmed-postgresql snap also ships list of tools used by charm:
 :icon: alert
 :class-title: sd-font-weight-normal
 
-To avoid a {term}`split-brain scenario`, we recommend you do **not** start, stop, and restart snap services manually. <!--TODO: meaning of "manually"? -->
+To avoid a {term}`split-brain scenario`, we recommend you do **not** start, stop, and restart snap services manually. See {ref}`this guide <troubleshooting>` for troubleshooting guidance.
 
 All snap resources must be executed under the special **snap user `_daemon_`** only!
 ```
@@ -235,11 +226,11 @@ The [PostgreSQL Test App](https://charmhub.io/postgresql-test-app) charm is a Ca
 
 {{seealso}} {ref}`enable-monitoring` and {ref}`enable-alert-rules`.
 
+<!--TODO: unhide when charm flowcharts are updated
 ## LLD (Low Level Design)
 
 Check the charm state machines displayed in the {ref}`charm-event-flowcharts`. The low-level logic is mostly common for both VM and K8s charms.
-
-<!--- TODO: Describe all possible installations? Cross-model/controller? --->
+-->
 
 ### Juju events
 
@@ -278,21 +269,10 @@ For this charm, the following events are observed:
 
 ### Charm code overview
 
-<!--TODO: update after single kernel? -->
-
 [`src/charm.py`](https://github.com/canonical/postgresql-operator/blob/main/src/charm.py) is the default entry point for a charm and has the `PostgresqlOperatorCharm` Python class which inherits from `CharmBase`.
 
 `CharmBase` is the base class from which all Charms are formed, defined by [Ops](https://ops.readthedocs.io/en/latest/) (Python framework for developing charms). See more information in the [Ops documentation for `CharmBase`](https://ops.readthedocs.io/en/latest/reference/ops.html#ops.CharmBase).
 
 The `__init__` method guarantees that the charm observes all events relevant to its operation and handles them.
 
-The VM and K8s charm flavours shares the codebase via charm libraries in [`lib/charms/postgresql_k8s/v0/`](https://github.com/canonical/postgresql-k8s-operator/blob/main/lib/charms/postgresql_k8s/v0/postgresql.py) (of K8s flavour of the charm!):
-
-```shell
-$ charmcraft list-lib postgresql-k8s
-
-Library name    API    Patch
-postgresql      0      12
-postgresql_tls  0      7
-```
-
+The VM and K8s charm flavours shares the codebase via [`postgresql-single-kernel-library`](https://github.com/canonical/postgresql-single-kernel-library).

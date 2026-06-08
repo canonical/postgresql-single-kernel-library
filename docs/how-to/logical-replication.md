@@ -60,7 +60,7 @@ Request the credentials for the first PostgreSQL cluster.
 juju run di1/leader get-credentials
 ```
 
-Output example: <!--TODO: verify that different outputs for VM and K8s make sense -->
+Output example:
 
 `````{tab-set}
 ````{tab-item} VM

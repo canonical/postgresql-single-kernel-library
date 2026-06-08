@@ -39,7 +39,7 @@ credentials:
 EOF
 ```
 
-<!--- TODO, teach Juju to use `aws configure` format:
+<!---TODO, teach Juju to use `aws configure` format:
 ```shell
 ~$ aws configure
 AWS Access Key ID [None]: SECRET_ACCESS_KEY_ID
@@ -99,7 +99,6 @@ to create a new model to deploy workloads.
 ```
 </details>
 
-<!--TODO: Check this link: [AWS EC2 instance availability](https://us-east-1.console.aws.amazon.com/ec2/home?region=us-east-1#Instances:instanceState=running) -->
 You can check the AWS EC2 instance availability (ensure the right AWS region chosen!):
 ![image|690x118](aws-ec2-availability.png)
 

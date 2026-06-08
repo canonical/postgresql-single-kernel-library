@@ -1,7 +1,6 @@
 (enable-ldap)=
 # How to enable LDAP authentication
 {{vm_k8s}}
-<!--TODO: check this whole guide for correctness (I removed the cross-controller relation on K8s to simplify) -->
 
 The Lightweight Directory Access Protocol (LDAP) enables centralised authentication for PostgreSQL clusters, reducing the overhead of managing local credentials and access policies.
 
@@ -21,7 +20,20 @@ Check the collection of [Charmhub operators](https://charmhub.io/?q=tls-certific
 
 ## Prerequisites
 
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
 * Juju `v3.6` or higher
+* A Kubernetes Juju controller
+```
+
+```{tab-item} K8s
+:sync: k8s
+
+* Juju `v3.6` or higher
+```
+````
 
 ---
 

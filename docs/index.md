@@ -23,7 +23,7 @@ Learn about what's in the charm, how to set up your environment, and perform the
 
 * **Charm overview**: {ref}`system-requirements` • {ref}`architecture`
 * **Deploy PostgreSQL**: {ref}`Guided tutorial <tutorial>` • {ref}`deploy-quickstart` • {ref}`Set up a cloud <deploy-clouds>`
-* **Key operations**: {ref}`Scale your cluster <scale-replicas>` • {ref}`Connect to a client <integrate-with-another-application>` • {ref}`Create a backup <create-a-backup>`
+* **Key operations**: {ref}`Scale your cluster <scale-replicas>` • {ref}`Connect to a client <integrate-with-a-client-application>` • {ref}`Create a backup <create-a-backup>`
 
 ### Production deployments
 
@@ -83,10 +83,4 @@ explanation/index
 release-notes/index
 Contribute <contribute>
 Contact <contact>
-```
-
-```{toctree}
-:hidden:
-
-temp-notes
 ```

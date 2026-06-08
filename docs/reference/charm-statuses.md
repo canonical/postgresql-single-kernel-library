@@ -14,7 +14,7 @@ For more information about troubleshooting in general, see {ref}`troubleshooting
 
 This reference is a work in progress and may not reflect the latest statuses.
 ```
-<!--TODO: still a work in progress? Should this be updated or automated?-->
+<!--TODO: Needs to be updated (remove outdated ones, add new ones)-->
 
 | Juju Status | Message | Expectations | Actions |
 |-------------|---------|--------------|---------|

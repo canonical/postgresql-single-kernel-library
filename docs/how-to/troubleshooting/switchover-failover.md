@@ -1,7 +1,6 @@
 (switchover-failover)=
 # How to perform a switchover/failover
-{{vm}}
-<!--TODO: verify K8s -->
+{{vm_k8s}}
 
 Charmed PostgreSQL constantly monitors the cluster status and performs **automated failover** in case the primary unit is gone.
 
@@ -13,11 +12,20 @@ Charmed PostgreSQL has been designed for maximum guarantee of data survival in a
 
 ## Switchover
 
-To switchover the PostgreSQL Primary (write-endpoint) to new Juju unit, use Juju action `promote-to-primary` (on the unit `x`, which will be promoted as a new primary):
+To switchover the PostgreSQL Primary (write-endpoint) to new Juju unit, use Juju action `promote-to-primary` (on the unit `<unit number>`, which will be promoted as a new primary):
 
-```shell
-juju run postgresql/x promote-to-primary scope=unit
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+    juju run postgresql/<unit number> promote-to-primary scope=unit
 ```
+```{tab-item} K8s
+:sync: k8s
+
+    juju run postgresql-k8s/<unit number> promote-to-primary scope=unit
+```
+````
 
 Note that:
 * a manual switchover is possible on the healthy {ref}`sync standby unit <units>` only. Otherwise it will be rejected by Patroni with the reason explanation.
@@ -27,9 +35,10 @@ Note that:
 
 Charmed PostgreSQL doesn't provide manual failover due to lack of data safety guarantees.
 
-Advanced users can still execute it using {ref}`patronictl and the Patroni REST API <cli-helpers>`. The same time Charmed PostgreSQL allows the cluster recovery using the full PostgreSQL/Patroni/Raft cluster re-initialisation.
+Advanced users can still execute it using {ref}`patronictl and the Patroni REST API <low-level-switchover-failover>`. The same time Charmed PostgreSQL allows the cluster recovery using the full PostgreSQL/Patroni/Raft cluster re-initialisation.
 
-## Raft re-initialisation
+## Raft re-initialisation (VM only)
+{{vm}}
 
 This is the worst possible recovery case scenario when Primary and ALL Sync Standby units lost simultaneously and their data cannot be recovered from the disc.
 

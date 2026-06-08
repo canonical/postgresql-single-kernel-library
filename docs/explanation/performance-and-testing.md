@@ -2,9 +2,9 @@
 # Performance and testing
 {{vm_k8s}}
 
-<!--TODO: intro -->
+This page summarizes the configuration parameters and testing methods that can help optimize and validate Charmed PostgreSQL deployments. It provides operational guidelines for adjusting resource allocation profiles, applying hardware constraints, and executing functional validation tests.
 
-## Deployment profiles
+## Resource allocation
 
 Charmed PostgreSQL resource allocation can be controlled via the charm's `profile` config option:
 
@@ -26,7 +26,7 @@ Charmed PostgreSQL resource allocation can be controlled via the charm's `profil
 
 See: {ref}`system-profiling`
 
-## Juju constraints
+## Hardware constraints
 
 The Juju [`--constraints`](https://juju.is/docs/juju/constraint) flag sets RAM and CPU limits for [Juju units](https://juju.is/docs/juju/unit):
 
@@ -59,7 +59,7 @@ Juju constraints can be set together with the charm's profile:
 ````
 
 (testing)=
-## Testing
+## Testing your deployment
 
 ### Benchmarking
 
@@ -147,7 +147,9 @@ watch -n1 -x juju run postgresql-test-app/leader run-sql dbname=${db} query="${q
 watch -n1 -x juju ssh --container postgresql postgresql-k8s/leader "psql postgresql://${user}:${pass}@${ip}:5432/${db} -c \"${query}\""
 -->
 
+<!--TODO: No bundle for 16 (yet?). Update this section when ready.
+
 ### System test
 
 To perform a system test, deploy the PostgreSQL charm bundle ([VM](https://charmhub.io/postgresql-bundle) | [K8s](https://charmhub.io/postgresql-k8s-bundle)). This charm bundle automatically deploys and tests all the necessary parts at once.
-
+-->

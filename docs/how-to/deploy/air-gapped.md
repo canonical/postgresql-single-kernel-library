@@ -77,8 +77,7 @@ The necessary charm(s) can be exported as bundle or independently (charm-by-char
 * [Offline Charmhub > Export charm bundle](https://documentation.ubuntu.com/enterprise-store/main/how-to/airgap-charmhub/#export-charm-bundles)
 * [Offline Charmhub > Export charms](https://documentation.ubuntu.com/enterprise-store/main/how-to/airgap-charmhub/#export-charms)
 
-
-For example, to export all charms in the PostgreSQL 14 bundle: <!--TODO: clarify bundle for PG 16? -->
+For example, to export all charms in the PostgreSQL 14 bundle:
 
 ````{tab-set}
 ```{tab-item} VM
@@ -92,6 +91,15 @@ For example, to export all charms in the PostgreSQL 14 bundle: <!--TODO: clarify
     store-admin export bundle postgresql-k8s-bundle --channel=14/edge --series=jammy --arch=amd64
 ```
 ````
+
+```{dropdown} There is no bundle yet for PostgreSQL 16.
+:open:
+:color: warning
+:icon: alert
+:class-title: sd-font-weight-normal
+
+{ref}`Contact us <contact>` for guidance on exporting the right charms for an offline deployment of PostgreSQL 16.
+```
 
 ### Transfer the binary blobs
 

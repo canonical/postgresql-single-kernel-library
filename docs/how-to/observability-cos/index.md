@@ -1,6 +1,8 @@
 (observability-cos)=
 # Observability (COS)
 
+<!--Define observability, COS, different types -->
+
 ```{toctree}
 :titlesonly:
 :maxdepth: 2

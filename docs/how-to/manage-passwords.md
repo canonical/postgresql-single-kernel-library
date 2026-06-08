@@ -2,8 +2,6 @@
 # How to manage passwords
 {{vm_k8s}}
 
-<!--TODO: rename to manage secrets? -->
-
 Charmed PostgreSQL 16 uses [Juju secrets](https://documentation.ubuntu.com/juju/latest/reference/secret/#secret) to manage passwords.
 
 {{seealso}} [Juju | How to manage secrets](https://documentation.ubuntu.com/juju/latest/howto/manage-secrets/#manage-secrets)
@@ -78,3 +76,80 @@ In this example,
 * `user_b`'s password remains as it was when the secret was added, but **`user_b` is no longer part of the secret**.
 
 {{seealso}} {ref}`users`
+
+## Rotate application passwords
+
+To rotate the passwords of users created for integrated applications, the integration should be removed and integrated again. This process will generate a new user and password for the application.
+
+## Request a custom username
+
+Charms can request a custom username to be used in their relation with PostgreSQL 16.
+
+The simplest way to test it is to use `requested-entities-secret` field via the [`data-integrator` charm](https://charmhub.io/data-integrator).
+
+`````{dropdown} Example
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+    $ juju deploy postgresql --channel 16/stable
+
+    $ juju add-secret myusername mylogin=mypassword
+    secret:d5l3do605d8c4b1gn9a0
+
+    $ juju deploy data-integrator --channel latest/edge --config database-name=mydbname --config requested-entities-secret=d5l3do605d8c4b1gn9a0
+    Deployed "data-integrator" from charm-hub charm "data-integrator", revision 307 in channel latest/edge on ubuntu@24.04/stable
+
+    $ juju grant-secret d5l3do605d8c4b1gn9a0 data-integrator
+
+    $ juju relate postgresql data-integrator
+
+    $ juju run data-integrator/leader get-credentials
+    ...
+    postgresql:
+    database: mydbname
+    username: mylogin
+    password: mypassword
+    uris: postgresql://mylogin:mypassword@10.218.34.199:5432/mydbname
+    version: "16.11"
+    ...
+
+    $ psql postgresql://mylogin:mypassword@10.218.34.199:5432/mydbname -c "SELECT SESSION_USER, CURRENT_USER"
+    session_user |       current_user
+    --------------+---------------------------
+    mylogin      | charmed_mydbname_owner
+    (1 row)
+```
+```{tab-item} K8s
+:sync: k8s
+
+    $ juju deploy postgresql-k8s --channel 16/stable --trust
+
+    $ juju add-secret myusername mylogin=mypassword
+    secret:d5l3do605d8c4b1gn9a0
+
+    $ juju deploy data-integrator --channel latest/edge --config database-name=mydbname --config requested-entities-secret=d5l3do605d8c4b1gn9a0
+    Deployed "data-integrator" from charm-hub charm "data-integrator", revision 307 in channel latest/edge on ubuntu@24.04/stable
+
+    $ juju grant-secret d5l3do605d8c4b1gn9a0 data-integrator
+
+    $ juju relate postgresql-k8s data-integrator
+
+    $ juju run data-integrator/leader get-credentials
+    ...
+    postgresql-k8s:
+    database: mydbname
+    username: mylogin
+    password: mypassword
+    uris: postgresql://mylogin:mypassword@10.218.34.199:5432/mydbname
+    version: "16.13"
+    ...
+
+    $ psql postgresql://mylogin:mypassword@10.218.34.199:5432/mydbname -c "SELECT SESSION_USER, CURRENT_USER"
+    session_user |       current_user
+    --------------+---------------------------
+    mylogin      | charmed_mydbname_owner
+    (1 row)
+```
+````
+`````

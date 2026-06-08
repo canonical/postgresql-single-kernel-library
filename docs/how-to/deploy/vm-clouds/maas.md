@@ -39,7 +39,7 @@ multipass list
 </details>
 </br>
 
-Make sure you are downloading *22.04* images as well. <!--TODO: update? -->
+Make sure you are downloading *24.04* images as well.
 
 The LXD machine will be up and running after the images downloading and sync is completed.
 <details>

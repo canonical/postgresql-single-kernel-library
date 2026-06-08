@@ -20,7 +20,7 @@ The operator uses the following internal DB users:
 * `monitoring` - the user for {ref}`COS integration <enable-monitoring>`.
 * `backups` - the user to perform {ref}`backup operations <back-up-and-restore>`.
 
-The full list of internal users is available in charm [source code](https://github.com/canonical/postgresql-operator/blob/main/src/constants.py). <!--TODO: did this move to single kernel? -->
+The full list of internal users is available in charm [source code](https://github.com/canonical/postgresql-operator/blob/main/src/constants.py).
 
 The full dump of internal users (on the newly installed charm):
 

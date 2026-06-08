@@ -1,7 +1,11 @@
+---
+orphan: True
+---
+
 (charm-event-flowcharts)=
 # Charm event flowcharts
 
-<!--TODO: K8s only?-->
+<!--TODO: hide for now, make ticket to update-->
 
 ```{toctree}
 :titlesonly:

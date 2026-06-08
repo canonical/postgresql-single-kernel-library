@@ -1,7 +1,7 @@
 (configuration)=
 # Configuration
 
-<!--TODO: needs through engineer validation-->
+<!--TODO: re-categorize with existing prefixes-->
 
 The PostgreSQL charm exposes several configuration parameters you can use to fine tune your deployment via [`juju config`](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/config/).
 
@@ -71,6 +71,10 @@ See options related to authentication with `juju config postgresql | grep -e -en
 ### `experimental-max-connections`
 
 <!--TODO connection-pooling.md -->
+
+## Experimental
+
+experimental-delete-older-than-days (manage-backup-retention.md)
 
 ## Data formatting and query parsing behavior
 

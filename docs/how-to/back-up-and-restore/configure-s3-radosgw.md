@@ -41,7 +41,6 @@ Then, deploy and run the charm:
 juju deploy s3-integrator
 juju run s3-integrator/leader sync-s3-credentials access-key=<access-key> secret-key=<secret-key>
 ```
-<!--TODO: s3-integrator secrets?-->
 
 Lastly, use `juju config` to add your configuration parameters. For example:
 

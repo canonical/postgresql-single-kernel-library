@@ -1,6 +1,6 @@
 (juju-storage)=
 # How to deploy on Juju storage
-{{vm}} <!--TODO: check if available for K8s -->
+{{vm}} <!--TODO: create K8s docs -->
 
 Charmed PostgreSQL uses the [Juju storage](https://documentation.ubuntu.com/juju/3.6/reference/storage/) abstraction to utilise data volume provided by different [clouds](https://documentation.ubuntu.com/juju/3.6/reference/cloud/#cloud) while keeping the same UI/UX for end users.
 
@@ -8,7 +8,7 @@ Charmed PostgreSQL uses the [Juju storage](https://documentation.ubuntu.com/juju
 
 ## Prerequisites
 
-If deploying on Terraform, note that the Juju Terraform Provider introduced storage support in version [0.13](https://github.com/juju/terraform-provider-juju/releases/tag/v0.13.0)
+If you are deploying with Terraform, note that the Juju Terraform Provider introduced storage support in version [0.13](https://github.com/juju/terraform-provider-juju/releases/tag/v0.13.0)
 
 ---
 
@@ -81,7 +81,6 @@ postgresql/2  pgdata/2    filesystem  mystoragepool  5 GiB   attached
 To re-deploy the application with the old Juju storage, it is necessary to provide all charm/database credentials as Juju user secrets.
 
 Charmed PostgreSQL 16 uses Juju user secrets to handle credentials:
-<!--TODO: separate commands-->
 
 ```shell
 # Note old passwords

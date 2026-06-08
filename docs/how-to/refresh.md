@@ -1,7 +1,6 @@
 (refresh)=
 # Refresh (upgrade)
 {{vm_k8s}}
-<!--TODO: verify K8s instructions and any important differences in behavior-->
 
 ````{dropdown} Emergency stop button
 :open:
@@ -10,7 +9,7 @@
 
 Halt an in-progress refresh with
 
-```
+```shell
 juju config <app name> pause-after-unit-refresh=all
 ```
 

@@ -4,10 +4,6 @@
 
 This guide contains the steps to enable tracing with [Grafana Tempo](https://grafana.com/docs/tempo/latest/) for your PostgreSQL application.
 
-<!--TODO: warning still applies?
-This is feature is in development. It is **not recommended** for production environments.
--->
-
 ## Prerequisites
 
 * Fully configured monitoring with COS

@@ -41,7 +41,6 @@ Modern charm
 * **For legacy charm users**: Migrate to PostgreSQL 14 as soon as possible
 
 ## PostgreSQL 16 features
-<!--TODO: check which features are VM/K8s-only -->
 
 **Latest stable version** with active feature development.
 
