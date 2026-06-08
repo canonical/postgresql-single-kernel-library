@@ -2,7 +2,7 @@
 # How to manage passwords
 {{vm_k8s}}
 
-Charmed PostgreSQL 16 uses [Juju secrets](https://documentation.ubuntu.com/juju/latest/reference/secret/#secret) to manage passwords.
+Charmed PostgreSQL 16 uses [Juju secrets](https://documentation.ubuntu.com/juju/latest/reference/secret/#secret) to manage user credentials.
 
 {{seealso}} [Juju | How to manage secrets](https://documentation.ubuntu.com/juju/latest/howto/manage-secrets/#manage-secrets)
 

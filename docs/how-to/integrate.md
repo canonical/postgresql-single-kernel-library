@@ -1,6 +1,5 @@
-(manage-integrations)=
-# Manage integrations
-
+(integrate)=
+# How to integrate with PostgreSQL
 [Integrations](https://juju.is/docs/juju/relation), also known as “relations” are connections between two applications with compatible endpoints. These connections simplify the creation and management of users, passwords, and other shared data.
 
 Charmed PostgreSQL can be integrated with any charmed application that supports its interfaces.

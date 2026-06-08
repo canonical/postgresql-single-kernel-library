@@ -22,9 +22,9 @@ Essential operations to configure and manage a PostgreSQL cluster:
 ```{toctree}
 :titlesonly:
 
-Scale <scale-replicas>
-Manage integrations <manage-integrations>
-Manage passwords <manage-passwords>
+Scale a cluster <scale-cluster>
+Integrate <integrate>
+Authentication <authentication/index>
 Network and encryption <network-and-encryption/index>
 ```
 

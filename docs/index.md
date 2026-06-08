@@ -23,13 +23,14 @@ Learn about what's in the charm, how to set up your environment, and perform the
 
 * **Charm overview**: {ref}`system-requirements` • {ref}`architecture`
 * **Deploy PostgreSQL**: {ref}`Guided tutorial <tutorial>` • {ref}`deploy-quickstart` • {ref}`Set up a cloud <deploy-clouds>`
-* **Key operations**: {ref}`Scale your cluster <scale-replicas>` • {ref}`Connect to a client <integrate-with-a-client-application>` • {ref}`Create a backup <create-a-backup>`
+* **Key operations**: {ref}`Scale your cluster <scale-cluster>` • {ref}`Connect to a client <integrate-with-a-client-application>` • {ref}`Create a backup <create-a-backup>`
 
 ### Production deployments
 
 Advanced deployments and operations focused on production scenarios and high availability.
 
-* **Advanced deployment scenarios**: {ref}`Terraform <terraform>` • {ref}`Air-gapped deployments <air-gapped>` • {ref}`Multiple availability zones <multi-az>` • {ref}`Cluster-cluster replication <cluster-cluster-replication>` • {ref}`Logical replication <logical-replication>`
+* **Advanced deployment scenarios**: {ref}`Terraform <terraform>` • {ref}`Air-gapped deployments <air-gapped>`
+* **High availability**: {ref}`Multiple availability zones <multi-az>` • {ref}`Cluster-cluster replication <cluster-cluster-replication>` • {ref}`Logical replication <logical-replication>`
 * **Networking**: {ref}`Juju spaces <juju-spaces>` • {ref}`Enable TLS encryption <enable-tls>` • {ref}`External network access <external-network-access>`
 * **Upgrades and data migration**: {ref}`In-place refresh (upgrade) <refresh>` • {ref}`Cluster and data migration <data-migration>`
 * **Troubleshooting**: {ref}`Overview and tools <troubleshooting>` • {ref}`Manual switchover/failover <switchover-failover>` • {ref}`Logs<logs>` • {ref}`sos-report`
