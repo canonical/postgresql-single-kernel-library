@@ -1,5 +1,7 @@
 (integrate)=
 # How to integrate with PostgreSQL
+{{vm_k8s}}
+
 [Integrations](https://juju.is/docs/juju/relation), also known as “relations” are connections between two applications with compatible endpoints. These connections simplify the creation and management of users, passwords, and other shared data.
 
 Charmed PostgreSQL can be integrated with any charmed application that supports its interfaces.
@@ -40,9 +42,9 @@ To remove the integration, run
 
 {{seealso}} [All compatible charms](https://charmhub.io/integrations/postgresql_client)
 
-### Non-Juju applications
+### Other applications
 
-To integrate with an application outside of Juju, you use the [`data-integrator`](https://charmhub.io/data-integrator) charm to create the required credentials and endpoints.
+To integrate with a charm that doesn't support the interface or a client application that lives outside of Juju, use the [`data-integrator`](https://charmhub.io/data-integrator) charm to create the required credentials and endpoints.
 
 Deploy `data-integrator`:
 
