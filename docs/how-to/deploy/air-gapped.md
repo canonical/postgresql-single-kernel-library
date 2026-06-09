@@ -123,7 +123,10 @@ For example:
 ```
 ````
 
-```{tip}
+```{dropdown} Tip
+:icon: light-bulb
+:class-container: dropdown-tip
+
 Always verify the [checksum](https://en.wikipedia.org/wiki/Checksum) for the transferred blobs!
 ```
 
@@ -167,7 +170,10 @@ Upload the charm blobs into the local airgapped Charmhub. See:
 ```
 ````
 
-```{tip}
+```{dropdown} Tip
+:icon: light-bulb
+:class-container: dropdown-tip
+
 When re-importing charms or importing other revisions, make sure to provide the `--push-channel-map`.
 ```
 

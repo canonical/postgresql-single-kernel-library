@@ -297,8 +297,12 @@ uptime: 2482881
 version: 0.3.12
 ```
 
-```{tip}
-Pay attention to the CLI syntax. Use the standard hyphen `-`, avoid typos with the common `--` prefix for parameters.
+```{dropdown} Pay attention to the CLI syntax.
+:icon: light-bulb
+:class-container: dropdown-tip
+:class-title: sd-font-weight-normal
+
+Use the standard hyphen `-`, avoid typos with the common `--` prefix for parameters.
 ```
 
 </details>

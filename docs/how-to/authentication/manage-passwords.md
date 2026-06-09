@@ -50,9 +50,7 @@ To set the `system-users` config option to the secret URI:
 ```
 ````
 
-```{tip}
-Note that `<secret_URI>` includes the the scheme (`secret:`).
-```
+{octicon}`alert` Note that `<secret_URI>` includes the the scheme (`secret:`).
 
 When the `system-users` config option is set, the charm will:
 * Use the content of the secret specified by the `system-users` config option instead of the one generated.

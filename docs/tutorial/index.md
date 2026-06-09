@@ -29,11 +29,11 @@ First, we will set up a cloud environment using [Multipass](https://multipass.ru
 
 ```{dropdown} Learn more
 :open:
-:color: light
+:class-container: dropdown-tip
 :icon: book
 :class-title: sd-font-weight-normal
 
-{ref}`How-to guides > Deploy <deploy>` contains instructions for several other types of deployment environments and methods, like specific VM and K8s clouds, using Terraform instead of the Juju CLI, or setting up an airgapped environment.
+{ref}`How to deploy <deploy>` contains instructions for several other types of deployment environments and methods, like specific VM and K8s clouds, using Terraform instead of the Juju CLI, or setting up an airgapped environment.
 ```
 
 ### Create a Multipass VM
@@ -79,8 +79,13 @@ Welcome to Ubuntu 24.04.2 LTS (GNU/Linux 6.8.0-63-generic x86_64)
 ...
 ```
 
-```{tip}
-The files `/var/log/cloud-init.log` and `/var/log/cloud-init-output.log` contain all low-level installation details. 
+```{dropdown} <code>cloud-init</code> logs
+:open:
+:class-container: dropdown-tip
+:icon: light-bulb
+:class-title: sd-font-weight-normal
+
+The files `/var/log/cloud-init.log` and `/var/log/cloud-init-output.log` contain all low-level installation details.
 ```
 
 ### Set up Juju
@@ -146,9 +151,7 @@ You can track the progress by running:
 juju status --watch 1s
 ```
 
-```{tip}
 You can open a separate terminal window, enter the same Multipass VM, and keep `juju status --watch 1s` permanently running in it.
-```
 
 When the application is ready, `juju status` will show something similar to the sample output below:
 
@@ -177,8 +180,9 @@ This is where we are introduced to internal database [users](/explanation/users)
 This part of the tutorial accesses PostgreSQL via the charm's `operator` user. This is a superuser with permissions to create roles, databases, and more.
 
 ```{dropdown} Do **not** directly interface with the <code>operator</code> user in a production environment.
+:open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 In a later section, we will cover how to access PostgreSQL more safely.
@@ -217,9 +221,7 @@ One more step is needed for the charm to update the passwords of its internal us
 juju config postgresql system-users=secret:d1ohj30ek0fco390bt9g
 ```
 
-```{tip}
-Remember to replace the secret URI above with yours!
-```
+{octicon}`alert` Remember to replace the secret URI above with yours!
 
 Now we have all the information required to access PostgreSQL. Run the command below to enter the leader unit's shell:
 
@@ -384,7 +386,7 @@ The Charmed PostgreSQL operator for machines uses a [PostgreSQL Patroni-based cl
 ```
 
 ```{dropdown} Do **not** host all replicas on the same machine in a production environment.
-:class-container: dropdown-caution
+:color: warning
 :icon: alert
 :class-title: sd-font-weight-normal
 
@@ -707,7 +709,7 @@ Typically, enabling TLS internally within a highly available database or between
 TLS is enabled by integrating Charmed PostgreSQL with the [Self-signed certificates charm](https://charmhub.io/self-signed-certificates). This charm centralises TLS certificate management consistently and handles operations like providing, requesting, and renewing TLS certificates.
 
 ```{dropdown} Do **not** use self-signed certificates in a production environment.
-:class-container: dropdown-caution
+:color: warning
 :icon: alert
 :class-title: sd-font-weight-normal
 
@@ -842,7 +844,7 @@ If you're done with testing and would like to free up resources on your machine,
 
 ```{dropdown} When you remove the VM **you will lose all the data** inside it.
 :open:
-:class-container: dropdown-caution
+:color: warning
 :icon: alert
 :class-title: sd-font-weight-normal
 

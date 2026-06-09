@@ -23,15 +23,23 @@ To deploy PostgreSQL with multiple replicas, specify the number of desired units
 ```
 ````
 
-```{tip}
-It is recommended to use an odd number to prevent a [split-brain](https://en.wikipedia.org/wiki/Split-brain_(computing)) scenario.
+```{dropdown} It is recommended to deploy an *odd* number of replicas
+:icon: light-bulb
+:class-container: dropdown-tip
+:class-title: sd-font-weight-normal
+
+This helps prevent a [split-brain](https://en.wikipedia.org/wiki/Split-brain_(computing)) scenario.
 ```
 
 ## Scale replicas on an existing application
 
 The amount of replicas (Juju units) can also be modified after deployment.
 
-```{attention}
+```{dropdown} Attention
+:open:
+:class-container: dropdown-important
+:icon: no-entry-fill
+
 Removing the last unit will destroy your data!
 ```
 

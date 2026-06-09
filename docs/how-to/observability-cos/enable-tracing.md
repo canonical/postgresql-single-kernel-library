@@ -45,9 +45,8 @@ juju switch <postgresql_controller>:<postgresql_model>
 
 juju find-offers <cos_k8s_controller>:
 ```
-```{tip}
-Do not miss the "`:`" in the command above.
-```
+
+{octicon}`alert` Do not miss the "`:`" in the command above.
 
 Below is a sample output where `k8s` is the K8s controller name and `cos` is the model where `cos-lite` and `tempo-k8s` are deployed:
 

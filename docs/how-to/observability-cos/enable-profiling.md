@@ -3,10 +3,6 @@
 
 This guide contains the steps to enable profiling with [Parca](https://www.parca.dev/docs/overview/) for your PostgreSQL application.
 
-```{important}
-Read the {ref}`prerequisites` section carefully if you are deploying PostgreSQL in an **LXD model** or if your **base is `ubuntu@22.04`**.
-```
-
 (prerequisites)=
 ## Prerequisites
 
@@ -115,9 +111,7 @@ Consume the Parca offer from [Step 2](#parca-offer-interfaces) and integrate wit
 juju find-offers <k8s_controller_name>:
 ```
 
-```{tip}
-Do not miss the colon "`:" in the command above.
-```
+{octicon}`alert` Do not miss the colon "`:" in the command above.
 
 Below is a sample output where `k8s` is the K8s controller name and `cos` is the model where `cos-lite` and `parca-k8s` are deployed:
 

@@ -362,7 +362,5 @@ Setting up less (590-1ubuntu0.22.04.1) ...
 ````
 `````
 
-```{tip}
 Always remove manually installed components at the end of troubleshooting. Keep the house clean!
-```
 

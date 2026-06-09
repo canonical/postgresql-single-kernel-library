@@ -7,9 +7,8 @@ juju expose postgresql
 ```
 
 ```{dropdown} Be wary of opening ports to the public
-:open:
-:class-container: dropdown-caution
 :icon: alert
+:class-container: dropdown-caution
 :class-title: sd-font-weight-normal
 
 Make sure you understand the risks before doing this in production.
