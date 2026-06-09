@@ -16,7 +16,7 @@ Let's deploy the {ref}`PostgreSQL Cluster on GCE (us-east4) <gce>` using all 3 z
 
 ```{dropdown} Creating the following resources may cost you money
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

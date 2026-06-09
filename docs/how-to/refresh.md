@@ -4,7 +4,7 @@
 
 ````{dropdown} Emergency stop button
 :open:
-:color: danger
+:class-container: dropdown-important
 :icon: no-entry-fill
 
 Halt an in-progress refresh with
@@ -180,7 +180,7 @@ To ensure that the cluster can handle all traffic during the refresh, consider s
 
 ```{dropdown} The PostgreSQL charm does not support scaling up while a refresh is in progress.
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 
@@ -249,7 +249,7 @@ For example:
 
 ```{dropdown} Automatic pause on health check failure
 :open:
-:color: info
+:class-container: dropdown-note
 :icon: info
 :class-title: sd-font-weight-normal
 

@@ -30,7 +30,7 @@ sudo k8s status --wait-ready
 
 ````{dropdown} Optionally, install the <code>kubectl</code> tool and dump the K8s config.
 :open:
-:color: light
+:class-container: dropdown-tip
 :icon: light-bulb
 :class-title: sd-font-weight-normal
 

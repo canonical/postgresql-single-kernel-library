@@ -17,7 +17,7 @@ This guide will teach you how to deploy and configure the s3-integrator charm on
 
 ```{dropdown} pgBackRest limitations
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

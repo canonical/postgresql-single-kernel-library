@@ -60,7 +60,7 @@ And if you run `kubectl describe pod postgresql-k8s-0`, all the containers will 
 
 ```{dropdown} The charmed-postgresql snap installs <code>14/stable</code> by default.
 :open:
-:color: info
+:class-container: dropdown-note
 :icon: info
 :class-title: sd-font-weight-normal
 
@@ -108,7 +108,7 @@ The charmed-postgresql snap also ships list of tools used by charm:
 
 ```{dropdown} Managing snap services manually
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 
@@ -155,7 +155,7 @@ All `metrics_server` Pebble service is only activated after integrating with {re
 
 ```{dropdown} Managing Pebble services manually
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

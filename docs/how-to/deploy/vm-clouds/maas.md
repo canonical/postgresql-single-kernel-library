@@ -64,7 +64,7 @@ multipass exec maas -- sudo maas apikey --username admin
 </br>
 
 ```{dropdown} Make sure to enable DHCP service inside the MAAS VM only.
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

@@ -7,7 +7,7 @@ The Lightweight Directory Access Protocol (LDAP) enables centralised authenticat
 This guide goes over the steps to integrate LDAP as an authentication method with the PostgreSQL charm, all within the Juju ecosystem.
 
 ```{dropdown} Do **not** use self-signed certificates in production.
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

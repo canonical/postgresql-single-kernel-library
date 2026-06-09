@@ -8,7 +8,7 @@ For more information about troubleshooting in general, see {ref}`troubleshooting
 
 ```{dropdown} Caution
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

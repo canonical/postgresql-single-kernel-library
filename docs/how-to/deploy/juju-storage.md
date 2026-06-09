@@ -42,7 +42,7 @@ storage:
 
 ```{dropdown} The charm only supports using tmpfs as a storage provider for <code>temp</code> storage.
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

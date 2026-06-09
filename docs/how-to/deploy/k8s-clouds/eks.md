@@ -158,7 +158,7 @@ juju add-k8s <k8s-cloud-name>
 
 ```{dropdown} K8s credentials on Juju
 :open:
-:color: info
+:class-container: dropdown-note
 :icon: info
 :class-title: sd-font-weight-normal
 

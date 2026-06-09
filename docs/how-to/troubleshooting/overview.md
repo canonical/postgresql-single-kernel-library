@@ -6,7 +6,7 @@ This page goes over some recommended tools and approaches to troubleshooting the
 
 ```{dropdown} To avoid service disruptions:
 :open:
-:color: light
+:class-container: dropdown-tip
 :icon: light-bulb
 :class-title: sd-font-weight-normal
 

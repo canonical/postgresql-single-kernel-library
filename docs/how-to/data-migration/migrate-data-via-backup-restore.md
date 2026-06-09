@@ -6,7 +6,7 @@ Charmed PostgreSQL can restore backups of itself stored on S3-compatible storage
 This is a guide for migrating data from modern charms.
 
 ```{dropdown} Always try this in a test environment before performing it in production!
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

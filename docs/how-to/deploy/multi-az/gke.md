@@ -20,7 +20,7 @@ Let's deploy a {ref}`PostgreSQL Cluster on GKE (us-east4) <gke>` using all 3 zon
 
 ```{dropdown} Creating the following resources may cost you money
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

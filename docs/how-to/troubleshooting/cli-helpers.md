@@ -8,7 +8,7 @@ This page describes some useful low-level tools shipped withing Charmed PostgreS
 
 ```{dropdown} These tools can be dangerous in a production environment.
 :open:
-:color: danger
+:class-container: dropdown-important
 :icon: flame
 
 When in doubt, {ref}`contact us <contact>`.
@@ -219,7 +219,7 @@ $ curl 10.189.210.55:8008/cluster | jq # where 10.189.210.55 is IP of Charmed Po
 
 ```{dropdown} Patroni REST API access
 :open:
-:color: info
+:class-container: dropdown-note
 :icon: info
 :class-title: sd-font-weight-normal
 

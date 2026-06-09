@@ -177,7 +177,7 @@ This is where we are introduced to internal database [users](/explanation/users)
 This part of the tutorial accesses PostgreSQL via the charm's `operator` user. This is a superuser with permissions to create roles, databases, and more.
 
 ```{dropdown} Do **not** directly interface with the <code>operator</code> user in a production environment.
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 
@@ -384,7 +384,7 @@ The Charmed PostgreSQL operator for machines uses a [PostgreSQL Patroni-based cl
 ```
 
 ```{dropdown} Do **not** host all replicas on the same machine in a production environment.
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 
@@ -707,7 +707,7 @@ Typically, enabling TLS internally within a highly available database or between
 TLS is enabled by integrating Charmed PostgreSQL with the [Self-signed certificates charm](https://charmhub.io/self-signed-certificates). This charm centralises TLS certificate management consistently and handles operations like providing, requesting, and renewing TLS certificates.
 
 ```{dropdown} Do **not** use self-signed certificates in a production environment.
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 
@@ -842,7 +842,7 @@ If you're done with testing and would like to free up resources on your machine,
 
 ```{dropdown} When you remove the VM **you will lose all the data** inside it.
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

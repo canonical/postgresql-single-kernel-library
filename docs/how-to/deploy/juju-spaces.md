@@ -37,7 +37,7 @@ juju deploy postgresql --channel 16/stable \
 
 ```{dropdown} There is no support for the juju <code>bind</code> command.
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 
@@ -71,7 +71,7 @@ The Charmed PostgreSQL operator endpoints are:
 
 ```{dropdown} Using spaces for backup traffic
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

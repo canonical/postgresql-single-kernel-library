@@ -57,7 +57,7 @@ store-admin export snaps --from-yaml snaps.yaml
 ```
 
 ```{dropdown} Always use the <code>snap.yaml</code> and <code>bundle.yaml</code> from the same Git commit!
-:color: warning
+:class-container: dropdown-caution
 :icon: commit
 :class-title: sd-font-weight-normal
 
@@ -94,7 +94,7 @@ For example, to export all charms in the PostgreSQL 14 bundle:
 
 ```{dropdown} There is no bundle yet for PostgreSQL 16.
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 
@@ -191,7 +191,7 @@ Deploy and operate Juju charms normally:
 
 ```{dropdown} Artifact store revisions
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: tag
 :class-title: sd-font-weight-normal
 

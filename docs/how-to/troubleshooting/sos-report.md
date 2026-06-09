@@ -5,7 +5,7 @@
 SoS is an extensible, portable, support data collection tool primarily aimed at Linux distributions and other UNIX-like operating systems.
 
 ```{dropdown} Always review the collected data before sharing it!
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

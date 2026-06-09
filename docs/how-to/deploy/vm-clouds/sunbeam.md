@@ -83,7 +83,7 @@ Follow the official guide: [Accessing the OpenStack dashboard](https://canonical
 
 ````{dropdown} When using a Multipass VM, you may need to manually route OpenStack IPs.
 :open:
-:color: info
+:class-container: dropdown-note
 :icon: info
 :class-title: sd-font-weight-normal
 

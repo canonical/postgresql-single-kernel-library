@@ -172,7 +172,7 @@ At this point, Juju is responsible for the health of the clusters/applications:
 
 ```{dropdown} Multiple availability zones
 :open:
-:color: light
+:class-container: dropdown-tip
 :icon: light-bulb
 :class-title: sd-font-weight-normal
 

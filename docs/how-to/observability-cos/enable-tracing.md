@@ -169,7 +169,7 @@ Wait until the model settles. The following is an example of the `juju status --
 ````
 
 ```{dropdown} All traces are exported to Tempo using HTTP.
-:color: info
+:class-container: dropdown-note
 :icon: info
 :class-title: sd-font-weight-normal
 

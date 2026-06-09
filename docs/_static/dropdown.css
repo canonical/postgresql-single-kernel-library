@@ -1,0 +1,76 @@
+/* Custom tip color */
+body {
+    --color-admonition-title--tip: #000000;
+}
+
+body[data-theme="dark"] {
+    --color-admonition-title--tip: #cfcfcf;
+}
+
+@media (prefers-color-scheme: dark) {
+    body:not([data-theme="light"]) {
+        --color-admonition-title--tip: #cfcfcf;
+    }
+}
+
+/* Base dropdown dark-mode compatibility */
+.sd-dropdown.dropdown-tip,
+.sd-dropdown.dropdown-note,
+.sd-dropdown.dropdown-caution,
+.sd-dropdown.dropdown-important {
+    background-color: var(--color-background-primary);
+    border: none;
+}
+
+/* Tip-styled dropdown */
+.sd-dropdown.dropdown-tip>summary.sd-summary-title {
+    color: var(--color-admonition-title--tip);
+    border-top: 3px solid var(--color-admonition-title--tip);
+    background-color: var(--color-admonition-title-background--tip, transparent);
+}
+
+/* Note-styled dropdown */
+.sd-dropdown.dropdown-note>summary.sd-summary-title {
+    color: var(--color-admonition-title--note);
+    border-top: 3px solid var(--color-admonition-title--note);
+    background-color: var(--color-admonition-title-background--note, transparent);
+}
+
+/* Caution-styled dropdown */
+.sd-dropdown.dropdown-caution>summary.sd-summary-title {
+    color: var(--color-admonition-title--caution);
+    border-top: 3px solid var(--color-admonition-title--caution);
+    background-color: var(--color-admonition-title-background--caution, transparent);
+}
+
+/* Important-styled dropdown */
+.sd-dropdown.dropdown-important>summary.sd-summary-title {
+    color: var(--color-admonition-title--important);
+    border-top: 3px solid var(--color-admonition-title--important);
+    background-color: var(--color-admonition-title-background--important, transparent);
+}
+
+/* Ensure icon color matches title color */
+.sd-dropdown.dropdown-tip>summary .sd-summary-icon {
+    color: var(--color-admonition-title--tip);
+}
+
+.sd-dropdown.dropdown-note>summary .sd-summary-icon {
+    color: var(--color-admonition-title--note);
+}
+
+.sd-dropdown.dropdown-caution>summary .sd-summary-icon {
+    color: var(--color-admonition-title--caution);
+}
+
+.sd-dropdown.dropdown-important>summary .sd-summary-icon {
+    color: var(--color-admonition-title--important);
+}
+
+/* Card body inherits proper background in both modes */
+.sd-dropdown.dropdown-tip .sd-card-body,
+.sd-dropdown.dropdown-note .sd-card-body,
+.sd-dropdown.dropdown-caution .sd-card-body,
+.sd-dropdown.dropdown-important .sd-card-body {
+    background-color: var(--color-background-secondary);
+}

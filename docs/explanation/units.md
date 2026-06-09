@@ -45,7 +45,7 @@ primary: postgresql/0
 
 ````{dropdown} We highly recommend configuring the <code>update-status</code> hook to run frequently.
 :open:
-:color: info
+:class-container: dropdown-tip
 :icon: light-bulb
 :class-title: sd-font-weight-normal
 

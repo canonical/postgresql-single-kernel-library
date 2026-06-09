@@ -57,7 +57,7 @@ This configuration will be enforced in every Charmed PostgreSQL application that
 
 ```{dropdown} Backups older than retention time will only expire once a newer backup is created
 :open:
-:color: info
+:class-container: dropdown-note
 :icon: info
 :class-title: sd-font-weight-normal
 

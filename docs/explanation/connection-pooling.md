@@ -14,7 +14,7 @@ If using PgBouncer is not enough to handle the connections load of your applicat
 
 ```{dropdown} Resource usage warning
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

@@ -18,7 +18,7 @@ A minor difference in commands might be necessary for different revisions and/or
 * Validate results and remove legacy charm
 
 ```{dropdown} Always try this in a test environment before performing it in production!
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

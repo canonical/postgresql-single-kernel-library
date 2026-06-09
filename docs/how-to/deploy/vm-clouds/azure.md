@@ -41,7 +41,7 @@ Your CLI is up-to-date.
 ## Authenticate
 
 ```{dropdown} Choose the authentication method that fits you best.
-:color: info
+:class-container: dropdown-note
 :icon: info
 :class-title: sd-font-weight-normal
 

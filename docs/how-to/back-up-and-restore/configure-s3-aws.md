@@ -30,7 +30,7 @@ juju config s3-integrator \
 ```
 
 ```{dropdown} We recommend using the <code>1/stable</code> channel of the S3 integrator charm.
-:color: light
+:class-container: dropdown-tip
 :icon: light-bulb
 :class-title: sd-font-weight-normal
 
@@ -44,7 +44,7 @@ There is an experimental configuration option that sets up a retention time (in 
 
 ```{dropdown} The S3 endpoint must be specified as <code>s3.\<region\>.amazonaws.com</code> within the **first 24 hours** of creating the bucket.
 :open:
-:color: warning
+:class-container: dropdown-caution
 :icon: alert
 :class-title: sd-font-weight-normal
 

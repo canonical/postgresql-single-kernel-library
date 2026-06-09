@@ -113,7 +113,7 @@ Add a Juju K8s cloud:
 
 ```{dropdown} K8s credentials on Juju
 :open:
-:color: info
+:class-container: dropdown-note
 :icon: info
 :class-title: sd-font-weight-normal
 
