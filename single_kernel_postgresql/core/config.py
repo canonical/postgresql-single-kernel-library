@@ -7,10 +7,10 @@
 import logging
 from typing import Annotated, Literal
 
-from single_kernel_postgresql.lib.charms.data_platform_libs.v1.data_models import BaseConfigModel
 from pydantic import Field, NonNegativeInt, PositiveInt
 
 from single_kernel_postgresql.config.locales import SNAP_LOCALES
+from single_kernel_postgresql.lib.charms.data_platform_libs.v1.data_models import BaseConfigModel
 
 logger = logging.getLogger(__name__)
 

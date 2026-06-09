@@ -4,19 +4,30 @@
 # See LICENSE file for licensing details.
 
 """State objects for database-peers relation."""
+
 import json
-from ops import Application, Relation, Unit
+
+from ops import Application, BlockedStatus, Relation, Unit
 
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import MONITORING_PASSWORD_KEY, PATRONI_PASSWORD_KEY, REPLICATION_PASSWORD_KEY, USER_PASSWORD_KEY
+from single_kernel_postgresql.config.literals import (
+    MONITORING_PASSWORD_KEY,
+    PATRONI_PASSWORD_KEY,
+    REPLICATION_PASSWORD_KEY,
+    USER_PASSWORD_KEY,
+)
 from single_kernel_postgresql.core.relation_state import RelationState
-from ops import Relation, Unit, Application
-from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import DataPeerUnitData, DataPeerData
-from ops import BlockedStatus
+from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
+    DataPeerData,
+    DataPeerUnitData,
+)
 
 
 class PostgreSQLPeer(RelationState):
     """State/Relation data collection for a PostgreSQL unit."""
+
+    data_interface: DataPeerUnitData
+    unit: Unit
 
     def __init__(
         self,
@@ -135,14 +146,14 @@ class PostgreSQLPeer(RelationState):
         if not self.relation:
             return None
         return self.relation.data[self.unit].get("replication-address", None)
-    
+
     @property
     def replication_offer_address(self) -> str | None:
         """Get the address to be used for replication communication in case of replication offer."""
         if not self.relation:
             return None
         return self.relation.data[self.unit].get("replication-offer-address", None)
-    
+
     @property
     def private_address(self) -> str | None:
         """Get the private address of the unit."""
@@ -152,6 +163,7 @@ class PostgreSQLPeer(RelationState):
 
     @property
     def peer_addresses(self) -> set[str]:
+        """Set of peer unit addresses (database, replication, and replication-offer)."""
         peer_addrs = set()
         if addr := self.database_peers_address:
             peer_addrs.add(addr)
@@ -164,12 +176,14 @@ class PostgreSQLPeer(RelationState):
         return peer_addrs
 
 
-
 class PostgreSQLApplication(RelationState):
     """An PostgreSQL Application is the peer application state.
 
     This class defines state/relation data for a single PostgreSQL application.
     """
+
+    data_interface: DataPeerData
+    app: Application
 
     def __init__(
         self,
@@ -242,7 +256,6 @@ class PostgreSQLApplication(RelationState):
         """
         return self.get_secret("internal-ca-key")
 
-
     @property
     def cluster_name(self) -> str:
         """Get cluster name.
@@ -272,8 +285,6 @@ class PostgreSQLApplication(RelationState):
         if not self.relation:
             return set()
         return set(json.loads(self.relation.data[self.app].get("endpoints", "[]")))
-
-
 
     def get_secret(self, key: str) -> str | None:
         """Get the secret value for 'key' from the peer relation data."""

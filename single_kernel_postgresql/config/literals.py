@@ -29,16 +29,16 @@ BASE_SNAP_DIR = "/var/snap/charmed-postgresql"
 SNAP_DATA = "current"
 SNAP_COMMON = "common"
 SNAP = "/snap/charmed-postgresql/current"
-VM_DATA_PATH = "var/lib/postgresql" 
+VM_DATA_PATH = "var/lib/postgresql"
 
 ## K8s Paths
 K8S_DATA_PATH = "var/lib/pg/data"
 
 ## Shared Paths
-# NOTE: The paths don't have leading slahes since pathops 
+# NOTE: The paths don't have leading slahes since pathops
 # will handle path concatenation otherwise it will use "/var/lib/postgresql"
 # instead of using the root path or any other part defined by the / operator.
-# e.g. snap_current / "/etc/postgresql" will resutl in "/etc/postgresql" instead of "/var/snap/postgresql/current/etc/postgresql"
+# e.g. snap_current / "/etc/postgresql" will result in "/etc/postgresql" instead of "/var/snap/postgresql/current/etc/postgresql"
 POSTGRESQL_CONF_PATH = "etc/postgresql"
 POSTGRESQL_CONF_FILE = "postgresql.conf"
 
@@ -87,7 +87,6 @@ K8S_ROTATE_LOGS_SERVICE_NAME = "rotate-logs"
 ## K8s User and group
 K8S_WORKLOAD_OS_GROUP = "postgres"
 K8S_WORKLOAD_OS_USER = "postgres"
-
 
 
 # File permissions as octal

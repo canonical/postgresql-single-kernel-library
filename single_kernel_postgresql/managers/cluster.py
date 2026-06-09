@@ -8,31 +8,33 @@ Responsible for managing cluster-wide operations.
 """
 
 import logging
-from ops import ModelError, SecretNotFoundError
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from ops import ModelError, SecretNotFoundError
+from tenacity import RetryError, Retrying, stop_after_delay, wait_fixed
 
-from tenacity import Retrying, stop_after_delay, wait_fixed, RetryError
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.exceptions import (
+    PostgreSQLCannotConnectError,
+    SettingSystemPasswordError,
+)
+from single_kernel_postgresql.config.literals import (
+    APP_SCOPE,
+    MONITORING_PASSWORD_KEY,
+    PATRONI_PASSWORD_KEY,
+    RAFT_PASSWORD_KEY,
+    REPLICATION_PASSWORD_KEY,
+    REWIND_PASSWORD_KEY,
+    USER_PASSWORD_KEY,
+)
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.utils import new_password
+from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
-from single_kernel_postgresql.config.exceptions import ErrorSettingSystemPassword, PostgreSQLCannotConnectError
-from single_kernel_postgresql.utils import new_password
-from single_kernel_postgresql.config.literals import (
-    USER_PASSWORD_KEY,
-    REPLICATION_PASSWORD_KEY,
-    REWIND_PASSWORD_KEY,
-    MONITORING_PASSWORD_KEY,
-    RAFT_PASSWORD_KEY,
-    PATRONI_PASSWORD_KEY,
-    APP_SCOPE,
-)
-
 
 logger = logging.getLogger(__name__)
 
@@ -53,16 +55,15 @@ class ClusterManager(BaseManager):
             self.workload.create_snap_alias("patronictl")
             self.workload.create_snap_alias("psql")
         else:
-            logger.debug("No workload installation steps defined for substrate %s", self.state.substrate)
-
-
-    
+            logger.debug(
+                "No workload installation steps defined for substrate %s", self.state.substrate
+            )
 
     def configure_system_passwords(self) -> None:
         """Configure system user passwords.
 
         This is called on leader units only to create system passwords
-        if not already set. 
+        if not already set.
         """
         # consider configured system user passwords
         raise_error = False
@@ -95,7 +96,7 @@ class ClusterManager(BaseManager):
                     logger.info(f"Generated new password for {key}")
 
         if raise_error:
-            raise ErrorSettingSystemPassword("Failed to set system user passwords.")
+            raise SettingSystemPasswordError("Failed to set system user passwords.")
 
     def expose_ip_and_port(self) -> None:
         """Expose the unit's IP and port to the peer relation."""
@@ -107,9 +108,9 @@ class ClusterManager(BaseManager):
         except ModelError:
             logger.exception("failed to open port")
 
-    
     @property
     def can_connect_to_postgresql(self) -> bool:
+        """Whether the local PostgreSQL instance is reachable and responding."""
         if not self.postgresql_client.password or not self.postgresql_client.current_host:
             return False
         try:
@@ -127,7 +128,10 @@ class ClusterManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
-        if not self.state.application.user_password or not self.state.application.replication_password:
+        if (
+            not self.state.application.user_password
+            or not self.state.application.replication_password
+        ):
             return [GeneralStatuses.WAITING_PASSWORDS_GENERATION.value]
 
         if not self.can_connect_to_postgresql:

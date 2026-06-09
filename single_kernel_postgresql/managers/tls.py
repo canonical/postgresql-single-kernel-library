@@ -6,31 +6,33 @@
 
 Responsible for managing the TLS configuration of the PostgreSQL instance.
 """
-import logging
 
-from data_platform_helpers.advanced_statuses import StatusObject
-from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from charmlibs.interfaces.tls_certificates import (
-    generate_ca,
-    generate_private_key,
-    generate_certificate,
-    PrivateKey,
-    Certificate,
-    generate_csr,
-)
+import logging
 from datetime import timedelta
 
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
-from single_kernel_postgresql.config.statuses import GeneralStatuses
+from charmlibs.interfaces.tls_certificates import (
+    Certificate,
+    PrivateKey,
+    generate_ca,
+    generate_certificate,
+    generate_csr,
+    generate_private_key,
+)
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+
 from single_kernel_postgresql.config.exceptions import TlsError
-from single_kernel_postgresql.core.state import CharmState
-from single_kernel_postgresql.managers.base import BaseManager
-from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses
+from single_kernel_postgresql.core.state import CharmState
+from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
+from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
 
 class TLSManager(BaseManager):
     """PostgreSQL TLS Manager.
@@ -41,16 +43,13 @@ class TLSManager(BaseManager):
     def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
         super().__init__(state, workload, "tls_manager", client)
 
-
     def configure_internal_peer_ca(self) -> None:
-        """Configure TLS internal peer CA.
-        """
+        """Configure TLS internal peer CA."""
         if not self.state.get_secret(APP_SCOPE, "internal-ca"):
-            self.generate_internal_peer_ca() 
+            self.generate_internal_peer_ca()
 
     def configure_internal_peer_cert(self) -> None:
-        """Configure TLS internal peer certificate.
-        """
+        """Configure TLS internal peer certificate."""
         if not self.state.peer.internal_cert:
             self.generate_internal_peer_cert()
 
@@ -78,7 +77,7 @@ class TLSManager(BaseManager):
         self.state.peer.internal_cert = str(cert)
         self.state.peer.internal_key = str(private_key)
 
-        #self.charm.push_tls_files_to_workload()
+        # self.charm.push_tls_files_to_workload()
         logger.info(
             "Internal peer certificate generated. Please use a proper TLS operator if possible."
         )
@@ -95,10 +94,8 @@ class TLSManager(BaseManager):
         self.state.set_secret(APP_SCOPE, "internal-ca-key", str(private_key))
         self.state.set_secret(APP_SCOPE, "internal-ca", str(ca))
 
-
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
         return [GeneralStatuses.ACTIVE_IDLE.value]
-

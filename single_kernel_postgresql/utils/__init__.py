@@ -18,6 +18,7 @@ from httpx import AsyncClient, BasicAuth, HTTPError
 from ..config.enums import Substrates
 from ..config.literals import API_REQUEST_TIMEOUT
 
+
 def unit_name_to_pod_name(unit_name: str) -> str:
     """Converts unit name to pod name.
 

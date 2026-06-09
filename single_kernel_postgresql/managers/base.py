@@ -9,9 +9,9 @@ import logging
 from data_platform_helpers.advanced_statuses import ManagerStatusProtocol, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
+from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -23,10 +23,12 @@ class BaseManager(ManagerStatusProtocol):
     Include a set of functions and properties useful to other managers.
     """
 
+    state: CharmState
+
     def __init__(
         self, state: CharmState, workload: BaseWorkload, name: str, client: PostgreSQLClient
     ):
-        self.state: CharmState = state  # type: ignore[override]
+        self.state = state
         self.workload = workload
         self.name = name
         self.postgresql_client = client

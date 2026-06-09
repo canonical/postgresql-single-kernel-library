@@ -3,22 +3,35 @@
 # See LICENSE file for licensing details.
 
 """Handler for General PostgreSQL charm events."""
-from typing import TYPE_CHECKING
-from ops import Object, InstallEvent, StartEvent, LeaderElectedEvent, ModelError, WorkloadEvent, WaitingStatus
-from datetime import datetime
+
 import logging
+from datetime import datetime
+from typing import TYPE_CHECKING, cast
+
+from ops import (
+    InstallEvent,
+    LeaderElectedEvent,
+    ModelError,
+    Object,
+    StartEvent,
+    WaitingStatus,
+    WorkloadEvent,
+)
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
+from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.exceptions import (
+    SettingSystemPasswordError,
+    StorageUnavailableError,
+)
+from single_kernel_postgresql.config.statuses import GeneralStatuses, PatroniStatuses
+from single_kernel_postgresql.core.state import CharmState
+from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
-from single_kernel_postgresql.workload.vm import VMWorkload
 from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.core.state import CharmState
-from single_kernel_postgresql.config.statuses import GeneralStatuses, PatroniStatuses
-from single_kernel_postgresql.managers.cluster import ClusterManager
-from single_kernel_postgresql.config.exceptions import StorageUnavailableError, ErrorSettingSystemPassword
+from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
@@ -30,7 +43,16 @@ logger = logging.getLogger(__name__)
 class PostgreSQLEventsHandler(Object):
     """Class implementing PostgreSQL Charm events handling."""
 
-    def __init__(self, charm: "AbstractPostgreSQLCharm", workload: BaseWorkload, state: CharmState, cluster_manager: ClusterManager, tls_manager: TLSManager, config_manager: ConfigManager, patroni_manager: PatroniManager) -> None:
+    def __init__(
+        self,
+        charm: "AbstractPostgreSQLCharm",
+        workload: BaseWorkload,
+        state: CharmState,
+        cluster_manager: ClusterManager,
+        tls_manager: TLSManager,
+        config_manager: ConfigManager,
+        patroni_manager: PatroniManager,
+    ) -> None:
         super().__init__(charm, key="postgresql_events")
         self.charm = charm
         self.workload = workload
@@ -45,7 +67,9 @@ class PostgreSQLEventsHandler(Object):
         self.framework.observe(self.charm.on.start, self._on_start)
         self.framework.observe(self.charm.on.leader_elected, self._on_leader_elected)
         if self.state.substrate == Substrates.K8S:
-            self.framework.observe(self.on.postgresql_pebble_ready, self._on_postgresql_pebble_ready)
+            self.framework.observe(
+                self.charm.on.postgresql_pebble_ready, self._on_postgresql_pebble_ready
+            )
 
     def _on_install(self, event: InstallEvent) -> None:
         """Install prerequisites for the application."""
@@ -54,28 +78,28 @@ class PostgreSQLEventsHandler(Object):
             self._check_detached_storage(self.workload)
 
         self.state.add_status_if_not_present(
-            GeneralStatuses.MAINTAINENANCE_INSTALLING,
+            GeneralStatuses.MAINTAINENANCE_INSTALLING.value,
             scope="unit",
-            component=self.cluster_manager.name
+            component=self.cluster_manager.name,
         )
         # Install the charmed PostgreSQL snap.
         self.cluster_manager.install_workload()
 
         self.state.remove_status_if_present(
-            GeneralStatuses.MAINTAINENANCE_INSTALLING,
+            GeneralStatuses.MAINTAINENANCE_INSTALLING.value,
             scope="unit",
-            component=self.cluster_manager.name
+            component=self.cluster_manager.name,
         )
         self.state.add_status_if_not_present(
-            GeneralStatuses.WAITING_POSTGRESQL_START,
+            GeneralStatuses.WAITING_POSTGRESQL_START.value,
             scope="unit",
-            component=self.cluster_manager.name
+            component=self.cluster_manager.name,
         )
 
     def _on_start(self, event: StartEvent) -> None:
         """Event handler for start event."""
         if not self._can_start(event):
-            return 
+            return
 
         try:
             postgres_password = self.state.application.user_password
@@ -101,10 +125,10 @@ class PostgreSQLEventsHandler(Object):
 
     def _on_postgresql_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event handler for PostgreSQL container on PebbleReadyEvent."""
-        assert isinstance(self.charm, PostgreSQLK8sCharm), "Charm must be an instance of PostgreSQLK8sCharm"
-        # TODO: Safeguard against refresh 
+        charm = cast("PostgreSQLK8sCharm", self.charm)
+        # TODO: Safeguard against refresh
         if self.state.endpoint in self.state.endpoints:
-            # TODO: Fix pod by adding services 
+            # TODO: Fix pod by adding services
             pass
 
         # TODO: move this code to an "_update_layer" method in order to also utilize it in
@@ -129,7 +153,7 @@ class PostgreSQLEventsHandler(Object):
             self.tls_manager.configure_internal_peer_cert()
 
         # Start the database service
-        self.charm.k8s_manager.update_pebble_layers()
+        charm.k8s_manager.update_pebble_layers()
 
         # Assert the member is up and running before marking it as initialised.
         if not self.patroni_manager.member_started:
@@ -137,32 +161,23 @@ class PostgreSQLEventsHandler(Object):
             event.defer()
             return
 
-
-
-
-
-
-
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
         """Event handler for leader elected event."""
         try:
             self.cluster_manager.configure_system_passwords()
-        except ErrorSettingSystemPassword:
+        except SettingSystemPasswordError:
             self.state.add_status_if_not_present(
-                GeneralStatuses.FAILED_SETTING_PASSWORDS,
+                GeneralStatuses.FAILED_SETTING_PASSWORDS.value,
                 scope="unit",
-                component=self.cluster_manager.name
+                component=self.cluster_manager.name,
             )
             event.defer()
 
-        # TODO: Check raft keys and initialize 
+        # TODO: Check raft keys and initialize
 
         self.tls_manager.configure_internal_peer_ca()
 
-
-        # TODO: Add next steps of leader elected 
-
-    
+        # TODO: Add next steps of leader elected
 
     def _can_start(self, event: StartEvent) -> bool:
         """Returns whether the workload can be started on this unit."""
@@ -180,8 +195,6 @@ class PostgreSQLEventsHandler(Object):
 
         return True
 
-
-    
     def _start_primary(self, event: StartEvent) -> None:
         """Bootstrap the cluster."""
         # Set some information needed by Patroni to bootstrap the cluster.
@@ -189,9 +202,9 @@ class PostgreSQLEventsHandler(Object):
 
         if not self.patroni_manager.start_patroni():
             self.state.add_status_if_not_present(
-                PatroniStatuses.FAILLED_STARTING_PATRONI,
+                PatroniStatuses.FAILLED_STARTING_PATRONI.value,
                 scope="unit",
-                component=self.patroni_manager.name
+                component=self.patroni_manager.name,
             )
             return
 
@@ -207,7 +220,6 @@ class PostgreSQLEventsHandler(Object):
             return
 
         # TODO: Check primary endpoint
-
 
     def _check_detached_storage(self, workload: VMWorkload) -> None:
         """Wait for storage to become available.

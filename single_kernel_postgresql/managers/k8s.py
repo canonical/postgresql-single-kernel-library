@@ -12,20 +12,14 @@ import logging
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from ops.pebble import CheckDict, Layer, LayerDict, ServiceDict
 
-from ops.pebble import Layer, LayerDict, ServiceDict, CheckDict
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
-from single_kernel_postgresql.config.statuses import GeneralStatuses
-from single_kernel_postgresql.core.state import CharmState
-from single_kernel_postgresql.managers.base import BaseManager
-from single_kernel_postgresql.workload.k8s import K8sWorkload
-from single_kernel_postgresql.utils import unit_name_to_pod_name
 from single_kernel_postgresql.config.literals import (
-    K8S_POSTGRESQL_SERVICE_NAME,
-    K8S_PGBACK_REST_SERVER_SERVICE_NAME,
     K8S_LDAP_SYNC_SERVICE_NAME,
     K8S_METRICS_SERVER_SERVICE_NAME,
+    K8S_PGBACK_REST_SERVER_SERVICE_NAME,
     K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
+    K8S_POSTGRESQL_SERVICE_NAME,
     K8S_ROTATE_LOGS_SERVICE_NAME,
     K8S_WORKLOAD_OS_GROUP,
     K8S_WORKLOAD_OS_USER,
@@ -34,7 +28,12 @@ from single_kernel_postgresql.config.literals import (
     REPLICATION_USER,
     USER,
 )
-
+from single_kernel_postgresql.config.statuses import GeneralStatuses
+from single_kernel_postgresql.core.state import CharmState
+from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.utils import unit_name_to_pod_name
+from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
+from single_kernel_postgresql.workload.k8s import K8sWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +53,8 @@ class K8sManager(BaseManager):
         # Create a new config layer.
         new_layer = self._postgresql_layer()
 
-        # Reconcile pebble 
+        # Reconcile pebble
         self.workload.reconcile_pebble_layer(new_layer, replan)
-
 
     def _postgresql_layer(self) -> Layer:
         """Returns a Pebble configuration layer for PostgreSQL."""
@@ -131,9 +129,7 @@ class K8sManager(BaseManager):
             "summary": "postgresql metrics exporter",
             "command": "/start-exporter.sh",
             "startup": (
-                "enabled"
-                if self.state.application.monitoring_password is not None
-                else "disabled"
+                "enabled" if self.state.application.monitoring_password is not None else "disabled"
             ),
             "after": [K8S_POSTGRESQL_SERVICE_NAME],
             "user": K8S_WORKLOAD_OS_USER,

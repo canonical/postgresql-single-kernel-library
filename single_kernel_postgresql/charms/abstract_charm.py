@@ -4,6 +4,7 @@
 
 from abc import ABC, abstractmethod
 
+from data_platform_helpers.advanced_statuses import StatusHandler
 from ops.charm import CharmBase
 
 from single_kernel_postgresql.core.state import CharmState
@@ -13,7 +14,6 @@ from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.workload.base import BaseWorkload
-from data_platform_helpers.advanced_statuses import StatusHandler
 
 from ..config.enums import Substrates
 from ..utils.postgresql import PostgreSQL
@@ -43,14 +43,15 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         )
 
         # Events Handler
-        self.postgresql_events_handler = PostgreSQLEventsHandler(self,
-                                                                self.workload,
-                                                                self.state,
-                                                                self.cluster_manager,
-                                                                self.tls_manager,
-                                                                self.config_manager,
-                                                                self.patroni_manager
-                                                                )
+        self.postgresql_events_handler = PostgreSQLEventsHandler(
+            self,
+            self.workload,
+            self.state,
+            self.cluster_manager,
+            self.tls_manager,
+            self.config_manager,
+            self.patroni_manager,
+        )
 
         # Status Handler
         self.status_handler = StatusHandler(
@@ -60,7 +61,6 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.config_manager,
             self.patroni_manager,
         )
-
 
     # Postgresql Client
     @property

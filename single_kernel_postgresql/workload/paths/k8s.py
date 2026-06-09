@@ -4,8 +4,13 @@
 
 from charmlibs.pathops import PathProtocol
 
+from single_kernel_postgresql.config.literals import (
+    K8S_DATA_PATH,
+    PATRONI_CONF_PATH,
+    POSTGRESQL_CONF_FILE,
+    POSTGRESQL_CONF_PATH,
+)
 from single_kernel_postgresql.workload.paths.base import Paths
-from single_kernel_postgresql.config.literals import POSTGRESQL_CONF_FILE, POSTGRESQL_CONF_PATH, K8S_DATA_PATH
 
 
 class K8sPaths(Paths):
@@ -45,3 +50,8 @@ class K8sPaths(Paths):
     def postgresql_conf(self) -> PathProtocol:
         """Path to the postgresql.conf file."""
         return self.conf / POSTGRESQL_CONF_FILE
+
+    @property
+    def patroni_conf(self) -> PathProtocol:
+        """Path to the patroni.yaml file."""
+        return self.root / PATRONI_CONF_PATH

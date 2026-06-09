@@ -3,21 +3,32 @@
 
 
 """Object representing the global state of PostgreSQL Charm."""
+
 import re
 import socket
-from ops import Object, Relation, Unit, JujuVersion, ModelError, SecretNotFoundError
-from typing import TYPE_CHECKING, Any, get_args
 from functools import cached_property
+from typing import TYPE_CHECKING, Any, get_args
+
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from ops import JujuVersion, ModelError, Object, Relation, SecretNotFoundError, Unit
+
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS_RELATION, SCOPES, APP_SCOPE, UNIT_SCOPE
-from single_kernel_postgresql.core.peer_relation import PostgreSQLPeer, PostgreSQLApplication
-from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import DataPeerUnitData, DataPeerData
-from single_kernel_postgresql.utils.status import format_status
-from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
-from single_kernel_postgresql.utils import unit_name_to_pod_name
+from single_kernel_postgresql.config.literals import (
+    APP_SCOPE,
+    PEER_RELATION,
+    SCOPES,
+    STATUS_PEERS_RELATION,
+)
 from single_kernel_postgresql.core.config import CharmConfig
+from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication, PostgreSQLPeer
+from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
+    DataPeerData,
+    DataPeerUnitData,
+)
+from single_kernel_postgresql.utils import unit_name_to_pod_name
+from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
+from single_kernel_postgresql.utils.status import format_status
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
@@ -38,7 +49,6 @@ class CharmState(Object):
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
 
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
-
 
     # -- Charm Config
     @cached_property
@@ -160,7 +170,7 @@ class CharmState(Object):
         if self.peer_relation:
             return self.application.endpoints
         else:
-            return set([self.endpoint]) if self.endpoint else set()
+            return {self.endpoint} if self.endpoint else set()
 
     @property
     def model_name(self) -> str:
@@ -171,7 +181,6 @@ class CharmState(Object):
     def patroni_url(self) -> str:
         """Patroni REST API URL."""
         return f"https://{self.unit_ip}:8007"
-
 
     @property
     def peer_members_ips(self) -> set[str]:
@@ -186,7 +195,6 @@ class CharmState(Object):
         if current_unit_ip in addresses:
             addresses.remove(current_unit_ip)
         return addresses
-
 
     @property
     def host(self) -> str:
@@ -203,8 +211,7 @@ class CharmState(Object):
         """Return the common name for the internally generated peer certificate."""
         return self.peer.database_peers_address or self.host
 
-
-    # -- Secrets 
+    # -- Secrets
     # TODO: This is temporary till data interfaces v1 is integrated
     def get_secret(self, scope: SCOPES, key: str) -> str | None:
         """Get secret from the secret storage."""
@@ -267,7 +274,6 @@ class CharmState(Object):
 
         return secret_content
 
-
     # -- Statuses
     def add_status_if_not_present(
         self,
@@ -313,7 +319,6 @@ class CharmState(Object):
             # Updates dynamic params if status already present.
             self.remove_status_if_present(status, scope, component, interpolated=True)
             self.statuses.add(format_status(status, dynamic_params), scope, component)
-
 
     def remove_status_if_present(
         self,
@@ -379,7 +384,3 @@ class CharmState(Object):
             if re.fullmatch(regex_pattern, present_status.message) is not None:
                 return present_status
         return None
-
-
-
-

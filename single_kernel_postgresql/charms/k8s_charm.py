@@ -22,7 +22,9 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def __init__(self, *args):
         """Initialize the PostgreSQL Kubernetes Charm."""
         super().__init__(*args)
-        assert isinstance(self.workload, K8sWorkload), "Workload must be an instance of K8sWorkload"
+        assert isinstance(self.workload, K8sWorkload), (  # noqa: S101
+            "Workload must be an instance of K8sWorkload"
+        )
         self.k8s_manager = K8sManager(self.state, self.workload, self.postgresql)
 
     @property

@@ -27,6 +27,11 @@ postgresql = [
     "httpx; python_version >= '3.12'",
     "data-platform-helpers>=0.1.7; python_version >= '3.12'",
     "charmlibs-pathops>=1.0.1; python_version >= '3.12'",
+    "charmlibs-snap>=1.0.1; python_version >= '3.12'",
+    "charmlibs-interfaces-tls-certificates>=1.8.3; python_version >= '3.12'",
+    "charm-refresh; python_version >= '3.12'",
+    "requests; python_version >= '3.12'",
+    "tomli; python_version >= '3.12'",
  ]
 
 [build-system]

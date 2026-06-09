@@ -4,24 +4,23 @@
 """Machine Workload."""
 
 import logging
-from contextlib import contextmanager
-from types import SimpleNamespace
-from pathlib import Path
-from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.workload.paths.vm import VMPaths
-from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
-from charmlibs.pathops import PathProtocol
-from charmlibs import pathops
-from typing import Generator
+import pathlib
+import platform
 import subprocess
 import tempfile
-import platform
-import tomli
-import pathlib
-from charmlibs import snap
+from collections.abc import Generator
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
+
 import charm_refresh
+import tomli
+from charmlibs import pathops, snap
+from charmlibs.pathops import PathProtocol
 
-
+from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
+from single_kernel_postgresql.workload.paths.vm import VMPaths
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +31,10 @@ class VMWorkload(BaseWorkload):
     def __init__(self, charm_dir: Path):
         super().__init__(charm_dir)
 
-
-
     def is_storage_attached(self) -> bool:
         """Returns if storage is attached.
 
-        This is VM specific. 
+        This is VM specific.
         """
         try:
             # Storage path is constant
