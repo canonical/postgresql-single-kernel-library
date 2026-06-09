@@ -14,7 +14,7 @@ This is a guide on how to restore a backup that was made from a different cluste
 
 ## Prerequisites
 
-* A PostgreSQL deployment {ref}`scaled down <scale-replicas>` to one unit (scale it up again after the backup is restored)
+* A PostgreSQL deployment {ref}`scaled down <scale-cluster>` to one unit (scale it up again after the backup is restored)
 * A {ref}`backup <create-a-backup>` from the previous cluster in your S3 storage
 * Passwords from your previous cluster
   * See: {ref}`manage-passwords` and {ref}`save-current-cluster-credentials`

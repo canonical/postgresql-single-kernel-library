@@ -2,54 +2,68 @@
 # How to deploy on MAAS
 {{vm}}
 
-This guide aims to provide a quick start to deploying Charmed PostgreSQL on MAAS. It summarises the instructions from the [Build a MAAS and LXD environment with Multipass Tutorial](https://discourse.maas.io/t/5360) to set up and tear down a **playground environment**.
+This guide aims to provide a quick start to deploying Charmed PostgreSQL on MAAS.
 
-If you want to deploy PostgreSQL on MAAS in a **production environment**, refer to the official [Bootstrap MAAS Tutorial](https://maas.io/docs/tutorial-bootstrapping-maas) followed by our {ref}`deployment guides <deploy>`.
+## Prerequisites
 
-For further details and explanation about each step, remember you can refer to the [original tutorial](https://discourse.maas.io/t/5360).
+* A physical or virtual machine running Ubuntu 24.04+
+* Juju 3.6+ installed via snap
 
-## Bootstrap a Multipass VM
+---
 
-Install Multipass and launch a VM:
-```shell
-sudo snap install multipass
+## Set up your environment
 
-wget -qO- https://raw.githubusercontent.com/canonical/maas-multipass/main/maas.yml \
- | multipass launch --name maas -c8 -m12GB -d50GB --cloud-init -
-```
+To try things out in a simple test environment with Multipass, see:
+* [MAAS documentation | Build a MAAS and LXD environment in 30 minutes](https://canonical.com/maas/docs/latest/tutorial/)
 
-> The wget command provides a [cloud-init](https://github.com/canonical/maas-multipass/blob/main/maas.yml) file that will set up the LXD and MAAS environment.
+To set up a local installation on a single machine, follow:
+* [MAAS documentation | Install MAAS](https://canonical.com/maas/docs/latest/how-to-guides/get-started/install-maas/)
 
 ## Configure MAAS
 
-**1.** Find your MAAS IP with
+Open the URL `http://<MAAS_IP>:5240/MAAS/` in your web browser, and log in with the default credentials:
+* username=`admin`
+* password=`admin`.
 
-```shell
-multipass list
-```
+Complete the additional MAAS configuration in the welcome screen.
 
-**2.** Open `http://<MAAS_IP>:5240/MAAS/` and log in with the default credentials: username=`admin`, password=`admin`.
+Wait for image downloads to complete on `http://<MAAS_IP>:5240/MAAS/r/images`
 
-**3.** Complete the additional MAAS configuration in the welcome screen.
-
-<details>
-<summary><b>4.</b> Wait for image downloads to complete on <code>http://<MAAS_IP>:5240/MAAS/r/images</code> </summary>
+```{dropdown} <code>/MAAS/r/images</code>
+:open:
+:icon: browser
+:color: light
+:class-title: sd-font-weight-normal
 
 ![MAAS image downloads](maas-image-downloads.png)
-</details>
-</br>
+```
 
-Make sure you are downloading *24.04* images as well.
+Make sure you are downloading **24.04** images as well.
 
 The LXD machine will be up and running after the images downloading and sync is completed.
-<details>
-<summary><b>5.</b> Navigate to  <code>http://<MASS_IP>:5240/MAAS/r/tags</code> and create a tag with <code>tag-name=juju</code>. Assign it to the LXD machine. </summary>
+
+Navigate to `http://<MASS_IP>:5240/MAAS/r/tags` and create a tag with `tag-name=juju`. Assign it to the LXD machine.
+
+```{dropdown} <code>/MAAS/r/tags</code>
+:open:
+:icon: browser
+:color: light
+:class-title: sd-font-weight-normal
 
 ![MAAS interface - create tag](maas-create-tag.png)
-</details>
+```
+
+If you are on Multipass, dump the MAAS admin user API key to add as Juju credentials later:
+
+```{terminal}
+:copy:
+
+multipass exec maas -- sudo maas apikey --username admin
+```
+
+</br>
 
 ```{dropdown} Make sure to enable DHCP service inside the MAAS VM only.
-:open:
 :color: warning
 :icon: alert
 :class-title: sd-font-weight-normal
@@ -60,25 +74,15 @@ MAAS uses DHCP to boot and install new machines. You must enable DHCP manually i
 Use the internal VM network `fabric-1` on `10.10.10.0/24` and choose a range (e.g. `10.10.10.100-10.10.10.120`). Check the [official MAAS manual](https://maas.io/docs/enabling-dhcp) for more information about enabling DHCP.
 ```
 
-**6.** Finally, dump MAAS admin user API key to add as Juju credentials later:
-
-```shell
-multipass exec maas -- sudo maas apikey --username admin
-```
-
 ## Register MAAS with Juju
 
-**1.** Enter the Multipass shell and install juju:
+Add MAAS cloud and credentials to Juju.
 
-```shell
-multipass shell maas
-sudo snap install juju
-```
-**2.** Add MAAS cloud and credentials into juju.
+These commands are interactive, so the following code block shows a sample output. **Make sure to enter your own information when prompted by Juju.**
 
-These commands are interactive, so the following code block shows the commands followed by a sample output. **Make sure to enter your own information when prompted by juju.**
+```{terminal}
+:copy:
 
-```shell
 juju add-cloud
 
 > Since Juju 2 is being run for the first time, downloading latest cloud information. Fetching latest public cloud list... Your list of public clouds is up to date, see `juju clouds`. Cloud Types
@@ -94,7 +98,9 @@ juju add-cloud
 > Cloud "maas-cloud"
 ```
 
-```shell
+```{terminal}
+:copy:
+
 juju add-credential maas-cloud
 
 > ...
@@ -109,26 +115,39 @@ juju add-credential maas-cloud
 > Credential "maas-credentials" added locally for cloud "maas-cloud".
 ```
 
-**3.** Bootstrap Juju.
+Bootstrap a Juju controller. Add the flags `--credential` if you registered several MAAS credentials, and `--debug` if you want to see bootstrap details:
 
-Add the flags `--credential` if you registered several MAAS credentials, and `--debug` if you want to see bootstrap details:
+```{terminal}
+:copy:
 
-```shell
 juju bootstrap --constraints tags=juju maas-cloud maas-controller
 ```
 
 ## Deploy Charmed PostgreSQL on MAAS
 
-```shell
-juju add-model postgresql maas-cloud
+Create a Juju model:
+
+```{terminal}
+:copy:
+
+juju add-model <model-name> maas-cloud
+```
+
+Deploy PostgreSQL:
+
+```{terminal}
+:copy:
+
 juju deploy postgresql --channel 16/stable
 ```
 
-Sample `juju status` output:
+```{terminal}
+:copy:
 
-```shell
-Model       Controller       Cloud/Region        Version  SLA          Timestamp
-postgresql  maas-controller  maas-cloud/default  3.1.8    unsupported  12:50:26+02:00
+juju status --watch 1s
+
+Model         Controller       Cloud/Region        Version  SLA          Timestamp
+<model-name>  maas-controller  maas-cloud/default  3.1.8    unsupported  12:50:26+02:00
 
 App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
 postgresql  16.9     active      1  postgresql  16/stable  843  no       Primary
@@ -140,42 +159,17 @@ Machine  State    Address     Inst id        Base          AZ       Message
 0        started  10.10.10.5  wanted-dassie  ubuntu@22.04  default  Deployed
 ```
 
-See {ref}`testing` for guidance about the different ways to test your deployment.
 
 ## Clean up the environment
 
-To stop your VM, run:
+Always clean cloud resources that are no longer necessary; they could be costly!
 
-```shell
-multipass stop maas
-```
+### Multipass
 
-If you're done with testing and would like to free up resources on your machine, you can remove the VM entirely.
+If you are using Multipass, you can **delete all your data** by removing the VM entirely. See the documentation for [`multipass delete`](https://multipass.run/docs/delete-command).
 
-```{dropdown} When you remove the VM **you will lose all the data** inside it.
-:open:
-:color: warning
-:icon: alert
-:class-title: sd-font-weight-normal
+### Local deployment
 
-This includes all data in PostgreSQL and any other applications.
-
-For more information, see the docs for [`multipass delete`](https://multipass.run/docs/delete-command).
-```
-
-To completely delete your VM and all its data, run:
-
-```shell
-multipass delete --purge maas
-```
-
-```{dropdown} PgBouncer
-:open:
-:color: info
-:icon: light-bulb
-:class-title: sd-font-weight-normal
-
-If you expect having several concurrent connections frequently, it is highly recommended to deploy [PgBouncer](https://charmhub.io/pgbouncer?channel=1/stable) alongside PostgreSQL.
-
-For more information, read our explanation about {ref}`connection-pooling`.
+```{include} ../reuse/clean-cloud-resources.md
+:start-after: "costly!\n"
 ```

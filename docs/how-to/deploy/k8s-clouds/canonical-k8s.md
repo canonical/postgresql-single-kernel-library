@@ -4,72 +4,93 @@
 
 [Canonical Kubernetes](https://ubuntu.com/kubernetes) is a Kubernetes service built on Ubuntu and optimised for most major public clouds.
 
-The following instructions are a summarised version of the steps for installing Canonical K8s. For more thorough instructions and details, see the official Canonical Kubernetes documentation: [Install Canonical Kubernetes from a snap](https://documentation.ubuntu.com/canonical-kubernetes/latest/src/snap/howto/install/snap/).
-
 ## Prerequisites
 
-* A physical or virtual machine running Ubuntu 22.04+
+* A physical or virtual machine running Ubuntu 24.04+
+* Juju 3.6+ installed via snap
 
 ---
 
 ## Install Canonical Kubernetes
 
-Install, bootstrap, and check the status of Canonical K8s:
+Follow the instructions in the [official Canonical Kubernetes documentation](https://documentation.ubuntu.com/canonical-kubernetes/release-1.35/snap/howto/install/snap/)
 
-```shell
-sudo snap install k8s --edge --classic
-sudo k8s bootstrap
-sudo k8s status --wait-ready
-```
+Once Canonical K8s is up and running, enable local storage (or any another persistent volume provider, to be used by [Juju storage](https://juju.is/docs/juju/storage) later):
 
-Once Canonical K8s is up and running, [enable local storage](https://documentation.ubuntu.com/canonical-kubernetes/latest/snap/tutorial/getting-started/#enable-local-storage) (or any another persistent volume provider, to be used by [Juju Storage](https://juju.is/docs/juju/storage) later):
+```{terminal}
+:copy:
 
-```shell
 sudo k8s enable local-storage
+```
+```{terminal}
+:copy:
 sudo k8s status --wait-ready
 ```
+{{seealso}} [Canonical Kubernetes | Enable local storage](https://documentation.ubuntu.com/canonical-kubernetes/latest/snap/tutorial/getting-started/#enable-local-storage)
 
-(Optional) Install the `kubectl` tool and dump the K8s config:
+````{dropdown} Optionally, install the <code>kubectl</code> tool and dump the K8s config.
+:open:
+:color: light
+:icon: light-bulb
+:class-title: sd-font-weight-normal
 
-```shell
+```{terminal}
+:copy:
+
 sudo snap install kubectl --classic
+```
+```{terminal}
+:copy:
+
 mkdir ~/.kube
+```
+```{terminal}
+:copy:
+
 sudo k8s config > ~/.kube/config
+```
+```{terminal}
+:copy:
 kubectl get namespaces # to test the credentials
 ```
+````
 
-## Bootstrap a controller
+## Bootstrap Juju on Canonical K8s
 
-Bootstrap the first Juju controller in K8s:
+Add a Juju K8s cloud:
 
-```shell
+```{terminal}
+:copy:
+
 juju add-k8s ck8s --client --context-name="k8s"
+```
+
+Bootstrap a Juju controller:
+
+```{terminal}
+:copy:
+
 juju bootstrap ck8s
 ```
 
-## Deploy Charmed PostgreSQL K8s
+## Deploy Charmed PostgreSQL
 
-```shell
-juju add-model postgresql
+Create a Juju model:
+
+```{terminal}
+:copy:
+
+juju add-model <model-name>
+```
+
+Deploy the PostgreSQL charm for K8s:
+
+```{terminal}
+:copy:
+
 juju deploy postgresql-k8s --channel 16/stable --trust
 ```
 
-follow the deployment progress using:
+---
 
-```shell
-juju status --watch 1s
-```
-
-Example output:
-
-```shell
-Model       Controller  Cloud/Region  Version  SLA          Timestamp
-postgresql  ck8s        ck8s          3.6-rc1  unsupported  17:25:11+01:00
-
-App             Version   Status  Scale  Charm           Channel     Rev  Address         Exposed  Message
-postgresql-k8s  14.12     active      1  postgresql-k8s  16/stable   615  10.152.183.30   no
-
-Unit               Workload  Agent  Address    Ports  Message
-postgresql-k8s/0*  active    idle   10.1.0.16         Primary
-```
-
+{octicon}`arrow-right` For more information, see the [official Canonical Kubernes documentation](https://documentation.ubuntu.com/canonical-kubernetes/)

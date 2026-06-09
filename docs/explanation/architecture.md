@@ -198,7 +198,7 @@ The [TLS Certificates](https://charmhub.io/tls-certificates-operator) charm is r
 
 The [data integrator](https://charmhub.io/data-integrator) charm requests credentials for non-native Juju applications. Not all applications implement a `data_interfaces` relation, but do allow setting credentials via config. Additionally, some of applications are run outside of juju. This integrator charm allows receiving credentials which can be passed into application config directly without implementing a Juju-native relation.
 
-{{seealso}} {ref}`integrate-with-another-application`
+{{seealso}} {ref}`integrate-with-a-client-application`
 
 ### PostgreSQL test app
 

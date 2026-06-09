@@ -2,53 +2,76 @@
 # How to deploy on EKS
 {{k8s}}
 
-The [Amazon Elastic Kubernetes Service](https://aws.amazon.com/eks/) (EKS) is a popular, fully automated Kubernetes service. To access the EKS web interface, go to [console.aws.amazon.com/eks/home](https://console.aws.amazon.com/eks/home).
+The [Amazon Elastic Kubernetes Service](https://aws.amazon.com/eks/) (EKS) is a popular, fully automated Kubernetes service.
+
+{octicon}`browser` EKS web interface: [console.aws.amazon.com/eks/home](https://console.aws.amazon.com/eks/home)
 
 ## Prerequisites
 
-This guide assumes you have:
+* A physical or virtual machine running Ubuntu 24.04+
+* Juju 3.6+ installed via snap
 
-* A physical or virtual machine running Ubuntu 22.04+
+---
 
 ## Install EKS tooling
 
+Install the Amazon EKS CLI by following the [official `eksctl` documentation](https://eksctl.io/installation/).
+
+Install the Amazon Web Services CLI by following the [official AWS documentation](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+
 Install the [`kubectl` CLI tools](https://kubernetes.io/docs/tasks/tools/) via snap:
 
-```shell
+```{terminal}
+:copy:
+
 sudo snap install kubectl --classic
 ```
 
-Follow the installation guides for:
-* The [Amazon EKS CLI](https://eksctl.io/installation/)
-* The [Amazon Web Services CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+To check they are correctly installed, run
 
-To check they are all correctly installed, you can run the commands demonstrated below with sample outputs:
+```{terminal}
+:copy:
 
-```shell
-$ kubectl version --client
-Client Version: v1.28.2
-Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3
+eksctl info
 
-$ eksctl info
 eksctl version: 0.159.0
 kubectl version: v1.28.2
+```
+```{terminal}
+:copy:
+aws --version
 
-$ aws --version
 aws-cli/2.13.25 Python/3.11.5 Linux/6.2.0-33-generic exe/x86_64.ubuntu.23 prompt/off
 ```
 
-### Authenticate
+```{terminal}
+:copy:
 
-Create an IAM account (or use legacy access keys) and login to AWS:
+kubectl version --client
 
-```shell
-$ aws configure
+Client Version: v1.28.2
+Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3
+```
+
+## Authenticate
+
+Create an IAM account or use legacy access keys to operate AWS:
+
+```{terminal}
+:copy:
+
+aws configure
+
 AWS Access Key ID [None]: SECRET_ACCESS_KEY_ID
 AWS Secret Access Key [None]: SECRET_ACCESS_KEY_VALUE
 Default region name [None]: eu-west-3
 Default output format [None]:
+```
+```{terminal}
+:copy:
 
-$ aws sts get-caller-identity
+aws sts get-caller-identity
+
 {
     "UserId": "1234567890",
     "Account": "1234567890",
@@ -58,25 +81,28 @@ $ aws sts get-caller-identity
 
 ## Create a new EKS cluster
 
-Export the deployment name for further use:
+Export the deployment name for later use:
 
-```shell
-export JUJU_NAME=eks-$USER-$RANDOM
+```{terminal}
+:copy:
+
+export JUJU_NAME=aks-$USER-$RANDOM
 ```
 
-This following examples in this guide will use the location `eu-west-3` and K8s `v.1.27` - feel free to change this for your own deployment.
+Example `cluster.yaml`:
 
-Sample `cluster.yaml`:
+```{terminal}
+:copy:
 
-```shell
-~$ cat <<-EOF > cluster.yaml
+cat <<-EOF > cluster.yaml
+
 ---
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
 metadata:
     name: ${JUJU_NAME}
-    region: eu-west-3
+    region: <region-name>
     version: "1.27"
 iam:
   withOIDC: true
@@ -106,112 +132,147 @@ nodeGroups:
 EOF
 ```
 
-Bootstrap EKS cluster with the following command:
+Create a new Kubernetes cluster on EKS with the following command:
 
-```shell
+```{terminal}
+:copy:
+
 eksctl create cluster -f cluster.yaml
-```
 
-Sample output:
-
-```shell
 ...
-2023-10-12 11:13:58 [ℹ]  using region eu-west-3
+2023-10-12 11:13:58 [ℹ]  using region <region-name>
 2023-10-12 11:13:59 [ℹ]  using Kubernetes version 1.27
 ...
-2023-10-12 11:40:00 [✔]  EKS cluster "eks-taurus-27506" in "eu-west-3" region is ready
+2023-10-12 11:40:00 [✔]  EKS cluster "eks-taurus-27506" in "<region-name>" region is ready
 ```
 
 ## Bootstrap Juju on EKS
 
-Add Juju k8s clouds:
+Add a Juju K8s cloud:
 
-```shell
-juju add-k8s $JUJU_NAME
+```{terminal}
+:copy:
+
+juju add-k8s <k8s-cloud-name>
 ```
 
-Bootstrap Juju controller:
+```{dropdown} K8s credentials on Juju
+:open:
+:color: info
+:icon: info
+:class-title: sd-font-weight-normal
 
-```shell
-juju bootstrap $JUJU_NAME
+[This known issue](https://bugs.launchpad.net/juju/+bug/2007575) forces non-snap Juju usage to add-k8s credentials on Juju.
 ```
 
-Create a new Juju model (k8s namespace)
+Bootstrap a Juju controller:
 
-```shell
-juju add-model welcome
+```{terminal}
+:copy:
+
+juju bootstrap <controller-name>
 ```
-
-Optionally, increase the debug level if you are troubleshooting charms:
-
-```shell
-juju model-config logging-config='<root>=INFO;unit=DEBUG'
-```
+{{seealso}} [Juju | Amazon EKS and Juju](https://documentation.ubuntu.com/juju/3.6/reference/cloud/list-of-supported-clouds/the-amazon-eks-cloud-and-juju/#the-amazon-eks-cloud-and-juju)
 
 ## Deploy charms
 
-The following command deploys PostgreSQL K8s, PgBouncer K8s, a TLS certificate provider, and the PostgreSQL Test app:
+Create a Juju model (K8s namespace):
 
-```shell
-juju deploy postgresql-k8s-bundle --channel 14/edge --trust
-juju deploy postgresql-test-app
+```{terminal}
+:copy:
+
+juju add-model <model-name>
 ```
 
-We then integrate the test app with the `postgresql-k8s` app and check the status:
+The following command deploys 3 nodes of PostgreSQL on Kubernetes:
 
-```shell
-juju integrate postgresql-test-app:first-database postgresql-k8s
-juju status --watch 1s
+```{terminal}
+:copy:
+
+juju deploy postgresql-k8s --channel 16/stable --trust -n 3
+
+Deployed "postgresql-k8s" from charm-hub charm "postgresql-k8s", revision <number> in channel 16/stable on ubuntu@24.04/edge
 ```
 
 ### Display deployment information
 
-Display information about the current deployments with the following commands:
+Display information about the current deployments with `kubectl` and `eksctl`:
 
-```shell
-$ kubectl cluster-info
-Kubernetes control plane is running at https://AAAAAAAAAAAAAAAAAAAAAAA.gr7.eu-west-3.eks.amazonaws.com
-CoreDNS is running at https://AAAAAAAAAAAAAAAAAAAAAAA.gr7.eu-west-3.eks.amazonaws.com/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+```{terminal}
+:copy:
 
-$ eksctl get cluster -A
-NAME			    REGION		EKSCTL   CREATED
-eks-taurus-27506	eu-west-3	True
+kubectl cluster-info
 
-$ kubectl get node
-NAME                                           STATUS   ROLES    AGE   VERSION
-ip-192-168-14-61.eu-west-3.compute.internal    Ready    <none>   19m   v1.27.5-eks-43840fb
-ip-192-168-51-96.eu-west-3.compute.internal    Ready    <none>   19m   v1.27.5-eks-43840fb
-ip-192-168-78-167.eu-west-3.compute.internal   Ready    <none>   19m   v1.27.5-eks-43840fb
+Kubernetes control plane is running at https://AAAAAAAAAAAAAAAAAAAAAAA.gr7.<region-name>.eks.amazonaws.com
+CoreDNS is running at https://AAAAAAAAAAAAAAAAAAAAAAA.gr7.<region-name>.eks.amazonaws.com/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+```
+```{terminal}
+:copy:
+
+eksctl get cluster -A
+
+NAME			        REGION		    EKSCTL   CREATED
+eks-taurus-27506	<region-name>	True
+```
+```{terminal}
+:copy:
+
+kubectl get node
+
+NAME                                               STATUS   ROLES    AGE   VERSION
+ip-192-168-14-61.<region-name>.compute.internal    Ready    <none>   19m   v1.27.5-eks-43840fb
+ip-192-168-51-96.<region-name>.compute.internal    Ready    <none>   19m   v1.27.5-eks-43840fb
+ip-192-168-78-167.<region-name>.compute.internal   Ready    <none>   19m   v1.27.5-eks-43840fb
 ```
 
 ## Clean up
 
-Always clean cloud resources that are no longer necessary; they could be costly!
-
-To clean the EKS cluster, resources and juju cloud, run the following commands:
-
-```shell
-juju destroy-controller $JUJU_NAME --yes --destroy-all-models --destroy-storage --force
-juju remove-cloud $JUJU_NAME
+```{include} ../reuse/clean-cloud-resources.md
 ```
 
-List all services and then delete those that have an associated EXTERNAL-IP value (e.g. load balancers):
+To delete the Juju cloud, run
 
-```shell
+```{terminal}
+:copy:
+
+juju remove-cloud <k8s-cloud-name>
+```
+
+List all services and then delete those that have an associated `EXTERNAL-IP` value (e.g. load balancers):
+
+```{terminal}
+:copy:
+
 kubectl get svc --all-namespaces
+
+(...)
+```
+```{terminal}
+:copy:
+
 kubectl delete svc <service-name>
 ```
 
-Next, delete the EKS cluster (source: [Deleting an Amazon EKS cluster](https://docs.aws.amazon.com/eks/latest/userguide/delete-cluster.html))
+Next, delete the EKS cluster:
 
-```shell
+```{terminal}
+:copy:
+
 eksctl get cluster -A
-eksctl delete cluster <cluster_name> --region eu-west-3 --force --disable-nodegroup-eviction
 ```
+```{terminal}
+:copy:
+
+eksctl delete cluster <cluster-name> --region <region-name> --force --disable-nodegroup-eviction
+```
+
+{{seealso}} [Amazon documentation | Delete an EKS cluster](https://docs.aws.amazon.com/eks/latest/userguide/delete-cluster.html)
 
 Finally, remove AWS CLI user credentials (to avoid forgetting and leaking):
 
-```shell
+```{terminal}
+:copy:
+
 rm -f ~/.aws/credentials
 ```
 

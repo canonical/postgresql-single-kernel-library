@@ -14,7 +14,7 @@ Make sure your troubleshooting activity does not interfere with the operator its
 
 Do not manage users, credentials, databases, and schema directly. This could cause a {term}`split-brain scenario`.
 
-Avoid restarting services directly. If you see the problem with a unit, consider {ref}`removing the failing unit and adding a new unit <scale-replicas>` to recover the cluster state.
+Avoid restarting services directly. If you see the problem with a unit, consider {ref}`removing the failing unit and adding a new unit <scale-cluster>` to recover the cluster state.
 ```
 
 ## Check charm status

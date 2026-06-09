@@ -2,38 +2,68 @@
 # How to deploy on GKE
 {{k8s}}
 
-[Google Kubernetes Engine](https://cloud.google.com/kubernetes-engine?hl=en) (GKE) is a highly scalable and fully automated Kubernetes service. To access the GKE Web interface, go to [console.cloud.google.com/compute](https://console.cloud.google.com/compute).
+[Google Kubernetes Engine](https://cloud.google.com/kubernetes-engine?hl=en) (GKE) is a highly scalable and fully automated Kubernetes service.
 
-This guide will walk you through setting up a cluster and deploying PostgreSQL K8s on GKE.
+{octicon}`browser` GKE web interface: [console.cloud.google.com/compute](https://console.cloud.google.com/compute)
 
 ## Prerequisites
 
-This guide assumes you have:
+* A physical or virtual machine running Ubuntu 24.04+
+* Juju 3.6+ installed via snap
 
-* A physical or virtual machine running Ubuntu 22.04+
+---
 
 ## Install GKE tooling
 
-Install `kubectl`, and Google Cloud command-line tools via snap:
+Install the Google Cloud command-line tools via snap:
 
-```shell
-sudo snap install kubectl --classic
+```{terminal}
+:copy:
+
 sudo snap install google-cloud-cli --classic
+```
+
+Install the [`kubectl` CLI tools](https://kubernetes.io/docs/tasks/tools/) via snap:
+
+```{terminal}
+:copy:
+
+sudo snap install kubectl --classic
+```
+
+To check they are correctly installed, run
+
+```{terminal}
+:copy:
+
+gcloud --version
+
+Google Cloud SDK 474.0.0
+...
+```
+```{terminal}
+:copy:
+
+kubectl version --client
+
+Client Version: v1.28.2
+Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3
 ```
 
 ### Authenticate
 
-Log in to a Google account with the command
+Log in to Google Cloud:
 
-```shell
+```{terminal}
+:copy:
+
 gcloud auth login
 ```
-
 This should open a page in your browser starting with  `https://accounts.google.com/o/oauth2/...` where you can complete the login.
 
 If successful, the command prompt will show:
 
-```shell
+```text
 You are now logged in as [<account>@gmail.com].
 ```
 
@@ -41,44 +71,44 @@ You are now logged in as [<account>@gmail.com].
 
 Next, you must associate this installation with GCloud project using "Project ID" from [resource-management](https://console.cloud.google.com/cloud-resource-manager):
 
-```shell
+```{terminal}
+:copy:
+
 gcloud config set project <PROJECT_ID>
-```
 
-Sample output:
-
-```shell
 Updated property [core/project].
 ```
 
-### Install additional gcloud CLI tool
+### Install additional auth plugin
 
-As a last step, install the Debian package `google-cloud-sdk-gke-gcloud-auth-plugin` using this Google guide: [Install the gcloud CLI](https://cloud.google.com/sdk/docs/install#deb).
+As a last step, install the Debian package `google-cloud-sdk-gke-gcloud-auth-plugin` using this [official Google Cloud documentation](https://cloud.google.com/sdk/docs/install#deb).
 
 ## Create a new GKE cluster
 
-This guide will use high-availability zone `europe-west1` and compute engine type `n1-standard-4` in command examples. Make sure to choose the zone and resources that best suit your use-case.
+The following command will start three [compute engines](https://cloud.google.com/compute/) on Google Cloud and deploy a K8s cluster. You can imagine the compute engines as three physical servers in clouds.
 
-The following command will start three [compute engines](https://cloud.google.com/compute/) on Google Cloud and deploy a K8s cluster (you can imagine the compute engines as three physical servers in clouds):
+```{terminal}
+:copy:
 
-```shell
-gcloud container clusters create --zone europe-west1-c $USER-$RANDOM --cluster-version 1.25 --machine-type n1-standard-4 --num-nodes=3 --no-enable-autoupgrade
+gcloud container clusters create --zone <region-name>-c $USER-$RANDOM --cluster-version 1.25 --machine-type <compute-engine> --num-nodes=3 --no-enable-autoupgrade
 ```
 
 Next, assign your account as an admin of the newly created K8s cluster:
 
-```shell
+```{terminal}
+:copy:
+
 kubectl create clusterrolebinding cluster-admin-binding-$USER --clusterrole=cluster-admin --user=$(gcloud config get-value core/account)
 ```
 
 ## Bootstrap Juju on GKE
 
-Bootstrap a new juju controller on the new cluster by running the following commands:
+Add a Juju K8s cloud:
 
-```shell
-/snap/juju/current/bin/juju add-k8s gke-jun-9 --storage=standard --client
-juju bootstrap gke-jun-9
-juju add-model welcome-model
+```{terminal}
+:copy:
+
+/snap/juju/current/bin/juju add-k8s <k8s-cloud-name> --storage=standard --client
 ```
 
 ```{dropdown} K8s credentials on Juju
@@ -90,59 +120,74 @@ juju add-model welcome-model
 [This known issue](https://bugs.launchpad.net/juju/+bug/2007575) forces non-snap Juju usage to add-k8s credentials on Juju.
 ```
 
-At this stage, Juju is ready to use GKE. Check the list of currently running K8s pods with:
+Bootstrap a Juju controller:
 
-```shell
-kubectl get pods -n welcome-model
+```{terminal}
+:copy:
+
+juju bootstrap <controller-name>
 ```
+{{seealso}} [Juju | Google GKE and Juju](https://documentation.ubuntu.com/juju/3.6/reference/cloud/list-of-supported-clouds/the-google-gke-cloud-and-juju/)
 
 ## Deploy charms
 
-The following commands deploy PostgreSQL K8s and PgBouncer K8s:
+Create a Juju model (K8s namespace):
 
-```shell
+```{terminal}
+:copy:
+
+juju add-model <model-name>
+```
+
+At this stage, Juju is ready to use GKE. Check the list of currently running K8s pods with:
+
+```{terminal}
+:copy:
+
+kubectl get pods -n <model-name>
+```
+
+The following commands deploy PostgreSQL and PgBouncer:
+
+```{terminal}
+:copy:
+
 juju deploy postgresql-k8s --channel 16/stable --trust
+```
+```{terminal}
+:copy:
+
 juju deploy pgbouncer-k8s --trust
 ```
 
-To track the status of the deployment, run
+### Display deployment information
 
-```shell
-juju status --watch 1s
-```
+To list GKE clusters:
 
-## List clusters and clouds
+```{terminal}
+:copy:
 
-To list GKE clusters and juju clouds, run:
-
-```shell
 gcloud container clusters list
-```
 
-Sample output:
-
-```shell
->NAME          LOCATION        MASTER_VERSION   MASTER_IP      MACHINE_TYPE   NODE_VERSION     >NUM_NODES  STATUS
->mykola-18187  europe-west1-c  1.25.9-gke.2300  31.210.22.127  n1-standard-4  1.25.9-gke.2300  3          >RUNNING
->taurus-7485   europe-west1-c  1.25.9-gke.2300  142.142.21.25  n1-standard-4  1.25.9-gke.2300  3          >RUNNING
+>NAME          LOCATION         MASTER_VERSION   MASTER_IP      MACHINE_TYPE      NODE_VERSION     >NUM_NODES  STATUS
+>mykola-18187  <region-name>-c  1.25.9-gke.2300  31.210.22.127  <compute-engine>  1.25.9-gke.2300  3          >RUNNING
+>taurus-7485   <region-name>-c  1.25.9-gke.2300  142.142.21.25  <compute-engine>  1.25.9-gke.2300  3          >RUNNING
 ```
 
 Juju can handle multiple clouds simultaneously. To see a list of clouds with registered credentials on Juju, run:
 
-```shell
+```{terminal}
+:copy:
+
 juju clouds
-```
 
-Sample output:
-
-```shell
 >Clouds available on the controller:
 >Cloud      Regions  Default       Type
->gke-jun-9  1        europe-west1  k8s
+><k8s-cloud-name>  1        <region-name>  k8s
 >
 >Clouds available on the client:
 >Cloud           Regions  Default       Type  Credentials  Source    Description
->gke-jun-9       1        europe-west1  k8s   1            local     A Kubernetes Cluster
+><k8s-cloud-name>       1        <region-name>  k8s   1            local     A Kubernetes Cluster
 >localhost       1        localhost     lxd   1            built-in  LXD Container Hypervisor
 >microk8s        0                      k8s   1            built-in  A local Kubernetes context
 >
@@ -150,29 +195,38 @@ Sample output:
 
 ## Clean up
 
-Always clean cloud resources that are no longer necessary; they could be costly!
+```{include} ../reuse/clean-cloud-resources.md
+```
 
-To clean GKE clusters and juju clouds, use:
+To delete the Juju cloud, run
 
-```shell
-juju destroy-controller gke-jun-9-europe-west1 --yes --destroy-all-models --destroy-storage --force
-juju remove-cloud gke-jun-9
+```{terminal}
+:copy:
+
+juju remove-cloud <k8s-cloud-name>
+```
+
+To delete GKE clusters, run
+
+```{terminal}
+:copy:
 
 gcloud container clusters list
-gcloud container clusters delete <cluster_name> --zone europe-west1-c
+```
+```{terminal}
+:copy:
+
+gcloud container clusters delete <cluster_name> --zone <region-name>-c
 ```
 
-Revoke the GCloud user credentials:
+Revoke the Google Cloud user credentials (you should see a confirmation output):
 
-```shell
-gcloud auth revoke your_account@gmail.com
-```
+```{terminal}
+:copy:
 
-You should see a confirmation output:
+gcloud auth revoke <account>@gmail.com
 
-```shell
 >Revoked credentials:
- >- your_account@gmail.com
->
+ >- <account>@gmail.com
 ```
 

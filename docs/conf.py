@@ -261,6 +261,7 @@ new_tab_link_show_external_link_icon = True
 # Excludes files or directories from processing
 exclude_patterns = [
     ".venv*",
+    "*/reuse/*"
 ]
 
 # Adds custom CSS files, located remotely or in 'html_static_path'.

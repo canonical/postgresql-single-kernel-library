@@ -12,7 +12,7 @@ This guide contains recommended steps and useful commands for creating and manag
 
 ## Prerequisites
 
-* A cluster with {ref}`at least three nodes <scale-replicas>` deployed
+* A cluster with {ref}`at least three nodes <scale-cluster>` deployed
 * {ref}`Configured settings for S3 storage <configure-s3-aws>`
 
 ---

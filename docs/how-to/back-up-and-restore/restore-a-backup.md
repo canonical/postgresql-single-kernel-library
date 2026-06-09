@@ -14,7 +14,7 @@ To restore a backup that was made from the a *different* cluster, (i.e. cluster 
 
 ## Prerequisites
 
-* A PostgreSQL deployment {ref}`scaled down <scale-replicas>` to one unit (scale it up again after the backup is restored)
+* A PostgreSQL deployment {ref}`scaled down <scale-cluster>` to one unit (scale it up again after the backup is restored)
 - Access to S3 storage
 - {ref}`A backup in your S3 storage <create-a-backup>`
 

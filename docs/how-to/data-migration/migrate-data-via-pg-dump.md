@@ -1,6 +1,8 @@
 (migrate-data-via-pg-dump)=
 # Migrate data via `pg_dump`
 
+<!--TODO: replace "legacy"? -->
+
 This guide describes database **data** migration from a {ref}`legacy PostgreSQL charm <charm-versions>` running PostgreSQL 16 to a modern PostgreSQL 16 charm.
 
 To migrate charms on new Juju interfaces, refer to the guide {ref}`integrate-with-your-charm`.
@@ -26,7 +28,7 @@ A minor difference in commands might be necessary for different revisions and/or
 ## Prerequisites
 
 - **Your application supports modern PostgreSQL interfaces**
-    - See: {ref}`check-supported-interfaces`
+    - See: {ref}`interfaces-and-endpoints` and {ref}`integrate-with-your-charm`
 - A client machine with access to the deployed legacy charm
 - Enough storage in the cluster to support backup/restore of the databases.
 

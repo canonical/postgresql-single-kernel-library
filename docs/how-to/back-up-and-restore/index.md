@@ -19,6 +19,8 @@ TODO: clarify difference between:
 
 `data-migration/migrate-data-via-pg-dump`
 
+https://canonical-information-systems-documentation.readthedocs-hosted.com/en/latest/how-to/prodstack/sql-migration/
+
 Backup today explains payload (bc juju backup involves everthing, like secrets)
 
 Migration is for multiplying your instances elsewhere. Can be done via backup and other methods like pg-dump.
