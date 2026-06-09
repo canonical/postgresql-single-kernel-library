@@ -872,6 +872,7 @@ postgresql = [
     { name = "charmlibs-snap", marker = "python_full_version >= '3.12'" },
     { name = "data-platform-helpers", marker = "python_full_version >= '3.12'" },
     { name = "httpx", marker = "python_full_version >= '3.12'" },
+    { name = "pydantic", marker = "python_full_version >= '3.12'" },
     { name = "requests", marker = "python_full_version >= '3.12'" },
     { name = "tomli", marker = "python_full_version >= '3.12'" },
 ]
@@ -899,6 +900,7 @@ requires-dist = [
     { name = "httpx", marker = "python_full_version >= '3.12' and extra == 'postgresql'" },
     { name = "ops", specifier = ">=2.0.0" },
     { name = "psycopg2", specifier = ">=2.9.10" },
+    { name = "pydantic", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=2.0" },
     { name = "requests", marker = "python_full_version >= '3.12' and extra == 'postgresql'" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tomli", marker = "python_full_version >= '3.12' and extra == 'postgresql'" },

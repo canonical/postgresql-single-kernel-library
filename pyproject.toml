@@ -32,6 +32,7 @@ postgresql = [
     "charm-refresh; python_version >= '3.12'",
     "requests; python_version >= '3.12'",
     "tomli; python_version >= '3.12'",
+    "pydantic>=2.0; python_version >= '3.12'",
  ]
 
 [build-system]
