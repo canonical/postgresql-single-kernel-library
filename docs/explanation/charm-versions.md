@@ -6,7 +6,7 @@ myst:
 
 (charm-versions)=
 # PostgreSQL major versions
-{{vm}}{{k8s}}
+{{vm_k8s}}
 
 ````{tab-set}
 ```{tab-item} VM

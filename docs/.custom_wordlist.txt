@@ -172,6 +172,7 @@ subnet
 subproject
 SVG
 Sysbench
+systemd
 terraform
 tex
 texlive

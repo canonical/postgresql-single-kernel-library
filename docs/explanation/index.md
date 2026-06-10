@@ -30,6 +30,7 @@ Standard PostgreSQL operational concepts explained in the context of charms and 
 :titlesonly:
 
 Units <units>
+Stereo mode <stereo-mode>
 Users <users>
 Roles <roles>
 Logs <logs>

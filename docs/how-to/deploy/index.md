@@ -115,3 +115,13 @@ Use volume provided by different clouds via [Juju storage](https://documentation
 
 Juju storage <juju-storage>
 ```
+
+## High availability
+
+Deploy a two-node cluster with a lightweight watcher that supplies a third Raft vote:
+
+```{toctree}
+:titlesonly:
+
+Stereo mode <stereo-mode>
+```
