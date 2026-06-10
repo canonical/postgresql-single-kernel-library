@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL on Google Kubernetes Engine (GKE) using Juju, with step-by-step Google Cloud CLI and kubectl configuration."
+---
+
 (gke)=
 # How to deploy on GKE
 {{k8s}}

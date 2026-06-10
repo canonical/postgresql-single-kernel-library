@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Enable any supported PostgreSQL extension in Charmed PostgreSQL using juju config and integrate your application with the database."
+---
+
 (enable-extension)=
 # How to enable an extension
 {{vm_k8s}}

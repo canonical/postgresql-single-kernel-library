@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "How-to guides for Charmed PostgreSQL on VMs and Kubernetes, covering deployment, scaling, authentication, backups, observability, and data migration."
+---
+
 (how-to)=
 # How-to guides
 {{vm_k8s}}

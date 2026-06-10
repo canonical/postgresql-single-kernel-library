@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Explanation of Charmed PostgreSQL unit types: Primary, Sync Standby, and Replica, and how they contribute to high availability and data safety."
+---
+
 (units)=
 # PostgreSQL units
 {{vm}}

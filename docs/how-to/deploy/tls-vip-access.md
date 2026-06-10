@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL with external TLS VIP access using PgBouncer and HAcluster for a secure, highly available connection endpoint."
+---
+
 (tls-vip-access)=
 # How to deploy for external TLS VIP access
 {{vm}}

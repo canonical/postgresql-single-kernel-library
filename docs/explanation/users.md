@@ -1,3 +1,10 @@
+---
+myst:
+  html_meta:
+    description: "Understand the types of PostgreSQL users in the charm: internal users, relation users, and identity users."
+---
+
+
 (users)=
 # Users
 {{vm_k8s}}

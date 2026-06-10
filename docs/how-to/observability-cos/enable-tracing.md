@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Enable distributed tracing for Charmed PostgreSQL using Grafana Tempo and the Canonical Observability Stack with cross-model integrations."
+---
+
 (enable-tracing)=
 # Enable tracing
 {{vm_k8s}}

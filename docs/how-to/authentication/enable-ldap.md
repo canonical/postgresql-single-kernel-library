@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Integrate LDAP as a centralised authentication method for Charmed PostgreSQL using the Juju ecosystem with TLS certificate support."
+---
+
 (enable-ldap)=
 # How to enable LDAP authentication
 {{vm_k8s}}

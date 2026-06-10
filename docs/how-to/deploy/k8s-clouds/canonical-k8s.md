@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL on Canonical Kubernetes using Juju, with steps to enable local storage and bootstrap the cluster."
+---
+
 (canonical-k8s)=
 # How to deploy on Canonical K8s
 {{k8s}}

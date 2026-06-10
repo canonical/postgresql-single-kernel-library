@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Follow this hands-on tutorial to deploy, scale, and manage Charmed PostgreSQL using Juju and LXD from setup to clean up."
+---
+
 (tutorial)=
 # Tutorial
 {{vm}}

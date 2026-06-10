@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    description: "Configure the s3-integrator charm to use Ceph RadosGW S3-compatible storage for Charmed MySQL backups using the MinIO client."
+    description: "Configure the s3-integrator charm to use Ceph RadosGW S3-compatible storage for Charmed PostgreSQL backups using the MinIO client."
 ---
 
 (configure-s3-radosgw)=

@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Enable TLS/SSL encryption on a Charmed PostgreSQL cluster by integrating with a TLS certificate operator such as self-signed-certificates."
+---
+
 (enable-tls)=
 # How to enable TLS encryption
 {{vm_k8s}}

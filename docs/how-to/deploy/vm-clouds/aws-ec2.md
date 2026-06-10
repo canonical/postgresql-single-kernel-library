@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL on Amazon EC2 using Juju, with step-by-step instructions for AWS CLI installation and IAM credential setup."
+---
+
 (aws-ec2)=
 # How to deploy on AWS EC2
 {{vm}}

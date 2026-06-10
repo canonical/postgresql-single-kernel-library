@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Reference for all Charmed PostgreSQL configuration options, including resource profiles, CPU concurrency, memory allocation, and PostgreSQL tuning parameters."
+---
+
 (configuration)=
 # Configuration
 

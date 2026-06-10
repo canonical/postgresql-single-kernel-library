@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL with Juju network spaces to separate client, replication, cluster, and backup traffic on different network interfaces."
+---
+
 (juju-spaces)=
 # How to deploy on Juju spaces
 {{vm}}

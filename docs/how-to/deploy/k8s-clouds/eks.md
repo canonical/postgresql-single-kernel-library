@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL on Amazon Elastic Kubernetes Service (EKS) using Juju, with setup for eksctl, AWS CLI, and kubectl tools."
+---
+
 (eks)=
 # How to deploy on EKS
 {{k8s}}

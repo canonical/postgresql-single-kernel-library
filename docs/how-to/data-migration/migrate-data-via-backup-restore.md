@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Migrate data to Charmed PostgreSQL by restoring a pgBackRest backup from a legacy or modern charm installation stored in S3-compatible storage."
+---
+
 (migrate-data-via-backup-restore)=
 # How to migrate data via backup/restore
 

@@ -2,7 +2,7 @@
 relatedlinks: "[Charmhub&#32;|&#32;PostgreSQL&#32;VM](https://charmhub.io/postgresql?channel=16/stable), [Charmhub&#32;|&#32;PostgreSQL&#32;K8s](https://charmhub.io/postgresql-k8s?channel=16/stable)"
 myst:
   html_meta:
-    description: "Official documentation for Charmed PostgreSQL operator. Deploy and manage MySQL Community Edition on VMs and Kubernetes using Juju."
+    description: "Official documentation for Charmed PostgreSQL operator. Deploy and manage PostgreSQL on VMs and Kubernetes using Juju."
 ---
 
 # Charmed PostgreSQL documentation

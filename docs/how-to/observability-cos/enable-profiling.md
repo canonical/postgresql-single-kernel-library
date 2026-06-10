@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Enable on-CPU profiling for Charmed PostgreSQL on VM deployments using Parca, with prerequisites for LXD virtual machines and Ubuntu kernels."
+---
+
 # Enable profiling with Parca
 {{vm}}
 

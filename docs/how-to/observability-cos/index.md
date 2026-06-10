@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Observability guides for Charmed PostgreSQL using the Canonical Observability Stack (COS), including monitoring, alert rules, tracing, and profiling."
+---
+
 (observability-cos)=
 # Observability (COS)
 

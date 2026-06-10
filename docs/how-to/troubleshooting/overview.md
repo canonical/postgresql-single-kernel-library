@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Troubleshoot Charmed PostgreSQL by checking charm status, inspecting Juju logs, and using built-in tools to resolve common cluster issues."
+---
+
 (troubleshooting-overview)=
 # How to troubleshoot
 {{vm_k8s}}

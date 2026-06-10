@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Complete list of PostgreSQL extensions and plugins supported by Charmed PostgreSQL for both VM and Kubernetes deployments."
+---
+
 (supported-extensions)=
 # Supported extensions
 

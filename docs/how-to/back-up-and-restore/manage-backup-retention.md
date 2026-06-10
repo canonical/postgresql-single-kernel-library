@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    description: "Manage Charmed PostgreSQL backups with a retention policy."
+    description: "Configure a backup retention policy for Charmed PostgreSQL by setting the experimental-delete-older-than-days option in the s3-integrator charm."
 ---
 
 (manage-backup-retention)=

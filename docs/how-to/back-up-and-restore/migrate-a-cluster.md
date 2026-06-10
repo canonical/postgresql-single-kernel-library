@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    description: "Migrate a Charmed PostgreSQL cluster by restoring a backup from a source cluster to a new cluster and synchronize passwords."
+    description: "Migrate a Charmed PostgreSQL cluster by restoring a backup from a source cluster to a new cluster and synchronizing passwords."
 ---
 
 (migrate-a-cluster)=

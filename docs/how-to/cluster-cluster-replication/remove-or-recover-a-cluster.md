@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Remove, detach, or recover a Charmed PostgreSQL cluster from an async replication set, including switchover and cluster reuse procedures."
+---
+
 (remove-or-recover-a-cluster)=
 # Remove or recover a cluster
 

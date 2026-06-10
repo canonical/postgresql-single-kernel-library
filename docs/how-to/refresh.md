@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Refresh and upgrade Charmed PostgreSQL to a new revision using juju refresh, with rollback guidance and recommended upgrade paths."
+---
+
 (refresh)=
 # Refresh (upgrade)
 {{vm_k8s}}

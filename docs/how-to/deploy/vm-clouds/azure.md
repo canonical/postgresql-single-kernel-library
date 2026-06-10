@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL on Microsoft Azure using Juju, with instructions for Azure CLI installation and subscription authentication."
+---
+
 (azure)=
 # How to deploy on Azure
 {{vm}}

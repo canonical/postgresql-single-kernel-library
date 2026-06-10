@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Manage Charmed PostgreSQL system user passwords using Juju secrets, including creating, granting, and configuring the system-users option."
+---
+
 (manage-passwords)=
 # How to manage passwords
 {{vm_k8s}}

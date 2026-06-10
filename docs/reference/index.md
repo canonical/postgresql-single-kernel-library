@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Technical reference for Charmed PostgreSQL: system requirements, configuration options, supported extensions, charm statuses, and glossary."
+---
+
 (reference)=
 # Reference
 

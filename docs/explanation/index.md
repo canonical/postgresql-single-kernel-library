@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Explanations for Charmed PostgreSQL covering architecture, Juju integration, users, roles, logs, security, performance, and key interfaces."
+---
+
 (explanation)=
 # Explanation
 {{vm_k8s}}

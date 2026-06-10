@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL on Google Compute Engine (GCE) using Juju, with step-by-step instructions for Google Cloud CLI setup and authentication."
+---
+
 (gce)=
 # How to deploy on GCE
 {{vm}}

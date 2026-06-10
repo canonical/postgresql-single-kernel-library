@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Step-by-step guide to migrate database data from Charmed PostgreSQL 14 to PostgreSQL 16 using pg_dump and charm roles management."
+---
+
 (migrate-data-from-14-to-16)=
 # How to migrate data from PostgreSQL 14 to 16
 

@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL on Canonical Sunbeam (OpenStack) using Juju, with instructions for Sunbeam installation and environment setup."
+---
+
 (sunbeam)=
 # How to deploy on Sunbeam
 {{vm}}

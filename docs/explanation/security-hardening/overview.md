@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Security hardening guide for Charmed PostgreSQL covering cloud environments, Juju security, OS hardening, encryption, authentication, and monitoring."
+---
+
 (security-hardening-overview)=
 # Security hardening overview
 {{vm_k8s}}

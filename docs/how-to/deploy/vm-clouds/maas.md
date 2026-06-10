@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL on MAAS (Metal as a Service) using Juju, with setup for the MAAS environment, images, and LXD configuration."
+---
+
 (maas)=
 # How to deploy on MAAS
 {{vm}}

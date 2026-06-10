@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Minimum hardware and software requirements for running Charmed PostgreSQL, including Ubuntu version, Juju, Kubernetes, and resource specifications."
+---
+
 (system-requirements)=
 # System requirements
 

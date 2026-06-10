@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Scale a Charmed PostgreSQL cluster by adding or removing Juju units to control the number of replicas for high availability and performance."
+---
+
 (scale-cluster)=
 # How to scale a cluster
 {{vm_k8s}}
@@ -49,11 +55,11 @@ Removing the last unit will destroy your data!
 
 To scale up the cluster, use `juju add-unit`:
 
-    juju add-unit mysql --num-units <amount_of_units_to_add>
+    juju add-unit postgresql --num-units <amount_of_units_to_add>
 
 To scale down the cluster, use `juju remove-unit`:
 
-    juju remove-unit mysql/<unit_id_to_remove>
+    juju remove-unit postgresql/<unit_id_to_remove>
 ```
 
 ```{tab-item} K8s
@@ -61,7 +67,7 @@ To scale down the cluster, use `juju remove-unit`:
 
 In Kubernetes, scaling operations are performed using `juju scale-application` and specifying the total amount of units you want to have in the cluster:
 
-    juju scale-application mysql-k8s <total number of units>
+    juju scale-application postgresql-k8s <total number of units>
 ```
 ````
 

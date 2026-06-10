@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Overview of Charmed PostgreSQL major versions, the legacy and modern charm generations, supported Charmhub channels, and migration guidance."
+---
+
 (charm-versions)=
 # PostgreSQL major versions
 {{vm}}{{k8s}}

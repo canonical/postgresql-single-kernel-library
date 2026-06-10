@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Set up COS alert rules for Charmed PostgreSQL monitoring and receive notifications through Pushover or other alertmanager integrations."
+---
+
 (enable-alert-rules)=
 # How to enable COS alert rules
 {{vm_k8s}}

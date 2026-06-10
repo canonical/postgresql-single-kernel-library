@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Performance tuning and testing guidance for Charmed PostgreSQL, covering resource profiles, hardware constraints, and functional validation methods."
+---
+
 (performance-and-testing)=
 # Performance and testing
 {{vm_k8s}}

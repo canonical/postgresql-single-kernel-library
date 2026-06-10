@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Migrate PostgreSQL data from a legacy charm to Charmed PostgreSQL 16 using pg_dump for a complete backup and restore data migration."
+---
+
 (migrate-data-via-pg-dump)=
 # Migrate data via `pg_dump`
 

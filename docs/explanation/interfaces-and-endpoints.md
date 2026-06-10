@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Reference for Charmed PostgreSQL 16 postgresql_client interface and database endpoint."
+---
+
 (interfaces-and-endpoints)=
 # Interfaces and endpoints
 {{vm_k8s}}

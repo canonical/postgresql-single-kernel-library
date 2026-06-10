@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Glossary of Charmed PostgreSQL terms including the Canonical Observability Stack, application endpoints, PostgreSQL extensions, and split-brain scenarios."
+---
+
 # Glossary
 
 <!--TODO: definitions and apply {term} label throughout docs -->

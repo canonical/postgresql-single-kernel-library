@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Enable logical replication in Charmed PostgreSQL to replicate data subsets between clusters using PostgreSQL publications and subscriptions."
+---
+
 (logical-replication)=
 # How to enable logical replication
 {{vm_k8s}}

@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Enable the TimescaleDB extension in Charmed PostgreSQL for time-series data using the juju config plugin-timescaledb-enable option."
+---
+
 (enable-timescaledb)=
 # How to enable TimescaleDB
 {{vm_k8s}}

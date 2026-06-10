@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL on Azure Kubernetes Service (AKS) using Juju, with step-by-step instructions for Azure CLI and kubectl setup."
+---
+
 (aks)=
 # How to deploy on AKS
 {{k8s}}

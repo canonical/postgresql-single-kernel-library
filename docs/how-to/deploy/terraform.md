@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL using Terraform and the Juju Terraform Provider with ready-to-use canonical module examples."
+---
+
 (terraform)=
 # How to deploy with Terraform
 {{vm_k8s}}

@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Use patronictl and the Patroni REST API for low-level Charmed PostgreSQL cluster diagnostics, status inspection, and advanced troubleshooting."
+---
+
 (cli-helpers)=
 # How to use CLI helpers
 {{vm}}

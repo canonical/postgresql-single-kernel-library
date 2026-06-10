@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Explanation of connection pooling for Charmed PostgreSQL using PgBouncer to reduce active connections and optimize database resource usage."
+---
+
 (connection-pooling)=
 # Connection pooling
 {{vm_k8s}}

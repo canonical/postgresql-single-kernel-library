@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Collect and export diagnostic logs from a Charmed PostgreSQL VM unit using the built-in SoS report tool for support investigations."
+---
+
 (sos-report)=
 # How to use SoS report
 {{vm}}

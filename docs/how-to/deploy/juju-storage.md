@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Deploy Charmed PostgreSQL with Juju storage pools to configure archive, data, logs, and temp storage volumes on supported clouds."
+---
+
 (juju-storage)=
 # How to deploy on Juju storage
 {{vm}} <!--TODO: create K8s docs -->

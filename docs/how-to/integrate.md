@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Integrate Charmed PostgreSQL with other Juju charms using the postgresql_client interface, or connect non-Juju applications to the database."
+---
+
 (integrate)=
 # How to integrate with PostgreSQL
 {{vm_k8s}}

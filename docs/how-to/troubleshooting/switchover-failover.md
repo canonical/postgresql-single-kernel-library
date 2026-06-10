@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Perform a manual switchover or trigger an automated failover on a Charmed PostgreSQL cluster using the promote-to-primary Juju action."
+---
+
 (switchover-failover)=
 # How to perform a switchover/failover
 {{vm_k8s}}

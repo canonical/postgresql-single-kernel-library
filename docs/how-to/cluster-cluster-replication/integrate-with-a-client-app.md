@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Integrate a client application with Charmed PostgreSQL cluster-cluster async replication using cross-model database endpoint offers and consumes."
+---
+
 (integrate-with-a-client-app)=
 # Integrate with a client application
 

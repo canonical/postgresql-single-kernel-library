@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Data migration guides for Charmed PostgreSQL, including upgrading from PostgreSQL 14 to 16, using pg_dump, and backup-based migration methods."
+---
+
 (data-migration)=
 # Migrate data
 

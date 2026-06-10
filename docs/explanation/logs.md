@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Learn about Charmed PostgreSQL logging: Juju logs, Patroni logs, pgBackRest logs, and log rotation."
+---
+
 (logs)=
 # Logs
 {{vm_k8s}}

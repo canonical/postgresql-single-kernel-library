@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Set up Charmed PostgreSQL cross-regional async replication across two Juju models in different servers for disaster recovery."
+---
+
 (set-up-clusters)=
 # Set up clusters
 

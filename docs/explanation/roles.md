@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Reference for PostgreSQL and Charmed PostgreSQL roles, including predefined system roles and charmed_stats, charmed_read, and charmed_dml roles."
+---
+
 (roles)=
 # Roles
 {{vm_k8s}}
