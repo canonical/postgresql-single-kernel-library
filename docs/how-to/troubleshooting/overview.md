@@ -18,7 +18,7 @@ This page goes over some recommended tools and approaches to troubleshooting the
 
 Make sure your troubleshooting activity does not interfere with the operator itself.
 
-Do not manage users, credentials, databases, and schema directly. This could cause a {term}`split-brain scenario`.
+Do not manage users, credentials, databases, and schema directly. This could cause a split-brain scenario.
 
 Avoid restarting services directly. If you see the problem with a unit, consider {ref}`removing the failing unit and adding a new unit <scale-cluster>` to recover the cluster state.
 ```

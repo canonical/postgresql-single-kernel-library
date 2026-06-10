@@ -7,7 +7,7 @@ myst:
 (cli-helpers)=
 # How to use CLI helpers
 {{vm}}
-<!--TODO: update for K8s same stuff except Raft section (VM-only
+<!--TODO: update for K8s, same except Raft section (VM-only
 $ patronictl ...patroni.yaml -->
 
 This page describes some useful low-level tools shipped withing Charmed PostgreSQL for advanced troubleshooting.

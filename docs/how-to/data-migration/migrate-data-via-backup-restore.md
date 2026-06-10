@@ -13,7 +13,7 @@ This is a guide for migrating data from modern charms.
 
 ```{dropdown} Always try this in a test environment before performing it in production!
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 This page describes the general approach for data migration. Canonical does not guarantee restoration results.

@@ -8,7 +8,14 @@ myst:
 # Security hardening
 {{vm_k8s}}
 
+Learn about the security features at different layers of the PostgreSQL charm - Juju, the cloud it is deployed on, and the artifacts it is built from:
+
 ```{toctree}
 Overview <overview>
+```
+
+Dive deeper into the cryptography mechanisms used by Charmed PostgreSQL, including TLS and authentication:
+
+```{toctree}
 Cryptography <cryptography>
 ```

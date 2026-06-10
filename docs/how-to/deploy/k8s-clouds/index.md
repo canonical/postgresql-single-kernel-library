@@ -8,11 +8,17 @@ myst:
 # Deploy on a Kubernetes cloud
 {{k8s}}
 
+Set up Canonical K8s for PostgreSQL:
 
 ```{toctree}
 :titlesonly:
 
 Canonical K8s <canonical-k8s>
+```
+
+Deploy on a public Kubernetes cloud:
+
+```{toctree}
 GKE <gke>
 EKS <eks>
 AKS <aks>

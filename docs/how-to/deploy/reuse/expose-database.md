@@ -7,7 +7,7 @@ juju expose postgresql
 ```
 
 ```{dropdown} Be wary of opening ports to the public
-:icon: alert
+:icon: alert-fill
 :class-container: dropdown-caution
 :class-title: sd-font-weight-normal
 

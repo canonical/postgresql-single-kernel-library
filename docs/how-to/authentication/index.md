@@ -7,6 +7,8 @@ myst:
 (authentication)=
 # Authentication
 
+Guidance for managing user and relation credentials with Juju secrets, and using LDAP as a centralized authentication method:
+
 ```{toctree}
 :titlesonly:
 

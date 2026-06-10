@@ -12,7 +12,7 @@ SoS is an extensible, portable, support data collection tool primarily aimed at 
 
 ```{dropdown} Always review the collected data before sharing it!
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 The generated archive may contain sensitive data. Its content should be reviewed by the originating organisation before being passed to any third party.

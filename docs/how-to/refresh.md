@@ -187,7 +187,7 @@ To ensure that the cluster can handle all traffic during the refresh, consider s
 ```{dropdown} The PostgreSQL charm does not support scaling up while a refresh is in progress.
 :open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 If you anticipate that the refresh will be in progress for an extended duration (e.g. days, weeks), scale up the application before the refresh so that it can handle the maximum load during that period.

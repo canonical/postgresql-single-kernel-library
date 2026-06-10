@@ -71,7 +71,7 @@ multipass exec maas -- sudo maas apikey --username admin
 
 ```{dropdown} Make sure to enable DHCP service inside the MAAS VM only.
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 MAAS uses DHCP to boot and install new machines. You must enable DHCP manually if you see this banner on MAAS pages:

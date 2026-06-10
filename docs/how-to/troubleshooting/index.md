@@ -8,13 +8,28 @@ myst:
 # Troubleshooting
 {{vm_k8s}}
 
-```{toctree}
-:titlesonly:
-:maxdepth: 2
-:hidden:
+Available troubleshooting tools and recommended steps to take when debugging the behavior of your Charmed PostgreSQL deployment:
 
+```{toctree}
 Overview <overview>
+```
+
+## Advanced troubleshooting
+
+Learn about manual and automated switchover/failover procedures when there is an issue with the primary unit:
+
+```{toctree}
 Switchover/failover <switchover-failover>
-SOS report <sos-report>
+```
+
+Examples of how to use low-level, Patroni-based CLI tools for advanced troubleshooting:
+
+```{toctree}
 CLI helpers <cli-helpers>
+```
+
+Details about using the SoS report tool with PostgreQL for data collection:
+
+```{toctree}
+SOS report <sos-report>
 ```

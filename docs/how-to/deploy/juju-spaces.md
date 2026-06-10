@@ -44,7 +44,7 @@ juju deploy postgresql --channel 16/stable \
 ```{dropdown} There is no support for the juju <code>bind</code> command.
 :open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 Network space binding must be defined at deploy time only.
@@ -78,7 +78,7 @@ The Charmed PostgreSQL operator endpoints are:
 ```{dropdown} Using spaces for backup traffic
 :open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 If using a network space for the backup traffic, the user is responsible for ensuring that the target object storage URL traffic is routed via the specified network space.

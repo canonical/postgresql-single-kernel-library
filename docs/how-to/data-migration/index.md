@@ -5,7 +5,7 @@ myst:
 ---
 
 (data-migration)=
-# Migrate data
+# Data migration
 
 For guidance about moving data from a Charmed PostgreSQL 14 database to Charmed PostgreSQL 16, start here:
 
@@ -15,7 +15,7 @@ For guidance about moving data from a Charmed PostgreSQL 14 database to Charmed 
 Migrate data from PostgreSQL 14 to 16 <migrate-data-from-14-to-16>
 ```
 
-More generic data migration guides:
+Data migration between two PostgreSQL 16 clusters:
 
 ```{toctree}
 :titlesonly:

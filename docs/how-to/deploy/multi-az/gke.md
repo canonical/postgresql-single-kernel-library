@@ -21,7 +21,7 @@ Let's deploy a {ref}`PostgreSQL Cluster on GKE (us-east4) <gke>` using all 3 zon
 ```{dropdown} Creating the following resources may cost you money
 :open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 Be sure to monitor your Google Cloud costs.

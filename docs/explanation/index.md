@@ -8,23 +8,23 @@ myst:
 # Explanation
 {{vm_k8s}}
 
-Additional context about the PostgreSQL charm, including design, legacy information, and security.
+Additional context about the PostgreSQL charm, including design, operational concepts, and security.
 
-## Core
+## Charm design
 
-Core concepts about the history and high-level design of Charmed PostgreSQL:
+Core concepts about the high-level design of the PostgreSQL charm and its interfaces:
 
 ```{toctree}
 :titlesonly:
 
 Architecture <architecture>
-Interfaces and endpoints <interfaces-and-endpoints>
 Charm versions <charm-versions>
+Interfaces and endpoints <interfaces-and-endpoints>
 ```
 
 ## Operation
 
-Clarification of standard PostgreSQL operational concepts in the context of charms and Juju:
+Standard PostgreSQL operational concepts explained in the context of charms and Juju - such as how Juju units map to PostgreSQL replicas, what kinds of users and roles are exposed through the charm, and what kind of logs get written:
 
 ```{toctree}
 :titlesonly:
@@ -33,13 +33,13 @@ Units <units>
 Users <users>
 Roles <roles>
 Logs <logs>
-Connection pooling <connection-pooling>
 Performance and testing <performance-and-testing>
+Connection pooling <connection-pooling>
 ```
 
 ## Security
 
-Overview of security features in the charm and hardening guidance:
+Overview of security and cryptography features in the charm:
 
 ```{toctree}
 :titlesonly:

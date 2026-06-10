@@ -21,7 +21,7 @@ If using PgBouncer is not enough to handle the connections load of your applicat
 ```{dropdown} Resource usage warning
 :open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 Each connection opened by PostgreSQL spawns a new process, which is resource-intensive. Use this option as a last resort.

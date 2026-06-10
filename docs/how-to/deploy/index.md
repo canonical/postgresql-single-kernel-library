@@ -59,7 +59,7 @@ VM clouds <vm-clouds/index>
 K8s clouds <k8s-clouds/index>
 ```
 
-Deploy a cluster on a cloud using different availability zones:
+Deploy a cluster on a cloud using different availability zones, using Google Cloud as an example:
 
 ```{toctree}
 :titlesonly:

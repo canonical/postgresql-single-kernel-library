@@ -12,7 +12,7 @@ This guide will show how to enable TLS/SSL on a PostgreSQL cluster using the [`s
 
 ```{dropdown} Do **not** use self-signed certificates in production.
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 In this guide, we use [self-signed certificates](https://en.wikipedia.org/wiki/Self-signed_certificate) provided by the [`self-signed-certificates` operator](https://github.com/canonical/self-signed-certificates-operator).

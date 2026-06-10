@@ -8,11 +8,18 @@ myst:
 # Deploy on a VM cloud
 {{vm}}
 
+Deploy on Canonical infrastructure like Sunbeam (OpenStack) and Metal-as-a-service (MAAS):
+
 ```{toctree}
 :titlesonly:
 
 Sunbeam <sunbeam>
 MAAS <maas>
+```
+
+Deploy PostgreSQL for machines in a public cloud:
+
+```{toctree}
 AWS EC2 <aws-ec2>
 GCE <gce>
 Azure <azure>

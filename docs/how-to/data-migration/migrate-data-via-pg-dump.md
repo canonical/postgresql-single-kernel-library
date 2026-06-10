@@ -25,7 +25,7 @@ A minor difference in commands might be necessary for different revisions and/or
 
 ```{dropdown} Always try this in a test environment before performing it in production!
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 {ref}`Contact us <contact>` for more guidance.

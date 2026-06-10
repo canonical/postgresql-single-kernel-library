@@ -7,8 +7,11 @@ myst:
 (release-notes)=
 # Release notes
 
+Release notes for all revisions of the PostgreSQL charm for VM and Kubernetes.
+
 ```{toctree}
 :titlesonly:
+:maxdepth: 2
 
 VM charm <vm/index>
 K8s charm <k8s/index>

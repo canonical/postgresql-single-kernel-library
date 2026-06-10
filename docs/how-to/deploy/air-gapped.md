@@ -95,7 +95,7 @@ For example, to export all charms in the PostgreSQL 14 bundle:
 ```{dropdown} There is no bundle yet for PostgreSQL 16.
 :open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 {ref}`Contact us <contact>` for guidance on exporting the right charms for an offline deployment of PostgreSQL 16.

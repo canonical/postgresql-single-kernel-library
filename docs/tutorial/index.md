@@ -393,7 +393,7 @@ The Charmed PostgreSQL operator for machines uses a [PostgreSQL Patroni-based cl
 
 ```{dropdown} Do **not** host all replicas on the same machine in a production environment.
 :color: warning
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 This tutorial hosts all replicas on the same machine.
@@ -716,7 +716,7 @@ TLS is enabled by integrating Charmed PostgreSQL with the [Self-signed certifica
 
 ```{dropdown} Do **not** use self-signed certificates in a production environment.
 :color: warning
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 In this guide, we use [self-signed certificates](https://en.wikipedia.org/wiki/Self-signed_certificate) provided by the [`self-signed-certificates` operator](https://github.com/canonical/self-signed-certificates-operator).
@@ -851,7 +851,7 @@ If you're done with testing and would like to free up resources on your machine,
 ```{dropdown} When you remove the VM **you will lose all the data** inside it.
 :open:
 :color: warning
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 This includes all data in PostgreSQL and any other applications.

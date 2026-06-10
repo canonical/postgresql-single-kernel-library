@@ -49,7 +49,7 @@ storage:
 ```{dropdown} The charm only supports using tmpfs as a storage provider for <code>temp</code> storage.
 :open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 Using tmpfs for `archive`, `data`, or `logs` storage is not supported. These storage types must be backed by persistent filesystems.

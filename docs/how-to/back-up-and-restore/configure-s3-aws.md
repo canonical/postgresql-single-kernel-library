@@ -14,6 +14,16 @@ This guide will teach you how to deploy and configure the s3-integrator charm fo
 
 {{seealso}} {ref}`configure-s3-radosgw`.
 
+```{dropdown} pgBackRest limitations
+:open:
+:class-container: dropdown-caution
+:icon: alert-fill
+
+The backup tool [pgBackRest](https://pgbackrest.org/) can only interact with S3-compatible storage if they work with [SSL/TLS](https://github.com/pgbackrest/pgbackrest/issues/2340).
+
+Backup via the plain HTTP is currently not supported.
+```
+
 ## Set up `s3-integrator`
 
 Deploy and configure the `s3-integrator` charm for AWS S3:
@@ -39,13 +49,13 @@ The latest version of the S3 integrator charm is in `2/stable`, and adds support
 The PostgreSQL charm is not yet using the latest version of the S3 integrator library, so we recommend using `1/stable` for guaranteed compatibility.
 ```
 
-There is an experimental configuration option that sets up a retention time (in days) for backups stored in S3: [`experimental-delete-older-than-days`](https://charmhub.io/s3-integrator/configuration?channel=latest/edge#experimental-delete-older-than-days). See: {ref}`manage-backup-retention`.
+There is an experimental configuration option that sets up a retention time (in days) for backups stored in S3: [`experimental-delete-older-than-days`](https://charmhub.io/s3-integrator/configuration?channel=latest/edge#experimental-delete-older-than-days). 
 
+See: {ref}`manage-backup-retention`.
 
 ```{dropdown} The S3 endpoint must be specified as <code>s3.\<region\>.amazonaws.com</code> within the **first 24 hours** of creating the bucket.
-:open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
 For older buckets, the endpoint `s3.amazonaws.com` can be used.

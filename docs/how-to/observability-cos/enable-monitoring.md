@@ -8,7 +8,7 @@ myst:
 # How to enable monitoring
 {{vm_k8s}}
 
-To enable monitoring and observability, {term}`COS <Canonical Observability Stack>` should be deployed in a separate Juju controller and model from PostgreSQL.
+To enable monitoring and observability, COS <Canonical Observability Stack> should be deployed in a separate Juju controller and model from PostgreSQL.
 
 In this guide, we'll refer to the following:
 * `<cos_k8s_controller>` is a Kubernetes Juju controller

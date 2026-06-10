@@ -4,6 +4,7 @@ myst:
     description: "Enable on-CPU profiling for Charmed PostgreSQL on VM deployments using Parca, with prerequisites for LXD virtual machines and Ubuntu kernels."
 ---
 
+(enable-profiling)=
 # Enable profiling with Parca
 {{vm}}
 

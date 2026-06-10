@@ -112,10 +112,10 @@ The charmed-postgresql snap also ships list of tools used by charm:
 ```{dropdown} Managing snap services manually
 :open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
-To avoid a {term}`split-brain scenario`, we recommend you do **not** start, stop, and restart snap services manually. See {ref}`this guide <troubleshooting>` for troubleshooting guidance.
+To avoid a split-brain scenario, we recommend you do **not** start, stop, and restart snap services manually. See {ref}`this guide <troubleshooting>` for troubleshooting guidance.
 
 All snap resources must be executed under the special **snap user `_daemon_`** only!
 ```
@@ -159,10 +159,10 @@ All `metrics_server` Pebble service is only activated after integrating with {re
 ```{dropdown} Managing Pebble services manually
 :open:
 :class-container: dropdown-caution
-:icon: alert
+:icon: alert-fill
 :class-title: sd-font-weight-normal
 
-To avoid a {term}`split-brain scenario`, we recommend you do **not** start, stop, and restart Pebble services manually.
+To avoid a split-brain scenario, we recommend you do **not** start, stop, and restart Pebble services manually.
 
 All Pebble resources must be executed with the proper user defined in the `user:group` options of the Pebble layer.
 ```
