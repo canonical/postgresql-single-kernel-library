@@ -22,59 +22,30 @@ This guide contains recommended steps and useful commands for creating and manag
 
 For security reasons, charm credentials are not stored inside backups. So, if you plan to restore to a backup at any point in the future, **you will need the following user passwords for your existing cluster**:
 * `operator`
-* `monitoring`
 * `replication`
 * `rewind`
 
-If custom passwords were set with a secret previously, retrieve them with
+You can retrieve them with:
 
 ````{tab-set}
 ```{tab-item} VM
 :sync: vm
 
-    juju config postgresql system-users
+    juju run postgresql/leader get-password username=operator
+    juju run postgresql/leader get-password username=replication
+    juju run postgresql/leader get-password username=rewind
 ```
 
 ```{tab-item} K8s
 :sync: k8s
 
-    juju config postgresql-k8s system-users
+    juju run postgresql-k8s/leader get-password username=operator
+    juju run postgresql-k8s/leader get-password username=replication
+    juju run postgresql-k8s/leader get-password username=rewind
 ```
 ````
 
-This will output a secret URI that starts with `secret:`. To display its contents (i.e. the credentials):
-
-```shell
-juju show-secret --reveal <secret URI>
-```
-
-The output will include the credentials for the system users:
-
-```
-<secret URI>:
-    ...
-
-    monitoring-password: <password-to-copy>
-    operator-password: <password-to-copy>
-    patroni-password: ...
-    raft-password: ...
-    replication-password: <password-to-copy>
-    rewind-password: <password-to-copy>
-```
-
-If custom passwords were not previously set with a secret, you can find the peer secret with:
-
-```shell
-juju secrets --format=json | jq -r 'to_entries[] | select(.value.label == "database-peers.postgresql.app") | .key'
-```
-
-Copy the secret URI, and use it in the following command:
-
-```shell
-juju show-secret --reveal <secret URI> --format=json | jq '.[].content.Data | with_entries(select(.key|contains("password")))'
-```
-
-{{seealso}} {ref}`manage-passwords`
+{{seealso}} {ref}`manage-passwords` and {ref}`migrate-a-cluster`.
 
 ## Create a backup
 

@@ -58,8 +58,8 @@ Modern charm
 
 ### New features
 
-* [**Juju spaces**](juju-spaces) - Enhanced networking capabilities for complex deployment scenarios
-* [**Juju user secrets**](https://documentation.ubuntu.com/juju/latest/reference/secret/index.html#user-secret) - Secure management of the charm's [internal passwords](manage-passwords)
+* **Juju spaces** - Enhanced networking capabilities for complex deployment scenarios
+* [**Juju user secrets**](https://documentation.ubuntu.com/juju/latest/reference/secret/index.html#user-secret) - Secure management of the charm's internal passwords
 * **Improved** [**security hardening**](security-hardening) - Enhanced security posture and best practices
 * **TLS v4 library migration**
   * New endpoints `client-certificates` and `peer-certificates`

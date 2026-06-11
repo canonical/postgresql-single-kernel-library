@@ -41,16 +41,6 @@ juju deploy s3-integrator --channel=1/stable
 juju run s3-integrator/leader sync-s3-credentials access-key=<access-key> secret-key=<secret-key>
 ```
 
-```{dropdown} We recommend using the <code>1/stable</code> channel of the S3 integrator charm.
-:class-container: dropdown-tip
-:icon: light-bulb
-:class-title: sd-font-weight-normal
-
-The latest version of the S3 integrator charm is in `2/stable`, and adds support for Juju secrets.
-
-The PostgreSQL charm is not yet using the latest version of the S3 integrator library, so we recommend using `1/stable` for guaranteed compatibility.
-```
-
 Lastly, use `juju config` to add your configuration parameters. For example:
 
 ```shell

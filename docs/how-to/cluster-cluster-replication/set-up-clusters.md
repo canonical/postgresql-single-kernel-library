@@ -62,6 +62,7 @@ juju offer db1:replication-offer replication-offer
 ## Consume
 
 Consume asynchronous replication on planned `Standby` cluster (Lisbon):
+
 ```shell
 juju switch lisbon
 juju consume rome.replication-offer

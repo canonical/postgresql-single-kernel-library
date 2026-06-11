@@ -39,16 +39,6 @@ juju config s3-integrator \
     region="us-west-2"
 ```
 
-```{dropdown} We recommend using the <code>1/stable</code> channel of the S3 integrator charm.
-:class-container: dropdown-tip
-:icon: light-bulb
-:class-title: sd-font-weight-normal
-
-The latest version of the S3 integrator charm is in `2/stable`, and adds support for Juju secrets.
-
-The PostgreSQL charm is not yet using the latest version of the S3 integrator library, so we recommend using `1/stable` for guaranteed compatibility.
-```
-
 There is an experimental configuration option that sets up a retention time (in days) for backups stored in S3: [`experimental-delete-older-than-days`](https://charmhub.io/s3-integrator/configuration?channel=latest/edge#experimental-delete-older-than-days). 
 
 See: {ref}`manage-backup-retention`.

@@ -23,33 +23,27 @@ This is a guide on how to restore a backup that was made from a different cluste
 
 ## Apply cluster credentials
 
-Passwords are not re-generated when a cluster is restored. To make sure the new cluster uses the credentials from the previous cluster, apply the credentials you {ref}`saved during the backup process <save-current-cluster-credentials>` **before** restoring.
+When you restore a backup from an old cluster, it will restore the password from the previous cluster to your current cluster. 
 
-<!--begin include-->
-Create a secret with the password values you saved when creating the backup:
-
-```shell
-juju add-secret <secret name> monitoring=<password1> operator=<password2> replication=<password3> rewind=<password4>
-```
-
-where `<secret name>` can be any name you'd like for the restored secrets.
-
-Then, grant the secret to the PostgreSQL application that will initiate the restore:
+Set the password of your current cluster to the previous cluster’s password:
 
 ````{tab-set}
 ```{tab-item} VM
 :sync: vm
 
-    juju grant-secret <secret name> postgresql
+    juju run postgresql/leader set-password username=operator password=<previous cluster password> 
+    juju run postgresql/leader set-password username=replication password=<previous cluster password> 
+    juju run postgresql/leader set-password username=rewind password=<previous cluster password> 
 ```
 
 ```{tab-item} K8s
 :sync: k8s
 
-    juju grant-secret <secret name> postgresql-k8s
+    juju run postgresql-k8s/leader set-password username=operator password=<previous cluster password>
+    juju run postgresql-k8s/leader set-password username=replication password=<previous cluster password> 
+    juju run postgresql-k8s/leader set-password username=rewind password=<previous cluster password>
 ```
 ````
-<!--end include-->
 
 ## List backups
 

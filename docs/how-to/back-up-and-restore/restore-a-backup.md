@@ -15,19 +15,13 @@ To restore a backup that was made from the a *different* cluster, (i.e. cluster 
 ## Prerequisites
 
 * A PostgreSQL deployment {ref}`scaled down <scale-cluster>` to one unit (scale it up again after the backup is restored)
-- Access to S3 storage
-- {ref}`A backup in your S3 storage <create-a-backup>`
+* Access to S3 storage
+* {ref}`A backup in your S3 storage <create-a-backup>`
+* Point-in-time recovery requires:
+    * Charmed PostgreSQL VM Revisions 467+
+    * Charmed PostgreSQL K8s Revisions 381+
 
 ---
-
-## Apply cluster credentials
-
-When restoring a backup that was taken from the same cluster and the `operator`, `monitoring`, `replication`, and `rewind` passwords have not changed since then, you **do not** need to do this step.
-
-```{include} migrate-a-cluster.md
-    :start-after: "<!--begin include-->"
-    :end-before: "<!--end include-->"
-```
 
 ## List backups
 

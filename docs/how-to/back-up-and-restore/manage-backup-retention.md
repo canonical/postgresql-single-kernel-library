@@ -8,13 +8,9 @@ myst:
 # Manage backup retention
 {{vm_k8s}}
 
-Charmed PostgreSQL backups can be managed via a retention policy. This retention can be set by the user in the form of a configuration parameter in the charm [`s3-integrator`](https://charmhub.io/s3-integrator) via the config option  [`experimental-delete-older-than-days`](https://charmhub.io/s3-integrator/configuration?channel=latest/edge#experimental-delete-older-than-days).
+Charmed PostgreSQL backups can be managed via a retention policy. This retention can be set by the user in the form of a configuration parameter in the charm [`s3-integrator`](https://charmhub.io/s3-integrator).
 
 This guide will teach you how to set this configuration and how it works in managing existing backups.
-
-```{caution}
-This is an experimental parameter; use it with caution.
-```
 
 ## Configure S3-integrator charm
 
@@ -25,7 +21,15 @@ juju deploy s3-integrator
 juju run s3-integrator/leader sync-s3-credentials access-key=<access-key-here> secret-key=<secret-key-here>
 ```
 
-Then, use `juju config` to add the desired retention time in days:
+Then, use `experimental-delete-older-than-days` to configure the desired retention time in days.
+
+```{dropdown} This is an experimental parameter; use it with caution.
+:class-container: dropdown-caution
+:icon: alert-fill
+:class-title: sd-font-weight-normal
+
+See [`experimental-delete-older-than-days`](https://charmhub.io/s3-integrator/configuration?channel=latest/edge#experimental-delete-older-than-days) for more details.
+```
 
 ```shell
 juju config s3-integrator experimental-delete-older-than-days=<number-of-days>

@@ -5,6 +5,21 @@
 
 ## Documentation
 
+### VM & K8s tabs
+
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+content
+```
+```{tab-item} K8s
+:sync: k8s
+
+content
+```
+````
+
 ### Admonitions
 
 ````
