@@ -75,7 +75,7 @@ $ juju status
 Model       Controller  Cloud/Region         Version  SLA          Timestamp
 postgresql  lxd         localhost/localhost  3.6.5    unsupported  14:50:19+02:00
 
-App         Version  Status  Scale  Charm       Channel  Rev  Exposed  Message
+App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
 postgresql  14.10    active    1/3  postgresql  14/stable  615  no
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
@@ -112,7 +112,7 @@ $ juju status
 Model       Controller  Cloud/Region         Version  SLA          Timestamp
 postgresql  lxd         localhost/localhost  3.6.5    unsupported  14:54:40+02:00
 
-App         Version  Status  Scale  Charm       Channel  Rev  Exposed  Message
+App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
 postgresql  14.10    active    1/3  postgresql  14/stable  615  no
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
@@ -179,7 +179,7 @@ $ juju status
 Model       Controller  Cloud/Region         Version  SLA          Timestamp
 postgresql  lxd         localhost/localhost  3.6.5    unsupported  15:03:12+02:00
 
-App         Version  Status  Scale  Charm       Channel  Rev  Exposed  Message
+App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
 postgresql  14.10    active      1  postgresql  14/stable  615  no
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
@@ -202,7 +202,7 @@ $ juju status
 Model       Controller  Cloud/Region         Version  SLA          Timestamp
 postgresql  lxd         localhost/localhost  3.6.5    unsupported  15:09:56+02:00
 
-App         Version  Status  Scale  Charm       Channel  Rev  Exposed  Message
+App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
 postgresql  14.10    active      3  postgresql  14/stable  615  no
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
