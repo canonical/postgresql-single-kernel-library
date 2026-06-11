@@ -24,19 +24,10 @@ All revisions of PostgreSQL described below are built for *Ubuntu 22.04 LTS (Jam
 
 | Charmhub revision</br>(amd, arm)  | Snap revision</br>(amd, arm) | PostgreSQL version | Minimum Juju version |
 |:---------------------------------:|:------------------------:|:------------------:|:--------------------:|
-| {ref}`1088, 1089 <rev-1088-1089>` |         282, 283         |        16.13       |         3.6.21      |
-| {ref}`1047, 1046 <rev-1046-1047>` |         244, 242         |        16.11       |         3.6.14      |
-| {ref}`990, 989 <rev-989-990>`     |         244, 242         |        16.11       |         3.6.1      |
-| {ref}`952, 951 <rev-951-952>`     |         239, 202         |        16.10       |         3.6.1      |
-| {ref}`843, 844 <rev-843-844>`     |         218, 219         |        16.9        |         3.6        |
 
 ```{toctree}
 :titlesonly:
 :hidden:
 
-1046-1047
-1088-1089
-843-844
-951-952
-989-990
+
 ```

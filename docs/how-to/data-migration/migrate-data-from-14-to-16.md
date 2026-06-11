@@ -42,12 +42,12 @@ Deploy one unit of Charmed PostgreSQL 16. This will simplify the migration and c
 ```{tab-item} VM
 :sync: vm
 
-    juju deploy postgresql --channel 16/stable
+    juju deploy postgresql --channel 14/stable
 ```
 ```{tab-item} K8s
 :sync: k8s
 
-    juju deploy postgresql-k8s --channel 16/stable --trust
+    juju deploy postgresql-k8s --channel 14/stable --trust
 ```
 ````
 

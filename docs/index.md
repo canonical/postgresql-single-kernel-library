@@ -1,5 +1,5 @@
 ---
-relatedlinks: "[Charmhub&#32;|&#32;PostgreSQL&#32;VM](https://charmhub.io/postgresql?channel=16/stable), [Charmhub&#32;|&#32;PostgreSQL&#32;K8s](https://charmhub.io/postgresql-k8s?channel=16/stable)"
+relatedlinks: "[Charmhub&#32;|&#32;PostgreSQL&#32;VM](https://charmhub.io/postgresql?channel=14/stable), [Charmhub&#32;|&#32;PostgreSQL&#32;K8s](https://charmhub.io/postgresql-k8s?channel=14/stable)"
 myst:
   html_meta:
     description: "Official documentation for Charmed PostgreSQL operator. Deploy and manage PostgreSQL on VMs and Kubernetes using Juju."
@@ -30,8 +30,8 @@ Learn about what's in the charm, how to set up your environment, and perform the
 Advanced deployments and operations focused on production scenarios and high availability.
 
 * **Advanced deployment scenarios**: {ref}`Terraform <terraform>` • {ref}`Air-gapped deployments <air-gapped>`
-* **High availability**: {ref}`Multiple availability zones <multi-az>` • {ref}`Cluster-cluster replication <cluster-cluster-replication>` • {ref}`Logical replication <logical-replication>`
-* **Networking**: {ref}`Juju spaces <juju-spaces>` • {ref}`Enable TLS encryption <enable-tls>` • {ref}`External network access <external-network-access>`
+* **High availability**: {ref}`Multiple availability zones <multi-az>` • {ref}`Cluster-cluster replication <cluster-cluster-replication>`
+* **Networking**: {ref}`Enable TLS encryption <enable-tls>` • {ref}`External network access <external-network-access>`
 * **Upgrades and data migration**: {ref}`In-place refresh (upgrade) <refresh>` • {ref}`Cluster and data migration <data-migration>`
 * **Troubleshooting**: {ref}`Overview and tools <troubleshooting>` • {ref}`Manual switchover/failover <switchover-failover>` • {ref}`Logs<logs>` • {ref}`sos-report`
 
@@ -41,7 +41,7 @@ Information for developers looking to make their application compatible with Pos
 
 * **Charm integrations**: {ref}`Interfaces and endpoints <interfaces-and-endpoints>` • {ref}`How to integrate with your charm with PostgreSQL <integrate-with-your-charm>`
 * **Learn about the PostgreSQL charm's design**: {ref}`architecture` • {ref}`Internal users <users>` • {ref}`Roles <roles>` • {ref}`Charm versions <charm-versions>`
-* **Juju properties**: [Configurations](https://charmhub.io/postgresql/configurations?channel=16/stable) • [Actions](https://charmhub.io/postgresql/actions?channel=16/stable)
+* **Juju properties**: [Configurations](https://charmhub.io/postgresql/configurations?channel=14/stable) • [Actions](https://charmhub.io/postgresql/actions?channel=14/stable)
 
 ## How this documentation is organised
 
@@ -61,7 +61,7 @@ Charmed PostgreSQL is an official distribution of PostgreSQL. It’s an open-sou
 * [Discourse forum](https://discourse.charmhub.io/tag/postgresql)
 * [Public Matrix channel](https://matrix.to/#/#charmhub-data-platform:ubuntu.com)
 * [Report an issue](https://github.com/canonical/postgresql-single-kernel-library/issues/new/choose)
-* [Contribute](https://github.com/canonical/postgresql-single-kernel-library/blob/16/edge/CONTRIBUTING.md)
+* {ref}`Contribute <contribute>`
 
 ### Governance and policies
 

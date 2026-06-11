@@ -31,10 +31,10 @@ To deploy two clusters in different servers, create two juju models - one for th
     juju add-model lisbon
 
     juju switch rome # active model must correspond to cluster
-    juju deploy postgresql --channel 16/stable db1
+    juju deploy postgresql --channel 14/stable db1
 
     juju switch lisbon
-    juju deploy postgresql --channel 16/stable db2
+    juju deploy postgresql --channel 14/stable db2
 ```
 ```{tab-item} K8s
 :sync: k8s
@@ -43,10 +43,10 @@ To deploy two clusters in different servers, create two juju models - one for th
     juju add-model lisbon
 
     juju switch rome # active model must correspond to cluster
-    juju deploy postgresql-k8s --trust --channel 16/stable db1
+    juju deploy postgresql-k8s --trust --channel 14/stable db1
 
     juju switch lisbon
-    juju deploy postgresql-k8s --trust --channel 16/stable db2
+    juju deploy postgresql-k8s --trust --channel 14/stable db2
 ```
 ````
 

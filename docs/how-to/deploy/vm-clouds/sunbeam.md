@@ -20,7 +20,7 @@ This guide goes through the steps for setting up Sunbeam and deploying Charmed P
 
 ## Prerequisites
 
-* A physical or virtual machine running Ubuntu 24.04+
+* A physical or virtual machine running Ubuntu 22.04+
 * Hardware requirements depend on planned deployment size.
   * Recommended: 8 CPU cores, 32GB RAM, 100GB of storage
   * Minimum: See the requirements listed in the [Sunbeam documentation](https://canonical-openstack.readthedocs-hosted.com/en/latest/how-to/install/install-canonical-openstack-using-the-manual-bare-metal-provider/)
@@ -35,7 +35,7 @@ Pay attention to the `Caution` and `Note` sections - the `/etc/hosts` will requi
 
 ## Enable OpenStack images auto-sync
 
-Follow the official [Images Sync](https://canonical-openstack.readthedocs-hosted.com/en/latest/how-to/features/images-sync/) guide to enable auto-sync and wait for the image `24.04` to be downloaded.
+Follow the official [Images Sync](https://canonical-openstack.readthedocs-hosted.com/en/latest/how-to/features/images-sync/) guide to enable auto-sync and wait for the image `22.04` to be downloaded.
 
 ## Set up Juju inside an OpenStack bastion
 
@@ -58,7 +58,7 @@ juju add-model <model-name>
 ```{terminal}
 :copy:
 
-juju deploy postgresql --channel 16/stable --base ubuntu@24.04 -n 3
+juju deploy postgresql --channel 14/stable --base ubuntu@22.04 -n 3
 ```
 
 ```{terminal}
@@ -70,7 +70,7 @@ Model         Controller     Cloud/Region       Version  SLA          Timestamp
 <model-name>  my-controller  sunbeam/RegionOne  3.6.1    unsupported  19:42:44Z
 
 App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
-postgresql  16.9     active      3  postgresql  16/stable  843  no
+postgresql  14.10    active      3  postgresql  14/stable       no
 
 Unit           Workload  Agent  Machine  Public address   Ports     Message
 postgresql/0*  active    idle   0        192.168.122.211  5432/tcp  Primary
@@ -78,9 +78,9 @@ postgresql/1   active    idle   1        192.168.122.226  5432/tcp
 postgresql/2   active    idle   2        192.168.122.14   5432/tcp
 
 Machine  State    Address          Inst id                               Base          AZ    Message
-0        started  192.168.122.211  3f0a331c-bc08-4bae-af22-44087a7b74d6  ubuntu@24.04  nova  ACTIVE
-1        started  192.168.122.226  e6e908f8-0da1-4440-9bbd-9f1c1bc780df  ubuntu@24.04  nova  ACTIVE
-2        started  192.168.122.14   6f9ad7cd-2a9d-435e-a6d8-3e39bf2218cd  ubuntu@24.04  nova  ACTIVE
+0        started  192.168.122.211  3f0a331c-bc08-4bae-af22-44087a7b74d6  ubuntu@22.04  nova  ACTIVE
+1        started  192.168.122.226  e6e908f8-0da1-4440-9bbd-9f1c1bc780df  ubuntu@22.04  nova  ACTIVE
+2        started  192.168.122.14   6f9ad7cd-2a9d-435e-a6d8-3e39bf2218cd  ubuntu@22.04  nova  ACTIVE
 ```
 
 ## Access the OpenStack dashboard (optional)

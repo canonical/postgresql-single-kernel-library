@@ -10,8 +10,8 @@ myst:
 
 Charmed PostgreSQL ships a pre-configured and pre-enabled list of [Awesome Alert Rules](https://samber.github.io/awesome-prometheus-alerts/) for PostgreSQL, PgBouncer, Patroni, and pgBackRest:
 
-* [PostgreSQL K8s](https://github.com/canonical/postgresql-k8s-operator/tree/16/edge/src/prometheus_alert_rules)
-* [PostgreSQL VM](https://github.com/canonical/postgresql-operator/tree/16/edge/src/prometheus_alert_rules)
+* [PostgreSQL K8s](https://github.com/canonical/postgresql-k8s-operator/tree/14/stable/src/prometheus_alert_rules)
+* [PostgreSQL VM](https://github.com/canonical/postgresql-operator/tree/14/stable/src/prometheus_alert_rules)
 
 <details><summary>Screenshot of alert rules in the Grafana web interface</summary>
 

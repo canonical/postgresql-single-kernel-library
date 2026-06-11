@@ -69,7 +69,7 @@ Deploy `glauth-k8s`, `self-signed-certificates`, and `postgresql-k8s`:
 ```shell
 juju deploy glauth-k8s --channel edge --trust --config ldaps_enabled=true
 juju deploy self-signed-certificates
-juju deploy postgresql-k8s --channel 16/edge --trust
+juju deploy postgresql-k8s --channel 14/edge --trust
 ```
 
 Integrate the three applications:

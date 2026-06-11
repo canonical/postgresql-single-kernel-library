@@ -82,7 +82,7 @@ The command below demonstrates how to deploy Charmed PostgreSQL K8s with Juju co
 
 ```shell
 export MYAPP="mydatabase" ; \
-juju deploy postgresql-k8s --channel 16/stable  ${MYAPP} --trust -n 3 \
+juju deploy postgresql-k8s --channel 14/stable  ${MYAPP} --trust -n 3 \
  --constraints="tags=anti-pod.app.kubernetes.io/name=${MYAPP},anti-pod.topology-key=topology.kubernetes.io/zone"
 ```
 
@@ -152,7 +152,7 @@ Model    Controller  Cloud/Region  Version  SLA          Timestamp
 mymodel  gke         gke/us-east4  3.5.3    unsupported  22:02:32+02:00
 
 App         Version  Status  Scale  Charm           Channel    Rev  Address         Exposed  Message
-mydatabase  14.13    active      3  postgresql-k8s  16/stable    615  34.118.235.169  no
+mydatabase  14.13    active      3  postgresql-k8s  14/stable    615  34.118.235.169  no
 
 Unit           Workload  Agent  Address    Ports  Message
 mydatabase/0   active    idle   10.80.5.9
@@ -255,7 +255,7 @@ Model    Controller  Cloud/Region  Version  SLA          Timestamp
 mymodel  gke         gke/us-east4  3.5.3    unsupported  22:31:00+02:00
 
 App         Version  Status   Scale  Charm           Channel    Rev  Address         Exposed  Message
-mydatabase  14.13    waiting    2/3  postgresql-k8s  16/stable    615  34.118.235.169  no       installing agent
+mydatabase  14.13    waiting    2/3  postgresql-k8s  14/stable    615  34.118.235.169  no       installing agent
 
 Unit           Workload  Agent  Address    Ports  Message
 mydatabase/0   unknown   lost                     agent lost, see 'juju show-status-log mydatabase/0'
@@ -278,7 +278,7 @@ Model    Controller  Cloud/Region  Version  SLA          Timestamp
 mymodel  gke         gke/us-east4  3.5.3    unsupported  22:38:23+02:00
 
 App         Version  Status  Scale  Charm           Channel    Rev  Address         Exposed  Message
-mydatabase  14.13    active      3  postgresql-k8s  16/stable  615  34.118.235.169  no
+mydatabase  14.13    active      3  postgresql-k8s  14/stable  615  34.118.235.169  no
 
 Unit           Workload  Agent  Address     Ports  Message
 mydatabase/0   active    idle   10.80.5.10

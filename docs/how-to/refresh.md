@@ -129,7 +129,7 @@ In some of these cases, it may be possible to perform an out-of-place upgrade or
 * Minor in-place downgrade from PostgreSQL 16.10 to 16.9
 * Major in-place upgrade from PostgreSQL 14 to 16
 * Major in-place downgrade from PostgreSQL 16 to 14
-* Any refresh from or to a non-stable version (e.g. 16/edge)
+* Any refresh from or to a non-stable version (e.g. 14/edge)
 
 ## Verify your backups
 

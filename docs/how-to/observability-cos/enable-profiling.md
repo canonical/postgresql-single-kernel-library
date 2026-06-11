@@ -29,7 +29,7 @@ This is because LXD does not allow `/sys/kernel/tracing` to be mounted in a syst
 To ensure that a virtual machine is used instead of a system container, you would need to add constraints, for example:
 
 ```shell
-juju deploy postgresql --channel 16/stable --constraints="virt-type=virtual-machine"`
+juju deploy postgresql --channel 14/stable --constraints="virt-type=virtual-machine"`
 ```
 
 (base-ubuntu-version)=

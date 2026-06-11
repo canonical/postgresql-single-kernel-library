@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    description: "Migrate PostgreSQL data from a legacy charm to Charmed PostgreSQL 16 using pg_dump for a complete backup and restore data migration."
+    description: "Migrate PostgreSQL data from a legacy charm to Charmed PostgreSQL 14 using pg_dump for a complete backup and restore data migration."
 ---
 
 (migrate-data-via-pg-dump)=
@@ -9,7 +9,7 @@ myst:
 
 <!--TODO: replace "legacy"? -->
 
-This guide describes database **data** migration from a {ref}`legacy PostgreSQL charm <charm-versions>` running PostgreSQL 16 to a modern PostgreSQL 16 charm.
+This guide describes database **data** migration from a {ref}`legacy PostgreSQL charm <charm-versions>` running PostgreSQL 14 to a modern PostgreSQL 14 charm.
 
 To migrate charms on new Juju interfaces, refer to the guide {ref}`integrate-with-your-charm`.
 
@@ -78,13 +78,13 @@ Deploy new PostgreSQL database charm:
 ```{tab-item} VM
 :sync: vm
 
-    juju deploy postgresql ${NEW_DB_APP} --channel 16/stable
+    juju deploy postgresql ${NEW_DB_APP} --channel 14/stable
 ```
 
 ```{tab-item} K8s
 :sync: k8s
 
-    juju deploy postgresql-k8s ${NEW_DB_APP} --channel 16/stable --trust
+    juju deploy postgresql-k8s ${NEW_DB_APP} --channel 14/stable --trust
 ```
 ````
 

@@ -4,12 +4,6 @@ myst:
     description: "Connect to Charmed PostgreSQL from outside the local network using PgBouncer with virtual IPs or cross-controller Juju relations."
 ---
 
----
-myst:
-  html_meta:
-    description: "Connect to Charmed PostgreSQL from outside the local network using PgBouncer with virtual IPs or cross-controller Juju relations."
----
-
 (external-network-access)=
 # How to connect to your database outside the local network
 {{vm_k8s}}

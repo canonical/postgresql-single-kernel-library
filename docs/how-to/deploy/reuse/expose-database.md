@@ -33,7 +33,7 @@ postgresql/0*  active    idle   0        <public-ip>     5432/tcp  Primary
 
 psql postgresql://<username>:<password>@<public-ip>  :5432/test-db
 
-psql (15.6 (Ubuntu 15.6-0ubuntu0.23.10.1), server 16.9 (Ubuntu 14.12-0ubuntu0.24.04.1))
+psql (15.6 (Ubuntu 15.6-0ubuntu0.23.10.1), server 14.10(Ubuntu 14.12-0ubuntu0.22.04.1))
 Type "help" for help.
 
 test-db=>

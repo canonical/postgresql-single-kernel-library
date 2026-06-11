@@ -220,7 +220,7 @@ while the modern charm installs and operates PostgreSQL snap [charmed-postgresql
 
 The legacy charm (from `latest/stable`) is stored on [Launchpad](https://git.launchpad.net/postgresql-charm/). Report legacy charm issues [here](https://bugs.launchpad.net/postgresql-charm).
 
-The modern charms are stored on GitHub: [PostgreSQL 14 branch](https://github.com/canonical/postgresql-operator/tree/main) and [PostgreSQL 16 branch](https://github.com/canonical/postgresql-operator/tree/16/edge) . Report modern charm issues [here](https://github.com/canonical/postgresql-operator/issues/new/choose).
+The modern charms are stored on GitHub: [PostgreSQL 14 branch](https://github.com/canonical/postgresql-operator/tree/main) and [PostgreSQL 16 branch](https://github.com/canonical/postgresql-operator/tree/14/stable) . Report modern charm issues [here](https://github.com/canonical/postgresql-operator/issues/new/choose).
 ```
 ```{tab-item} K8s
 :sync: k8s

@@ -74,7 +74,7 @@ resource "juju_application" "machine_postgresql" {
 
   charm {
     name    = "postgresql"
-    channel = "16/stable"
+    channel = "14/stable"
   }
 
   config = {
@@ -136,7 +136,7 @@ Sample output:
     my-model  lxd         localhost/localhost  3.5.2    unsupported  14:04:26+02:00
 
     App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
-    postgresql  16.9     active      1  postgresql  16/stable  843  no
+    postgresql  14.10    active      1  postgresql  14/stable       no
 
     Unit           Workload  Agent  Machine  Public address  Ports     Message
     postgresql/0*  active    idle   0        10.142.152.90   5432/tcp  Primary
@@ -155,7 +155,7 @@ Sample output:
     my-model  k8s         microk8s/localhost  3.5.3    unsupported  12:09:38Z
 
     App             Version  Status  Scale  Charm           Channel    Rev  Address         Exposed  Message
-    postgresql-k8s  16.9     active      1  postgresql-k8s  16/stable  615  10.152.183.137  no
+    postgresql-k8s  14.10    active      1  postgresql-k8s  14/stable  615  10.152.183.137  no
 
     Unit               Workload  Agent  Address     Ports  Message
     postgresql-k8s/0*  active    idle   10.1.77.74         Primary
@@ -208,11 +208,11 @@ Sample output:
         - units       = 1 -> null
 
         - charm {
-            - base     = "ubuntu@24.04" -> null
-            - channel  = "16/stable" -> null
+            - base     = "ubuntu@22.04" -> null
+            - channel  = "14/stable" -> null
             - name     = "postgresql" -> null
             - revision = 843 -> null
-            - series   = "noble" -> null
+            - series   = "jammy" -> null
             }
         }
 

@@ -34,7 +34,7 @@ For example:
 :sync: vm
 
     # Deploy Charmed PostgreSQL cluster with 3 nodes
-    juju deploy postgresql -n 3 --channel 16/stable
+    juju deploy postgresql -n 3 --channel 14/stable
 
     # Deploy the relevant application charms
     juju deploy mycharm
@@ -53,7 +53,7 @@ For example:
 :sync: k8s
 
     # Deploy Charmed PostgreSQL cluster with 3 nodes
-    juju deploy postgresql-k8s --channel 16/stable -n 3 --trust
+    juju deploy postgresql-k8s --channel 14/stable -n 3 --trust
 
     # Deploy the relevant application charms
     juju deploy mycharm

@@ -69,14 +69,14 @@ juju run postgresql/x promote-to-primary scope=unit force=true
 Deploy PostgreSQL 3 units:
 
 ```shell
-$ juju deploy postgresql --channel 16/stable --config synchronous-node-count=1
+$ juju deploy postgresql --channel 14/stable --config synchronous-node-count=1
 
 $ juju status
 Model       Controller  Cloud/Region         Version  SLA          Timestamp
 postgresql  lxd         localhost/localhost  3.6.5    unsupported  14:50:19+02:00
 
 App         Version  Status  Scale  Charm       Channel  Rev  Exposed  Message
-postgresql  16.9     active    1/3  postgresql  16/edge  615  no
+postgresql  14.10    active    1/3  postgresql  14/stable  615  no
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
 postgresql/0*  active    idle   0        10.189.210.53   5432/tcp
@@ -113,7 +113,7 @@ Model       Controller  Cloud/Region         Version  SLA          Timestamp
 postgresql  lxd         localhost/localhost  3.6.5    unsupported  14:54:40+02:00
 
 App         Version  Status  Scale  Charm       Channel  Rev  Exposed  Message
-postgresql  16.9     active    1/3  postgresql  16/edge  615  no
+postgresql  14.10    active    1/3  postgresql  14/stable  615  no
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
 postgresql/0   unknown   lost   0        10.189.210.53   5432/tcp  agent lost, see 'juju show-status-log postgresql/0'
@@ -180,7 +180,7 @@ Model       Controller  Cloud/Region         Version  SLA          Timestamp
 postgresql  lxd         localhost/localhost  3.6.5    unsupported  15:03:12+02:00
 
 App         Version  Status  Scale  Charm       Channel  Rev  Exposed  Message
-postgresql  16.9     active      1  postgresql  16/edge  615  no
+postgresql  14.10    active      1  postgresql  14/stable  615  no
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
 postgresql/1*  active    idle   1        10.189.210.166  5432/tcp  Primary
@@ -203,7 +203,7 @@ Model       Controller  Cloud/Region         Version  SLA          Timestamp
 postgresql  lxd         localhost/localhost  3.6.5    unsupported  15:09:56+02:00
 
 App         Version  Status  Scale  Charm       Channel  Rev  Exposed  Message
-postgresql  16.9     active      3  postgresql  16/edge  615  no
+postgresql  14.10    active      3  postgresql  14/stable  615  no
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
 postgresql/1*  active    idle   1        10.189.210.166  5432/tcp  Primary

@@ -13,7 +13,7 @@ The following command deploys PostgreSQL and the [data-integrator charm](https:/
 ```{terminal}
 :copy:
 
-juju deploy postgresql --channel 16/stable
+juju deploy postgresql --channel 14/stable
 ```
 ```{terminal}
 :copy:
@@ -45,7 +45,7 @@ All further Juju applications will use the database through the internal network
 
 psql postgresql://<username>:<password>@<endpoint>/test-db
 
-psql (15.6 (Ubuntu 15.6-0ubuntu0.23.10.1), server 16.9 (Ubuntu 14.12-0ubuntu0.24.04.1))
+psql (15.6 (Ubuntu 15.6-0ubuntu0.23.10.1), server 14.10(Ubuntu 14.12-0ubuntu0.22.04.1))
 Type "help" for help.
 
 test-db=>

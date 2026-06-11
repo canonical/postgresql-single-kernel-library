@@ -29,7 +29,7 @@ Then, use the `juju deploy` command:
 ```{tab-item} VM
 :sync: vm
 
-    juju deploy postgresql --channel 16/stable
+    juju deploy postgresql --channel 14/stable
 
 See all available config options for the charm with `juju config postgresql --format json`.
 ```
@@ -37,7 +37,7 @@ See all available config options for the charm with `juju config postgresql --fo
 ```{tab-item} K8s
 :sync: k8s
 
-    juju deploy postgresql-k8s --channel 16/stable --trust
+    juju deploy postgresql-k8s --channel 14/stable --trust
 
 See all available config options for the charm with `juju config postgresql-k8s --format json`.
 ```
@@ -98,14 +98,6 @@ Example setup of external TLS/SSL access via Virtual IP (VIP):
 TLS VIP access <tls-vip-access>
 ```
 
-Configure Juju spaces to separate network traffic:
-
-```{toctree}
-:titlesonly:
-
-Juju spaces <juju-spaces>
-```
-
 ## Juju storage
 
 Use volume provided by different clouds via [Juju storage](https://documentation.ubuntu.com/juju/3.6/reference/storage/):
@@ -114,14 +106,4 @@ Use volume provided by different clouds via [Juju storage](https://documentation
 :titlesonly:
 
 Juju storage <juju-storage>
-```
-
-## High availability
-
-Deploy a two-node cluster with a lightweight watcher that supplies a third Raft vote:
-
-```{toctree}
-:titlesonly:
-
-Stereo mode <stereo-mode>
 ```

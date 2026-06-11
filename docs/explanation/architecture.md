@@ -24,7 +24,7 @@ Example Charmed PostgreSQL deployment with 3 replicas. Integrations include PgBo
 ````{tab-item} VM
 :sync: vm
 
-The machine charm leverages the [charmed-postgresql](https://snapcraft.io/charmed-postgresql) snap, which is deployed by Juju on the specified VM/MAAS/bare-metal machine based on Ubuntu Noble/24.04.
+The machine charm leverages the [charmed-postgresql](https://snapcraft.io/charmed-postgresql) snap, which is deployed by Juju on the specified VM/MAAS/bare-metal machine based on Ubuntu Jammy (22.04 LTS).
 
 The snap runs PostgreSQL service(s) in a secure and isolated environment. For more information, see this blog post about [strict confinement](https://ubuntu.com/blog/demystifying-snap-confinement).
 

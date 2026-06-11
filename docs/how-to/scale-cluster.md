@@ -20,12 +20,12 @@ To deploy PostgreSQL with multiple replicas, specify the number of desired units
 ```{tab-item} VM
 :sync: vm
 
-    juju deploy postgresql --channel 16/stable -n <number_of_replicas>
+    juju deploy postgresql --channel 14/stable -n <number_of_replicas>
 ```
 ```{tab-item} K8s
 :sync: k8s
 
-    juju deploy postgresql-k8s --channel 16/stable -n <number_of_replicas> --trust
+    juju deploy postgresql-k8s --channel 14/stable -n <number_of_replicas> --trust
 ```
 ````
 

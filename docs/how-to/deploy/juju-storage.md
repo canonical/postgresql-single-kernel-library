@@ -10,7 +10,7 @@ myst:
 
 Charmed PostgreSQL uses the [Juju storage](https://documentation.ubuntu.com/juju/3.6/reference/storage/) abstraction to utilise data volume provided by different [clouds](https://documentation.ubuntu.com/juju/3.6/reference/cloud/#cloud) while keeping the same UI/UX for end users.
 
-[Charmed PostgreSQL 16](https://charmhub.io/postgresql?channel=16/stable) supports multiple storage types: `archive`, `data`, `logs` and `temp`.
+[Charmed PostgreSQL 14](https://charmhub.io/postgresql?channel=14/stable) supports multiple storage types: `archive`, `data`, `logs` and `temp`.
 
 ## Prerequisites
 
@@ -20,9 +20,9 @@ If you are deploying with Terraform, note that the Juju Terraform Provider intro
 
 ## Check Juju storage details
 
-Charmed PostgreSQL 16 supports multiple storage types: `archive` , `data` , `logs` and `temp`. Check the [`metadata.yaml`](https://github.com/canonical/postgresql-operator/blob/16/edge/metadata.yaml) to find more technical details.
+Charmed PostgreSQL 14 supports multiple storage types: `archive` , `data` , `logs` and `temp`. Check the [`metadata.yaml`](https://github.com/canonical/postgresql-operator/blob/14/stable/metadata.yaml) to find more technical details.
 
-````{dropdown} Charmed PostgreSQL 16 storage list
+````{dropdown} Charmed PostgreSQL 14 storage list
 :open:
 :color: light
 :icon: list-unordered
@@ -58,7 +58,7 @@ Using tmpfs for `archive`, `data`, or `logs` storage is not supported. These sto
 ## Define storage size
 
 ```shell
-$ juju deploy postgresql --channel 16/stable --storage pgdata=10G
+$ juju deploy postgresql --channel 14/stable --storage pgdata=10G
 
 $ juju storage
 Unit          Storage ID  Type        Pool  Size    Status    Message
@@ -75,7 +75,7 @@ $ juju create-storage-pool mystoragepool lxd
 $ juju storage-pools | grep mystoragepool
 mystoragepool  lxd
 
-$ juju deploy postgresql --channel 16/stable --storage pgdata=5G,mystoragepool
+$ juju deploy postgresql --channel 14/stable --storage pgdata=5G,mystoragepool
 
 $ juju storage
 Unit          Storage ID  Type        Pool           Size    Status    Message
@@ -106,7 +106,7 @@ $ juju storage
 
 # Re-deploy new app re-using old storage and old credentials
 $ juju deploy postgresql \
-  --channel 16/stable \
+  --channel 14/stable \
   --attach-storage pgdata/5 \
   --config system-users=newsecret54321id
 
@@ -123,8 +123,8 @@ Prepare the test data to restore later:
 $ juju add-model teststorage
 
 # Deploy the new postgresql to dump storage with credentials
-$ juju deploy postgresql --channel 16/stable --storage pgdata=5Gcompleted
-Deployed "postgresql" from charm-hub charm "postgresql", revision 613 in channel 16/stable on ubuntu@24.04/stable
+$ juju deploy postgresql --channel 14/stable --storage pgdata=5Gcompleted
+Deployed "postgresql" from charm-hub charm "postgresql", revision 613 in channel 14/stable on ubuntu@22.04/stable
 
 # Wait for deployment completed:
 $ juju status
@@ -202,10 +202,10 @@ secret:d09vcn1oie738j7af4ng
 
 # Re-deploy app with old storage and old passwords
 $ juju deploy postgresql \
-  --channel 16/stable \
+  --channel 14/stable \
   --attach-storage pgdata/0 \
   --config system-users=d09vcn1oie738j7af4ng
-Deployed "postgresql" from charm-hub charm "postgresql", revision 613 in channel 16/stable on ubuntu@24.04/stable
+Deployed "postgresql" from charm-hub charm "postgresql", revision 613 in channel 14/stable on ubuntu@22.04/stable
 
 # Grant new application access to manually created Juju User secret
 $ juju grant-secret mypgpass postgresql

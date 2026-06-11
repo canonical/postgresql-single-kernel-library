@@ -85,15 +85,6 @@ Walkthrough of a cross-regional, cluster-cluster deployment and disaster recover
 Custer-cluster replication <cluster-cluster-replication/index>
 ```
 
-Use logical replication to copy a subset of data to another PostgreSQL cluster:
-
-```{toctree}
-:maxdepth: 2
-:titlesonly:
-
-Logical replication <logical-replication>
-```
-
 ## Extensions (plugins)
 
 ```{toctree}

@@ -147,7 +147,7 @@ Below is a sample output of `juju status` on the PostgreSQL model:
 
     App                   Version      Status  Scale  Charm               Channel    Rev  Exposed  Message
     grafana-agent                      active      1  grafana-agent       edge         5  no
-    postgresql              16.9       active      1  postgresql          16/stable  296  no       Primary
+    postgresql              14.10      active      1  postgresql          14/stable  296  no       Primary
 
     Unit                          Workload  Agent  Machine  Public address  Ports               Message
     postgresql/3*                 active    idle   4        10.85.186.140                       Primary
@@ -169,7 +169,7 @@ Below is a sample output of `juju status` on the PostgreSQL model:
 
     App                Version  Status  Scale  Charm              Channel  Rev  Address          Exposed  Message
     grafana-agent-k8s  0.32.1   active      1  grafana-agent-k8s  stable    42  10.152.183.61    no
-    postgresql-k8s     16.9     active      3  postgresql-k8s     16/stable  615  10.152.183.126 no
+    postgresql-k8s     14.10    active      3  postgresql-k8s     14/stable  615  10.152.183.126 no
 
     Unit                  Workload  Agent   Address       Ports  Message
     grafana-agent-k8s/0*  active    idle    10.1.142.191

@@ -14,7 +14,7 @@ myst:
 
 ## Prerequisites
 
-* A physical or virtual machine running Ubuntu 24.04+
+* A physical or virtual machine running Ubuntu 22.04+
 * Juju 3.6+ installed via snap
 
 ---
@@ -158,7 +158,7 @@ The following commands deploy PostgreSQL and PgBouncer:
 ```{terminal}
 :copy:
 
-juju deploy postgresql-k8s --channel 16/stable --trust
+juju deploy postgresql-k8s --channel 14/stable --trust
 ```
 ```{terminal}
 :copy:

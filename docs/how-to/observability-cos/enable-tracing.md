@@ -129,7 +129,7 @@ Wait until the model settles. The following is an example of the `juju status --
 
 	App            Version  Status   Scale  Charm          Channel      Rev  Exposed  Message
 	grafana-agent           blocked      1  grafana-agent  latest/edge  286  no       Missing ['grafana-cloud-config']|['grafana-dashboards-provider']|['logging-consumer']|['send-remote-write'] for cos-a...
-	postgresql     16.9     active       1  postgresql                    0  no
+	postgresql     14.10    active       1  postgresql                    0  no
 
 	Unit                Workload  Agent  Machine  Public address  Ports     Message
 	postgresql/0*       active    idle   0        10.205.193.87   5432/tcp  Primary
@@ -157,7 +157,7 @@ Wait until the model settles. The following is an example of the `juju status --
 
 	App                Version  Status  Scale  Charm              Channel      Rev  Address         Exposed  Message
 	grafana-agent-k8s  0.40.4   active      1  grafana-agent-k8s  latest/edge   93  10.152.183.226  no       grafana-dashboards-provider: off, logging-consumer: off, send-remote-write: off
-	postgresql-k8s     16.9     active      1  postgresql-k8s                    0  10.152.183.96   no
+	postgresql-k8s     14.10    active      1  postgresql-k8s                    0  10.152.183.96   no
 
 	Unit                  Workload  Agent  Address       Ports  Message
 	grafana-agent-k8s/0*  active    idle   10.1.241.195         grafana-dashboards-provider: off, logging-consumer: off, send-remote-write: off

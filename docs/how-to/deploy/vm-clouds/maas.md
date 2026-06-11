@@ -12,7 +12,7 @@ This guide aims to provide a quick start to deploying Charmed PostgreSQL on MAAS
 
 ## Prerequisites
 
-* A physical or virtual machine running Ubuntu 24.04+
+* A physical or virtual machine running Ubuntu 22.04+
 * Juju 3.6+ installed via snap
 
 ---
@@ -44,7 +44,7 @@ Wait for image downloads to complete on `http://<MAAS_IP>:5240/MAAS/r/images`
 ![MAAS image downloads](maas-image-downloads.png)
 ```
 
-Make sure you are downloading **24.04** images as well.
+Make sure you are downloading **22.04** images as well.
 
 The LXD machine will be up and running after the images downloading and sync is completed.
 
@@ -144,7 +144,7 @@ Deploy PostgreSQL:
 ```{terminal}
 :copy:
 
-juju deploy postgresql --channel 16/stable
+juju deploy postgresql --channel 14/stable
 ```
 
 ```{terminal}
@@ -156,7 +156,7 @@ Model         Controller       Cloud/Region        Version  SLA          Timesta
 <model-name>  maas-controller  maas-cloud/default  3.1.8    unsupported  12:50:26+02:00
 
 App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
-postgresql  16.9     active      1  postgresql  16/stable  843  no       Primary
+postgresql  14.10    active      1  postgresql  14/stable       no       Primary
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
 postgresql/0*  active    idle   0        10.10.10.5      5432/tcp  Primary

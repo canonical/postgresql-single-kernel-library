@@ -14,7 +14,7 @@ myst:
 
 ## Prerequisites
 
-* A physical or virtual machine running Ubuntu 24.04+
+* A physical or virtual machine running Ubuntu 22.04+
 * Juju 3.6+ installed via snap
 
 ---
@@ -162,9 +162,9 @@ The following command deploys 3 nodes of PostgreSQL on Kubernetes:
 ```{terminal}
 :copy:
 
-juju deploy postgresql-k8s --channel 16/stable --trust -n 3
+juju deploy postgresql-k8s --channel 14/stable --trust -n 3
 
-Deployed "postgresql-k8s" from charm-hub charm "postgresql-k8s", revision <number> in channel 16/stable on ubuntu@24.04/edge
+Deployed "postgresql-k8s" from charm-hub charm "postgresql-k8s", revision <number> in channel 14/stable on ubuntu@22.04/edge
 ```
 
 ## Display deployment information
