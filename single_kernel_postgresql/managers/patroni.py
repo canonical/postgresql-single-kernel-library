@@ -15,7 +15,7 @@ import subprocess
 from contextlib import suppress
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 # Platform specific imports
 with suppress(ImportError):
@@ -73,10 +73,6 @@ PG_BASE_CONF_PATH = f"{POSTGRESQL_CONF_PATH}/postgresql.conf"
 
 STARTED_STATES = ["running", "streaming"]
 RUNNING_STATES = [*STARTED_STATES, "starting"]
-
-
-if TYPE_CHECKING:
-    from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
 
 
 class RaftPostgresqlNotUpError(Exception):
@@ -141,7 +137,7 @@ class Patroni:
 
     def __init__(
         self,
-        charm: "AbstractPostgreSQLCharm",
+        charm,
         unit_ip: str | None,
         cluster_name: str,
         member_name: str,
@@ -922,7 +918,7 @@ class Patroni:
         """Cleanup RAFT members not belonging to the current cluster or not a related watcher."""
         # Get Raft cluster status to find all members
         try:
-            if not self.charm._is_workload_running:  # type: ignore
+            if not self.charm._is_workload_running:
                 logger.warning("Raft cleanup: Patroni service not running.")
                 return True
             syncobj_util = TcpUtility(password=self.raft_password, timeout=3)
