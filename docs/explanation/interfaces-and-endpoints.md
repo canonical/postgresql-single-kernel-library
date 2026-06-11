@@ -24,17 +24,17 @@ For example:
     juju deploy postgresql -n 3 --channel 16/stable
 
     # Deploy the relevant application charms
-    juju deploy mycharm
+    juju deploy <my-charm>
 
     # Relate PostgreSQL with your application
-    juju relate postgresql:database mycharm:database
+    juju integrate postgresql:database <my-charm>:database
 
     # Check established relation (using postgresql_client interface):
     juju status --relations
 
     # Example of a properly established relation:
-    # > Relation provider      Requirer          Interface          Type
-    # > postgresql:database    mycharm:database  postgresql_client  regular
+    # > Relation provider      Requirer             Interface          Type
+    # > postgresql:database    <my-charm>:database  postgresql_client  regular
 ```
 ```{tab-item} K8s
 :sync: k8s
@@ -43,17 +43,17 @@ For example:
     juju deploy postgresql-k8s --channel 16/stable -n 3 --trust
 
     # Deploy the relevant application charms
-    juju deploy mycharm
+    juju deploy <my-charm>
 
     # Relate PostgreSQL with your application
-    juju relate postgresql-k8s:database mycharm:database
+    juju integrate postgresql-k8s:database <my-charm>:database
 
     # Check established relation (using postgresql_client interface):
     juju status --relations
 
     # Example of a properly established relation:
-    # > Relation provider          Requirer          Interface          Type
-    # > postgresql-k8s:database    mycharm:database  postgresql_client  regular
+    # > Relation provider          Requirer             Interface          Type
+    # > postgresql-k8s:database    <my-charm>:database  postgresql_client  regular
 ```
 ````
 

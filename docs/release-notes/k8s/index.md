@@ -20,7 +20,7 @@ Several [revisions](https://documentation.ubuntu.com/juju/3.6/reference/charm/#c
 
 If you do not specify a revision on deploy time, Juju will automatically choose the revision that matches your base and architecture.
 
-All revisions of PostgreSQL described below are built for *Ubuntu 22.04 LTS (Jammy)*.
+All revisions of PostgreSQL described below are built for *Ubuntu 24.04 LTS (Noble)*.
 
 | Charmhub revision</br>(amd, arm)  |  PostgreSQL version | Minimum Juju version |
 |:---------------------------------:|:------------------:|:--------------------:|

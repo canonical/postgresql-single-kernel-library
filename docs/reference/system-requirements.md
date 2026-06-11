@@ -51,7 +51,9 @@ Minimum recommended hardware for **testing**:
 * RAM: 2GB
 * Disk: 10GB
 
-Actual hardware requirements will depend on the workload you are running against your database. See: {ref}`performance-and-testing`.
+Actual hardware requirements will depend on the workload you are running against your database.
+
+{{seealso}} {ref}`performance-and-testing`
 
 The charm is based on the [charmed-postgresql snap](https://snapcraft.io/charmed-postgresql).
 
@@ -61,9 +63,11 @@ It currently supports the following architectures:
 
 ## Networking
 
-*Access to the internet is required for downloading required snaps and charms
-* Only IPv4 is supported at the moment
-  * See more information about this limitation in [this Jira issue](https://warthogs.atlassian.net/browse/DPE-4695)
+Access to the internet is required for downloading required snaps and charms.
+
+{{seealso}} {ref}`air-gapped`
+
+Only IPv4 is supported at the moment. See more information about this limitation in [this Jira issue](https://warthogs.atlassian.net/browse/DPE-4695)
 
 
 [3.6 LTS]: https://img.shields.io/badge/3.6_LTS-%23E95420?label=Juju

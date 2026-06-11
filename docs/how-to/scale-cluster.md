@@ -41,12 +41,12 @@ This helps prevent a [split-brain](https://en.wikipedia.org/wiki/Split-brain_(co
 
 The amount of replicas (Juju units) can also be modified after deployment.
 
-```{dropdown} Attention
+```{dropdown} Data loss warning
 :open:
 :class-container: dropdown-important
 :icon: no-entry-fill
 
-Removing the last unit will destroy your data!
+Removing the last unit will destroy your data permanently!
 ```
 
 ````{tab-set}

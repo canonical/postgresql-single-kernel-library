@@ -96,7 +96,7 @@ At the moment, it is only possible to retrieve this information using `patronict
 Example:
 
 ```shell
-> ... patronictl ... list
+$ ... patronictl ... list
 + Cluster: postgresql (7499430436963402504) ---+-----------+----+-----------+
 | Member       | Host           | Role         | State     | TL | Lag in MB |
 +--------------+----------------+--------------+-----------+----+-----------+
@@ -105,7 +105,7 @@ Example:
 | postgresql-2 | 10.189.210.188 | Replica      | streaming |  1 |        42 |  <<<<<
 +--------------+----------------+--------------+-----------+----+-----------+
 
-> curl ... x.x.x.x:8008/cluster | jq
+$ curl ... x.x.x.x:8008/cluster | jq
   "members": [
     {
       "name": "postgresql-0",

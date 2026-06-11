@@ -72,7 +72,7 @@ For `16/stable`, use the `--channel` flag when installing or refreshing the snap
 
 The snap ships the following components:
 
-* **PostgreSQL** (based on Ubuntu APT package [postgresql](https://packages.ubuntu.com/jammy/postgresql))
+* **PostgreSQL** (based on Ubuntu APT package [postgresql](https://packages.ubuntu.com/noble/postgresql))
 * **PgBouncer** (based on Canonical [backport](https://launchpad.net/~data-platform/+archive/ubuntu/pgbouncer))
 * **Patroni** (based on Canonical [backport](https://launchpad.net/~data-platform/+archive/ubuntu/patroni))
 * **pgBackRest** (based on Canonical  [backport](https://launchpad.net/~data-platform/+archive/ubuntu/pgbackrest))
@@ -183,7 +183,6 @@ The following charms can be integrated with PostgreSQL out of the box.
 ### PgBouncer
 
 [PgBouncer](https://charmhub.io/pgbouncer) & [PgBouncer K8s](https://charmhub.io/pgbouncer-k8s) is a lightweight connection pooler for PostgreSQL that provides transparent routing between your application and back-end PostgreSQL Servers.
-
 
 ### TLS certificates operator
 
