@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    description: "Data migration guides for Charmed PostgreSQL, including upgrading from PostgreSQL 14 to 16, using pg_dump, and backup-based migration methods."
+    description: "Data migration guides for Charmed PostgreSQL, including upgrading from PostgreSQL 14 to 16, migrating data from a legacy charm, using pg_dump, and backup-based migration."
 ---
 
 (data-migration)=
@@ -15,7 +15,7 @@ For guidance about moving data from a Charmed PostgreSQL 14 database to Charmed 
 Migrate data from PostgreSQL 14 to 16 <migrate-data-from-14-to-16>
 ```
 
-Data migration between two PostgreSQL 14 clusters:
+For data migration between legacy or PostgreSQL 14 clusters:
 
 ```{toctree}
 :titlesonly:

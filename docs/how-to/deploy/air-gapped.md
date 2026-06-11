@@ -15,20 +15,32 @@ This guide goes through the special configuration steps for installing Charmed P
 
 Canonical does not prescribe how you should set up your specific air-gapped environment. However, it is assumed that it meets the following conditions:
 
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
 * DNS is configured to the local nameservers.
 * Juju 3
 * [Juju is configured](https://documentation.ubuntu.com/enterprise-store/main/how-to/airgap-charmhub/#configure-juju) to use local airgapped services.
 * The [`store-admin`](https://snapcraft.io/store-admin) tool is installed and configured.
 * [Air-gapped CharmHub](https://documentation.ubuntu.com/enterprise-store/main/how-to/airgap-charmhub) is installed and running.
 * Local APT and LXD Images caches are reachable.
-
-On machines:
 * A VM/hardware resources are available for Juju
+```
+```{tab-item} K8s
+:sync: k8s
 
-On Kubernetes:
+* DNS is configured to the local nameservers.
+* Juju 3
+* [Juju is configured](https://documentation.ubuntu.com/enterprise-store/main/how-to/airgap-charmhub/#configure-juju) to use local airgapped services.
+* The [`store-admin`](https://snapcraft.io/store-admin) tool is installed and configured.
+* [Air-gapped CharmHub](https://documentation.ubuntu.com/enterprise-store/main/how-to/airgap-charmhub) is installed and running.
+* Local APT and LXD Images caches are reachable.
 * A K8s cluster is running
 * An air-gapped container registry (such as [Artifactory](https://jfrog.com/artifactory/)) is reachable from the K8s cluster over HTTPS
   *  **Note**: Secure (HTTPS) OCI access is important, otherwise Juju won’t work!
+```
+````
 
 ## Summary of an airgapped setup
 

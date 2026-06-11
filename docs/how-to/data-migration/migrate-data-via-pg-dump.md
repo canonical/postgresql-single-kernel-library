@@ -7,13 +7,19 @@ myst:
 (migrate-data-via-pg-dump)=
 # Migrate data via `pg_dump`
 
-<!--TODO: replace "legacy"? -->
+This guide describes database **data** migration from a {ref}`legacy PostgreSQL charm <charm-versions>` to a modern PostgreSQL 14 charm.
 
-This guide describes database **data** migration from a {ref}`legacy PostgreSQL charm <charm-versions>` running PostgreSQL 14 to a modern PostgreSQL 14 charm.
+This guide can be used to copy data between different installations of the same modern PostgreSQL 14 charm but {ref}`migration via backup/restore <migrate-data-via-backup-restore>` is more recommended for that use-case.
 
-To migrate charms on new Juju interfaces, refer to the guide {ref}`integrate-with-your-charm`.
+```{dropdown} Always try migrations in a test environment before performing them in production!
+:class-container: dropdown-caution
+:icon: alert-fill
+:class-title: sd-font-weight-normal
 
-A minor difference in commands might be necessary for different revisions and/or Juju versions, but the general logic remains:
+{ref}`Contact us <contact>` for more guidance.
+```
+
+## Summary
 
 * Deploy the modern charm nearby
 * Request credentials from legacy charm
@@ -23,26 +29,19 @@ A minor difference in commands might be necessary for different revisions and/or
 * Add relation to modern charm
 * Validate results and remove legacy charm
 
-```{dropdown} Always try this in a test environment before performing it in production!
-:class-container: dropdown-caution
-:icon: alert-fill
-:class-title: sd-font-weight-normal
-
-{ref}`Contact us <contact>` for more guidance.
-```
-
 ## Prerequisites
 
-- **Your application supports modern PostgreSQL interfaces**
-    - See: {ref}`interfaces-and-endpoints` and {ref}`integrate-with-your-charm`
-- A client machine with access to the deployed legacy charm
-- Enough storage in the cluster to support backup/restore of the databases.
+* **Your application supports PostgreSQL interfaces**
+    * See: {ref}`interfaces-and-endpoints` and {ref}`integrate-with-your-charm`
+* A client machine with access to the deployed legacy charm
+* Juju 2.9 or later
+* Enough storage in the cluster to support backup/restore of the databases.
 
 ## Obtain existing database credentials
 
 To obtain credentials for existing databases, execute the following commands for **each** database that will be migrated. Take note of these credentials for future steps.
 
-First, define and tune your application and database (db) names. For example:
+First, define and tune your application and database names. For example:
 
 ````{tab-set}
 ```{tab-item} VM
@@ -88,11 +87,11 @@ Deploy new PostgreSQL database charm:
 ```
 ````
 
-Obtain the `operator` user password of the new PostgreSQL database via Juju secrets. See {ref}`save-current-cluster-credentials` for more details.
+Obtain `operator` user password of new PostgreSQL database from PostgreSQL charm:
 
 ```shell
 NEW_DB_USER=operator
-NEW_DB_PASS=<your password>
+NEW_DB_PASS=$(juju run ${NEW_DB_APP} get-password | yq '.password')
 ```
 
 ## Migrate database
@@ -188,13 +187,13 @@ pg_restore -h localhost -U ${NEW_DB_USER} --password -d ${DB_NAME} --no-owner --
 Integrate your application and new PostgreSQL database charm using the modern `database` endpoint:
 
 ```shell
-juju integrate ${CLIENT_APP}  ${NEW_DB_APP}:database
+juju integrate ${CLIENT_APP} ${NEW_DB_APP}:database
 ```
 
 If the `database` endpoint (from the `postgresql_client` interface) is not yet supported, use instead the `db` endpoint from the legacy `pgsql` interface:
 
 ```shell
-juju integrate ${CLIENT_APP}  ${NEW_DB_APP}:db
+juju integrate ${CLIENT_APP} ${NEW_DB_APP}:db
 ```
 
 ## Verify database migration

@@ -142,7 +142,7 @@ postgresql:
 Now use the received credentials (`uris`) to connect PostgreSQL (via TLS/SSL):
 
 ```shell
-> psql postgresql://relation_id_9:V7kHqHyapIphkUS0cHoOtP3j@10.78.217.100:6432/mytestdb
+$ psql postgresql://relation_id_9:V7kHqHyapIphkUS0cHoOtP3j@10.78.217.100:6432/mytestdb
 psql (14.15 (Ubuntu 14.15-0ubuntu0.22.04.1), server 14.12 (Ubuntu 14.12-0ubuntu0.22.04.1))
 SSL connection (protocol: TLSv1.3, cipher: TLS_AES_256_GCM_SHA384, bits: 256, compression: off)
 Type "help" for help.

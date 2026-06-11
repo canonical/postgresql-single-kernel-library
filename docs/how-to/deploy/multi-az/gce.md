@@ -153,7 +153,7 @@ Model    Controller  Cloud/Region     Version    SLA          Timestamp
 mymodel  gce         google/us-east1  3.5.4      unsupported  00:30:42+02:00
 
 App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
-postgresql           active    2/3  postgresql  14/stable       no
+postgresql  14.10    active    2/3  postgresql  14/stable       no
 
 Unit           Workload  Agent       Machine  Public address  Ports     Message
 postgresql/0   active    idle        0        34.148.44.51    5432/tcp
@@ -173,7 +173,7 @@ Always clean cloud resources that are no longer necessary; they could be costly!
 Check the list of currently running GCE instances:
 
 ```shell
-> gcloud compute instances list
+$ gcloud compute instances list
 NAME           ZONE        MACHINE_TYPE   PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP    STATUS
 juju-a82dd9-0  us-east1-b  n1-highcpu-4                10.142.0.30  34.23.252.144  RUNNING
 juju-e7c0db-2  us-east1-b  n2-highcpu-2                10.142.0.32  34.138.167.85  RUNNING
