@@ -6,7 +6,7 @@ myst:
 
 (units)=
 # PostgreSQL units
-{{vm}}
+{{vm_k8s}}
 
 <!--TODO: update for K8s -->
 
@@ -23,7 +23,7 @@ It is recommended to use 3+ units cluster size in production (due to [Raft conse
 
 All SQL transactions have to be confirmed by all Sync Standby unit(s) before Primary unit commit transaction to the client. Therefore, high-performance and high-availability is a trade-off between "sync standby" and "replica" unit count in the cluster.
 
-All Charmed PostgreSQL 16 units are configured as Sync Standby members by default. It provides better guarantees for the data survival when two of three units gone simultaneously. Users can re-configure the necessary synchronous units count using Juju config option '[synchronous-node-count](https://charmhub.io/postgresql/configurations?channel=16/stable)'.
+All Charmed PostgreSQL 14 units are configured as Sync Standby members by default. It provides better guarantees for the data survival when two of three units gone simultaneously. Users can re-configure the necessary synchronous units count using Juju config option '[synchronous-node-count](https://charmhub.io/postgresql/configurations?channel=14/stable)'.
 
 
 ## Primary
@@ -32,22 +32,41 @@ The [PostgreSQL primary server](https://www.postgresql.org/docs/current/runtime-
 
 The juju leader unit is the represented in `juju status` by an asterisk (*) next to its name:
 
-```shell
-Unit           Workload  Agent  Machine  Public address  Ports     Message
-postgresql/0*  active    idle   0        10.189.210.53   5432/tcp  Primary <<<<<<<<<<<<<<
-postgresql/1   active    idle   1        10.189.210.166  5432/tcp
-postgresql/2   active    idle   2        10.189.210.188  5432/tcp
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+	Unit           Workload  Agent  Machine  Public address  Ports     Message
+	postgresql/0*  active    idle   0        <address0>      5432/tcp  Primary <<<<<<<<<<<<<<
+	postgresql/1   active    idle   1        <address1>      5432/tcp
+	postgresql/2   active    idle   2        <address2>      5432/tcp
 ```
+```{tab-item} K8s
+:sync: k8s
+
+	Unit               Workload  Agent  Machine  Public address  Ports     Message
+	postgresql-k8s/0*  active    idle   0        <address0>      5432/tcp  Primary <<<<<<<<<<<<<<
+	postgresql-k8s/1   active    idle   1        <address1>      5432/tcp
+	postgresql-k8s/2   active    idle   2        <address2>      5432/tcp
+```
+````
 
 However, this information can be outdated as it is being updated only on the [`update-status`](https://documentation.ubuntu.com/juju/3.6/reference/hook/#update-status) Juju event.
 
 The most up-to-date Primary unit number can be received using Juju action `get-primary`:
 
-```shell
-> juju run postgresql/leader get-primary
-...
-primary: postgresql/0
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+	juju run postgresql-k8s/leader get-primary
 ```
+```{tab-item} K8s
+:sync: k8s
+
+	juju run postgresql-k8s/leader get-primary
+```
+````
 
 ````{dropdown} We highly recommend configuring the <code>update-status</code> hook to run frequently.
 :open:
@@ -72,7 +91,7 @@ It is also possible to retrieve this information using `patronictl` and the Patr
 
 This information can be retrieved with `patronictl` and the Patroni REST API. See {ref}`troubleshooting` for more details.
 
-Example:
+Example with the machine (VM) charm:
 
 ```shell
 > ... patronictl ... list
@@ -93,10 +112,10 @@ Example:
 
 At the moment, it is only possible to retrieve this information using `patronictl` and the Patroni REST API. See {ref}`troubleshooting` for more details.
 
-Example:
+Example with the machine (VM) charm:
 
 ```shell
-> ... patronictl ... list
+$ ... patronictl ... list
 + Cluster: postgresql (7499430436963402504) ---+-----------+----+-----------+
 | Member       | Host           | Role         | State     | TL | Lag in MB |
 +--------------+----------------+--------------+-----------+----+-----------+
@@ -105,7 +124,7 @@ Example:
 | postgresql-2 | 10.189.210.188 | Replica      | streaming |  1 |        42 |  <<<<<
 +--------------+----------------+--------------+-----------+----+-----------+
 
-> curl ... x.x.x.x:8008/cluster | jq
+$ curl ... x.x.x.x:8008/cluster | jq
   "members": [
     {
       "name": "postgresql-0",

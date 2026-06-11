@@ -4,7 +4,6 @@ myst:
     description: "Understand the types of PostgreSQL users in the charm: internal users, relation users, and identity users."
 ---
 
-
 (users)=
 # Users
 {{vm_k8s}}
@@ -48,7 +47,7 @@ These users cannot be managed directly, as they are dedicated to the operator's 
 
 Use the [data-integrator](https://charmhub.io/data-integrator) charm to generate, manage, and remove external credentials.
 
-Passwords for internal users can be managed using Juju secrets. See {ref}`manage-passwords`.
+Passwords for *internal* users can be rotated using the action `set-password` on the leader unit. See {ref}`manage-passwords`.
 
 ## Relation users
 
@@ -86,9 +85,18 @@ If password rotation is required for users used in relations, the relation must 
 
 ### Extra user roles
 
-When an application charm requests a new user through the relation/integration, it can specify that the user should be part of a predefined role to give them additional permissions.
+When an application charm requests a new user through the relation/integration it can specify that the user should have the `admin` role in the `extra-user-roles` field. The `admin` role enables the new user to read and write to all databases (for the `postgres` system database it can only read data) and also to create and delete non-system databases.
 
-See {ref}`roles` for a list of available roles.
+{{seealso}} {ref}`roles`
+
+```{dropdown} <code>extra-user-roles</code> is only supported by the modern <code>postgresql_client</code> interface.
+:class-container: dropdown-caution
+:icon: alert-fill
+:class-title: sd-font-weight-normal 
+
+It is not supported for the legacy `pgsql` interface. See {ref}`interfaces-and-endpoints`.
+
+```
 
 ## Identity users
 
