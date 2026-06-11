@@ -13,7 +13,6 @@ Information about releases, charm options, technical specifications, and other r
 :titlesonly:
 
 System requirements <system-requirements>
-Configuration <configuration>
 Supported extensions <supported-extensions>
 Charm statuses <charm-statuses>
 ```

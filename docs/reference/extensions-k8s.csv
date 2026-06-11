@@ -31,7 +31,6 @@ pg_trgm, `plugin-pg-trgm-enable`, 100
 pg_visibility, `plugin-pg-visibility-enable`, 168
 pgrowlocks, `plugin-pgrowlocks-enable`, 168
 pgstattuple, `plugin-pgstattuple-enable`, 168
-pg_stat_statements, `plugin-pg-stat-statements-enable`, 901
 plperl, `plugin-plperl-enable`, 193
 PL/Python, `plugin-plpython3u-enable`, 100
 pltcl, `plugin-pltcl-enable`, 193
