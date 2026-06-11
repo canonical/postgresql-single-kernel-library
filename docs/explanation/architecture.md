@@ -1,5 +1,5 @@
 ---
-relatedlinks: "[Charmhub&#32;|&#32;PostgreSQL&#32;VM](https://charmhub.io/postgresql?channel=16/stable), [Charmhub&#32;|&#32;PostgreSQL&#32;K8s](https://charmhub.io/postgresql-k8s?channel=16/stable)"
+relatedlinks: "[Charmhub&#32;|&#32;PostgreSQL&#32;VM](https://charmhub.io/postgresql?channel=14/stable), [Charmhub&#32;|&#32;PostgreSQL&#32;K8s](https://charmhub.io/postgresql-k8s?channel=14/stable)"
 myst:
   html_meta:
     description: "Understand the architecture of Charmed PostgreSQL for VM and Kubernetes deployments, including the charm design and services running inside the snap and rock.
@@ -60,15 +60,6 @@ And if you run `kubectl describe pod postgresql-k8s-0`, all the containers will 
 `````{tab-set}
 ````{tab-item} VM
 :sync: vm
-
-```{dropdown} The charmed-postgresql snap installs <code>14/stable</code> by default.
-:open:
-:class-container: dropdown-note
-:icon: info
-:class-title: sd-font-weight-normal
-
-For `16/stable`, use the `--channel` flag when installing or refreshing the snap.
-```
 
 The snap ships the following components:
 
@@ -278,4 +269,4 @@ For this charm, the following events are observed:
 
 The `__init__` method guarantees that the charm observes all events relevant to its operation and handles them.
 
-The VM and K8s charm flavours shares the codebase via [`postgresql-single-kernel-library`](https://github.com/canonical/postgresql-single-kernel-library).
+The VM and K8s charm flavours shares the codebase via charm libraries in [lib/charms/postgresql_k8s/v0/](https://github.com/canonical/postgresql-k8s-operator/blob/main/lib/charms/postgresql_k8s/v0/postgresql.py).
