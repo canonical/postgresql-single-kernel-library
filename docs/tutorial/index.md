@@ -26,7 +26,7 @@ While this tutorial intends to guide you as you deploy Charmed PostgreSQL for th
 - Virtualisation support
 - `amd64` or `arm64` architecture
 
-<!--TODO: Update requirements and add testing profile to deployment. Test whole tutorial once. -->
+<!--TODO: Update requirements and add testing profile to deployment. Test whole tutorial once, update outputs -->
 ---
 
 ## Set up the environment
@@ -76,13 +76,6 @@ As soon as the new VM has started, access it:
 :host: my-pc
 
 multipass shell my-vm
-
-Welcome to Ubuntu 24.04.2 LTS (GNU/Linux 6.8.0-63-generic x86_64)
-
- * Documentation:  https://help.ubuntu.com
- * Management:     https://landscape.canonical.com
- * Support:        https://ubuntu.com/pro
-...
 ```
 
 ```{dropdown} <code>cloud-init</code> logs
@@ -142,10 +135,10 @@ To deploy Charmed PostgreSQL, run:
 :user: ubuntu
 :host: my-vm
 
-juju deploy postgresql --channel=16/stable
+juju deploy postgresql --channel=14/stable
 ```
 
-Juju will now fetch Charmed PostgreSQL from [Charmhub][https://charmhub.io/postgresql?channel=16/stable] and deploy it to the LXD cloud. This process can take several minutes depending on how provisioned (RAM, CPU, etc) your machine is. 
+Juju will now fetch Charmed PostgreSQL from [Charmhub][https://charmhub.io/postgresql?channel=14/stable] and deploy it to the LXD cloud. This process can take several minutes depending on how provisioned (RAM, CPU, etc) your machine is. 
 
 You can track the progress by running:
 
@@ -166,13 +159,13 @@ Model     Controller  Cloud/Region         Version  SLA          Timestamp
 tutorial  overlord   localhost/localhost   3.6.8    unsupported  15:38:30+02:00
 
 App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message     
-postgresql  16.9     active      1  postgresql  16/stable  843  no                                     
+postgresql  14.10    active      1  postgresql  14/stable       no                                     
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message    
 postgresql/0*  active    idle   0        10.26.224.154   5432/tcp  Primary                                      
 
 Machine  State    Address        Inst id        Base          AZ  Message
-0        started  10.26.224.154  juju-1c143d-0  ubuntu@24.04      Running
+0        started  10.26.224.154  juju-1c143d-0  ubuntu@22.04      Running
 ```
 
 You can also watch juju logs with the [`juju debug-log`](https://juju.is/docs/juju/juju-debug-log) command.
@@ -305,7 +298,7 @@ Password:
 After submitting the password, you'll enter an interactive terminal like this:
 
 ```text
-psql (16.9 (Ubuntu 16.9-0ubuntu0.24.04.1))
+psql (14.10 (Ubuntu 14.10-0ubuntu0.22.04.1))
 Type "help" for help.
 
 postgres=#
@@ -317,11 +310,11 @@ Now you are successfully logged in the `psql` interactive terminal. Here it is p
 postgres=# SELECT version();
                                                                version
 --------------------------------------------------------------------------------------------------------------------------------------
- PostgreSQL 16.9 (Ubuntu 16.9-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0, 64-bit
+ PostgreSQL 14.10 (Ubuntu 14.10-0ubuntu0.22.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 11.4.0-1ubuntu1~22.04) 11.4.0, 64-bit
 (1 row)
 ```
 
-We can see that PostgreSQL version 16.9 is installed. From this prompt, to print the list of available databases, we can simply run this command:
+We can see that PostgreSQL version 14.10 is installed. From this prompt, to print the list of available databases, we can simply run this command:
 
 ```text
 postgres=# \l
@@ -342,7 +335,7 @@ You are now connected to database "mydb_test" as user "operator".
 
 We can now create a new table inside this database:
 
-```text
+```shell
 mydb_test=# CREATE TABLE mytable (
 	id SERIAL PRIMARY KEY,
 	name VARCHAR(50),
@@ -352,13 +345,13 @@ mydb_test=# CREATE TABLE mytable (
 
 and insert an element into it:
 
-```text
+```shell
 mydb_test=# INSERT INTO mytable (name, age) VALUES ('Numbat', 20);
 ```
 
 We can see our new table element by submitting a query:
 
-```text
+```shell
 mydb_test=# SELECT * FROM mytable;
 
  id | name | age
@@ -369,7 +362,7 @@ mydb_test=# SELECT * FROM mytable;
 
 You can try multiple SQL commands inside this environment. Once you're ready, reconnect to the default postgres database and drop the sample database we created:
 
-```text
+```shell
 mydb_test=# \c postgres
 
 You are now connected to database "postgres" as user "operator".
@@ -428,7 +421,7 @@ Model     Controller  Cloud/Region         Version  SLA          Timestamp
 tutorial  overlord   localhost/localhost  3.6.8    unsupported  17:04:14+02:00
 
 App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
-postgresql  16.9     active      3  postgresql  16/stable  843  no
+postgresql  14.10    active      3  postgresql  14/stable       no
 
 Unit           Workload  Agent  Machine  Public address  Ports     Message
 postgresql/0*  active    idle   0        10.26.224.154   5432/tcp  Primary
@@ -436,9 +429,9 @@ postgresql/1   active    idle   1        10.26.224.142   5432/tcp
 postgresql/2   active    idle   2        10.26.224.123   5432/tcp
 
 Machine  State    Address        Inst id        Base          AZ  Message
-0        started  10.26.224.154  juju-1c143d-0  ubuntu@24.04      Running
-1        started  10.26.224.142  juju-1c143d-1  ubuntu@24.04      Running
-2        started  10.26.224.123  juju-1c143d-2  ubuntu@24.04      Running
+0        started  10.26.224.154  juju-1c143d-0  ubuntu@22.04      Running
+1        started  10.26.224.142  juju-1c143d-1  ubuntu@22.04      Running
+2        started  10.26.224.123  juju-1c143d-2  ubuntu@22.04      Running
 ```
 
 ### Remove units
@@ -463,7 +456,7 @@ Model     Controller  Cloud/Region         Version  SLA          Timestamp
 tutorial  overlord   localhost/localhost  3.6.8    unsupported  17:14:38+02:00
 
 App         Version  Status  Scale  Charm       Channel    Rev  Exposed  Message
-postgresql  16.9     active      2  postgresql  16/stable  843  no
+postgresql  14.10    active      2  postgresql  14/stable       no
 
 Unit           Workload  Agent      Machine  Public address    Ports     Message   
 postgresql/0*  active    idle       0        10.26.224.154     5432/tcp                          
@@ -471,8 +464,8 @@ postgresql/1   active    executing  1        10.26.224.142
   5432/tcp   
                                                                                                                                               
 Machine  State    Address         Inst id        Base          AZ  Message
-0        started  10.26.224.154   juju-1c143d-0  ubuntu@24.04      Running
-1        started  10.26.224.142   juju-1c143d-1  ubuntu@24.04      Running
+0        started  10.26.224.154   juju-1c143d-0  ubuntu@22.04      Running
+1        started  10.26.224.142   juju-1c143d-1  ubuntu@22.04      Running
 ```
 
 ## Integrate with other applications
@@ -503,7 +496,7 @@ tutorial  overlord    localhost/localhost   3.6.8    unsupported  17:26:58+02:00
 
 App              Version  Status   Scale  Charm            Channel        Rev  Exposed  Message    
 data-integrator           blocked      1  data-integrator  latest/stable  78   no       Please relate the data-integrator with the desired product
-postgresql       16.9     active       2  postgresql       16/stable      843  no    
+postgresql       14.10    active       2  postgresql       14/stable           no    
 
 Unit                Workload  Agent  Machine  Public address  Ports     Message       
 data-integrator/0*  blocked   idle   3        10.26.224.131             Please relate the data-integrator with the desired product
@@ -511,8 +504,8 @@ postgresql/0*       active    idle   0        10.26.224.154   5432/tcp  Primary
 postgresql/1        active    idle   1        10.26.224.142   5432/tcp       
 
 Machine  State    Address       Inst id        Base          AZ  Message
-0        started  10.26.224.154 juju-1c143d-0  ubuntu@24.04      Running
-1        started  10.26.224.142 juju-1c143d-1  ubuntu@24.04      Running
+0        started  10.26.224.154 juju-1c143d-0  ubuntu@22.04      Running
+1        started  10.26.224.142 juju-1c143d-1  ubuntu@22.04      Running
 3        started  10.26.224.131 juju-1c143d-3  ubuntu@22.04      Running      
 ```
 
@@ -534,7 +527,7 @@ tutorial  overlord    localhost/localhost  3.6.8    unsupported  17:29:08+02:00
 
 App              Version  Status  Scale  Charm            Channel        Rev  Exposed  Message     
 data-integrator           active      1  data-integrator  latest/stable  78   no                                                                  
-postgresql       16.9     active      2  postgresql       16/stable      843  no     
+postgresql       14.10    active      2  postgresql       14/stable           no     
 
 Unit                Workload  Agent  Machine  Public address  Ports     Message       
 data-integrator/0*  active    idle   3        10.26.224.131                                                                           
@@ -542,8 +535,8 @@ postgresql/0*       active    idle   0        10.26.224.154   5432/tcp  Primary
 postgresql/1        active    idle   1        10.26.224.142   5432/tcp       
 
 Machine  State    Address        Inst id        Base          AZ  Message
-0        started  10.26.224.154  juju-1c143d-0  ubuntu@24.04      Running
-1        started  10.26.224.142  juju-1c143d-1  ubuntu@24.04      Running
+0        started  10.26.224.154  juju-1c143d-0  ubuntu@22.04      Running
+1        started  10.26.224.142  juju-1c143d-1  ubuntu@22.04      Running
 3        started  10.26.224.131  juju-1c143d-3  ubuntu@22.04      Running
 
 Integration provider                   Requirer                               Interface              Type     Message
@@ -563,24 +556,27 @@ To retrieve the username, password and database name, run the `get-credentials` 
 
 juju run data-integrator/leader get-credentials
 
-Running operation 3 with 1 task
-  - task 4 on unit-data-integrator-0
-
-Waiting for task 4...
-ok: "True"
-postgresql:
-  data: '{"database": "mydb-integrator", "external-node-connectivity": "true", "requested-secrets":
-    "[\"username\", \"password\", \"tls\", \"tls-ca\", \"uris\"]"}'
-  database: mydb-integrator
-  endpoints: 10.26.224.154:5432
-  password: MpMfj5ZnlmCAjnBB
-
-  ...
-
-  uris: postgresql://relation-4:MpMfj5ZnlmCAjnBB@10.26.224.154:5432/mydb-integrator
-  username: relation-4
-  version: "16.9"
+...
+unit-data-integrator-0:
+  UnitId: data-integrator/0
+  id: "20"
+  results:
+    ok: "True"
+    postgresql:
+      database: test-database
+      endpoints: 10.89.49.129:5432
+      password: 136bvw0s7FjJ6mxZ
+      read-only-endpoints: 10.89.49.197:5432
+      username: relation-3
+      version: "14.7"
+  status: completed
+  timing:
+    completed: 2023-03-20 09:22:50 +0000 UTC
+    enqueued: 2023-03-20 09:22:46 +0000 UTC
+    started: 2023-03-20 09:22:50 +0000 UTC
 ```
+
+Note that your hostnames, usernames, and passwords will likely be different.
 
 ### Access the related database
 
@@ -610,7 +606,7 @@ Password:
 When you enter the interactive prompt for `mydb-integrator`, type `\l` to view your list of databases.
 
 ```text
-psql (16.9 (Ubuntu 16.9-0ubuntu0.24.04.1))
+psql (14.10(Ubuntu 16.9-0ubuntu0.22.04.1))
 Type "help" for help.
 
 mydb-integrator=> \l
@@ -735,7 +731,7 @@ Before enabling TLS on Charmed PostgreSQL, we must deploy the `self-signed-certi
 
 juju deploy self-signed-certificates --config ca-common-name="Tutorial CA"
 
-Deployed "self-signed-certificates" from charm-hub charm "self-signed-certificates", revision 317 in channel 1/stable on ubuntu@24.04/stable
+Deployed "self-signed-certificates" from charm-hub charm "self-signed-certificates", revision 317 in channel 1/stable on ubuntu@22.04/stable
 ```
 
 Wait until the `self-signed-certificates` app is up and active, use `juju status --watch 1s` to monitor the progress:
@@ -746,7 +742,7 @@ tutorial  overlord   localhost/localhost   3.6.8    unsupported  17:43:44+02:00
                                                                                                                 
 App                       Version  Status  Scale  Charm                     Channel        Rev  Exposed  Message
 data-integrator                    active      1  data-integrator           latest/stable  78   no
-postgresql                16.9     active      2  postgresql                16/stable      843  no              
+postgresql                14.10    active      2  postgresql                14/stable           no              
 self-signed-certificates           active      1  self-signed-certificates  1/stable       317  no              
                                                                                                                 
 Unit                         Workload  Agent  Machine  Public address  Ports     Message
@@ -756,10 +752,10 @@ postgresql/1                 active    idle   1        10.26.224.142   5432/tcp
 self-signed-certificates/0*  active    idle   4        10.26.224.62       
                                                                                                   
 Machine  State    Address         Inst id        Base          AZ  Message
-0        started  10.26.224.154   juju-1c143d-0  ubuntu@24.04      Running
-1        started  10.26.224.142   juju-1c143d-1  ubuntu@24.04      Running
+0        started  10.26.224.154   juju-1c143d-0  ubuntu@22.04      Running
+1        started  10.26.224.142   juju-1c143d-1  ubuntu@22.04      Running
 3        started  10.26.224.131   juju-1c143d-3  ubuntu@22.04      Running                   
-4        started  10.26.224.62    juju-1c143d-4  ubuntu@24.04      Running       
+4        started  10.26.224.62    juju-1c143d-4  ubuntu@22.04      Running       
 ```
 
 To enable TLS on Charmed PostgreSQL, integrate the two applications:
@@ -782,18 +778,10 @@ Use `openssl` to connect to the PostgreSQL leader unit and check the TLS certifi
 :user: ubuntu
 :host: my-vm
 
-openssl s_client -starttls postgres -connect 10.26.224.154:5432
-
-CONNECTED(00000003)
-Can't use SSL_get_servername
-depth=1 CN = Tutorial CA
-verify error:num=19:self-signed certificate in certificate chain
+> openssl s_client -starttls postgres -connect 10.89.49.129:5432 | grep Issuer
 ...
-Certificate chain
- 0 s:CN = 10.26.224.154, x500UniqueIdentifier = 641535a5-b196-4e56-b54d-93fc42270667
-   i:CN = Tutorial CA
-   a:PKEY: rsaEncryption, 2048 (bit); sigalg: RSA-SHA256
-   v:NotBefore: Jul 11 15:50:00 2025 GMT; NotAfter: Oct  9 15:50:00 2025 GMT
+depth=1 C = US, CN = Tutorial CA
+verify error:num=19:self-signed certificate in certificate chain
 ...
 ```
 
@@ -872,7 +860,7 @@ multipass delete --purge my-vm
 ### Next steps
 
 - Run [Charmed PostgreSQL on Kubernetes](https://github.com/canonical/postgresql-k8s-operator)
-- Check out our other database charms, like [MySQL](https://charmhub.io/mysql) and [Kafka](https://charmhub.io/kafka?channel=edge)
+- Check out our other database charms, like [MySQL](https://charmhub.io/mysql) and [Kafka](https://charmhub.io/kafka)
 - Read about [high availability best practices](https://canonical.com/blog/database-high-availability)
 - [Report](https://github.com/canonical/postgresql-operator/issues) any problems you encountered
 - {ref}`Give us your feedback <contact>`
