@@ -138,11 +138,12 @@ class Patroni:
     def __init__(
         self,
         charm,
-        unit_ip: str | None,
+        substrate: Substrates,
+        endpoint: str | None,
+        endpoints: list[str],
         cluster_name: str,
         member_name: str,
         planned_units: int,
-        peers_ips: set[str],
         superuser_password: str | None,
         replication_password: str | None,
         rewind_password: str | None,
@@ -152,8 +153,10 @@ class Patroni:
         """Initialize the Patroni class.
 
         Args:
-            charm: PostgreSQL charm instance.
-            unit_ip: IP address of the current unit
+            charm: PostgreSQL charm instance
+            substrate: VM or K8s
+            endpoint: Current unit's IP or hostname to connect to
+            endpoints: Remote units IPs or hostnames to connect to
             cluster_name: name of the cluster
             member_name: name of the member inside the cluster
             planned_units: number of units planned for the cluster
@@ -165,11 +168,12 @@ class Patroni:
             patroni_password: password for the user used on patroni
         """
         self.charm = charm
-        self.unit_ip = unit_ip
+        self.substrate = substrate
+        self.endpoint = endpoint
+        self.endpoints = endpoints
         self.cluster_name = cluster_name
         self.member_name = member_name
         self.planned_units = planned_units
-        self.peers_ips = peers_ips
         self.superuser_password = superuser_password
         self.replication_password = replication_password
         self.rewind_password = rewind_password
@@ -203,7 +207,7 @@ class Patroni:
     @cached_property
     def _patroni_url(self) -> str:
         """Patroni REST API URL."""
-        return f"https://{self.unit_ip}:8008"
+        return f"https://{self.endpoint}:8008"
 
     @staticmethod
     def _dict_to_hba_string(_dict: dict[str, Any]) -> str:
@@ -265,10 +269,10 @@ class Patroni:
             endpoints = alternative_endpoints
         else:
             endpoints = []
-            if self.unit_ip:
-                endpoints.append(self.unit_ip)
-                for peer_ip in self.peers_ips:
-                    endpoints.append(peer_ip)
+            if self.endpoint:
+                endpoints.append(self.endpoint)
+                for peer in self.endpoints:
+                    endpoints.append(peer)
         # Request info from cluster endpoint (which returns all members of the cluster).
         if response := parallel_patroni_get_request(
             f"/{PATRONI_CLUSTER_STATUS_ENDPOINT}",
@@ -438,8 +442,8 @@ class Patroni:
 
     def is_replication_healthy(self) -> bool:
         """Return whether the replication is healthy."""
-        if not self.unit_ip:
-            logger.debug("Failed replication check no IP set")
+        if not self.endpoint:
+            logger.debug("Failed replication check no endpoint set")
             return False
         try:
             for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
@@ -448,12 +452,14 @@ class Patroni:
                     if not primary:
                         logger.debug("Failed replication check no primary reported")
                         raise Exception
-                    primary_ip = self.get_member_ip(primary)
-                    members_ips = {self.unit_ip}
-                    members_ips.update(self.peers_ips)
-                    for members_ip in members_ips:
-                        endpoint = "leader" if members_ip == primary_ip else "replica?lag=100MB"
-                        url = self._patroni_url.replace(self.unit_ip, members_ip)
+                    primary_addr = self.get_member_ip(primary)
+                    members_addrs = {self.endpoint}
+                    members_addrs.update(self.endpoints)
+                    for members_addr in members_addrs:
+                        endpoint = (
+                            "leader" if members_addr == primary_addr else "replica?lag=100MB"
+                        )
+                        url = self._patroni_url.replace(self.endpoint, members_addr)
                         r = requests.get(
                             f"{url}/{endpoint}",
                             verify=self.verify,
@@ -467,7 +473,7 @@ class Patroni:
                         )
                         if r.status_code != 200:
                             logger.debug(
-                                f"Failed replication check for {members_ip} with code {r.status_code}"
+                                f"Failed replication check for {members_addr} with code {r.status_code}"
                             )
                             raise Exception
         except RetryError:
@@ -664,7 +670,7 @@ class Patroni:
         with open("templates/patroni.yml.j2") as file:
             template = Template(file.read())
 
-        ldap_params = self.charm.get_ldap_parameters()  # type: ignore
+        ldap_params = self.charm.get_ldap_parameters()
 
         # Render the template file with the correct values.
         rendered = template.render(
@@ -678,14 +684,14 @@ class Patroni:
             enable_ldap=enable_ldap,
             enable_tls=enable_tls,
             member_name=self.member_name,
-            partner_addrs=self.charm.async_replication.get_partner_addresses()  # type: ignore
+            partner_addrs=self.charm.async_replication.get_partner_addresses()
             if not no_peers
             else [],
-            peers_ips=sorted(self.peers_ips) if not no_peers else set(),
+            peers_ips=sorted(self.endpoints) if not no_peers else set(),
             pgbackrest_configuration_file=PGBACKREST_CONFIGURATION_FILE,
             scope=self.cluster_name,
-            self_ip=self.unit_ip,
-            listen_ips=self.charm.listen_ips,  # type: ignore
+            self_ip=self.endpoint,
+            listen_ips=self.charm.listen_ips,
             superuser=USER,
             superuser_password=self.superuser_password,
             replication_password=self.replication_password,
