@@ -22,6 +22,8 @@ with suppress(ImportError):
     import psutil
     from charmlibs import snap
     from pysyncobj.utility import TcpUtility, UtilityException
+import psycopg2
+import psycopg2.extras
 import requests
 import tomli
 from httpx import BasicAuth
@@ -44,6 +46,7 @@ from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     API_REQUEST_TIMEOUT,
     LOGS_DATA_DIR,
+    LOGS_STORAGE_PATH,
     PATRONI_CLUSTER_STATUS_ENDPOINT,
     PATRONI_CONF_PATH,
     PATRONI_LOGS_PATH,
@@ -141,6 +144,7 @@ class Patroni:
         substrate: Substrates,
         endpoint: str | None,
         endpoints: list[str],
+        primary_endpoint: str | None,
         cluster_name: str,
         member_name: str,
         planned_units: int,
@@ -157,6 +161,7 @@ class Patroni:
             substrate: VM or K8s
             endpoint: Current unit's IP or hostname to connect to
             endpoints: Remote units IPs or hostnames to connect to
+            primary_endpoint: Primary endpoint. K8s only
             cluster_name: name of the cluster
             member_name: name of the member inside the cluster
             planned_units: number of units planned for the cluster
@@ -171,6 +176,7 @@ class Patroni:
         self.substrate = substrate
         self.endpoint = endpoint
         self.endpoints = endpoints
+        self.primary_endpoint = primary_endpoint
         self.cluster_name = cluster_name
         self.member_name = member_name
         self.planned_units = planned_units
@@ -179,6 +185,13 @@ class Patroni:
         self.rewind_password = rewind_password
         self.raft_password = raft_password
         self.patroni_password = patroni_password
+        if substrate == Substrates.VM:
+            if any([primary_endpoint]):
+                raise Exception("K8s attributes set with VM substrate")
+        else:
+            if any([raft_password]):
+                raise Exception("VM attributes set with K8s substrate")
+
         # Variable mapping to requests library verify parameter.
         # The CA bundle file is used to validate the server certificate when
         # TLS is enabled, otherwise True is set because it's the default value.
@@ -244,7 +257,11 @@ class Patroni:
     def cluster_members(self) -> set:
         """Get the current cluster members."""
         # Request info from cluster endpoint (which returns all members of the cluster).
-        return {member["name"] for member in self.cached_cluster_status}
+        # Request info from cluster endpoint (which returns all members of the cluster).
+        try:
+            return {member["name"] for member in self.cluster_status()}
+        except Exception:
+            return set()
 
     def get_postgresql_version(self) -> str:
         """Return the PostgreSQL version from the system."""
@@ -392,19 +409,24 @@ class Patroni:
             True if all members are ready False otherwise. Retries over a period of 10 seconds
             3 times to allow server time to start up.
         """
-        # Request info from cluster endpoint
-        # (which returns all members of the cluster and their states).
-        try:
-            members = self.cluster_status()
-        except RetryError:
-            return False
+        if self.substrate == Substrates.VM:
+            # Request info from cluster endpoint
+            # (which returns all members of the cluster and their states).
+            try:
+                members = self.cluster_status()
+            except RetryError:
+                return False
 
-        # Check if all members are running and one of them is a leader (primary) or
-        # a standby leader, because sometimes there may exist (for some period of time)
-        # only replicas after a failed switchover.
-        return all(member["state"] in STARTED_STATES for member in members) and any(
-            member["role"] in ["leader", "standby_leader"] for member in members
-        )
+            # Check if all members are running and one of them is a leader (primary) or
+            # a standby leader, because sometimes there may exist (for some period of time)
+            # only replicas after a failed switchover.
+            return all(member["state"] in STARTED_STATES for member in members) and any(
+                member["role"] in ["leader", "standby_leader"] for member in members
+            )
+        else:
+            # Request info from cluster endpoint
+            # (which returns all members of the cluster and their states).
+            return len(self.get_running_cluster_members()) == len(self.endpoints)
 
     @cached_property
     def cached_patroni_health(self) -> dict[str, str]:
@@ -491,8 +513,12 @@ class Patroni:
             True if services is ready False otherwise. Retries over a period of 60 seconds times to
             allow server time to start up.
         """
-        if not self.is_patroni_running():
-            return False
+        if self.substrate == Substrates.VM:
+            if not self.is_patroni_running():
+                return False
+        else:
+            if not self.charm._is_workload_running:
+                return False
         try:
             response = self.cached_patroni_health
         except RetryError:
@@ -630,6 +656,7 @@ class Patroni:
         is_creating_backup: bool = False,
         enable_ldap: bool = False,
         enable_tls: bool = False,
+        is_no_sync_member: bool = False,
         stanza: str | None = None,
         restore_stanza: str | None = None,
         disable_pgbackrest_archiving: bool = False,
@@ -649,6 +676,8 @@ class Patroni:
             is_creating_backup: whether this unit is creating a backup.
             enable_ldap: whether to enable LDAP authentication.
             enable_tls: whether to enable client TLS.
+            is_no_sync_member: whether this member shouldn't be a synchronous standby
+                (when it's a replica). K8s only.
             stanza: name of the stanza created by pgBackRest.
             restore_stanza: name of the stanza used when restoring a backup.
             disable_pgbackrest_archiving: whether to force disable pgBackRest WAL archiving.
@@ -672,57 +701,71 @@ class Patroni:
 
         ldap_params = self.charm.get_ldap_parameters()
 
-        # Render the template file with the correct values.
-        rendered = template.render(
-            conf_path=PATRONI_CONF_PATH,
-            connectivity=connectivity,
-            is_creating_backup=is_creating_backup,
-            log_path=PATRONI_LOGS_PATH,
-            postgresql_log_path=POSTGRESQL_LOGS_PATH,
-            data_path=POSTGRESQL_DATA_DIR,
-            wal_dir=LOGS_DATA_DIR,
-            enable_ldap=enable_ldap,
-            enable_tls=enable_tls,
-            member_name=self.member_name,
-            partner_addrs=self.charm.async_replication.get_partner_addresses()
-            if not no_peers
-            else [],
-            peers_ips=sorted(self.endpoints) if not no_peers else set(),
-            pgbackrest_configuration_file=PGBACKREST_CONFIGURATION_FILE,
-            scope=self.cluster_name,
-            self_ip=self.endpoint,
-            listen_ips=self.charm.listen_ips,
-            superuser=USER,
-            superuser_password=self.superuser_password,
-            replication_password=self.replication_password,
-            rewind_user=REWIND_USER,
-            rewind_password=self.rewind_password,
-            enable_pgbackrest_archiving=stanza is not None
+        confs = {
+            "connectivity": connectivity,
+            "enable_ldap": enable_ldap,
+            "enable_tls": enable_tls,
+            "member_name": self.member_name,
+            "superuser": USER,
+            "superuser_password": self.superuser_password,
+            "rewind_user": REWIND_USER,
+            "rewind_password": self.rewind_password,
+            "replication_password": self.replication_password,
+            "enable_pgbackrest_archiving": stanza is not None
             and disable_pgbackrest_archiving is False,
-            restoring_backup=backup_id is not None or pitr_target is not None,
-            backup_id=backup_id,
-            pitr_target=pitr_target if not restore_to_latest else None,
-            restore_timeline=restore_timeline,
-            restore_to_latest=restore_to_latest,
-            stanza=stanza,
-            restore_stanza=restore_stanza,
-            version=self.get_postgresql_version().split(".")[0],
-            synchronous_node_count=self._synchronous_node_count,
-            maximum_lag_on_failover=self.charm.config.durability_maximum_lag_on_failover,  # type: ignore
-            pg_parameters=parameters,
-            primary_cluster_endpoint=self.charm.async_replication.get_primary_cluster_endpoint(),  # type: ignore
-            extra_replication_endpoints=self.charm.async_replication.get_standby_endpoints(),  # type: ignore
-            raft_password=self.raft_password,
-            ldap_parameters=self._dict_to_hba_string(ldap_params),
-            patroni_password=self.patroni_password,
-            user_databases_map=user_databases_map,
-            slots=slots,
-            instance_password_encryption=self.charm.config.instance_password_encryption,  # type: ignore
-            watcher=self.charm.watcher_offer.watcher_raft_address  # type: ignore
-            if self.charm.watcher_offer.is_active  # type: ignore
-            else None,
-        )
-        render_file(Substrates.VM, f"{PATRONI_CONF_PATH}/patroni.yaml", rendered, 0o600)
+            "stanza": stanza,
+            "restore_stanza": restore_stanza,
+            "restoring_backup": backup_id is not None or pitr_target is not None,
+            "backup_id": backup_id,
+            "pitr_target": pitr_target if not restore_to_latest else None,
+            "restore_timeline": restore_timeline,
+            "restore_to_latest": restore_to_latest,
+            "is_creating_backup": is_creating_backup,
+            "version": self.get_postgresql_version().split(".")[0],
+            "synchronous_node_count": self._synchronous_node_count,
+            "maximum_lag_on_failover": self.charm.config.durability_maximum_lag_on_failover,
+            "pg_parameters": parameters,
+            "primary_cluster_endpoint": self.charm.async_replication.get_primary_cluster_endpoint(),
+            "ldap_parameters": self._dict_to_hba_string(ldap_params),
+            "patroni_password": self.patroni_password,
+            "user_databases_map": user_databases_map,
+            "slots": slots,
+            "instance_password_encryption": self.charm.config.instance_password_encryption,
+            "extra_replication_endpoints": self.charm.async_replication.get_standby_endpoints(),
+        }
+        if self.substrate == Substrates.VM:
+            confs.update({
+                "conf_path": PATRONI_CONF_PATH,
+                "log_path": PATRONI_LOGS_PATH,
+                "postgresql_log_path": POSTGRESQL_LOGS_PATH,
+                "data_path": POSTGRESQL_DATA_DIR,
+                "wal_dir": LOGS_DATA_DIR,
+                "partner_addrs": self.charm.async_replication.get_partner_addresses()
+                if not no_peers
+                else [],
+                "peers_ips": sorted(self.endpoints) if not no_peers else set(),
+                "pgbackrest_configuration_file": PGBACKREST_CONFIGURATION_FILE,
+                "scope": self.cluster_name,
+                "self_ip": self.endpoint,
+                "listen_ips": self.charm.listen_ips,
+                "raft_password": self.raft_password,
+                "watcher": self.charm.watcher_offer.watcher_raft_address
+                if self.charm.watcher_offer.is_active
+                else None,
+            })
+        else:
+            confs.update({
+                "endpoint": self.endpoint,
+                "endpoints": self.endpoints,
+                "is_no_sync_member": is_no_sync_member,
+                "namespace": self.charm._namespace,
+                "storage_path": self.charm._storage_path,
+                "logs_storage_path": LOGS_STORAGE_PATH,
+                "pgdata_path": self.charm._actual_pgdata_path,
+                "restoring_backup": backup_id is not None or pitr_target is not None,
+            })
+        rendered = template.render(**confs)
+        render_file(self.substrate, f"{PATRONI_CONF_PATH}/patroni.yaml", rendered, 0o600)
 
     def start_patroni(self) -> bool:
         """Start Patroni service using snap.
@@ -885,7 +928,7 @@ class Patroni:
     def reinitialise_raft_data(self) -> None:
         """Reinitialise the raft journals and promoting the unit to leader. Should only be run on sync replicas."""
         logger.info("Rerendering patroni config without peers")
-        self.charm.update_config(no_peers=True)  # type: ignore
+        self.charm.update_config(no_peers=True)
         logger.info("Starting patroni")
         self.start_patroni()
 
@@ -938,12 +981,12 @@ class Patroni:
 
                         # Check if this is a stale watcher (not a PostgreSQL node and not current watcher)
                         if (
-                            member_ip not in self.charm._units_ips  # type: ignore
-                            and member_addr != self.charm.watcher_offer.watcher_raft_address  # type: ignore
+                            member_ip not in self.charm._units_ips
+                            and member_addr != self.charm.watcher_offer.watcher_raft_address
                         ):
                             logger.info(f"Removing stale Raft member: {member_addr}")
                             self.remove_raft_member(member_addr)
-                            self.charm._remove_from_members_ips(member_ip)  # type: ignore
+                            self.charm._remove_from_members_ips(member_ip)
                 return True
             return False
         except Exception as e:
@@ -951,10 +994,10 @@ class Patroni:
             return False
 
     def _set_stuck_raft_flag(self) -> None:
-        self.charm.set_unit_status(BlockedStatus("Raft majority loss, run: promote-to-primary"))  # type: ignore
+        self.charm.set_unit_status(BlockedStatus("Raft majority loss, run: promote-to-primary"))
         logger.warning("Remove raft member: Stuck raft cluster detected")
         data_flags = {"raft_stuck": "True"}
-        self.charm.unit_peer_data.update(data_flags)  # type: ignore
+        self.charm.unit_peer_data.update(data_flags)
 
         # Leader doesn't always trigger when changing it's own peer data.
         if self.charm.unit.is_leader():
@@ -979,7 +1022,7 @@ class Patroni:
             logger.debug("Remove raft member: No address provided")
             return
 
-        if self.charm.has_raft_keys():  # type: ignore
+        if self.charm.has_raft_keys():
             logger.debug("Remove raft member: Raft already in recovery")
             return
 
@@ -1163,14 +1206,14 @@ class Patroni:
     @cached_property
     def _synchronous_node_count(self) -> int:
         planned_units = self.charm.app.planned_units()
-        if self.charm.config.synchronous_node_count == "all":  # type: ignore
+        if self.charm.config.synchronous_node_count == "all":
             return planned_units - 1
-        elif self.charm.config.synchronous_node_count == "majority":  # type: ignore
+        elif self.charm.config.synchronous_node_count == "majority":
             return planned_units // 2
         # -1 for leader
         return (
-            self.charm.config.synchronous_node_count  # type: ignore
-            if self.charm.config.synchronous_node_count < planned_units - 1  # type: ignore
+            self.charm.config.synchronous_node_count
+            if self.charm.config.synchronous_node_count < planned_units - 1
             else planned_units - 1
         )
 
@@ -1178,11 +1221,11 @@ class Patroni:
     def synchronous_configuration(self) -> dict[str, Any]:
         """Synchronous mode configuration."""
         # Try to update synchronous_node_count.
-        member_units = json.loads(self.charm.app_peer_data.get("members_ips", "[]"))  # type: ignore
+        member_units = json.loads(self.charm.app_peer_data.get("members_ips", "[]"))
         return {
             "synchronous_node_count": self._synchronous_node_count,
             "synchronous_mode_strict": len(member_units) > 1
-            and self.charm.config.synchronous_mode_strict  # type: ignore
+            and self.charm.config.synchronous_mode_strict
             and self._synchronous_node_count > 0,
         }
 
@@ -1235,3 +1278,58 @@ class Patroni:
         with open(PATRONI_SERVICE_DEFAULT_PATH, "w") as patroni_service_file:
             patroni_service_file.write(new_patroni_service)
         subprocess.run(["/bin/systemctl", "daemon-reload"])
+
+    @property
+    def primary_endpoint_ready(self) -> bool:
+        """Is the primary endpoint redirecting connections to the primary pod.
+
+        Returns:
+            Return whether the primary endpoint is redirecting connections to the primary pod.
+        """
+        if not self.primary_endpoint:
+            return False
+
+        try:
+            for attempt in Retrying(stop=stop_after_delay(10), wait=wait_fixed(1)):
+                with attempt:
+                    r = requests.get(
+                        f"https://{self.primary_endpoint}:8008/health",
+                        verify=self.verify,
+                        auth=self._patroni_auth,
+                        timeout=API_REQUEST_TIMEOUT,
+                    )
+                    if r.json()["state"] not in RUNNING_STATES:
+                        raise EndpointNotReadyError
+        except RetryError:
+            return False
+
+        return True
+
+    def is_replication_hba_ready(self, endpoint: str | None = None) -> bool:
+        """Check whether the pg_hba allows replication from this unit.
+
+        Attempts a physical replication connection. If it succeeds, the pg_hba
+        has been reloaded with this unit's endpoint.
+
+        Args:
+            endpoint: The host to connect to. If None, uses self._primary_endpoint.
+
+        Returns True if the connection is accepted, False otherwise.
+        """
+        host = endpoint if endpoint is not None else self.primary_endpoint
+        try:
+            conn = psycopg2.connect(
+                host=host,
+                port=5432,
+                user="replication",
+                password=self.replication_password,
+                dbname="replication",
+                connect_timeout=1,
+                connection_factory=psycopg2.extras.PhysicalReplicationConnection,
+            )
+            conn.close()
+            logger.debug("Replication HBA check passed: %s accepts replication connection", host)
+            return True
+        except psycopg2.OperationalError as e:
+            logger.debug("Replication HBA check failed: %s", e)
+            return False
