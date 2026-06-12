@@ -73,3 +73,25 @@ juju run postgresql/leader set-password username=<username> password=<password>
 juju run postgresql-k8s/leader set-password username=<username> password=<password>
 ```
 ````
+
+## Rotate application passwords
+
+To rotate the passwords of users created for integrated applications, the integration should be removed and created again. This process will generate a new user and password for the application.
+
+
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+    juju remove-relation <application> postgresql
+    juju integrate <application> postgresql
+```
+```{tab-item} K8s
+:sync: k8s
+
+    juju remove-relation <application> postgresql-k8s
+    juju integrate <application> postgresql-k8s
+```
+````
+
+In the case of connecting with a non-charmed application, `<application>` would be `data-integrator`.

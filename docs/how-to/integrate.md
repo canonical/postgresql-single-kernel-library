@@ -19,9 +19,9 @@ If you are a charm user who wants to know more about integrating PostgreSQL with
 (integrate-with-a-client-application)=
 ## Integrate with a client application
 
-PostgreSQL can be integrated with other charms that support the `postgresql_client` interface and with non-Juju applications.
+Integrations with charmed applications are supported via the modern [`postgresql_client`](https://github.com/canonical/charm-relation-interfaces/blob/main/interfaces/postgresql_client/v0/README.md) interface, and the legacy `psql` interface from the [original version](https://launchpad.net/postgresql-charm) of the charm.
 
-### Charms with the `postgresql_client` interface
+### Modern `postgresql_client` interface
 
 To integrate with a charmed application that already supports the `postgresql_client` interface (for example, PgBouncer or Temporal K8s) run
 
@@ -47,6 +47,35 @@ To remove the integration, run
 ````
 
 {{seealso}} [All compatible charms](https://charmhub.io/integrations/postgresql_client)
+
+### Legacy `pgsql` interface
+
+Note that this interface is **deprecated**. See {ref}`legacy-charm`.
+
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+To integrate via the legacy interface, run
+
+    juju integrate postgresql:db <charm>
+
+Extended permissions can be requested using the `db-admin` endpoint:
+
+    juju integrate postgresql:db-admin <charm>
+```
+```{tab-item} K8s
+:sync: k8s
+
+Using the `mattermost-k8s` charm as an example, an integration with the legacy interface could be created as follows:
+
+    juju integrate postgresql-k8s:db mattermost-k8s:db
+
+Extended permissions can be requested using the `db-admin` endpoint:
+
+    juju integrate postgresql-k8s:db-admin mattermost-k8s:db
+```
+````
 
 ### Other applications
 
@@ -80,8 +109,7 @@ Use the `get-credentials` action to retrieve credentials from `data-integrator`:
 juju run data-integrator/leader get-credentials
 ```
 
-{{seealso}} {ref}`manage-passwords` for information about credentials, such as password rotation or requesting a custom username.
-
+{{seealso}} {ref}`manage-passwords` for information about credentials, such as password rotation.
 (integrate-with-your-charm)=
 ## Integrate with your charm
 
