@@ -222,7 +222,8 @@ myst_substitutions = {
     "vm": "![vm](https://img.shields.io/badge/VM_only-orange?style=flat-square)",
     "k8s": "![k8s](https://img.shields.io/badge/K8s_only-blue?style=flat-square)",
     "vm_k8s": "![vm](https://img.shields.io/badge/VM-orange?style=flat-square)![k8s](https://img.shields.io/badge/K8s-blue?style=flat-square)",
-    "seealso": "{octicon}`arrow-right` See also:"
+    "seealso": "{octicon}`arrow-right` See also:",
+    "see": "{octicon}`arrow-right` See:"
 }
 
 # Custom Sphinx extensions; see

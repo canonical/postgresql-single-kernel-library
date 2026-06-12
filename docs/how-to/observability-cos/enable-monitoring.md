@@ -167,8 +167,8 @@ Below is a sample output of `juju status` on the PostgreSQL model:
     loki        active  microk8s  admin/cos.loki
     prometheus  active  microk8s  admin/cos.prometheus
 
-    App                Version  Status  Scale  Charm              Channel  Rev  Address          Exposed  Message
-    grafana-agent-k8s  0.32.1   active      1  grafana-agent-k8s  stable    42  10.152.183.61    no
+    App                Version  Status  Scale  Charm              Channel    Rev  Address          Exposed  Message
+    grafana-agent-k8s  0.32.1   active      1  grafana-agent-k8s  stable     42  10.152.183.61    no
     postgresql-k8s     14.10    active      3  postgresql-k8s     14/stable  615  10.152.183.126 no
 
     Unit                  Workload  Agent   Address       Ports  Message
