@@ -45,17 +45,17 @@ from tenacity import (
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     API_REQUEST_TIMEOUT,
-    LOGS_DATA_DIR,
-    LOGS_STORAGE_PATH,
+    LOGS_DATA_VM_DIR,
+    LOGS_STORAGE_K8S_PATH,
     PATRONI_CLUSTER_STATUS_ENDPOINT,
-    PATRONI_CONF_PATH,
-    PATRONI_LOGS_PATH,
+    PATRONI_CONF_VM_PATH,
+    PATRONI_LOGS_VM_PATH,
     PATRONI_SERVICE_DEFAULT_PATH,
     PEER_RELATION,
-    PGBACKREST_CONFIGURATION_FILE,
-    POSTGRESQL_CONF_PATH,
-    POSTGRESQL_DATA_DIR,
-    POSTGRESQL_LOGS_PATH,
+    PGBACKREST_CONFIGURATION_VM_FILE,
+    POSTGRESQL_CONF_VM_PATH,
+    POSTGRESQL_DATA_VM_DIR,
+    POSTGRESQL_LOGS_VM_PATH,
     POSTGRESQL_STORAGE_PERMISSIONS,
     RAFT_PARTNER_PREFIX,
     RAFT_PORT,
@@ -72,7 +72,7 @@ from single_kernel_postgresql.utils import (
 
 logger = logging.getLogger(__name__)
 
-PG_BASE_CONF_PATH = f"{POSTGRESQL_CONF_PATH}/postgresql.conf"
+PG_BASE_CONF_VM_PATH = f"{POSTGRESQL_CONF_VM_PATH}/postgresql.conf"
 
 STARTED_STATES = ["running", "streaming"]
 RUNNING_STATES = [*STARTED_STATES, "starting"]
@@ -195,17 +195,23 @@ class Patroni:
         # Variable mapping to requests library verify parameter.
         # The CA bundle file is used to validate the server certificate when
         # TLS is enabled, otherwise True is set because it's the default value.
-        self.verify = f"{PATRONI_CONF_PATH}/{TLS_CA_BUNDLE_FILE}"
+        if substrate == Substrates.VM:
+            self.verify = f"{PATRONI_CONF_VM_PATH}/{TLS_CA_BUNDLE_FILE}"
+        else:
+            # CA bundle is not secret
+            self.verify = f"/tmp/{TLS_CA_BUNDLE_FILE}"  # noqa: S108
 
     @property
     def _are_passwords_set(self) -> bool:
-        return all([
+        passes = [
             self.superuser_password,
             self.replication_password,
             self.rewind_password,
-            self.raft_password,
             self.patroni_password,
-        ])
+        ]
+        if self.substrate == Substrates.VM:
+            passes.append(self.raft_password)
+        return all(passes)
 
     @cached_property
     def _patroni_auth(self) -> HTTPBasicAuth | None:
@@ -241,17 +247,17 @@ class Patroni:
 
     def configure_patroni_on_unit(self):
         """Configure Patroni (configuration files and service) on the unit."""
-        os.makedirs(POSTGRESQL_DATA_DIR, exist_ok=True)
+        os.makedirs(POSTGRESQL_DATA_VM_DIR, exist_ok=True)
         # Parent must be _daemon_-owned so Patroni can rename/remove the data dir on reinit.
-        _change_owner(Substrates.VM, os.path.dirname(POSTGRESQL_DATA_DIR))
-        _change_owner(Substrates.VM, POSTGRESQL_DATA_DIR)
+        _change_owner(Substrates.VM, os.path.dirname(POSTGRESQL_DATA_VM_DIR))
+        _change_owner(Substrates.VM, POSTGRESQL_DATA_VM_DIR)
 
         # Create empty base config
-        open(PG_BASE_CONF_PATH, "a").close()
+        open(PG_BASE_CONF_VM_PATH, "a").close()
 
         # Expected permission
         # Replicas refuse to start with the default permissions
-        os.chmod(POSTGRESQL_DATA_DIR, POSTGRESQL_STORAGE_PERMISSIONS)
+        os.chmod(POSTGRESQL_DATA_VM_DIR, POSTGRESQL_STORAGE_PERMISSIONS)
 
     @cached_property
     def cluster_members(self) -> set:
@@ -294,7 +300,7 @@ class Patroni:
         if response := parallel_patroni_get_request(
             f"/{PATRONI_CLUSTER_STATUS_ENDPOINT}",
             endpoints,
-            f"{PATRONI_CONF_PATH}/{TLS_CA_BUNDLE_FILE}",
+            self.verify,
             self._patroni_async_auth,
             verify,
         ):
@@ -735,16 +741,16 @@ class Patroni:
         }
         if self.substrate == Substrates.VM:
             confs.update({
-                "conf_path": PATRONI_CONF_PATH,
-                "log_path": PATRONI_LOGS_PATH,
-                "postgresql_log_path": POSTGRESQL_LOGS_PATH,
-                "data_path": POSTGRESQL_DATA_DIR,
-                "wal_dir": LOGS_DATA_DIR,
+                "conf_path": PATRONI_CONF_VM_PATH,
+                "log_path": PATRONI_LOGS_VM_PATH,
+                "postgresql_log_path": POSTGRESQL_LOGS_VM_PATH,
+                "data_path": POSTGRESQL_DATA_VM_DIR,
+                "wal_dir": LOGS_DATA_VM_DIR,
                 "partner_addrs": self.charm.async_replication.get_partner_addresses()
                 if not no_peers
                 else [],
                 "peers_ips": sorted(self.endpoints) if not no_peers else set(),
-                "pgbackrest_configuration_file": PGBACKREST_CONFIGURATION_FILE,
+                "pgbackrest_configuration_file": PGBACKREST_CONFIGURATION_VM_FILE,
                 "scope": self.cluster_name,
                 "self_ip": self.endpoint,
                 "listen_ips": self.charm.listen_ips,
@@ -753,6 +759,8 @@ class Patroni:
                 if self.charm.watcher_offer.is_active
                 else None,
             })
+            conf_path = f"{PATRONI_CONF_VM_PATH}/patroni.yaml"
+            perms = 0o600
         else:
             confs.update({
                 "endpoint": self.endpoint,
@@ -760,12 +768,14 @@ class Patroni:
                 "is_no_sync_member": is_no_sync_member,
                 "namespace": self.charm._namespace,
                 "storage_path": self.charm._storage_path,
-                "logs_storage_path": LOGS_STORAGE_PATH,
+                "logs_storage_path": LOGS_STORAGE_K8S_PATH,
                 "pgdata_path": self.charm._actual_pgdata_path,
                 "restoring_backup": backup_id is not None or pitr_target is not None,
             })
+            conf_path = f"{self.charm._storage_path}/patroni.yml"
+            perms = 0o644
         rendered = template.render(**confs)
-        render_file(self.substrate, f"{PATRONI_CONF_PATH}/patroni.yaml", rendered, 0o600)
+        render_file(self.substrate, conf_path, rendered, perms)
 
     def start_patroni(self) -> bool:
         """Start Patroni service using snap.
@@ -812,7 +822,7 @@ class Patroni:
         Returns:
             Content of last log file of Postgresql service.
         """
-        log_files = glob.glob(f"{POSTGRESQL_LOGS_PATH}/*.log")
+        log_files = glob.glob(f"{POSTGRESQL_LOGS_VM_PATH}/*.log")
         if len(log_files) == 0:
             return ""
         log_files.sort(reverse=True)
@@ -916,7 +926,7 @@ class Patroni:
 
         logger.info("Removing raft data")
         try:
-            path = Path(f"{PATRONI_CONF_PATH}/raft")
+            path = Path(f"{PATRONI_CONF_VM_PATH}/raft")
             if path.exists() and path.is_dir():
                 shutil.rmtree(path)
         except OSError as e:
