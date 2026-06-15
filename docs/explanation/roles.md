@@ -37,13 +37,6 @@ test123=> SELECT * FROM pg_roles;
  pg_signal_backend           | f        | t          | f             | f           | f           | f              |           -1 | ********    |               | f            |           |  4200
 ```
 
-<!--TODO: check if 16 only:
-pg_checkpoint               | f        | t          | f             | f           | f           | f              |           -1 | ********    |               | f            |           |  4544
-pg_use_reserved_connections | f        | t          | f             | f           | f           | f              |           -1 | ********    |               | f            |           |  4550
-pg_create_subscription      | f        | t          | f             | f           | f           | f              |           -1 | ********    |               | f            |           |  6304
-...
---->
-
 ## Charmed PostgreSQL 14 roles
 
 ```shell
