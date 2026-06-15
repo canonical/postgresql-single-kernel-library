@@ -34,9 +34,9 @@ All revisions of PostgreSQL described below are built for *Ubuntu 24.04 LTS (Nob
 :titlesonly:
 :hidden:
 
-1046-1047
 1088-1089
-843-844
-951-952
+1046-1047
 989-990
+951-952
+843-844
 ```
