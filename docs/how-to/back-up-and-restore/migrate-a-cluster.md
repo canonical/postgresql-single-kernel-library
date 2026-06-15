@@ -35,7 +35,6 @@ Set the password of your current cluster to the previous cluster’s password:
     juju run postgresql/leader set-password username=replication password=<previous cluster password> 
     juju run postgresql/leader set-password username=rewind password=<previous cluster password> 
 ```
-
 ```{tab-item} K8s
 :sync: k8s
 
@@ -44,6 +43,13 @@ Set the password of your current cluster to the previous cluster’s password:
     juju run postgresql-k8s/leader set-password username=rewind password=<previous cluster password>
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
 
 ## List backups
 

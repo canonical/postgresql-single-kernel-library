@@ -15,9 +15,10 @@ myst:
 ## Prerequisites
 
 * A physical or virtual machine running Ubuntu 22.04+
-* Juju 3.6+ installed via snap
+* Juju 2.9+ installed via snap
 * The `Azure interactive` method (with web browser authentication `service-principal-secret-via-browser`) requires an Azure subscription.
   * See: [Azure | Create a subscription](https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/create-subscription) - you will need the Azure subscription ID for Juju.
+* See {ref}`system-requirements`
 
 ---
 

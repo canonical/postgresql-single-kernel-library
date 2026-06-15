@@ -519,6 +519,13 @@ Now that the `data-integrator` charm has been set up, we can relate it to Postgr
 juju integrate data-integrator postgresql
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
+
 Wait for `juju status --watch 1s --relations` to show all applications/units as `active`:
 
 ```text

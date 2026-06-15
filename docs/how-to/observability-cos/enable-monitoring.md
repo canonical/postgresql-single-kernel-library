@@ -109,6 +109,13 @@ Then, integrate it with Charmed PostgreSQL:
 ```
 ````
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
+
 Finally, integrate the Grafana agent with consumed COS offers:
 
 ````{tab-set}
@@ -244,6 +251,13 @@ To connect to the Grafana web interface, follow the [Browse dashboards](https://
 
 ```shell
 juju run grafana/leader get-admin-password --model <cos_k8s_controller>:<cos_model>
+```
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
 ```
 
 Below is a sample screenshot of Charmed PostgreSQL on the Grafana web UI:

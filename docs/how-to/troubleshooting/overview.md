@@ -330,6 +330,13 @@ juju ssh --container postgresql postgresql-k8s/0 bash
 ````
 `````
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 ## Install extra software
 
 We do not recommend in stalling additional software, as it may affect stability and create anomalies that are hard to troubleshoot.

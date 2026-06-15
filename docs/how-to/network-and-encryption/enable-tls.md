@@ -49,6 +49,13 @@ To enable TLS integrate the two applications:
 ```
 ````
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
+
 ## Check certificates in use
 
 To check the certificates in use by PostgreSQL, run
@@ -101,6 +108,13 @@ Apply both private keys to each unit. The shared internal key will be applied on
     juju run postgresql-k8s/2 set-tls-private-key "external-key=$(base64 -w0 external-key-2.pem)"  "internal-key=$(base64 -w0 internal-key.pem)"
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
 
 Updates can also be done with auto-generated keys with
 

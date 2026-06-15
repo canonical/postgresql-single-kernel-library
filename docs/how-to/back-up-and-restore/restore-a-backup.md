@@ -33,13 +33,19 @@ To view the available backups to restore, use the command `list-backups`:
 
     juju run postgresql/leader list-backups
 ```
-
 ```{tab-item} K8s
 :sync: k8s
 
     juju run postgresql-k8s/leader list-backups
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
 
 This should show your available backups like in the sample output below:
 

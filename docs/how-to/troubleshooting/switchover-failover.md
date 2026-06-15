@@ -33,6 +33,13 @@ To switchover the PostgreSQL Primary (write-endpoint) to new Juju unit, use Juju
 ```
 ````
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 Note that:
 * a manual switchover is possible on the healthy {ref}`sync standby unit <units>` only. Otherwise it will be rejected by Patroni with the reason explanation.
 * the [Juju leader](https://documentation.ubuntu.com/juju/3.6/reference/unit/#leader-unit) unit and PostgreSQL primary unit are normally pointing to different [Juju units](https://documentation.ubuntu.com/juju/3.6/reference/unit/). Juju leader failover is fully automated and can be [enforced](https://github.com/canonical/jhack?tab=readme-ov-file#elect) for educational purpose only! Do **not** trigger Juju leader election to move the primary.

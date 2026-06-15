@@ -57,6 +57,13 @@ juju deploy self-signed-certificates
 juju integrate postgresql self-signed-certificates
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
+
 Deploy `pgbouncer` from the `1/stable` channel and configure it with your VIP:
 
 ```shell
@@ -123,6 +130,13 @@ To test the connection to PostgreSQL via TLS, first get the credentials via `dat
 
 ```shell
 juju run data-integrator/leader get-credentials
+```
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
 ```
 
 ```shell

@@ -62,6 +62,13 @@ It is necessary to re-run `pre-upgrade-check` action on the leader unit to enter
 ```
 ````
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 (roll-back)=
 ## Roll back
 

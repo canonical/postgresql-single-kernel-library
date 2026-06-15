@@ -68,6 +68,13 @@ The most up-to-date Primary unit number can be received using Juju action `get-p
 ```
 ````
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 ````{dropdown} We highly recommend configuring the <code>update-status</code> hook to run frequently.
 :open:
 :class-container: dropdown-tip

@@ -13,7 +13,8 @@ myst:
 ## Prerequisites
 
 * A physical or virtual machine running Ubuntu 22.04+
-* Juju 3.6+ installed via snap
+* Juju 2.9+ installed via snap
+* See {ref}`system-requirements`
 
 ---
 

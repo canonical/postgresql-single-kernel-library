@@ -131,8 +131,8 @@ For this example, the current revision is `145`. Store it safely to use in case 
 (prepare-upgrade)=
 ## Prepare
 
-````{tab-set}
-```{tab-item} VM
+`````{tab-set}
+````{tab-item} VM
 :sync: vm
 
 Prepare for the upgrade by checking the cluster health and configuring the charm to minimize primary switchover.
@@ -143,11 +143,18 @@ Before running the [`juju refresh`](https://juju.is/docs/juju/juju-refresh) comm
 
     juju run postgresql/leader pre-upgrade-check
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 Make sure there are no errors in the result output.
 
 This action will configure the charm to minimise the amount of primary switchover, among other preparations for a safe upgrade process. After successful execution, the charm is ready to be upgraded.
-```
-```{tab-item} K8s
+````
+````{tab-item} K8s
 :sync: k8s
 
 Prepare for the upgrade by scaling up by one unit and checking the cluster health.
@@ -172,11 +179,18 @@ Before running the [`juju refresh`](https://juju.is/docs/juju/juju-refresh) comm
 
     juju run postgresql-k8s/leader pre-upgrade-check
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 Make sure there are no errors in the result output.
 
 This action will configure the charm to minimise the amount of primary switchover, among other preparations for a safe upgrade process. After successful execution, the charm is ready to be upgraded.
-```
 ````
+`````
 
 (upgrade)=
 ## Upgrade

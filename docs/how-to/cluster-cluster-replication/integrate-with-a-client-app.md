@@ -61,10 +61,17 @@ If the client application is another charm, deploy them and connect them with `j
     juju deploy postgresql-test-app
     juju deploy pgbouncer-k8s --trust --channel 1/stable
 
-    juju relate postgresql-test-app:first-database pgbouncer-k8s
-    juju relate pgbouncer-k8s db1database
+    juju integrate postgresql-test-app:first-database pgbouncer-k8s
+    juju integrate pgbouncer-k8s db1database
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
 
 ## External client
 
@@ -84,7 +91,6 @@ If the client application is external, they must be integrated via the [`data-in
 
     juju run data-integrator/leader get-credentials
 ```
-
 ```{tab-item} K8s
 :sync: k8s
 
@@ -99,3 +105,10 @@ If the client application is external, they must be integrated via the [`data-in
     juju run data-integrator/leader get-credentials
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```

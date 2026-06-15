@@ -26,6 +26,13 @@ juju deploy data-integrator --config database-name=test-db
 juju integrate postgresql data-integrator
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
+
 Once `juju status` shows the apps as `active` and `idle`, request the credentials for your newly bootstrapped PostgreSQL database:
 
 ```{terminal}

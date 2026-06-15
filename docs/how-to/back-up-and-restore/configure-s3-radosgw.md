@@ -41,6 +41,13 @@ juju deploy s3-integrator --channel=1/stable
 juju run s3-integrator/leader sync-s3-credentials access-key=<access-key> secret-key=<secret-key>
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 Lastly, use `juju config` to add your configuration parameters. For example:
 
 ```shell

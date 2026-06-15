@@ -79,6 +79,13 @@ juju integrate glauth-k8s:certificates self-signed-certificates
 juju integrate glauth-k8s:pg-database postgresql-k8s
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
+
 Deploy the [`glauth-utils` charm](https://charmhub.io/glauth-utils) to manage LDAP users, and integrate it with the GLAuth application:
 
 ```shell

@@ -30,8 +30,6 @@ Charmed PostgreSQL resource allocation can be controlled via the charm's `profil
 * `production`: maximum performance, higher {ref}`hardware requirements <hardware>`
 * `testing`: minimal resource usage, lower {ref}`hardware requirements <hardware>`
 
-See: {ref}`system-profiling`
-
 ## Hardware constraints
 
 The Juju [`--constraints`](https://juju.is/docs/juju/constraint) flag sets RAM and CPU limits for [Juju units](https://juju.is/docs/juju/unit):
@@ -81,6 +79,13 @@ One way to do this is by integrating your PostgreSQL application with the [Postg
 juju run postgresql-test-app/leader start-continuous-writes
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 The expected behaviour is:
 * `postgresql-test-app` will continuously insert records into the database received through the integration (the table `continuous_writes`).
 * The counters (amount of records in table) will grow on all cluster members
@@ -123,6 +128,13 @@ The expected behaviour is:
     juju run postgresql-test-app/leader show-continuous-writes
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
 
 To stop the "continuous write" test, run
 

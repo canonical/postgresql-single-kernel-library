@@ -1,5 +1,4 @@
 ---
-relatedlinks: "[Charmhub&#32;|&#32;PostgreSQL&#32;VM](https://charmhub.io/postgresql?channel=14/stable), [Charmhub&#32;|&#32;PostgreSQL&#32;K8s](https://charmhub.io/postgresql-k8s?channel=14/stable)"
 myst:
   html_meta:
     description: "Understand the architecture of Charmed PostgreSQL for VM and Kubernetes deployments, including the charm design and services running inside the snap and rock.

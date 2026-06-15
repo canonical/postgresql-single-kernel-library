@@ -100,6 +100,13 @@ Then, integrate Grafana Agent with Charmed PostgreSQL:
 ```
 ````
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
+
 Finally, integrate Grafana Agent with the consumed interface from the previous section:
 
 ````{tab-set}

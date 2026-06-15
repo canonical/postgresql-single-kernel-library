@@ -46,6 +46,13 @@ To remove the integration, run
 ```
 ````
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
+
 {{seealso}} [All compatible charms](https://charmhub.io/integrations/postgresql_client)
 
 ### Legacy `pgsql` interface
@@ -107,6 +114,13 @@ Use the `get-credentials` action to retrieve credentials from `data-integrator`:
 
 ```shell
 juju run data-integrator/leader get-credentials
+```
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
 ```
 
 {{seealso}} {ref}`manage-passwords` for information about credentials, such as password rotation.

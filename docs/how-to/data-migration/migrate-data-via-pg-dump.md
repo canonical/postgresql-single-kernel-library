@@ -94,6 +94,13 @@ NEW_DB_USER=operator
 NEW_DB_PASS=$(juju run ${NEW_DB_APP} get-password | yq '.password')
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 ## Migrate database
 
 Use the credentials and information obtained in previous steps to perform the database migration with the following procedure.
@@ -188,6 +195,13 @@ Integrate your application and new PostgreSQL database charm using the modern `d
 
 ```shell
 juju integrate ${CLIENT_APP} ${NEW_DB_APP}:database
+```
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
 ```
 
 If the `database` endpoint (from the `postgresql_client` interface) is not yet supported, use instead the `db` endpoint from the legacy `pgsql` interface:

@@ -39,6 +39,13 @@ juju config s3-integrator \
     region="us-west-2"
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 There is an experimental configuration option that sets up a retention time (in days) for backups stored in S3: [`experimental-delete-older-than-days`](https://charmhub.io/s3-integrator/configuration?channel=latest/edge#experimental-delete-older-than-days). 
 
 See: {ref}`manage-backup-retention`.
@@ -63,13 +70,19 @@ To pass these configurations to Charmed PostgreSQL, integrate the two applicatio
 
     juju integrate s3-integrator postgresql
 ```
-
 ```{tab-item} K8s
 :sync: k8s
 
     juju integrate s3-integrator postgresql-k8s
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
 
 You can create, list, and restore backups now:
 
@@ -82,7 +95,6 @@ You can create, list, and restore backups now:
     juju run postgresql/leader list-backups
     juju run postgresql/leader restore backup-id=<backup-id>
 ```
-
 ```{tab-item} K8s
 :sync: k8s
 

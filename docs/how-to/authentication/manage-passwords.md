@@ -27,6 +27,13 @@ To retrieve the operator's password:
 ```
 ````
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 ## Set password
 
 To change the operator's password to a new, randomised password:
@@ -93,5 +100,12 @@ To rotate the passwords of users created for integrated applications, the integr
     juju integrate <application> postgresql-k8s
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
 
 In the case of connecting with a non-charmed application, `<application>` would be `data-integrator`.

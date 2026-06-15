@@ -110,6 +110,13 @@ juju deploy parca-agent --channel latest/edge
 juju integrate postgresql parca-agent
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
+
 #### 4. Integrate `parca-agent` with `parca-k8s`
 
 Consume the Parca offer from [Step 2](#parca-offer-interfaces) and integrate with them:

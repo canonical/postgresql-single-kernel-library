@@ -21,6 +21,13 @@ juju deploy s3-integrator
 juju run s3-integrator/leader sync-s3-credentials access-key=<access-key-here> secret-key=<secret-key-here>
 ```
 
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
 Then, use `experimental-delete-older-than-days` to configure the desired retention time in days.
 
 ```{dropdown} This is an experimental parameter; use it with caution.
@@ -43,13 +50,19 @@ To pass these configurations to a Charmed PostgreSQL application, integrate the 
 
     juju integrate s3-integrator postgresql
 ```
-
 ```{tab-item} K8s
 :sync: k8s
 
     juju integrate s3-integrator postgresql-k8s
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
+```
 
 To remove this option at any time, the configuration can be erased from the charm:
 

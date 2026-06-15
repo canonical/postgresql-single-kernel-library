@@ -35,7 +35,6 @@ You can retrieve them with:
     juju run postgresql/leader get-password username=replication
     juju run postgresql/leader get-password username=rewind
 ```
-
 ```{tab-item} K8s
 :sync: k8s
 
@@ -44,6 +43,13 @@ You can retrieve them with:
     juju run postgresql-k8s/leader get-password username=rewind
 ```
 ````
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
 
 {{seealso}} {ref}`manage-passwords` and {ref}`migrate-a-cluster`.
 
