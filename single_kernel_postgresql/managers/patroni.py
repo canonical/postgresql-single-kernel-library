@@ -23,7 +23,7 @@ from single_kernel_postgresql.config.literals import (
     RUNNING_STATES,
     TLS_CA_BUNDLE_FILE,
 )
-from single_kernel_postgresql.config.statuses import GeneralStatuses, PatroniStatuses
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
@@ -82,7 +82,8 @@ class PatroniManager(BaseManager):
 
     def get_patroni_health(self) -> dict[str, str]:
         """Gets, retires and parses the Patroni health endpoint."""
-        for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(7)):
+        # TODO: Revert stop after delay to 60 and wait fixed to 7 after testing
+        for attempt in Retrying(stop=stop_after_delay(1), wait=wait_fixed(1)):
             with attempt:
                 r = requests.get(
                     f"{self.state.patroni_url}/health",
@@ -103,6 +104,6 @@ class PatroniManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
-        if self.workload.workload_present and self.state.substrate == Substrates.VM and not self.member_started:
-            return [PatroniStatuses.WAITING_MEMBER_START.value]
+        # if self.workload.workload_present and self.state.substrate == Substrates.VM and not self.member_started:
+        #    return [PatroniStatuses.WAITING_MEMBER_START.value]
         return [GeneralStatuses.ACTIVE_IDLE.value]

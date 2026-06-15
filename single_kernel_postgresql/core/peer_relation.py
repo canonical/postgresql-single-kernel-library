@@ -10,7 +10,14 @@ import json
 from ops import Application, BlockedStatus, Relation, Unit
 
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import MONITORING_PASSWORD_KEY, PATRONI_PASSWORD_KEY, RAFT_PASSWORD_KEY, REPLICATION_PASSWORD_KEY, REWIND_PASSWORD_KEY, USER_PASSWORD_KEY
+from single_kernel_postgresql.config.literals import (
+    MONITORING_PASSWORD_KEY,
+    PATRONI_PASSWORD_KEY,
+    RAFT_PASSWORD_KEY,
+    REPLICATION_PASSWORD_KEY,
+    REWIND_PASSWORD_KEY,
+    USER_PASSWORD_KEY,
+)
 from single_kernel_postgresql.core.relation_state import RelationState
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DataPeerData,

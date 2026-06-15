@@ -108,32 +108,43 @@ class ClusterManager(BaseManager):
         except ModelError:
             logger.exception("failed to open port")
 
-    @property
-    def can_connect_to_postgresql(self) -> bool:
+    def can_connect_to_postgresql(self, retry: bool = True) -> bool:
         """Whether the local PostgreSQL instance is reachable and responding."""
         if not self.postgresql_client.password or not self.postgresql_client.current_host:
             return False
+
+        def _check_connection():
+            try:
+                if not self.postgresql_client.get_postgresql_timezones():
+                    logger.debug("Cannot connect to database (CannotConnectError)")
+                    raise PostgreSQLCannotConnectError
+            except Exception as e:
+                logger.debug("Error occurred while checking connection: %s", e)
+                raise PostgreSQLCannotConnectError from e
+
         try:
-            for attempt in Retrying(stop=stop_after_delay(10), wait=wait_fixed(3)):
-                with attempt:
-                    if not self.postgresql_client.get_postgresql_timezones():
-                        logger.debug("Cannot connect to database (CannotConnectError)")
-                        raise PostgreSQLCannotConnectError
-        except RetryError:
+            if retry:
+                for attempt in Retrying(stop=stop_after_delay(10), wait=wait_fixed(3)):
+                    with attempt:
+                        _check_connection()
+            else:
+                _check_connection()
+        except (RetryError, PostgreSQLCannotConnectError):
             logger.debug("Cannot connect to database (RetryError)")
             return False
+
         return True
 
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
+        if not self.workload.workload_present:
+            return [GeneralStatuses.MAINTAINENANCE_INSTALLING.value]
         if (
             not self.state.application.user_password
             or not self.state.application.replication_password
         ):
             return [GeneralStatuses.WAITING_PASSWORDS_GENERATION.value]
 
-        if not self.can_connect_to_postgresql:
-            return [GeneralStatuses.WAITING_DATABASE_TO_START.value]
         return [GeneralStatuses.ACTIVE_IDLE.value]

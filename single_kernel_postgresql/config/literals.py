@@ -30,7 +30,7 @@ SNAP_DATA = "current"
 SNAP_COMMON = "common"
 SNAP = "/snap/charmed-postgresql/current"
 VM_LOGS_PATH = "var/log/postgresql"
-VM_DATA_PATH = "var/lib/postgresql" 
+VM_DATA_PATH = "var/lib/postgresql"
 
 ## K8s Paths
 K8S_DATA_PATH = "var/lib/pg/data"

@@ -82,7 +82,6 @@ class PostgreSQLEventsHandler(Object):
             scope="unit",
             component=self.cluster_manager.name,
         )
-        # Install the charmed PostgreSQL snap.
         self.cluster_manager.install_workload()
 
         self.state.remove_status_if_present(
@@ -157,7 +156,7 @@ class PostgreSQLEventsHandler(Object):
 
         # Assert the member is up and running before marking it as initialised.
         if not self.patroni_manager.member_started:
-            logger.debug("Deferring on_start: awaiting for member to start")
+            logger.debug("Deferring on_pebble_ready: awaiting for member to start")
             event.defer()
             return
 
@@ -177,12 +176,10 @@ class PostgreSQLEventsHandler(Object):
 
         self.tls_manager.configure_internal_peer_ca()
 
-        self.config_manager.update_config()
+        if self.charm.substrate == Substrates.VM:
+            self.config_manager.update_config()
 
-
-        # TODO: Add next steps of leader elected 
-
-    
+        # TODO: Add next steps of leader elected
 
     def _can_start(self, event: StartEvent) -> bool:
         """Returns whether the workload can be started on this unit."""
@@ -201,7 +198,7 @@ class PostgreSQLEventsHandler(Object):
         return True
 
     def _start_primary(self, event: StartEvent) -> None:
-        """Bootstrap the cluster."""
+        """Bootstrap the cluster on VM."""
         # Set some information needed by Patroni to bootstrap the cluster.
         self.config_manager.configure_patroni_on_unit()
 
@@ -213,16 +210,7 @@ class PostgreSQLEventsHandler(Object):
             )
             return
 
-        # Assert the member is up and running before marking it as initialised.
-        if not self.patroni_manager.member_started:
-            logger.debug("Deferring on_start: awaiting for member to start")
-            event.defer()
-            return
-
-        if not self.cluster_manager.can_connect_to_postgresql:
-            logger.debug("Deferring on_start: awaiting for database to start")
-            event.defer()
-            return
+        # TODO: Assert the member is up and running before marking it as initialised.
 
         # TODO: Check primary endpoint
 

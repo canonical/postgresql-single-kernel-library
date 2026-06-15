@@ -8,11 +8,13 @@ Responsible for managing the configuration of the PostgreSQL instance.
 """
 
 import logging
-from jinja2 import Template
 
+import charm_refresh
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from jinja2 import Template
 
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     POSTGRESQL_STORAGE_PERMISSIONS,
     USER,
@@ -20,11 +22,9 @@ from single_kernel_postgresql.config.literals import (
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
-from single_kernel_postgresql.utils import _change_owner
+from single_kernel_postgresql.utils import _change_owner, render_file
 from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.utils import render_file
-import charm_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +47,10 @@ class ConfigManager(BaseManager):
 
         # Expected permission
         # Replicas refuse to start with the default permissions
-        self.workload.mkdir(self.workload.paths.data, mode=POSTGRESQL_STORAGE_PERMISSIONS, exist_ok=True)
+        self.workload.mkdir(
+            self.workload.paths.data, mode=POSTGRESQL_STORAGE_PERMISSIONS, exist_ok=True
+        )
 
-    
     def _build_postgresql_parameters(self) -> dict[str, str] | None:
         """Build PostgreSQL configuration parameters.
 
@@ -68,7 +69,6 @@ class ConfigManager(BaseManager):
         # Calculate and merge worker process configurations
         # TODO: Add additional parameters
 
-
         return pg_parameters
 
     def update_config(
@@ -79,9 +79,8 @@ class ConfigManager(BaseManager):
         refresh: charm_refresh.Machines | None = None,
     ) -> bool:
         """Updates Patroni config file based on the existence of the TLS files."""
-
-        #if refresh is None:
-            #refresh = self.refresh
+        # if refresh is None:
+        # refresh = self.refresh
 
         # Build PostgreSQL parameters
         pg_parameters = self._build_postgresql_parameters()
@@ -143,7 +142,7 @@ class ConfigManager(BaseManager):
             template = Template(file.read())
 
         # TODO: configure LDAP
-        #ldap_params = self.charm.get_ldap_parameters()
+        # ldap_params = self.charm.get_ldap_parameters()
 
         # Render the template file with the correct values.
         rendered = template.render(
@@ -172,7 +171,9 @@ class ConfigManager(BaseManager):
             slots=slots,
             instance_password_encryption=self.state.config.instance_password_encryption,
         )
-        render_file(Substrates.VM, f"{self.workload.paths.patroni_conf}/patroni.yaml", rendered, 0o600)
+        render_file(
+            Substrates.VM, f"{self.workload.paths.patroni_conf}/patroni.yaml", rendered, 0o600
+        )
 
     @property
     def _are_passwords_set(self) -> bool:
@@ -183,7 +184,6 @@ class ConfigManager(BaseManager):
             self.state.application.raft_password,
             self.state.application.patroni_password,
         ])
-
 
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False

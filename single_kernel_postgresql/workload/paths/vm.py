@@ -3,18 +3,18 @@
 """PostgreSQL Machine Paths."""
 
 from charmlibs.pathops import PathProtocol
-from single_kernel_postgresql.workload.paths.base import Paths
-from single_kernel_postgresql.config.literals import BASE_SNAP_DIR, PATRONI_LOGS_PATH, SNAP_DATA, SNAP_COMMON, SNAP, VM_DATA_PATH, POSTGRESQL_CONF_FILE, POSTGRESQL_CONF_PATH, PATRONI_CONF_PATH, VM_LOGS_PATH
 
 from single_kernel_postgresql.config.literals import (
     BASE_SNAP_DIR,
     PATRONI_CONF_PATH,
+    PATRONI_LOGS_PATH,
     POSTGRESQL_CONF_FILE,
     POSTGRESQL_CONF_PATH,
     SNAP,
     SNAP_COMMON,
     SNAP_DATA,
     VM_DATA_PATH,
+    VM_LOGS_PATH,
 )
 from single_kernel_postgresql.workload.paths.base import Paths
 

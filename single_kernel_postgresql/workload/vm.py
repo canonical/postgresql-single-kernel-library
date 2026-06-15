@@ -92,8 +92,6 @@ class VMWorkload(BaseWorkload):
             )
             raise
 
-
-
     def start_patroni(self) -> bool:
         """Start Patroni service using snap.
 
@@ -216,7 +214,7 @@ class VMWorkload(BaseWorkload):
             return cache[charm_refresh.snap_name()].present
         except snap.SnapError:
             return False
- 
+
     def get_available_memory(self) -> int:
         """Returns the system available memory in bytes."""
         with open("/proc/meminfo") as meminfo:
@@ -225,4 +223,3 @@ class VMWorkload(BaseWorkload):
                     return int(line.split()[1]) * 1024
 
         return 0
-

@@ -4,14 +4,14 @@
 
 """Base interface for common workload operations."""
 
+import pathlib
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-import pathlib
-import tomli
 
+import tomli
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from ops import ModelError
@@ -238,5 +238,3 @@ class BaseWorkload(ABC):
     def get_available_memory(self) -> int:
         """Returns the system available memory in bytes."""
         pass
-
-

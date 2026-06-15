@@ -7,14 +7,11 @@ from charmlibs.pathops import PathProtocol
 from single_kernel_postgresql.config.literals import (
     K8S_DATA_PATH,
     PATRONI_CONF_PATH,
+    PATRONI_LOGS_PATH,
     POSTGRESQL_CONF_FILE,
     POSTGRESQL_CONF_PATH,
 )
 from single_kernel_postgresql.workload.paths.base import Paths
-<<<<<<< Updated upstream
-=======
-from single_kernel_postgresql.config.literals import PATRONI_LOGS_PATH, POSTGRESQL_CONF_FILE, POSTGRESQL_CONF_PATH, K8S_DATA_PATH, PATRONI_CONF_PATH 
->>>>>>> Stashed changes
 
 
 class K8sPaths(Paths):
@@ -58,9 +55,9 @@ class K8sPaths(Paths):
     @property
     def patroni_conf(self) -> PathProtocol:
         """Path to the patroni configuration file."""
-        return self.conf / PATRONI_CONF_PATH 
+        return self.conf / PATRONI_CONF_PATH
 
     @property
     def patroni_logs(self) -> PathProtocol:
         """Path to the patroni logs."""
-        return self.logs / PATRONI_LOGS_PATH 
+        return self.logs / PATRONI_LOGS_PATH

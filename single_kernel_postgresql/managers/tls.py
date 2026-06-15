@@ -21,8 +21,6 @@ from charmlibs.interfaces.tls_certificates import (
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
-from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.config.exceptions import TlsError
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,

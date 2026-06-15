@@ -6,14 +6,12 @@
 
 import re
 import socket
-from ops import Object, Relation, Unit, JujuVersion, ModelError, SecretNotFoundError, ConfigData
-from typing import TYPE_CHECKING, Any, get_args
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, get_args
 
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from ops import JujuVersion, ModelError, Object, Relation, SecretNotFoundError, Unit
+from ops import ConfigData, JujuVersion, ModelError, Object, Relation, SecretNotFoundError, Unit
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
@@ -69,7 +67,7 @@ class CharmState(Object):
         return CharmConfig(**config)
 
     @property
-    def model_config(self)-> ConfigData:
+    def model_config(self) -> ConfigData:
         """Returns the model config."""
         return self.model.config
 
@@ -232,8 +230,7 @@ class CharmState(Object):
         # TODO: Add other ips
         return ips
 
-
-    # -- Secrets 
+    # -- Secrets
     # TODO: This is temporary till data interfaces v1 is integrated
     def get_secret(self, scope: SCOPES, key: str) -> str | None:
         """Get secret from the secret storage."""

@@ -197,7 +197,7 @@ class K8sWorkload(BaseWorkload):
             return container.can_connect()
         except (RuntimeError, ModelError):
             return False
- 
+
     def get_available_memory(self) -> int:
         """Returns the system available memory in bytes."""
         raise NotImplementedError
