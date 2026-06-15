@@ -6,6 +6,8 @@
 
 import re
 import socket
+from ops import Object, Relation, Unit, JujuVersion, ModelError, SecretNotFoundError, ConfigData
+from typing import TYPE_CHECKING, Any, get_args
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, get_args
 
@@ -65,6 +67,11 @@ class CharmState(Object):
             config_option: value for config_option, value in config.items() if value is not None
         }
         return CharmConfig(**config)
+
+    @property
+    def model_config(self)-> ConfigData:
+        """Returns the model config."""
+        return self.model.config
 
     # -- Relations
     @property
@@ -211,7 +218,22 @@ class CharmState(Object):
         """Return the common name for the internally generated peer certificate."""
         return self.peer.database_peers_address or self.host
 
-    # -- Secrets
+    @property
+    def listen_ips(self) -> list[str]:
+        """Return the IPs to listen on.
+
+        This is used to configure the PostgreSQL server.
+        Peer relation IP must be first in list.
+        ref.: https://patroni.readthedocs.io/en/latest/yaml_configuration.html#postgresql
+        """
+        ips = []
+        if self.unit_ip:
+            ips.append(self.unit_ip)
+        # TODO: Add other ips
+        return ips
+
+
+    # -- Secrets 
     # TODO: This is temporary till data interfaces v1 is integrated
     def get_secret(self, scope: SCOPES, key: str) -> str | None:
         """Get secret from the secret storage."""

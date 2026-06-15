@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
-from ops import Container
+from ops import Container, ModelError
 from ops.pebble import Plan
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
@@ -187,5 +187,17 @@ class K8sWorkload(BaseWorkload):
 
     @property
     def workload_present(self) -> bool:
-        """Flag to check if workload is present and ready."""
+        """Check if the container is ready and connected.
+
+        Returns:
+            bool: True if container is ready and can connect, False otherwise.
+        """
+        try:
+            container = self.container
+            return container.can_connect()
+        except (RuntimeError, ModelError):
+            return False
+ 
+    def get_available_memory(self) -> int:
+        """Returns the system available memory in bytes."""
         raise NotImplementedError

@@ -9,6 +9,8 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+import pathlib
+import tomli
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
@@ -226,3 +228,15 @@ class BaseWorkload(ABC):
     def get_workload_version(self) -> str:
         """Get the workload version."""
         raise NotImplementedError
+
+    def get_postgresql_version(self) -> str:
+        """Return the PostgreSQL version from the system."""
+        with pathlib.Path("refresh_versions.toml").open("rb") as file:
+            return tomli.load(file)["workload"]
+
+    @abstractmethod
+    def get_available_memory(self) -> int:
+        """Returns the system available memory in bytes."""
+        pass
+
+

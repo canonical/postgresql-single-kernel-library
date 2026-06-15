@@ -103,6 +103,6 @@ class PatroniManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
-        if not self.member_started:
+        if self.workload.workload_present and self.state.substrate == Substrates.VM and not self.member_started:
             return [PatroniStatuses.WAITING_MEMBER_START.value]
         return [GeneralStatuses.ACTIVE_IDLE.value]

@@ -92,6 +92,8 @@ class VMWorkload(BaseWorkload):
             )
             raise
 
+
+
     def start_patroni(self) -> bool:
         """Start Patroni service using snap.
 
@@ -208,4 +210,19 @@ class VMWorkload(BaseWorkload):
     @property
     def workload_present(self) -> bool:
         """Flag to check if workload is present and ready."""
-        raise NotImplementedError
+        # check if snap is installed as an indicator of workload presence
+        cache = snap.SnapCache()
+        try:
+            return cache[charm_refresh.snap_name()].present
+        except snap.SnapError:
+            return False
+ 
+    def get_available_memory(self) -> int:
+        """Returns the system available memory in bytes."""
+        with open("/proc/meminfo") as meminfo:
+            for line in meminfo:
+                if "MemTotal" in line:
+                    return int(line.split()[1]) * 1024
+
+        return 0
+

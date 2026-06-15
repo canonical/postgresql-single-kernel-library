@@ -10,12 +10,7 @@ import json
 from ops import Application, BlockedStatus, Relation, Unit
 
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import (
-    MONITORING_PASSWORD_KEY,
-    PATRONI_PASSWORD_KEY,
-    REPLICATION_PASSWORD_KEY,
-    USER_PASSWORD_KEY,
-)
+from single_kernel_postgresql.config.literals import MONITORING_PASSWORD_KEY, PATRONI_PASSWORD_KEY, RAFT_PASSWORD_KEY, REPLICATION_PASSWORD_KEY, REWIND_PASSWORD_KEY, USER_PASSWORD_KEY
 from single_kernel_postgresql.core.relation_state import RelationState
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DataPeerData,
@@ -237,6 +232,27 @@ class PostgreSQLApplication(RelationState):
             password has not yet been set by the leader.
         """
         return self.get_secret(PATRONI_PASSWORD_KEY)
+
+    # rewind-password
+    @property
+    def rewind_password(self) -> str | None:
+        """Get rewind user password.
+
+        Returns:
+            The password from the peer relation or None if the
+            password has not yet been set by the leader.
+        """
+        return self.get_secret(REWIND_PASSWORD_KEY)
+
+    @property
+    def raft_password(self) -> str | None:
+        """Get raft user password.
+
+        Returns:
+            The password from the peer relation or None if the
+            password has not yet been set by the leader.
+        """
+        return self.get_secret(RAFT_PASSWORD_KEY)
 
     @property
     def internal_ca(self) -> str | None:

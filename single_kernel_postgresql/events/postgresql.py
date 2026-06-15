@@ -177,7 +177,12 @@ class PostgreSQLEventsHandler(Object):
 
         self.tls_manager.configure_internal_peer_ca()
 
-        # TODO: Add next steps of leader elected
+        self.config_manager.update_config()
+
+
+        # TODO: Add next steps of leader elected 
+
+    
 
     def _can_start(self, event: StartEvent) -> bool:
         """Returns whether the workload can be started on this unit."""
