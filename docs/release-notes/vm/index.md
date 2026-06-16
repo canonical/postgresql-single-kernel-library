@@ -24,6 +24,7 @@ All revisions of PostgreSQL described below are built for *Ubuntu 24.04 LTS (Nob
 
 | Charmhub revision</br>(amd, arm)  | Snap revision</br>(amd, arm) | PostgreSQL version | Minimum Juju version |
 |:---------------------------------:|:------------------------:|:------------------:|:--------------------:|
+| {ref}`1158, 1157 <rev-1157-1158>` |         366, 365         |        16.14       |         3.6.21      |
 | {ref}`1088, 1089 <rev-1088-1089>` |         282, 283         |        16.13       |         3.6.21      |
 | {ref}`1047, 1046 <rev-1046-1047>` |         244, 242         |        16.11       |         3.6.14      |
 | {ref}`990, 989 <rev-989-990>`     |         244, 242         |        16.11       |         3.6.1      |
@@ -34,6 +35,7 @@ All revisions of PostgreSQL described below are built for *Ubuntu 24.04 LTS (Nob
 :titlesonly:
 :hidden:
 
+1157-1158
 1088-1089
 1046-1047
 989-990
