@@ -103,6 +103,8 @@ Numpy
 Open Graph
 openapi
 optimizer*
+Otel
+Otelcol
 otf
 Parca
 Parca's
@@ -116,6 +118,7 @@ pgbackrest
 pgBackRest
 pgbouncer
 Pgbouncer*
+pgdata
 pgsql
 PITR
 plantuml
@@ -130,6 +133,7 @@ PR
 preconfigured
 programmatically
 PSC
+psql
 PVCs
 py
 Pygments
@@ -141,6 +145,8 @@ Read the Docs
 readthedocs
 redeclare
 rediraffe
+reinit
+repo
 requirer
 rerediraffe
 reStructuredText
@@ -154,6 +160,7 @@ scalable
 SCons
 sdk
 sequenceDiagram
+setpriv
 SHA
 sitemapindex
 snap
@@ -173,6 +180,7 @@ subproject
 SVG
 Sysbench
 systemd
+tablespace
 terraform
 tex
 texlive
@@ -186,6 +194,7 @@ ubuntu
 ulwazi
 uncomment(ing)?
 uncordon
+URI(s)?
 URL
 utils
 uv

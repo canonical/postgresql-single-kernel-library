@@ -99,4 +99,4 @@ juju deploy postgresql-k8s --channel 16/stable --trust
 
 ---
 
-{octicon}`arrow-right` For more information, see the [official Canonical Kubernes documentation](https://documentation.ubuntu.com/canonical-kubernetes/)
+{octicon}`arrow-right` For more information, see the [official Canonical Kubernetes documentation](https://documentation.ubuntu.com/canonical-kubernetes/)
