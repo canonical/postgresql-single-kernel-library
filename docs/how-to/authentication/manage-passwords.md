@@ -85,6 +85,7 @@ In this example,
 
 To rotate the passwords of users created for integrated applications, the integration should be removed and integrated again. This process will generate a new user and password for the application.
 
+(request-a-custom-username)=
 ## Request a custom username
 
 Charms can request a custom username to be used in their relation with PostgreSQL 16.

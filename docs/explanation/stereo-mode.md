@@ -65,4 +65,4 @@ A watcher in the same availability zone (AZ) as a database unit provides little 
 
 * {ref}`deploy-stereo-mode` — deploy a stereo-mode cluster step by step.
 * {ref}`architecture` — the standard Charmed PostgreSQL architecture.
-* {ref}`scale-replicas` — scaling a standard cluster up and down.
+* {ref}`scale-cluster` — scaling a standard cluster up and down.
