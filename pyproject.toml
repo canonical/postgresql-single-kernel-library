@@ -18,12 +18,12 @@ classifiers = [
 requires-python = ">=3.8,<4.0"
 dependencies = [
     "ops>=2.0.0",
-    "psycopg2>=2.9.10",
     "tenacity>=9.0.0",
 ]
 
 [project.optional-dependencies]
 postgresql = [
+    "psycopg2>=2.9.10",
     "httpx; python_version >= '3.12'",
     "data-platform-helpers>=0.1.7; python_version >= '3.12'",
     "charmlibs-pathops>=1.0.1; python_version >= '3.12'",
