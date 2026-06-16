@@ -488,6 +488,21 @@ ops = "*"
 pydantic = "*"
 
 [[package]]
+name = "charmlibs-pathops"
+version = "1.3.0"
+description = "A pathlib-like interface for Juju K8s charms to interact with files in their workload container."
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "charmlibs_pathops-1.3.0-py3-none-any.whl", hash = "sha256:4abe7591f2c0259bd1f72c9a9f7b662bb8b818821083b7ea53f22ff4fd6fa3e0"},
+    {file = "charmlibs_pathops-1.3.0.tar.gz", hash = "sha256:270c2675193576f43dc4da83be38af4b569f381b688ae3cf6da3bf3a6284c578"},
+]
+
+[package.dependencies]
+ops = ">=2.19,<4"
+
+[[package]]
 name = "charmlibs-snap"
 version = "1.0.1"
 description = "The charmlibs.snap package."
@@ -884,24 +899,24 @@ ssh = ["bcrypt (>=3.1.5)"]
 
 [[package]]
 name = "data-platform-helpers"
-version = "1.0.1"
+version = "0.1.7"
 description = ""
 optional = false
 python-versions = "<4.0,>=3.10"
 groups = ["main"]
 files = [
-    {file = "data_platform_helpers-1.0.1-py3-none-any.whl", hash = "sha256:21ef9c3cc62c19648a1ca742e962d1a3ed361dd97bf60f4c20e3d16228df74d4"},
-    {file = "data_platform_helpers-1.0.1.tar.gz", hash = "sha256:eb1d8350dc4a6c3670237dfaec3c53433ff42c757cfba3bed92e35c2779a7447"},
+    {file = "data_platform_helpers-0.1.7-py3-none-any.whl", hash = "sha256:cf01caef414a4c07911ecf2c009c19b8f69cae154b540dd578ddbe2af8fd3b98"},
+    {file = "data_platform_helpers-0.1.7.tar.gz", hash = "sha256:04445f3f4309730bb1c569a04464caeb27390b0d6e07829d09dacd8882fcfcd1"},
 ]
 
 [package.dependencies]
-ops = ">=3,<4"
-pydantic = ">=2.11,<3"
+ops = ">=2.15.0"
+pydantic = ">=2.0"
 rich = "*"
 
 [package.extras]
-all = ["pytest-operator"]
-tests = ["pytest-operator"]
+all = ["pytest_operator (==0.36.0)"]
+tests = ["pytest_operator (==0.36.0)"]
 
 [[package]]
 name = "decorator"
@@ -1858,13 +1873,12 @@ files = []
 develop = false
 
 [package.dependencies]
-data-platform-helpers = ">=0.1.7"
 ops = ">=2.0.0"
 psycopg2 = ">=2.9.10"
 tenacity = ">=9.0.0"
 
 [package.extras]
-postgresql = ["httpx ; python_version >= \"3.12\""]
+postgresql = ["charm-refresh ; python_version >= \"3.12\"", "charmlibs-interfaces-tls-certificates (>=1.8.3) ; python_version >= \"3.12\"", "charmlibs-pathops (>=1.0.1) ; python_version >= \"3.12\"", "charmlibs-rollingops (>=1.1.1) ; python_version >= \"3.12\"", "charmlibs-snap (>=1.0.1) ; python_version >= \"3.12\"", "data-platform-helpers (>=0.1.7) ; python_version >= \"3.12\"", "httpx ; python_version >= \"3.12\"", "pydantic (>=2.0) ; python_version >= \"3.12\"", "requests ; python_version >= \"3.12\"", "tomli ; python_version >= \"3.12\""]
 
 [package.source]
 type = "directory"
@@ -3140,4 +3154,4 @@ h11 = ">=0.16.0,<1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "f8a541a0284c08be3d2f3b9fb18acccd7f25f3f37692175103ecbbb8bb47d33d"
+content-hash = "e2ae8686439064f90fb8334b91516899fd25c47546e0a228ba25dcb35add6de1"
