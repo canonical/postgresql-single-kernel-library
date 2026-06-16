@@ -43,7 +43,7 @@ To report an issue in spelling, grammar, or technical content, file an issue on 
 
 To make a quick update yourself, the easiest way is to click the pencil icon in the top-right corner of the documentation page (next to the "Give feedback" button). It will take you to the GitHub web editor for that page, and you can submit the PR directly through the web interface.
 
-```{dropdown} Documentation branch
+```{dropdown} Merge against <code>14/docs</code>
 :open:
 :class-container: dropdown-caution
 :icon: alert-fill
