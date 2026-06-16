@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, NonNegativeInt, PositiveInt
 
-from single_kernel_postgresql.config.locales import SNAP_LOCALES
+from single_kernel_postgresql.config.locales import K8S_LOCALES, SNAP_LOCALES
 from single_kernel_postgresql.lib.charms.data_platform_libs.v1.data_models import BaseConfigModel
 
 logger = logging.getLogger(__name__)
@@ -252,3 +252,15 @@ class CharmConfig(BaseConfigModel):
     def plugin_keys(cls) -> filter:
         """Return plugin config names in a iterable."""
         return filter(lambda x: x.startswith("plugin_"), cls.keys())
+
+
+class K8SCharmConfig(CharmConfig):
+    """Structured configuration for the K8s charm.
+
+    Identical to :class:`CharmConfig`, but the locale options also accept the two
+    locales the K8s rock provides and the VM snap does not (``C.utf8``, ``POSIX``).
+    """
+
+    response_lc_monetary: K8S_LOCALES | None = Field(default=None)
+    response_lc_numeric: K8S_LOCALES | None = Field(default=None)
+    response_lc_time: K8S_LOCALES | None = Field(default=None)
