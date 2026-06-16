@@ -50,3 +50,21 @@ class Paths(ABC):
     def tmp(self) -> PathProtocol:
         """Path to the temporary directory."""
         pass
+
+    @property
+    @abstractmethod
+    def postgresql_conf(self) -> PathProtocol:
+        """Path to the postgresql.conf file."""
+        pass
+
+    @property
+    @abstractmethod
+    def patroni_conf(self) -> PathProtocol:
+        """Path to the patroni config."""
+        pass
+
+    @property
+    @abstractmethod
+    def patroni_logs(self) -> PathProtocol:
+        """Path to the patroni logs."""
+        pass
