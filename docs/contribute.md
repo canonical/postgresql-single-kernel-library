@@ -1,3 +1,9 @@
+---
+orphan: True
+---
+
+<!-- WIP -->
+
 (contribute)=
 # Contribute
 
@@ -61,4 +67,18 @@ More information about the cautionary message
 :icon: no-entry-fill
 
 More information about the important message
+```
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju run <action name>` becomes `juju run-action <action name> --wait` for Juju 2.9.
+```
+
+```{dropdown} Juju 2.9 users
+:class-container: dropdown-note
+:icon: info
+
+Remember that `juju integrate` becomes `juju relate` for Juju 2.9.
 ```

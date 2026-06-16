@@ -41,8 +41,10 @@ docstrings?
 dvipng
 eks
 EKS
+enablement
 entrypoint
 failover
+failsafe
 filesystem
 filesystems
 fonts
@@ -84,9 +86,11 @@ lastmod
 LaTeX
 latexmk
 LDAP
+libpq?
 libs
 lifecycle
 LLMs?
+logrotate
 LXD
 LXD's
 Makefiles?
@@ -103,6 +107,8 @@ Numpy
 Open Graph
 openapi
 optimizer*
+Otel
+Otelcol
 otf
 Parca
 Parca's
@@ -116,7 +122,10 @@ pgbackrest
 pgBackRest
 pgbouncer
 Pgbouncer*
+pgdata
+pgdate
 pgsql
+pgVector
 PITR
 plantuml
 PNG
@@ -128,8 +137,10 @@ PPAs
 pqsql
 PR
 preconfigured
+preload
 programmatically
 PSC
+psql
 PVCs
 py
 Pygments
@@ -141,6 +152,8 @@ Read the Docs
 readthedocs
 redeclare
 rediraffe
+reinitialisation
+repo
 requirer
 rerediraffe
 reStructuredText
@@ -155,6 +168,7 @@ SCons
 sdk
 sequenceDiagram
 SHA
+singlestat
 sitemapindex
 snap
 snapcraft
@@ -171,6 +185,7 @@ storages
 subnet
 subproject
 SVG
+Syncobj
 Sysbench
 systemd
 terraform
@@ -186,6 +201,7 @@ ubuntu
 ulwazi
 uncomment(ing)?
 uncordon
+URI(s)?
 URL
 utils
 uv

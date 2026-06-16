@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    description: "Understand the architecture of Charmed PostgreSQL for VM and Kubernetes deployments, including the charm design and services running inside the snap and rock.
+    description: "Understand the architecture of Charmed PostgreSQL for VM and Kubernetes deployments, including the charm design and services running inside the snap and rock."
 ---
 
 (architecture)=
