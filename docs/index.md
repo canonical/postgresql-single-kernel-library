@@ -61,7 +61,7 @@ Charmed PostgreSQL is an official distribution of PostgreSQL. It’s an open-sou
 * [Discourse forum](https://discourse.charmhub.io/tag/postgresql)
 * [Public Matrix channel](https://matrix.to/#/#charmhub-data-platform:ubuntu.com)
 * [Report an issue](https://github.com/canonical/postgresql-single-kernel-library/issues/new/choose)
-<!-- * {ref}`Contribute <contribute>` -->
+* {ref}`Contribute <contribute>`
 
 ### Governance and policies
 
