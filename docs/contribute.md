@@ -20,6 +20,17 @@ We recommend you get in touch with us if you'd like to contribute - either via i
 
 Contributions to Charmed PostgreSQL documentation are welcomed and encouraged.
 
+```{dropdown} All documentation is in the <code>postgresql-single-kernel-library</code> repository
+:open:
+:class-container: dropdown-note
+:icon: info
+
+While the code is still in a period of transition between GitHub repositories, the documentation for **all Charmed PostgreSQL operators and versions** has transferred to the [`postgresql-single-kernel-library` repository](https://github.com/canonical/postgresql-single-kernel-library):
+
+* `postgresql-single-kernel-library` branch [`16/docs`](https://github.com/canonical/postgresql-single-kernel-library/tree/16/docs) contains the docs for both VM and K8s charms for PostgreSQL 16 (newest)
+* `postgresql-single-kernel-library` branch [`14/docs`](https://github.com/canonical/postgresql-single-kernel-library/tree/14/docs) contains the docs for both VM and K8s charms for PostgreSQL 14
+```
+
 ### Prerequisites
 
  * A GitHub account: See [Creating an account on GitHub](https://docs.github.com/en/get-started/start-your-journey/creating-an-account-on-github)
@@ -32,6 +43,14 @@ To report an issue in spelling, grammar, or technical content, [file an issue on
 ### Make a contribution
 
 To make a quick update yourself, the easiest way is to click the pencil icon in the top-right corner of the documentation page (next to the "Give feedback" button). It will take you to the GitHub web editor for that page, and you can submit the PR directly through the web interface.
+
+```{dropdown} Merge against <code>16/docs</code>
+:open:
+:class-container: dropdown-caution
+:icon: alert-fill
+
+All documentation pull requests should be made against the `16/docs` branch -- **not** `16/edge`.
+```
 
 For larger, more involved contributions, please create an issue on GitHub with the `documentation` tag, and assign it to yourself. A maintainer will get in touch with you. Alternatively, you are welcome to contact us directly via [Matrix](https://matrix.to/#/#charmhub-data-platform:ubuntu.com).
 
