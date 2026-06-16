@@ -171,6 +171,7 @@ class PostgreSQLEventsHandler(Object):
                 component=self.cluster_manager.name,
             )
             event.defer()
+            return
 
         # TODO: Check raft keys and initialize
 

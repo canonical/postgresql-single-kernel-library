@@ -66,7 +66,7 @@ class K8sManager(BaseManager):
                 K8S_POSTGRESQL_SERVICE_NAME: ServiceDict({
                     "override": "replace",
                     "summary": "entrypoint of the postgresql + patroni image",
-                    "command": f"patroni {self.workload.paths.data}/patroni.yml",
+                    "command": f"patroni {self.workload.paths.patroni_conf}/patroni.yml",
                     "startup": "enabled",
                     "on-failure": self.state.peer.patroni_on_failure_condition_override
                     or ORIGINAL_PATRONI_ON_FAILURE_CONDITION,

@@ -172,7 +172,7 @@ class ConfigManager(BaseManager):
             instance_password_encryption=self.state.config.instance_password_encryption,
         )
         render_file(
-            Substrates.VM, f"{self.workload.paths.patroni_conf}/patroni.yaml", rendered, 0o600
+            self.state.substrate, f"{self.workload.paths.patroni_conf}/patroni.yaml", rendered, 0o600
         )
 
     @property
