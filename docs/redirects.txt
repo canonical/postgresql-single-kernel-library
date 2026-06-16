@@ -53,9 +53,9 @@ how-to/monitoring-cos/enable-tracing how-to/observability-cos/enable-tracing
 how-to/monitoring-cos/enable-profiling how-to/observability-cos/enable-profiling
 how-to/upgrade/ how-to/refresh
 
-how-to/upgrade/perform-a-minor-upgrade how-to/refresh/minor-upgrade
+how-to/upgrade/perform-a-minor-upgrade how-to/refresh/
 
-how-to/upgrade/perform-a-minor-rollback how-to/refresh/minor-rollback
+how-to/upgrade/perform-a-minor-rollback how-to/refresh/
 
 how-to/cross-regional-async-replication/ how-to/cluster-cluster-replication
 
