@@ -6,5 +6,196 @@
 # The old path must be a file that doesn"t exist in the source. The current path must be
 # a file that does exist in the source.
 
-# How-to guides
-# h-deploy-juju-spaces how-to/deploy/juju-spaces
+# There are two categories of redirects for pages in this documentation:
+# Discourse to new RTD - directs old Discourse slugs to the newest equivalent slug on RTD
+# old RTD to new RTD - directs old RTD slugs to newest version of that RTD slug
+# E.g.
+# h-deploy-sunbeam/ (Discourse slug) -> how-to/deploy/vm-clouds/sunbeam (newest path to Sunbeam guide on RTD)
+# how-to/deploy/sunbeam (old path to Sunbeam guide on RTD) -> how-to/deploy/vm-clouds/sunbeam (newest path to Sunbeam guide on RTD)
+
+##### Tutorial pages #####
+
+t-set-up/ tutorial
+t-deploy/ tutorial
+t-access/ tutorial
+t-scale/ tutorial
+t-manage-passwords/ tutorial
+t-integrate/ tutorial
+t-enable-tls/ tutorial
+t-clean-up/ tutorial
+
+##### How-to guides #####
+
+h-deploy/ how-to/deploy
+
+h-deploy-sunbeam/ how-to/deploy/vm-clouds/sunbeam
+how-to/deploy/sunbeam how-to/deploy/vm-clouds/sunbeam
+
+h-deploy-maas/ how-to/deploy/vm-clouds/maas
+how-to/deploy/maas how-to/deploy/vm-clouds/maas
+
+h-deploy-ec2/ how-to/deploy/vm-clouds/aws-ec2
+how-to/deploy/aws-ec2 how-to/deploy/vm-clouds/aws-ec2
+
+h-deploy-gce/ how-to/deploy/vm-clouds/gce
+how-to/deploy/gce how-to/deploy/vm-clouds/gce
+
+h-deploy-azure/ how-to/deploy/vm-clouds/azure
+how-to/deploy/azure how-to/deploy/vm-clouds/azure
+
+h-deploy-juju-storage/ how-to/deploy/juju-storage
+
+h-deploy-multi-az/ how-to/deploy/multi-az
+
+h-deploy-terraform/ how-to/deploy/terraform
+
+h-deploy-airgapped/ how-to/deploy/air-gapped
+
+h-integrate/ how-to/integrate
+how-to/integrate-with-another-application how-to/integrate
+
+h-manage-passwords/ how-to/authentication/manage-passwords
+how-to/manage-passwords how-to/authentication/manage-passwords
+
+h-external-access/ how-to/network-and-encryption/external-network-access
+how-to/external-network-access how-to/network-and-encryption/external-network-access
+
+h-scale/ how-to/scale-cluster
+how-to/scale-replicas how-to/scale-cluster
+
+h-switchover-failover/ how-to/troubleshooting/switchover-failover
+how-to/switchover-failover how-to/troubleshooting/switchover-failover
+
+h-enable-tls/ how-to/network-and-encryption/enable-tls
+how-to/enable-tls how-to/network-and-encryption/enable-tls
+
+h-enable-ldap/ how-to/authentication/enable-ldap
+how-to/enable-ldap how-to/authentication/enable-ldap
+
+h-enable-plugins-extensions/ how-to/extensions/enable-extension
+how-to/enable-plugins-extensions how-to/extensions/enable-extension
+
+h-plugins-timescaledb/ how-to/extensions/enable-timescaledb
+how-to/enable-plugins-extensions/enable-timescaledb how-to/extensions/enable-timescaledb
+
+h-backup/ how-to/back-up-and-restore/
+
+h-configure-s3-aws/ how-to/back-up-and-restore/configure-s3-aws
+
+h-configure-s3-radosgw/ how-to/back-up-and-restore/configure-s3-radosgw
+
+h-create-backup/ how-to/back-up-and-restore/create-a-backup
+
+h-restore-backup/ how-to/back-up-and-restore/restore-a-backup
+
+h-manage-backup-retention/ how-to/back-up-and-restore/manage-backup-retention
+
+h-migrate-cluster/ how-to/back-up-and-restore/migrate-a-cluster
+
+h-monitor/ how-to/observability-cos
+how-to/monitoring-cos/ how-to/observability-cos
+
+h-enable-monitoring/ how-to/observability-cos/enable-monitoring
+how-to/monitoring-cos/enable-monitoring how-to/observability-cos/enable-monitoring
+
+h-enable-alert-rules/ how-to/observability-cos/enable-alert-rules
+how-to/monitoring-cos/enable-alert-rules how-to/observability-cos/enable-alert-rules
+
+h-enable-tracing/ how-to/observability-cos/enable-tracing
+how-to/monitoring-cos/enable-tracing how-to/observability-cos/enable-tracing
+
+h-enable-profiling/ how-to/observability-cos/enable-profiling
+how-to/monitoring-cos/enable-profiling how-to/observability-cos/enable-profiling
+
+h-upgrade/ how-to/refresh
+how-to/upgrade/ how-to/refresh
+
+h-upgrade-minor/ how-to/refresh/minor-upgrade
+how-to/upgrade/perform-a-minor-upgrade how-to/refresh/minor-upgrade
+
+h-rollback-minor/ how-to/refresh/minor-rollback
+how-to/upgrade/perform-a-minor-rollback how-to/refresh/minor-rollback
+
+h-async/ how-to/cluster-cluster-replication
+how-to/cross-regional-async-replication/ how-to/cluster-cluster-replication
+
+h-async-set-up/ how-to/cluster-cluster-replication/set-up-clusters
+how-to/cross-regional-async-replication/set-up-clusters how-to/cluster-cluster-replication/set-up-clusters
+
+h-async-integrate/ how-to/cluster-cluster-replication/integrate-with-a-client-app
+how-to/cross-regional-async-replication/integrate-with-a-client-app how-to/cluster-cluster-replication/integrate-with-a-client-app
+
+h-async-remove-recover/ how-to/cluster-cluster-replication/remove-or-recover-a-cluster
+how-to/cross-regional-async-replication/remove-or-recover-a-cluster how-to/cluster-cluster-replication/remove-or-recover-a-cluster
+
+h-development/ how-to
+how-to/development/ how-to
+
+h-development-integrate/ how-to/integrate
+how-to/development/integrate-with-your-charm how-to/integrate
+
+h-migrate-pgdump/ how-to/data-migration/migrate-data-via-pg-dump
+how-to/development/migrate-data-via-pg-dump how-to/data-migration/migrate-data-via-pg-dump
+
+h-migrate-backup-restore/ how-to/data-migration/migrate-data-via-backup-restore
+how-to/development/migrate-data-via-backup-restore how-to/data-migration/migrate-data-via-backup-restore
+
+##### Reference #####
+
+r-releases/ release-notes
+reference/releases release-notes
+
+r-versions/ explanation/charm-versions
+
+r-system-requirements/ reference/system-requirements
+
+r-software-testing/ explanation/performance-and-testing
+reference/software-testing explanation/performance-and-testing
+
+r-performance/ explanation/performance-and-testing
+reference/performance-and-resources explanation/performance-and-testing
+
+r-troubleshooting/ how-to/troubleshooting/overview
+reference/troubleshooting/ how-to/troubleshooting/overview
+
+r-sos-report/ how-to/troubleshooting/sos-report
+reference/troubleshooting/sos-report how-to/troubleshooting/sos-report
+
+r-cli-helpers/ how-to/troubleshooting/cli-helpers
+reference/troubleshooting/cli-helpers how-to/troubleshooting/cli-helpers
+
+r-plugins-extensions/ reference/supported-extensions
+reference/plugins-extensions reference/supported-extensions
+
+r-alert-rules/ how-to/observability-cos/enable-alert-rules
+reference/alert-rules how-to/observability-cos/enable-alert-rules
+
+r-statuses/ reference/charm-statuses
+reference/statuses reference/charm-statuses
+
+r-contacts/ contact
+reference/contacts contact
+
+##### Explanation #####
+
+e-architecture/ explanation/architecture
+
+e-interfaces-endpoints/ explanation/interfaces-and-endpoints
+
+e-juju-details/ release-notes
+
+e-legacy-charm/ explanation/charm-versions
+
+e-units/ explanation/units
+
+e-users/ explanation/users
+
+e-roles/ explanation/roles
+
+e-logs/ explanation/logs
+
+e-connection-pooling/ explanation/connection-pooling
+
+e-security/ explanation/security-hardening/overview
+
+e-cryptography/ explanation/security-hardening/cryptography
