@@ -4,7 +4,6 @@
 from typing import Literal
 
 import pytest
-from _pytest.config.argparsing import Parser
 
 # To separate vm and k8s tests
 type Substrate = Literal["vm", "k8s"]
@@ -16,6 +15,7 @@ type Substrate = Literal["vm", "k8s"]
 def substrate(request) -> Substrate:
     """The substrate that we are testing."""
     return request.param
+
 
 @pytest.fixture(scope="session")
 def test_charm_path(substrate) -> str:

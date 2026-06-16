@@ -14,7 +14,6 @@ from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from jinja2 import Template
 
-from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     POSTGRESQL_STORAGE_PERMISSIONS,
     USER,
@@ -172,7 +171,10 @@ class ConfigManager(BaseManager):
             instance_password_encryption=self.state.config.instance_password_encryption,
         )
         render_file(
-            self.state.substrate, f"{self.workload.paths.patroni_conf}/patroni.yaml", rendered, 0o600
+            self.state.substrate,
+            f"{self.workload.paths.patroni_conf}/patroni.yaml",
+            rendered,
+            0o600,
         )
 
     @property
