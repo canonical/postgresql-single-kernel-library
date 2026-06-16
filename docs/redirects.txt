@@ -7,4 +7,90 @@
 # a file that does exist in the source.
 
 # How-to guides
-# h-deploy-juju-spaces how-to/deploy/juju-spaces
+# 
+
+
+##### How-to guides #####
+
+how-to/deploy/sunbeam how-to/deploy/vm-clouds/sunbeam
+
+how-to/deploy/maas how-to/deploy/vm-clouds/maas
+
+how-to/deploy/aws-ec2 how-to/deploy/vm-clouds/aws-ec2
+
+how-to/deploy/gce how-to/deploy/vm-clouds/gce
+
+how-to/deploy/azure how-to/deploy/vm-clouds/azure
+
+h-deploy-juju-spaces how-to/deploy/juju-spaces
+
+how-to/integrate-with-another-application how-to/integrate
+
+how-to/manage-passwords how-to/authentication/manage-passwords
+
+how-to/external-network-access how-to/network-and-encryption/external-network-access
+
+how-to/scale-replicas how-to/scale-cluster
+
+how-to/switchover-failover how-to/troubleshooting/switchover-failover
+
+how-to/enable-tls how-to/network-and-encryption/enable-tls
+
+how-to/enable-ldap how-to/authentication/enable-ldap
+
+how-to/enable-plugins-extensions how-to/extensions/enable-extension
+
+how-to/enable-plugins-extensions/enable-timescaledb how-to/extensions/enable-timescaledb
+
+how-to/monitoring-cos/ how-to/observability-cos
+
+how-to/monitoring-cos/enable-monitoring how-to/observability-cos/enable-monitoring
+
+how-to/monitoring-cos/enable-alert-rules how-to/observability-cos/enable-alert-rules
+
+how-to/monitoring-cos/enable-tracing how-to/observability-cos/enable-tracing
+
+how-to/monitoring-cos/enable-profiling how-to/observability-cos/enable-profiling
+how-to/upgrade/ how-to/refresh
+
+how-to/upgrade/perform-a-minor-upgrade how-to/refresh/minor-upgrade
+
+how-to/upgrade/perform-a-minor-rollback how-to/refresh/minor-rollback
+
+how-to/cross-regional-async-replication/ how-to/cluster-cluster-replication
+
+how-to/cross-regional-async-replication/set-up-clusters how-to/cluster-cluster-replication/set-up-clusters
+
+how-to/cross-regional-async-replication/integrate-with-a-client-app how-to/cluster-cluster-replication/integrate-with-a-client-app
+
+how-to/cross-regional-async-replication/remove-or-recover-a-cluster how-to/cluster-cluster-replication/remove-or-recover-a-cluster
+
+how-to/development/ how-to
+
+how-to/development/integrate-with-your-charm how-to/integrate
+
+how-to/development/migrate-data-via-pg-dump how-to/data-migration/migrate-data-via-pg-dump
+
+how-to/development/migrate-data-via-backup-restore how-to/data-migration/migrate-data-via-backup-restore
+
+##### Reference #####
+
+reference/releases release-notes
+
+reference/software-testing explanation/performance-and-testing
+
+reference/performance-and-resources explanation/performance-and-testing
+
+reference/troubleshooting/ how-to/troubleshooting/overview
+
+reference/troubleshooting/sos-report how-to/troubleshooting/sos-report
+
+reference/troubleshooting/cli-helpers how-to/troubleshooting/cli-helpers
+
+reference/plugins-extensions reference/supported-extensions
+
+reference/alert-rules how-to/observability-cos/enable-alert-rules
+
+reference/statuses reference/charm-statuses
+
+reference/contacts contact
