@@ -109,6 +109,9 @@ DATABASE = "database"
 DATABASE_DEFAULT_NAME = "postgres"
 DATABASE_PORT = "5432"
 
+# Client relations
+ALL_CLIENT_RELATIONS = [DATABASE]
+
 # TLS files
 TLS_KEY_FILE = "key.pem"
 TLS_CA_FILE = "ca.pem"
