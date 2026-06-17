@@ -112,6 +112,10 @@ DATABASE_PORT = "5432"
 # Client relations
 ALL_CLIENT_RELATIONS = [DATABASE]
 
+# Async replication relations
+REPLICATION_CONSUMER_RELATION = "replication"
+REPLICATION_OFFER_RELATION = "replication-offer"
+
 # TLS files
 TLS_KEY_FILE = "key.pem"
 TLS_CA_FILE = "ca.pem"
@@ -134,9 +138,26 @@ SPI_MODULE = ["refint", "autoinc", "insert_username", "moddatetime"]
 
 # Tracing
 TRACING_RELATION_NAME = "tracing"
+TRACING_PROTOCOL = "otlp_http"
 
 # Patroni
 PATRONI_CLUSTER_STATUS_ENDPOINT = "cluster"
 
 # pgBackRest
 PGBACKREST_LOGROTATE_FILE = "/etc/logrotate.d/pgbackrest.logrotate"
+# pgBackRest emits all error/warning output on stderr (the default is stdout) so error
+# extraction stays consistent. Reference: https://pgbackrest.org/configuration.html#section-log
+PGBACKREST_LOG_LEVEL_STDERR = "--log-level-stderr=warn"
+# Archive timeout: unable to archive WAL files within the configured timeout period.
+PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE = 82
+
+# Backup ID formats
+BACKUP_ID_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+PGBACKREST_BACKUP_ID_FORMAT = "%Y%m%d-%H%M%S"
+
+# Watcher relation (VM)
+WATCHER_OFFER_RELATION = "watcher-offer"
+WATCHER_RELATION = "watcher"
+WATCHER_USER = "watcher"
+WATCHER_PASSWORD_KEY = "watcher-password"  # noqa: S105
+WATCHER_SECRET_LABEL = "watcher-secret"  # noqa: S105
