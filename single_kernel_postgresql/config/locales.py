@@ -1,7 +1,12 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""List of locales available in the snap."""
+"""Locales accepted by the PostgreSQL ``response_lc_*`` config options.
+
+``SNAP_LOCALES`` is the set the VM snap ships (it stages ``locales-all``). The
+K8s rock additionally ships ``C.utf8`` and ``POSIX`` (from the Ubuntu base's
+``libc-bin``), so ``K8S_LOCALES`` extends ``SNAP_LOCALES`` with those two.
+"""
 
 from typing import Literal
 
@@ -516,3 +521,7 @@ SNAP_LOCALES = Literal[
     "zu_ZA",
     "zu_ZA.utf8",
 ]
+
+
+# The K8s rock additionally ships these (from libc-bin); the VM snap does not.
+K8S_LOCALES = Literal[SNAP_LOCALES, "C.utf8", "POSIX"]
