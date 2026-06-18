@@ -32,7 +32,6 @@ from single_kernel_postgresql.config.literals import (
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
-from single_kernel_postgresql.utils import _change_owner
 from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
 
@@ -170,31 +169,36 @@ class TLSManager(BaseManager):
         )
 
     def _write_tls_file(self, content: str, path) -> None:
-        """Write a TLS file and chown it to the daemon user so Patroni can read it."""
-        self.workload.write_text(content, path, 0o600)
-        _change_owner(self.state.substrate, str(path))
+        """Write a TLS file with 0o600 permissions and correct ownership.
+
+        Ownership is forwarded through pathops so it works on both VM
+        (LocalPath uses os.chown) and K8s (ContainerPath uses Pebble push).
+        """
+        self.workload.write_text(
+            content, path, 0o600, user=self.workload.user, group=self.workload.group
+        )
 
     def push_tls_files(self) -> None:
         """Write the client, peer, and CA-bundle TLS files to the workload."""
-        conf = self.workload.paths.patroni_conf
+        tls = self.workload.paths.tls
 
         key, ca, cert = self.get_client_tls_files()
         if key is not None:
-            self._write_tls_file(key, conf / TLS_KEY_FILE)
+            self._write_tls_file(key, tls / TLS_KEY_FILE)
         if ca is not None:
-            self._write_tls_file(ca, conf / TLS_CA_FILE)
+            self._write_tls_file(ca, tls / TLS_CA_FILE)
         if cert is not None:
-            self._write_tls_file(cert, conf / TLS_CERT_FILE)
+            self._write_tls_file(cert, tls / TLS_CERT_FILE)
 
         key, ca, cert = self.get_peer_tls_files()
         if key is not None:
-            self._write_tls_file(key, conf / f"peer_{TLS_KEY_FILE}")
+            self._write_tls_file(key, tls / f"peer_{TLS_KEY_FILE}")
         if ca is not None:
-            self._write_tls_file(ca, conf / f"peer_{TLS_CA_FILE}")
+            self._write_tls_file(ca, tls / f"peer_{TLS_CA_FILE}")
         if cert is not None:
-            self._write_tls_file(cert, conf / f"peer_{TLS_CERT_FILE}")
+            self._write_tls_file(cert, tls / f"peer_{TLS_CERT_FILE}")
 
-        self._write_tls_file(self.get_peer_ca_bundle(), conf / TLS_CA_BUNDLE_FILE)
+        self._write_tls_file(self.get_peer_ca_bundle(), tls / TLS_CA_BUNDLE_FILE)
 
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False

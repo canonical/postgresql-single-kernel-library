@@ -196,6 +196,16 @@ class VMWorkload(BaseWorkload):
                     raise e
 
     @property
+    def user(self) -> str:
+        """The OS user that owns workload files on VM."""
+        return "_daemon_"
+
+    @property
+    def group(self) -> str:
+        """The OS group that owns workload files on VM."""
+        return "_daemon_"
+
+    @property
     def paths(self) -> BasePaths:
         """Return Workload's paths."""
         return VMPaths(self.root)

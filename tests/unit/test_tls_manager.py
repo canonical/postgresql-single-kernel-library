@@ -143,8 +143,7 @@ def test_push_tls_files_writes_expected_files(harness):
     mgr.store_peer_tls(key="PK", cert="PC", ca="PCA")
 
     mgr.workload.write_text = MagicMock()
-    with patch("single_kernel_postgresql.managers.tls._change_owner") as mock_chown:
-        mgr.push_tls_files()
+    mgr.push_tls_files()
 
     written = {call.args[1].name: call.args[0] for call in mgr.workload.write_text.call_args_list}
     assert written["key.pem"] == "CK"
@@ -154,16 +153,13 @@ def test_push_tls_files_writes_expected_files(harness):
     assert written["peer_cert.pem"] == "PC"
     assert written["peer_ca.pem"] == "PCA"
     assert written["peer_ca_bundle.pem"] == "PCA"
-    # all TLS files are written with 0o600
-    assert all(call.args[2] == 0o600 for call in mgr.workload.write_text.call_args_list)
-    # every TLS file is written under the Patroni conf dir, not the postgres conf dir
+    # all TLS files are written with 0o600, user, and group from the workload
+    expected_user = mgr.workload.user
+    expected_group = mgr.workload.group
     for call in mgr.workload.write_text.call_args_list:
-        assert call.args[1].parent == mgr.workload.paths.patroni_conf
-    # every written file must be chowned to the daemon user
-    substrate = harness.charm.state.substrate
-    chowned_paths = {call.args[1] for call in mock_chown.call_args_list}
-    assert mock_chown.call_count == mgr.workload.write_text.call_count
-    for chown_call in mock_chown.call_args_list:
-        assert chown_call.args[0] == substrate
-    for write_call in mgr.workload.write_text.call_args_list:
-        assert str(write_call.args[1]) in chowned_paths
+        assert call.args[2] == 0o600
+        assert call.kwargs["user"] == expected_user
+        assert call.kwargs["group"] == expected_group
+    # every TLS file is written under the substrate-correct TLS dir (paths.tls)
+    for call in mgr.workload.write_text.call_args_list:
+        assert call.args[1].parent == mgr.workload.paths.tls
