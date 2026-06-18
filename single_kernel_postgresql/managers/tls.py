@@ -81,7 +81,9 @@ class TLSManager(BaseManager):
         self.state.peer.internal_cert = str(cert)
         self.state.peer.internal_key = str(private_key)
 
-        # self.charm.push_tls_files_to_workload()
+        # NOTE: pushing the internal-peer cert/CA to disk is owned by the config
+        # subsystem (not yet migrated); operator certs are pushed via
+        # TLSManager.push_tls_files from the events.tls handler.
         logger.info(
             "Internal peer certificate generated. Please use a proper TLS operator if possible."
         )
