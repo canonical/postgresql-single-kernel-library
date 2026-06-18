@@ -217,6 +217,19 @@ class CharmState(Object):
         return self.peer.database_peers_address or self.host
 
     @property
+    def client_addresses(self) -> set[str]:
+        """Client-facing addresses for the operator client certificate SANs."""
+        addrs: set[str] = set()
+        if addr := self.peer.database_address:
+            addrs.add(addr)
+        return addrs
+
+    @property
+    def client_common_name(self) -> str:
+        """Common name for the operator client certificate."""
+        return self.peer.database_address or self.host
+
+    @property
     def listen_ips(self) -> list[str]:
         """Return the IPs to listen on.
 

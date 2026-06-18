@@ -206,6 +206,13 @@ class PostgreSQLPeer(RelationState):
         return self.relation.data[self.unit].get("database-peers-address", None)
 
     @property
+    def database_address(self) -> str | None:
+        """Get the client-facing database endpoint address."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get("database-address", None)
+
+    @property
     def replication_address(self) -> str | None:
         """Get the address to be used for replication communication."""
         if not self.relation:
