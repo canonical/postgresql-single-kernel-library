@@ -138,18 +138,31 @@ def test_peer_certificate_available_clears_and_rotates_on_empty(harness):
 
 
 def test_relation_broken_client_wired(harness):
-    """relation_broken on TLS_CLIENT_RELATION routes to _on_certificate_available."""
-    # Add then remove the relation; no uncaught exception means handler is wired.
+    """relation_broken on TLS_CLIENT_RELATION routes to _on_certificate_available and clears state."""
+    charm = harness.charm
+    # Pre-load operator client material so the clear path has something to clear.
+    charm.tls_manager.store_client_tls(key="CK", cert="CC", ca="CA")
+
     client_rel_id = harness.add_relation("client-certificates", "tls-provider")
-    harness.charm.tls_manager.push_tls_files = MagicMock()
+    charm.tls_manager.push_tls_files = MagicMock()
     harness.remove_relation(client_rel_id)
+
+    # The broken handler must have cleared operator client TLS from state.
+    assert charm.tls_manager.get_client_tls_files() == (None, None, None)
 
 
 def test_relation_broken_peer_wired(harness):
-    """relation_broken on TLS_PEER_RELATION routes to _on_peer_certificate_available."""
+    """relation_broken on TLS_PEER_RELATION routes to _on_peer_certificate_available and clears state."""
+    charm = harness.charm
+    # Pre-load operator peer material so the clear path has something to clear.
+    charm.tls_manager.store_peer_tls(key="PK", cert="PC", ca="PCA")
+
     peer_rel_id = harness.add_relation("peer-certificates", "tls-provider")
-    harness.charm.tls_manager.push_tls_files = MagicMock()
+    charm.tls_manager.push_tls_files = MagicMock()
     harness.remove_relation(peer_rel_id)
+
+    # The broken handler must have cleared operator peer key from state.
+    assert charm.state.peer.operator_peer_key is None
 
 
 def _set_unit_db(harness, key, value):
