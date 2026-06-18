@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 def test_store_client_tls_writes_state(harness):
@@ -93,3 +93,23 @@ def test_get_peer_tls_files_falls_back_to_internal(harness):
     charm.state.set_secret("app", "internal-ca", "ICA")
 
     assert charm.tls_manager.get_peer_tls_files() == ("IK", "ICA", "IC")
+
+
+def test_push_tls_files_writes_expected_files(harness):
+    mgr = harness.charm.tls_manager
+    mgr.store_client_tls(key="CK", cert="CC", ca="CA")
+    mgr.store_peer_tls(key="PK", cert="PC", ca="PCA")
+
+    mgr.workload.write_text = MagicMock()
+    mgr.push_tls_files()
+
+    written = {call.args[1].name: call.args[0] for call in mgr.workload.write_text.call_args_list}
+    assert written["key.pem"] == "CK"
+    assert written["ca.pem"] == "CA"
+    assert written["cert.pem"] == "CC"
+    assert written["peer_key.pem"] == "PK"
+    assert written["peer_cert.pem"] == "PC"
+    assert written["peer_ca.pem"] == "PCA"
+    assert written["peer_ca_bundle.pem"] == "PCA"
+    # all TLS files are written with 0o600
+    assert all(call.args[2] == 0o600 for call in mgr.workload.write_text.call_args_list)

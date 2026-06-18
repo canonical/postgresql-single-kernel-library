@@ -24,6 +24,10 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from single_kernel_postgresql.config.exceptions import TlsError
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
+    TLS_CA_BUNDLE_FILE,
+    TLS_CA_FILE,
+    TLS_CERT_FILE,
+    TLS_KEY_FILE,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
@@ -146,6 +150,28 @@ class TLSManager(BaseManager):
             self.state.get_secret(APP_SCOPE, "internal-ca"),
             self.state.peer.internal_cert,
         )
+
+    def push_tls_files(self) -> None:
+        """Write the client, peer, and CA-bundle TLS files to the workload."""
+        conf = self.workload.paths.conf
+
+        key, ca, cert = self.get_client_tls_files()
+        if key is not None:
+            self.workload.write_text(key, conf / TLS_KEY_FILE, 0o600)
+        if ca is not None:
+            self.workload.write_text(ca, conf / TLS_CA_FILE, 0o600)
+        if cert is not None:
+            self.workload.write_text(cert, conf / TLS_CERT_FILE, 0o600)
+
+        key, ca, cert = self.get_peer_tls_files()
+        if key is not None:
+            self.workload.write_text(key, conf / f"peer_{TLS_KEY_FILE}", 0o600)
+        if ca is not None:
+            self.workload.write_text(ca, conf / f"peer_{TLS_CA_FILE}", 0o600)
+        if cert is not None:
+            self.workload.write_text(cert, conf / f"peer_{TLS_CERT_FILE}", 0o600)
+
+        self.workload.write_text(self.get_peer_ca_bundle(), conf / TLS_CA_BUNDLE_FILE, 0o600)
 
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
