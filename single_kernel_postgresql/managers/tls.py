@@ -104,6 +104,12 @@ class TLSManager(BaseManager):
         self.state.peer.operator_client_cert = cert
         self.state.peer.operator_client_ca = ca
 
+    def clear_client_tls(self) -> None:
+        """Remove the operator client material so getters fall back to internal."""
+        self.state.peer.remove_secret("operator-client-key")
+        self.state.peer.remove_secret("operator-client-cert")
+        self.state.peer.remove_secret("operator-client-ca")
+
     def store_peer_tls(self, key: str, cert: str, ca: str) -> None:
         """Persist the operator-provided peer key/cert and rotate the peer CA."""
         self.state.peer.operator_peer_key = key
@@ -112,6 +118,15 @@ class TLSManager(BaseManager):
             if self.state.peer.current_ca:
                 self.state.peer.old_ca = self.state.peer.current_ca
             self.state.peer.current_ca = ca
+
+    def clear_peer_tls(self) -> None:
+        """Remove the operator peer material and rotate the peer CA on removal."""
+        current = self.state.peer.current_ca
+        if current:
+            self.state.peer.old_ca = current
+        self.state.peer.remove_secret("current-ca")
+        self.state.peer.remove_secret("operator-peer-key")
+        self.state.peer.remove_secret("operator-peer-cert")
 
     def get_client_tls_files(self) -> tuple[str | None, str | None, str | None]:
         """Return (key, ca, cert) for the operator client certificate from state."""

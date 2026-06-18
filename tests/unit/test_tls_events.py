@@ -74,6 +74,54 @@ def test_peer_certificate_available_rotates_and_pushes(harness):
     harness.charm.tls_manager.push_tls_files.assert_called_once()
 
 
+def test_certificate_available_clears_on_empty(harness):
+    tls = harness.charm.tls
+    # First store some material
+    harness.charm.tls_manager.store_client_tls(key="CK", cert="CC", ca="CA")
+
+    # Mock get_assigned_certificates to return empty
+    tls.client_certificate.get_assigned_certificates = MagicMock(return_value=([], None))
+    harness.charm.tls_manager.push_tls_files = MagicMock()
+
+    tls._on_certificate_available(MagicMock())
+
+    assert harness.charm.tls_manager.get_client_tls_files() == (None, None, None)
+    harness.charm.tls_manager.push_tls_files.assert_called_once()
+
+
+def test_peer_certificate_available_clears_and_rotates_on_empty(harness):
+    tls = harness.charm.tls
+    # First store some peer material with a CA
+    harness.charm.tls_manager.store_peer_tls(key="PK", cert="PC", ca="PCA")
+
+    # Mock get_assigned_certificates to return empty
+    tls.peer_certificate.get_assigned_certificates = MagicMock(return_value=([], None))
+    harness.charm.tls_manager.push_tls_files = MagicMock()
+
+    tls._on_peer_certificate_available(MagicMock())
+
+    peer = harness.charm.state.peer
+    assert peer.old_ca == "PCA"
+    assert peer.current_ca is None
+    assert peer.operator_peer_cert is None
+    harness.charm.tls_manager.push_tls_files.assert_called_once()
+
+
+def test_relation_broken_client_wired(harness):
+    """relation_broken on TLS_CLIENT_RELATION routes to _on_certificate_available."""
+    # Add then remove the relation; no uncaught exception means handler is wired.
+    client_rel_id = harness.add_relation("client-certificates", "tls-provider")
+    harness.charm.tls_manager.push_tls_files = MagicMock()
+    harness.remove_relation(client_rel_id)
+
+
+def test_relation_broken_peer_wired(harness):
+    """relation_broken on TLS_PEER_RELATION routes to _on_peer_certificate_available."""
+    peer_rel_id = harness.add_relation("peer-certificates", "tls-provider")
+    harness.charm.tls_manager.push_tls_files = MagicMock()
+    harness.remove_relation(peer_rel_id)
+
+
 def _set_unit_db(harness, key, value):
     rel_id = harness.model.get_relation("database-peers").id
     harness.update_relation_data(rel_id, harness.charm.unit.name, {key: value})

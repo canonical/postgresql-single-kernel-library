@@ -76,6 +76,12 @@ class TLS(Object):
             self.peer_certificate.on.certificate_available, self._on_peer_certificate_available
         )
         self.framework.observe(
+            self.charm.on[TLS_CLIENT_RELATION].relation_broken, self._on_certificate_available
+        )
+        self.framework.observe(
+            self.charm.on[TLS_PEER_RELATION].relation_broken, self._on_peer_certificate_available
+        )
+        self.framework.observe(
             self.charm.on[PEER_RELATION].relation_changed, self._on_peer_relation_changed
         )
 
@@ -84,27 +90,29 @@ class TLS(Object):
         self.refresh_tls_certificates_event.emit()
 
     def _on_certificate_available(self, event) -> None:
-        """Store the operator client cert and push TLS files."""
+        """Store or clear the operator client cert and push TLS files."""
         certs, private_key = self.client_certificate.get_assigned_certificates()
-        if not certs or private_key is None:
-            return
-        provider_cert = certs[0]
-        self.tls_manager.store_client_tls(
-            key=str(private_key),
-            cert=str(provider_cert.certificate),
-            ca=str(provider_cert.ca),
-        )
+        if certs and private_key is not None:
+            provider_cert = certs[0]
+            self.tls_manager.store_client_tls(
+                key=str(private_key),
+                cert=str(provider_cert.certificate),
+                ca=str(provider_cert.ca),
+            )
+        else:
+            self.tls_manager.clear_client_tls()
         self.tls_manager.push_tls_files()
 
     def _on_peer_certificate_available(self, event) -> None:
-        """Store the operator peer cert (rotating the CA) and push TLS files."""
+        """Store or clear the operator peer cert (rotating the CA) and push TLS files."""
         certs, private_key = self.peer_certificate.get_assigned_certificates()
-        if not certs or private_key is None:
-            return
-        provider_cert = certs[0]
-        self.tls_manager.store_peer_tls(
-            key=str(private_key),
-            cert=str(provider_cert.certificate),
-            ca=str(provider_cert.ca),
-        )
+        if certs and private_key is not None:
+            provider_cert = certs[0]
+            self.tls_manager.store_peer_tls(
+                key=str(private_key),
+                cert=str(provider_cert.certificate),
+                ca=str(provider_cert.ca),
+            )
+        else:
+            self.tls_manager.clear_peer_tls()
         self.tls_manager.push_tls_files()
