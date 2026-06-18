@@ -155,3 +155,6 @@ def test_push_tls_files_writes_expected_files(harness):
     assert written["peer_ca_bundle.pem"] == "PCA"
     # all TLS files are written with 0o600
     assert all(call.args[2] == 0o600 for call in mgr.workload.write_text.call_args_list)
+    # every TLS file is written under the Patroni conf dir, not the postgres conf dir
+    for call in mgr.workload.write_text.call_args_list:
+        assert call.args[1].parent == mgr.workload.paths.patroni_conf

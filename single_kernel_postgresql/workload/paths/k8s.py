@@ -54,8 +54,8 @@ class K8sPaths(Paths):
 
     @property
     def patroni_conf(self) -> PathProtocol:
-        """Path to the patroni configuration file."""
-        return self.conf / PATRONI_CONF_PATH
+        """Path to the patroni configuration directory."""
+        return self.root / PATRONI_CONF_PATH
 
     @property
     def patroni_logs(self) -> PathProtocol:

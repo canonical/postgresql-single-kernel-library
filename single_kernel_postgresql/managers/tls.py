@@ -170,7 +170,7 @@ class TLSManager(BaseManager):
 
     def push_tls_files(self) -> None:
         """Write the client, peer, and CA-bundle TLS files to the workload."""
-        conf = self.workload.paths.conf
+        conf = self.workload.paths.patroni_conf
 
         key, ca, cert = self.get_client_tls_files()
         if key is not None:
