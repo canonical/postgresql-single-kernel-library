@@ -11,6 +11,7 @@ from charmlibs.interfaces.tls_certificates import (
 from ops import EventSource
 from ops.framework import EventBase, Object
 
+from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     PEER_RELATION,
     TLS_CLIENT_RELATION,
@@ -89,6 +90,27 @@ class TLS(Object):
         """Re-request certificates when peer addresses change."""
         self.refresh_tls_certificates_event.emit()
 
+    def _push_tls_files(self, event) -> None:
+        """Guard-then-push helper: defer if the workload is not yet ready.
+
+        Two conditions must hold before files can be written:
+        1. The internal CA secret must exist — it is written by the leader on
+           leader-elected, so non-leaders and early hooks may see it absent.
+        2. The workload must accept file writes — on K8s the Pebble container
+           may not be ready yet, causing PostgreSQLFileOperationError.
+
+        Mirrors postgresql-operator/src/relations/tls.py lines 157-170.
+        """
+        if not self.state.application.internal_ca:
+            logger.debug("Internal CA not yet present; deferring TLS file push.")
+            event.defer()
+            return
+        try:
+            self.tls_manager.push_tls_files()
+        except PostgreSQLFileOperationError:
+            logger.debug("Workload not ready for TLS file write; deferring.")
+            event.defer()
+
     def _on_certificate_available(self, event) -> None:
         """Store or clear the operator client cert and push TLS files."""
         certs, private_key = self.client_certificate.get_assigned_certificates()
@@ -101,7 +123,7 @@ class TLS(Object):
             )
         else:
             self.tls_manager.clear_client_tls()
-        self.tls_manager.push_tls_files()
+        self._push_tls_files(event)
 
     def _on_peer_certificate_available(self, event) -> None:
         """Store or clear the operator peer cert (rotating the CA) and push TLS files."""
@@ -115,4 +137,4 @@ class TLS(Object):
             )
         else:
             self.tls_manager.clear_peer_tls()
-        self.tls_manager.push_tls_files()
+        self._push_tls_files(event)
