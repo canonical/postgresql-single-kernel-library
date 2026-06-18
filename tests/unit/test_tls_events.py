@@ -8,7 +8,7 @@ get_client_tls_files / get_peer_tls_files (lines 183-212).
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 class _FakePrivateKey:
@@ -72,3 +72,45 @@ def test_peer_certificate_available_rotates_and_pushes(harness):
     assert peer.current_ca == "PCA"
     assert peer.operator_peer_key == "PK"
     harness.charm.tls_manager.push_tls_files.assert_called_once()
+
+
+def _set_unit_db(harness, key, value):
+    rel_id = harness.model.get_relation("database-peers").id
+    harness.update_relation_data(rel_id, harness.charm.unit.name, {key: value})
+
+
+def test_client_and_peer_requesters_have_distinct_common_names(harness):
+    """Client and peer requesters use distinct CNs drawn from different databag keys.
+
+    certificate_requests are baked at init time (before the test updates the databag), so
+    we verify distinctness via the live state properties (which read directly from the
+    databag) and confirm both requester objects were constructed.
+    """
+    _set_unit_db(harness, "database-address", "10.1.2.3")
+    _set_unit_db(harness, "database-peers-address", "10.4.5.6")
+
+    state = harness.charm.state
+    # Real distinct values: client CN reads database-address, peer CN reads database-peers-address.
+    assert state.client_common_name == "10.1.2.3"
+    assert state.peer_common_name == "10.4.5.6"
+    assert state.client_common_name != state.peer_common_name
+
+    tls = harness.charm.tls
+    assert tls.client_certificate is not None
+    assert tls.peer_certificate is not None
+
+
+def test_refresh_event_defined_and_wired(harness):
+    """refresh_tls_certificates_event exists; peer relation_changed emits it without error."""
+    tls = harness.charm.tls
+    assert hasattr(tls, "refresh_tls_certificates_event")
+
+    charm = harness.charm
+    peer_rel_id = harness.model.get_relation("database-peers").id
+    with (
+        patch.object(charm.cluster_manager, "configure_system_passwords", return_value=None),
+        patch.object(charm.config_manager, "update_config", return_value=None),
+    ):
+        harness.update_relation_data(
+            peer_rel_id, charm.unit.name, {"database-address": "10.9.8.7"}
+        )

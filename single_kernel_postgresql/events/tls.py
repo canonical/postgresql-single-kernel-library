@@ -8,20 +8,31 @@ from charmlibs.interfaces.tls_certificates import (
     CertificateRequestAttributes,
     TLSCertificatesRequiresV4,
 )
-from ops.framework import Object
+from ops import EventSource
+from ops.framework import EventBase, Object
 
-from single_kernel_postgresql.config.literals import TLS_CLIENT_RELATION, TLS_PEER_RELATION
+from single_kernel_postgresql.config.literals import (
+    PEER_RELATION,
+    TLS_CLIENT_RELATION,
+    TLS_PEER_RELATION,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class RefreshTLSCertificatesEvent(EventBase):
+    """Event emitted to trigger a re-request of TLS certificates with updated SANs."""
 
 
 class TLS(Object):
     """Owns the client/peer certificate requirers and pushes assigned certs into state.
 
-    First-cut operator-certificate handler: observes certificate_available and stores/pushes
-    via TLSManager. Deferred follow-ups (added when the real charm consumes this): observing
-    relation_broken, CA-rotation on certificate removal, and refresh_events re-requests.
+    Operator-certificate handler: observes certificate_available and stores/pushes
+    via TLSManager. Also owns the refresh_tls_certificates_event that re-requests
+    certificates whenever SANs change (emitted on peer relation_changed).
     """
+
+    refresh_tls_certificates_event = EventSource(RefreshTLSCertificatesEvent)
 
     def __init__(self, charm, state, workload, tls_manager):
         super().__init__(charm, key="tls")
@@ -30,20 +41,20 @@ class TLS(Object):
         self.workload = workload
         self.tls_manager = tls_manager
 
+        client_addresses = self.state.client_addresses
         peer_addresses = self.state.peer.peer_addresses
 
-        # TODO: client and peer requesters currently share SANs; distinguish client vs peer
-        # address sets when CharmState exposes them separately.
         self.client_certificate = TLSCertificatesRequiresV4(
             self.charm,
             TLS_CLIENT_RELATION,
             certificate_requests=[
                 CertificateRequestAttributes(
-                    common_name=self.state.peer_common_name,
-                    sans_ip=frozenset(peer_addresses),
-                    sans_dns=frozenset({*self.state.common_hosts, *peer_addresses}),
+                    common_name=self.state.client_common_name,
+                    sans_ip=frozenset(client_addresses),
+                    sans_dns=frozenset({*self.state.common_hosts, *client_addresses}),
                 ),
             ],
+            refresh_events=[self.refresh_tls_certificates_event],
         )
         self.peer_certificate = TLSCertificatesRequiresV4(
             self.charm,
@@ -55,6 +66,7 @@ class TLS(Object):
                     sans_dns=frozenset({*self.state.common_hosts, *peer_addresses}),
                 ),
             ],
+            refresh_events=[self.refresh_tls_certificates_event],
         )
 
         self.framework.observe(
@@ -63,6 +75,13 @@ class TLS(Object):
         self.framework.observe(
             self.peer_certificate.on.certificate_available, self._on_peer_certificate_available
         )
+        self.framework.observe(
+            self.charm.on[PEER_RELATION].relation_changed, self._on_peer_relation_changed
+        )
+
+    def _on_peer_relation_changed(self, event) -> None:
+        """Re-request certificates when peer addresses change."""
+        self.refresh_tls_certificates_event.emit()
 
     def _on_certificate_available(self, event) -> None:
         """Store the operator client cert and push TLS files."""
