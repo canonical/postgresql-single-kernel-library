@@ -14,6 +14,7 @@ from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from jinja2 import Template
 
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     POSTGRESQL_STORAGE_PERMISSIONS,
     USER,
@@ -179,13 +180,15 @@ class ConfigManager(BaseManager):
 
     @property
     def _are_passwords_set(self) -> bool:
-        return all([
+        passes = [
             self.state.application.user_password,
             self.state.application.replication_password,
             self.state.application.rewind_password,
-            self.state.application.raft_password,
             self.state.application.patroni_password,
-        ])
+        ]
+        if self.state.substrate == Substrates.VM:
+            passes.append(self.state.application.raft_password)
+        return all(passes)
 
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
