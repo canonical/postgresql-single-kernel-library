@@ -109,6 +109,44 @@ class TLSManager(BaseManager):
                 self.state.peer.old_ca = self.state.peer.current_ca
             self.state.peer.current_ca = ca
 
+    def get_client_tls_files(self) -> tuple[str | None, str | None, str | None]:
+        """Return (key, ca, cert) for the operator client certificate from state."""
+        cert = self.state.peer.operator_client_cert
+        if cert is None:
+            return None, None, None
+        return (
+            self.state.peer.operator_client_key,
+            self.state.peer.operator_client_ca,
+            cert,
+        )
+
+    def get_peer_ca_bundle(self) -> str:
+        """Compose the peer CA bundle: current CA, old CA, internal CA."""
+        cas = [
+            self.state.peer.current_ca,
+            self.state.peer.old_ca,
+            self.state.get_secret(APP_SCOPE, "internal-ca"),
+        ]
+        return "\n".join(ca for ca in cas if ca).strip()
+
+    def get_peer_tls_files(self) -> tuple[str | None, str | None, str | None]:
+        """Return (key, ca, cert) for the peer certificate.
+
+        Prefers the operator-provided peer material (with the composed CA
+        bundle); falls back to the internally generated peer material.
+        """
+        if self.state.peer.operator_peer_cert is not None:
+            return (
+                self.state.peer.operator_peer_key,
+                self.get_peer_ca_bundle(),
+                self.state.peer.operator_peer_cert,
+            )
+        return (
+            self.state.peer.internal_key,
+            self.state.get_secret(APP_SCOPE, "internal-ca"),
+            self.state.peer.internal_cert,
+        )
+
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
