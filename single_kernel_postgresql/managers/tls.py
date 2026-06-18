@@ -94,6 +94,21 @@ class TLSManager(BaseManager):
         self.state.set_secret(APP_SCOPE, "internal-ca-key", str(private_key))
         self.state.set_secret(APP_SCOPE, "internal-ca", str(ca))
 
+    def store_client_tls(self, key: str, cert: str, ca: str) -> None:
+        """Persist the operator-provided client key/cert/ca into peer state."""
+        self.state.peer.operator_client_key = key
+        self.state.peer.operator_client_cert = cert
+        self.state.peer.operator_client_ca = ca
+
+    def store_peer_tls(self, key: str, cert: str, ca: str) -> None:
+        """Persist the operator-provided peer key/cert and rotate the peer CA."""
+        self.state.peer.operator_peer_key = key
+        self.state.peer.operator_peer_cert = cert
+        if ca != self.state.peer.current_ca:
+            if self.state.peer.current_ca:
+                self.state.peer.old_ca = self.state.peer.current_ca
+            self.state.peer.current_ca = ca
+
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
