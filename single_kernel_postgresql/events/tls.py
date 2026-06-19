@@ -62,7 +62,7 @@ class TLS(Object):
         self.tls_manager = tls_manager
 
         client_addresses = self.state.client_addresses
-        peer_addresses = self.state.peer.peer_addresses
+        peer_addresses = self.state.peer_addresses
 
         self.client_certificate = TLSCertificatesRequiresV4(
             self.charm,

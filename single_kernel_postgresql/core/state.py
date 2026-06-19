@@ -221,6 +221,8 @@ class CharmState(Object):
     @property
     def peer_common_name(self) -> str:
         """Return the common name for the internally generated peer certificate."""
+        if self.substrate == Substrates.K8S:
+            return self._k8s_cert_common_name
         return self.peer.database_peers_address or self.host
 
     @property
@@ -234,7 +236,34 @@ class CharmState(Object):
     @property
     def client_common_name(self) -> str:
         """Common name for the operator client certificate."""
+        if self.substrate == Substrates.K8S:
+            return self._k8s_cert_common_name
         return self.peer.database_address or self.host
+
+    @property
+    def _k8s_cert_common_name(self) -> str:
+        """K8s operator-cert CN: the unit endpoints FQDN, wildcarded if too long.
+
+        Matches the original K8s charm: ``<app>-<unit_id>.<app>-endpoints``, collapsing to
+        ``*.<app>-endpoints`` when the full FQDN exceeds the 64-char CN limit. The
+        migration had switched this to the VM-style ``database_address/peers_address or
+        host``; restore the endpoints-FQDN CN for K8s parity.
+        """
+        full = self._get_hostname_from_unit(unit_name_to_pod_name(self.model.unit.name))
+        if len(full) > 64:
+            return f"*.{self.model.app.name}-endpoints"
+        return full
+
+    @property
+    def peer_addresses(self) -> set[str]:
+        """Peer addresses for the operator peer certificate SANs (substrate-aware).
+
+        K8s excludes the ``ip`` databag key (original K8s charm never added an ``ip`` SAN);
+        VM keeps it (unchanged from pre-migration behavior).
+        """
+        if self.substrate == Substrates.K8S:
+            return self.peer.peer_addresses_no_ip
+        return self.peer.peer_addresses
 
     @property
     def listen_ips(self) -> list[str]:

@@ -170,21 +170,32 @@ def _set_unit_db(harness, key, value):
     harness.update_relation_data(rel_id, harness.charm.unit.name, {key: value})
 
 
-def test_client_and_peer_requesters_have_distinct_common_names(harness):
+def test_client_and_peer_requesters_have_distinct_common_names(substrate, harness):
     """Client and peer requesters use distinct CNs drawn from different databag keys.
 
     certificate_requests are baked at init time (before the test updates the databag), so
     we verify distinctness via the live state properties (which read directly from the
     databag) and confirm both requester objects were constructed.
+
+    On VM the CNs are host-derived (database-address / database-peers-address). On K8s
+    both CNs collapse to the endpoints FQDN (original charm parity) — still distinct from
+    each other is not required there, only that both are the endpoints FQDN.
     """
     _set_unit_db(harness, "database-address", "10.1.2.3")
     _set_unit_db(harness, "database-peers-address", "10.4.5.6")
 
     state = harness.charm.state
-    # Real distinct values: client CN reads database-address, peer CN reads database-peers-address.
-    assert state.client_common_name == "10.1.2.3"
-    assert state.peer_common_name == "10.4.5.6"
-    assert state.client_common_name != state.peer_common_name
+    if substrate == "vm":
+        # VM: client CN reads database-address, peer CN reads database-peers-address.
+        assert state.client_common_name == "10.1.2.3"
+        assert state.peer_common_name == "10.4.5.6"
+        assert state.client_common_name != state.peer_common_name
+    else:
+        # K8s: both CNs are the unit endpoints FQDN (operator-cert parity).
+        app = state.model.app.name
+        expected = f"{app}-0.{app}-endpoints"
+        assert state.client_common_name == expected
+        assert state.peer_common_name == expected
 
     tls = harness.charm.tls
     assert tls.client_certificate is not None

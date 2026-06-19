@@ -3,7 +3,14 @@
 
 """Tests for operator-cert TLS state accessors on PostgreSQLPeer."""
 
+from unittest.mock import patch
+
 from single_kernel_postgresql.config.enums import Substrates  # noqa: F401  (substrate fixture)
+
+
+def _set_unit_db(harness, key, value):
+    rel_id = harness.model.get_relation("database-peers").id
+    harness.update_relation_data(rel_id, harness.charm.unit.name, {key: value})
 
 
 def test_common_hosts_k8s_includes_service_endpoints(substrate, harness):
@@ -59,3 +66,75 @@ def test_unset_operator_material_is_none(harness):
     assert peer.operator_client_cert is None
     assert peer.operator_peer_cert is None
     assert peer.current_ca is None
+
+
+# -- G1: substrate-aware cert common name (parity with the original charm) ----
+
+
+def test_cert_common_name_is_endpoints_fqdn_on_k8s(substrate, harness):
+    """K8s operator-cert CN must be `<app>-<unit_id>.<app>-endpoints` (original charm parity)."""
+    state = harness.charm.state
+    app = state.model.app.name
+    expected = f"{app}-0.{app}-endpoints"
+
+    if substrate == "k8s":
+        assert state.client_common_name == expected
+        assert state.peer_common_name == expected
+    else:
+        # VM unchanged: host-derived, not the endpoints FQDN.
+        assert state.client_common_name != expected
+        assert state.peer_common_name != expected
+
+
+def test_cert_common_name_wildcards_when_too_long_on_k8s(substrate, harness):
+    """K8s CN collapses to `*.<app>-endpoints` when the endpoints FQDN exceeds 64 chars."""
+    if substrate != "k8s":
+        return  # wildcard rule is K8s-only
+
+    state = harness.charm.state
+    app = state.model.app.name
+    # Force the endpoints FQDN past the 64-char CN limit; the suffix stays app-derived.
+    long_fqdn = "x" * 80
+    with patch.object(state, "_get_hostname_from_unit", return_value=long_fqdn):
+        assert state._k8s_cert_common_name == f"*.{app}-endpoints"
+
+
+def test_cert_common_name_vm_unchanged(substrate, harness):
+    """VM CN stays host-derived: client reads database-address, peer reads database-peers-address."""
+    if substrate != "vm":
+        return
+
+    _set_unit_db(harness, "database-address", "10.1.2.3")
+    _set_unit_db(harness, "database-peers-address", "10.4.5.6")
+    state = harness.charm.state
+    assert state.client_common_name == "10.1.2.3"
+    assert state.peer_common_name == "10.4.5.6"
+
+
+# -- G2: substrate-aware peer_addresses (no `ip` SAN on K8s) -----------------
+
+
+def test_peer_addresses_excludes_ip_on_k8s(substrate, harness):
+    """K8s peer SAN set must omit the `ip` databag key (original K8s charm never added it)."""
+    _set_unit_db(harness, "ip", "10.0.0.1")
+    _set_unit_db(harness, "private-address", "10.0.0.2")
+    _set_unit_db(harness, "database-peers-address", "10.0.0.3")
+
+    addrs = harness.charm.state.peer_addresses
+
+    if substrate == "k8s":
+        assert "10.0.0.1" not in addrs  # `ip` excluded
+        assert "10.0.0.2" in addrs  # private-address kept
+        assert "10.0.0.3" in addrs  # database-peers-address kept
+    else:
+        assert "10.0.0.1" in addrs  # VM keeps `ip`
+
+
+def test_peer_addresses_includes_ip_on_vm(substrate, harness):
+    """VM peer SAN set keeps `ip` (unchanged from pre-migration behavior)."""
+    if substrate != "vm":
+        return
+
+    _set_unit_db(harness, "ip", "10.0.0.1")
+    addrs = harness.charm.state.peer_addresses
+    assert "10.0.0.1" in addrs  # `ip` retained on VM (the G2 regression was K8s-only)
