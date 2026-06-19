@@ -209,7 +209,14 @@ class CharmState(Object):
     @property
     def common_hosts(self) -> set[str]:
         """Common hosts to be used in TLS certificate SANs."""
-        return {self.host, self.fqdn} if self.fqdn else {self.host}
+        hosts = {self.host, self.fqdn} if self.fqdn else {self.host}
+        if self.substrate == Substrates.K8S:
+            namespace = self.model.name
+            hosts |= {
+                f"{self.model.app.name}-primary.{namespace}.svc.cluster.local",
+                f"{self.model.app.name}-replicas.{namespace}.svc.cluster.local",
+            }
+        return hosts
 
     @property
     def peer_common_name(self) -> str:

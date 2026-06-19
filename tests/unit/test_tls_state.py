@@ -6,6 +6,25 @@
 from single_kernel_postgresql.config.enums import Substrates  # noqa: F401  (substrate fixture)
 
 
+def test_common_hosts_k8s_includes_service_endpoints(substrate, harness):
+    """On K8s the cert-SAN source must carry the primary/replicas Service DNS."""
+    state = harness.charm.state
+    app = state.model.app.name
+    namespace = state.model.name
+    hosts = state.common_hosts
+
+    if substrate == "k8s":
+        assert f"{app}-primary.{namespace}.svc.cluster.local" in hosts
+        assert f"{app}-replicas.{namespace}.svc.cluster.local" in hosts
+        # host/fqdn still present
+        assert state.host in hosts
+        assert state.fqdn in hosts
+    else:
+        # VM: only host/fqdn — no k8s service DNS leaks in
+        assert not any(h.endswith(".svc.cluster.local") for h in hosts)
+        assert hosts == {state.host, state.fqdn}
+
+
 def test_operator_client_material_roundtrips(harness):
     peer = harness.charm.state.peer
     peer.operator_client_key = "CLIENT-KEY"
