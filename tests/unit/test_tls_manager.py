@@ -163,3 +163,11 @@ def test_push_tls_files_writes_expected_files(harness):
     # every TLS file is written under the substrate-correct TLS dir (paths.tls)
     for call in mgr.workload.write_text.call_args_list:
         assert call.args[1].parent == mgr.workload.paths.tls
+
+
+def test_tls_manager_constructs_without_client(harness):
+    """TLSManager must not require a PostgreSQL client (it never uses one)."""
+    from single_kernel_postgresql.managers.tls import TLSManager
+
+    mgr = TLSManager(harness.charm.state, harness.charm.tls_manager.workload)
+    assert mgr.postgresql_client is None

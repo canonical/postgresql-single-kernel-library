@@ -39,7 +39,9 @@ class PatroniManager(BaseManager):
     This manager is responsible for handling operations related to Patroni.
     """
 
-    def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
+    def __init__(
+        self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient | None = None
+    ) -> None:
         super().__init__(state, workload, "patroni_manager", client)
         # Variable mapping to requests library verify parameter.
         # The CA bundle file is used to validate the server certificate when

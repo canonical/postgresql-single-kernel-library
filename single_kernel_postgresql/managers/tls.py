@@ -44,7 +44,9 @@ class TLSManager(BaseManager):
     This manager is responsible for handling TLS configuration operations.
     """
 
-    def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
+    def __init__(
+        self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient | None = None
+    ) -> None:
         super().__init__(state, workload, "tls_manager", client)
 
     def configure_internal_peer_ca(self) -> None:

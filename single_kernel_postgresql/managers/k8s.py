@@ -44,7 +44,9 @@ class K8sManager(BaseManager):
     This manager is responsible for handling operations related to Kubernetes and Pebble.
     """
 
-    def __init__(self, state: CharmState, workload: K8sWorkload, client: PostgreSQLClient):
+    def __init__(
+        self, state: CharmState, workload: K8sWorkload, client: PostgreSQLClient | None = None
+    ) -> None:
         super().__init__(state, workload, "pebble_manager", client)
         self.workload: K8sWorkload = workload  # type: ignore[assignment]
 

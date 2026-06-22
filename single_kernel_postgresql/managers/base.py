@@ -26,8 +26,12 @@ class BaseManager(ManagerStatusProtocol):
     state: CharmState
 
     def __init__(
-        self, state: CharmState, workload: BaseWorkload, name: str, client: PostgreSQLClient
-    ):
+        self,
+        state: CharmState,
+        workload: BaseWorkload,
+        name: str,
+        client: PostgreSQLClient | None = None,
+    ) -> None:
         self.state = state
         self.workload = workload
         self.name = name
