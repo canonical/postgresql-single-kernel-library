@@ -8,6 +8,7 @@ from single_kernel_postgresql.config.literals import (
     K8S_DATA_PATH,
     PATRONI_CONF_PATH,
     PATRONI_LOGS_PATH,
+    PGBACKREST_CONF_PATH,
     POSTGRESQL_CONF_FILE,
     POSTGRESQL_CONF_PATH,
 )
@@ -61,3 +62,8 @@ class K8sPaths(Paths):
     def patroni_logs(self) -> PathProtocol:
         """Path to the patroni logs."""
         return self.logs / PATRONI_LOGS_PATH
+
+    @property
+    def pgbackrest_conf(self) -> PathProtocol:
+        """Path to the pgbackrest config."""
+        return self.conf / PGBACKREST_CONF_PATH

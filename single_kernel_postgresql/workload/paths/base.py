@@ -68,3 +68,9 @@ class Paths(ABC):
     def patroni_logs(self) -> PathProtocol:
         """Path to the patroni logs."""
         pass
+
+    @property
+    @abstractmethod
+    def pgbackrest_conf(self) -> PathProtocol:
+        """Path to the patroni logs."""
+        pass

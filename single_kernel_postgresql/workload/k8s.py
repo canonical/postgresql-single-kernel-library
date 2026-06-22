@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from ops import Container, ModelError
-from ops.pebble import Plan
+from ops.pebble import Plan, ServiceStatus
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
@@ -77,6 +77,17 @@ class K8sWorkload(BaseWorkload):
     def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
         raise NotImplementedError
+
+    def is_patroni_running(self) -> bool:
+        """Check if the Patroni service is running."""
+        if not self.container.can_connect():
+            return False
+
+        services = self.container.pebble.get_services(names=[K8S_POSTGRESQL_SERVICE_NAME])
+        if len(services) == 0:
+            return False
+
+        return services[0].current == ServiceStatus.ACTIVE
 
     def run_cmd(
         self,

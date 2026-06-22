@@ -8,6 +8,7 @@ from single_kernel_postgresql.config.literals import (
     BASE_SNAP_DIR,
     PATRONI_CONF_PATH,
     PATRONI_LOGS_PATH,
+    PGBACKREST_CONF_PATH,
     POSTGRESQL_CONF_FILE,
     POSTGRESQL_CONF_PATH,
     SNAP,
@@ -91,3 +92,8 @@ class VMPaths(Paths):
     def tmp(self) -> PathProtocol:
         """Path to the temporary directory."""
         return self.root / "tmp"
+
+    @property
+    def pgbackrest_conf(self) -> PathProtocol:
+        """Path to the pgbackrest configuration."""
+        return self.snap_current / PGBACKREST_CONF_PATH

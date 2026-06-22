@@ -42,7 +42,9 @@ K8S_DATA_PATH = "var/lib/pg/data"
 # e.g. snap_current / "/etc/postgresql" will result in "/etc/postgresql" instead of "/var/snap/postgresql/current/etc/postgresql"
 POSTGRESQL_CONF_PATH = "etc/postgresql"
 POSTGRESQL_CONF_FILE = "postgresql.conf"
-
+## Pgbackreest Paths
+PGBACKREST_CONF_PATH = "etc/pgbackrest"
+PGBACKREST_CONF_FILE = "pgbackrest.conf"
 
 ## TLS Paths
 TLS_CA_BUNDLE_FILE = "peer_ca_bundle.pem"
@@ -161,3 +163,11 @@ WATCHER_RELATION = "watcher"
 WATCHER_USER = "watcher"
 WATCHER_PASSWORD_KEY = "watcher-password"  # noqa: S105
 WATCHER_SECRET_LABEL = "watcher-secret"  # noqa: S105
+
+# Raft
+RAFT_PORT = 2222
+RAFT_PARTNER_PREFIX = "partner_node_status_server_"
+
+# VM services
+PATRONI_VM_SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
+PATRONI_VM_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{PATRONI_VM_SERVICE_NAME}"

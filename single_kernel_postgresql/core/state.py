@@ -185,7 +185,7 @@ class CharmState(Object):
     @cached_property
     def patroni_url(self) -> str:
         """Patroni REST API URL."""
-        return f"https://{self.unit_ip}:8007"
+        return f"https://{self.unit_ip}:8008"
 
     @property
     def peer_members_ips(self) -> set[str]:
@@ -403,3 +403,29 @@ class CharmState(Object):
             if re.fullmatch(regex_pattern, present_status.message) is not None:
                 return present_status
         return None
+
+    @cached_property
+    def synchronous_node_count(self) -> int:
+        """Number of expected sync standbys."""
+        planned_units = self.application.planned_units
+        if self.config.synchronous_node_count == "all":
+            return planned_units - 1
+        elif self.config.synchronous_node_count == "majority":
+            return planned_units // 2
+        # -1 for leader
+        return (
+            self.config.synchronous_node_count
+            if self.config.synchronous_node_count < planned_units - 1
+            else planned_units - 1
+        )
+
+    @cached_property
+    def synchronous_configuration(self) -> dict[str, Any]:
+        """Synchronous mode configuration."""
+        # Try to update synchronous_node_count.
+        return {
+            "synchronous_node_count": self.synchronous_node_count,
+            "synchronous_mode_strict": len(self.application.members_ips) > 1
+            and self.config.synchronous_mode_strict
+            and self.synchronous_node_count > 0,
+        }
