@@ -138,3 +138,14 @@ def test_peer_addresses_includes_ip_on_vm(substrate, harness):
     _set_unit_db(harness, "ip", "10.0.0.1")
     addrs = harness.charm.state.peer_addresses
     assert "10.0.0.1" in addrs  # `ip` retained on VM (the G2 regression was K8s-only)
+
+
+def test_charmstate_accepts_plain_charmbase():
+    """CharmState must accept any ops.CharmBase, not only AbstractPostgreSQLCharm."""
+    import inspect
+
+    import ops
+    from single_kernel_postgresql.core.state import CharmState
+
+    ann = inspect.signature(CharmState.__init__).parameters["charm"].annotation
+    assert ann is ops.CharmBase

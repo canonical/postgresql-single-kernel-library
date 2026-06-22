@@ -7,11 +7,20 @@
 import re
 import socket
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, get_args
+from typing import Any, get_args
 
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from ops import ConfigData, JujuVersion, ModelError, Object, Relation, SecretNotFoundError, Unit
+from ops import (
+    CharmBase,
+    ConfigData,
+    JujuVersion,
+    ModelError,
+    Object,
+    Relation,
+    SecretNotFoundError,
+    Unit,
+)
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
@@ -30,16 +39,13 @@ from single_kernel_postgresql.utils import unit_name_to_pod_name
 from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
 from single_kernel_postgresql.utils.status import format_status
 
-if TYPE_CHECKING:
-    from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
-
 
 class CharmState(Object):
     """The global PostgreSQL Charm State."""
 
     def __init__(
         self,
-        charm: "AbstractPostgreSQLCharm",
+        charm: CharmBase,
         substrate: Substrates,
     ) -> None:
         """Initialize the CharmState object."""
