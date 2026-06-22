@@ -11,6 +11,10 @@
   reviewers: [
     'team:data-postgresql',
   ],
+  // Need to check tests dir to update test charm dependenices
+  "poetry": {
+    "ignorePaths": []
+  },
   packageRules: [
     {
       matchManagers: [
