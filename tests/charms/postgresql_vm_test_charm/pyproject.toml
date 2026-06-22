@@ -22,7 +22,6 @@ charmlibs-snap = "^1.0.1"
 charmlibs-interfaces-tls-certificates = "^1.8.1"
 charmlibs-pathops = "^1.0.1"
 data-platform-helpers = "^0.1.7"
-postgresql-charms-single-kernel = {path = "single_kernel_postgresql"}
 
 [tool.poetry.group.charm-libs.dependencies]
 # data_platform_libs/v0/data_interfaces.py
