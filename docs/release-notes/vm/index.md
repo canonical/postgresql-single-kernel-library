@@ -22,8 +22,9 @@ If you do not specify a revision on deploy time, Juju will automatically choose 
 
 All revisions of PostgreSQL described below are built for *Ubuntu 22.04 LTS (Jammy)*.
 
-| Charmhub revision</br>(amd, arm)   | Snap revision</br>(amd, arm) | PostgreSQL version | Minimum Juju version |
-|:----------------------------------|:----------------------------|:------------------|:--------------------|
+| Charmhub revision</br>(amd, arm)   | Snap revision</br>(amd, arm) | PostgreSQL version | Recommended Juju version |
+|:-----------------------------------|:-----------------------------|:-------------------|:--------------------|
+| {ref}`1162, 1161 <rev-1161-1162>`  |         334,333              | 14.23              | `3.6.24+`           |
 | {ref}`1090, 1091 <rev-1090-1091>`  |         281,280              | 14.22              | `3.6.21+`           |
 | {ref}`1044, 1045 <rev-1044-1045>`  |         247,246              | 14.20              | `3.6.14+`           |
 | {ref}`986, 987 <rev-986-987>`      |         245,243              | 14.20              | `3.6.1+`            |
@@ -41,6 +42,7 @@ All revisions of PostgreSQL described below are built for *Ubuntu 22.04 LTS (Jam
 :titlesonly:
 :hidden:
 
+1161-1162
 1090-1091
 1044-1045
 986-987
