@@ -23,12 +23,14 @@ If you do not specify a revision on deploy time, Juju will automatically choose 
 All revisions of PostgreSQL described below are built for *Ubuntu 24.04 LTS (Noble)*.
 
 | Charmhub revision</br>(amd, arm)  |  PostgreSQL version | Minimum Juju version |
-|:---------------------------------:|:------------------:|:--------------------:|
-| {ref}`901, 902 <rev-901-902>`     | 16.13              | `3.6.21+` |
+|:---------------------------------:|:-------------------:|:--------------------:|
+| {ref}`927, 926 <rev-926-927>`     | 16.14               | `3.6.24+`            |
+| {ref}`901, 902 <rev-901-902>`     | 16.13               | `3.6.21+`            |
 
 ```{toctree}
 :titlesonly:
 :hidden:
 
+926-927
 901-902
 ```
