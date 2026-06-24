@@ -88,24 +88,54 @@ class ConfigManager(BaseManager):
     def update_config(
         self,
         is_creating_backup: bool = False,
+        # TODO add rel handler
+        is_tls_enabled: bool = False,
+        # TODO add rel handler
+        relations_user_databases_map: dict[str, Any] | None = None,
+        # TODO add rel handler
+        ldap_parameters: dict[str, Any] | None = None,
+        # TODO add rel handler
+        async_primary_cluster_endpoint: str | None = None,
+        async_partner_addresses: list[str] | None = None,
+        async_standby_endpoints: list[str] | None = None,
+        # TODO add rel handler
+        watcher_raft_address: str | None = None,
         no_peers: bool = False,
         *,
         refresh: charm_refresh.Machines | None = None,
     ) -> bool:
         """Updates Patroni config file based on the existence of the TLS files."""
-        # if refresh is None:
-        # refresh = self.refresh
-
         # Build PostgreSQL parameters
         pg_parameters = self._build_postgresql_parameters()
 
         # replication_slots = self.logical_replication.replication_slots()
+        replication_slots = {}
+
+        # TODO add rel handler
+        relations_user_databases_map = relations_user_databases_map or {}
 
         # Update and reload configuration based on TLS files availability.
         logger.debug(f"Calling render_patroni_yml_file with parameters = {pg_parameters}")
         self.render_patroni_yml_file(
+            connectivity=self.state.peer.is_connectivity_enabled,
+            is_creating_backup=is_creating_backup,
+            enable_ldap=self.state.application.is_ldap_enabled,
+            enable_tls=is_tls_enabled,
+            backup_id=self.state.application.data.get("restoring-backup"),
+            pitr_target=self.state.application.data.get("restore-to-time"),
+            restore_timeline=self.state.application.data.get("restore-timeline"),
+            restore_to_latest=self.state.application.data.get("restore-to-time", None) == "latest",
+            stanza=self.state.application.data.get("stanza", self.state.peer.data.get("stanza")),
+            restore_stanza=self.state.application.data.get("restore-stanza"),
             parameters=pg_parameters,
-            slots={},
+            user_databases_map=relations_user_databases_map,
+            slots=replication_slots,
+            ldap_parameters=ldap_parameters,
+            async_primary_cluster_endpoint=async_primary_cluster_endpoint,
+            async_partner_addresses=async_partner_addresses,
+            async_standby_endpoints=async_standby_endpoints,
+            watcher_raft_address=watcher_raft_address,
+            no_peers=no_peers,
         )
         return True
 

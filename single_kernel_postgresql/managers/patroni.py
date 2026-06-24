@@ -8,23 +8,24 @@ This manager is responsible for handling operations related to Patroni,
 such as starting the service and checking its status.
 """
 
+# import shutil
+# from pathlib import Path
 import glob
 import logging
 import os
 import pathlib
 import re
-import shutil
 import subprocess
 from contextlib import suppress
 from functools import cached_property
-from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 # Platform specific imports
 with suppress(ImportError):
-    import psutil
+    # import psutil
     from charmlibs import snap
-    from pysyncobj.utility import TcpUtility, UtilityException
+    # from pysyncobj.utility import TcpUtility, UtilityException
+# from ops import BlockedStatus
 import psycopg2
 import psycopg2.extras
 import requests
@@ -32,7 +33,6 @@ import tomli
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from httpx import BasicAuth
-from ops import BlockedStatus
 from requests.auth import HTTPBasicAuth
 from tenacity import (
     Future,
@@ -51,10 +51,10 @@ from single_kernel_postgresql.config.literals import (
     API_REQUEST_TIMEOUT,
     PATRONI_CLUSTER_STATUS_ENDPOINT,
     PATRONI_VM_SERVICE_DEFAULT_PATH,
-    PEER_RELATION,
+    # PEER_RELATION,
     POSTGRESQL_STORAGE_PERMISSIONS,
-    RAFT_PARTNER_PREFIX,
-    RAFT_PORT,
+    # RAFT_PARTNER_PREFIX,
+    # RAFT_PORT,
     RUNNING_STATES,
     STARTED_STATES,
     TLS_CA_BUNDLE_FILE,
@@ -138,18 +138,8 @@ class PatroniManager(BaseManager):
         state: CharmState,
         workload: BaseWorkload,
         client: PostgreSQLClient,
-        endpoint: str | None,
-        endpoints: list[str],
-        primary_endpoint: str | None,
-        cluster_name: str,
-        member_name: str,
     ):
         super().__init__(state, workload, "patroni_manager", client)
-        self.endpoint = endpoint
-        self.endpoints = endpoints
-        self.primary_endpoint = primary_endpoint
-        self.cluster_name = cluster_name
-        self.member_name = member_name
         # Variable mapping to requests library verify parameter.
         # The CA bundle file is used to validate the server certificate when
         # TLS is enabled, otherwise True is set because it's the default value.
@@ -277,9 +267,9 @@ class PatroniManager(BaseManager):
             endpoints = alternative_endpoints
         else:
             endpoints = []
-            if self.endpoint:
-                endpoints.append(self.endpoint)
-                for peer in self.endpoints:
+            if self.state.endpoint:
+                endpoints.append(self.state.endpoint)
+                for peer in self.state.endpoints:
                     endpoints.append(peer)
         # Request info from cluster endpoint (which returns all members of the cluster).
         if response := parallel_patroni_get_request(
@@ -417,7 +407,7 @@ class PatroniManager(BaseManager):
         else:
             # Request info from cluster endpoint
             # (which returns all members of the cluster and their states).
-            return len(self.get_running_cluster_members()) == len(self.endpoints)
+            return len(self.get_running_cluster_members()) == len(self.state.endpoints)
 
     @property
     def is_creating_backup(self) -> bool:
@@ -436,7 +426,7 @@ class PatroniManager(BaseManager):
 
     def is_replication_healthy(self) -> bool:
         """Return whether the replication is healthy."""
-        if not self.endpoint:
+        if not self.state.endpoint:
             logger.debug("Failed replication check no endpoint set")
             return False
         try:
@@ -447,13 +437,13 @@ class PatroniManager(BaseManager):
                         logger.debug("Failed replication check no primary reported")
                         raise Exception
                     primary_addr = self.get_member_ip(primary)
-                    members_addrs = {self.endpoint}
-                    members_addrs.update(self.endpoints)
+                    members_addrs = {self.state.endpoint}
+                    members_addrs.update(self.state.endpoints)
                     for members_addr in members_addrs:
                         endpoint = (
                             "leader" if members_addr == primary_addr else "replica?lag=100MB"
                         )
-                        url = self.state.patroni_url.replace(self.endpoint, members_addr)
+                        url = self.state.patroni_url.replace(self.state.endpoint, members_addr)
                         r = requests.get(
                             f"{url}/{endpoint}",
                             verify=self.verify,
@@ -539,7 +529,7 @@ class PatroniManager(BaseManager):
             return False
 
         # Check if this member's name appears in the cluster members list
-        member_name = self.member_name
+        member_name = self.state.peer.member_name
         return any(member.get("name") == member_name for member in cluster_status)
 
     def online_cluster_members(self) -> list[ClusterMember]:
@@ -703,74 +693,75 @@ class PatroniManager(BaseManager):
         primary = self.get_primary()
         return primary != old_primary
 
-    def has_raft_quorum(self) -> bool:
-        """Check if raft cluster has quorum."""
-        # Get the status of the raft cluster.
-        syncobj_util = TcpUtility(password=self.state.application.raft_password, timeout=3)
+    # def has_raft_quorum(self) -> bool:
+    #     """Check if raft cluster has quorum."""
+    #     # Get the status of the raft cluster.
+    #     syncobj_util = TcpUtility(password=self.state.application.raft_password, timeout=3)
 
-        raft_host = "127.0.0.1:2222"
-        try:
-            raft_status = syncobj_util.executeCommand(raft_host, ["status"])
-        except UtilityException:
-            logger.warning("Has raft quorum: Cannot connect to raft cluster")
-            return False
-        if not raft_status:
-            logger.warning("Has raft quorum: No status reported")
-            return False
-        return raft_status["has_quorum"]
+    #     raft_host = "127.0.0.1:2222"
+    #     try:
+    #         raft_status = syncobj_util.executeCommand(raft_host, ["status"])
+    #     except UtilityException:
+    #         logger.warning("Has raft quorum: Cannot connect to raft cluster")
+    #         return False
+    #     if not raft_status:
+    #         logger.warning("Has raft quorum: No status reported")
+    #         return False
+    #     return raft_status["has_quorum"]
 
-    def remove_raft_data(self) -> None:
-        """Stops Patroni and removes the raft journals."""
-        logger.info("Stopping patroni")
-        self.stop_patroni()
+    # def remove_raft_data(self) -> None:
+    #     """Stops Patroni and removes the raft journals."""
+    #     logger.info("Stopping patroni")
+    #     self.stop_patroni()
 
-        logger.info("Wait for postgresql to stop")
-        for attempt in Retrying(wait=wait_fixed(5)):
-            with attempt:
-                for proc in psutil.process_iter(["name"]):
-                    if proc.name() == "postgres":
-                        raise RaftPostgresqlStillUpError()
+    #     logger.info("Wait for postgresql to stop")
+    #     for attempt in Retrying(wait=wait_fixed(5)):
+    #         with attempt:
+    #             for proc in psutil.process_iter(["name"]):
+    #                 if proc.name() == "postgres":
+    #                     raise RaftPostgresqlStillUpError()
 
-        logger.info("Removing raft data")
-        try:
-            path = Path(f"{self.workload.paths.patroni_conf}/raft")
-            if path.exists() and path.is_dir():
-                shutil.rmtree(path)
-        except OSError as e:
-            raise Exception(
-                f"Failed to remove previous cluster information with error: {e!s}"
-            ) from e
-        logger.info("Raft ready to reinitialise")
+    #     logger.info("Removing raft data")
+    #     try:
+    #         path = Path(f"{self.workload.paths.patroni_conf}/raft")
+    #         if path.exists() and path.is_dir():
+    #             shutil.rmtree(path)
+    #     except OSError as e:
+    #         raise Exception(
+    #             f"Failed to remove previous cluster information with error: {e!s}"
+    #         ) from e
+    #     logger.info("Raft ready to reinitialise")
 
-    def reinitialise_raft_data(self) -> None:
-        """Reinitialise the raft journals and promoting the unit to leader. Should only be run on sync replicas."""
-        logger.info("Rerendering patroni config without peers")
-        self.charm.update_config(no_peers=True)
-        logger.info("Starting patroni")
-        self.start_patroni()
+    # def reinitialise_raft_data(self, update_config, update_config_kwargs) -> None:
+    #     """Reinitialise the raft journals and promoting the unit to leader. Should only be run on sync replicas."""
+    #     logger.info("Rerendering patroni config without peers")
+    #     # TODO figure out cross manager update config calls
+    #     update_config(no_peers=True, **update_config_kwargs)
+    #     logger.info("Starting patroni")
+    #     self.start_patroni()
 
-        logger.info("Waiting for new raft cluster to initialise")
-        for attempt in Retrying(wait=wait_fixed(5)):
-            with attempt:
-                health_status = self.get_patroni_health()
-                if (
-                    health_status["role"] not in ["leader", "master"]
-                    or health_status["state"] != "running"
-                ):
-                    raise RaftNotPromotedError()
+    #     logger.info("Waiting for new raft cluster to initialise")
+    #     for attempt in Retrying(wait=wait_fixed(5)):
+    #         with attempt:
+    #             health_status = self.get_patroni_health()
+    #             if (
+    #                 health_status["role"] not in ["leader", "master"]
+    #                 or health_status["state"] != "running"
+    #             ):
+    #                 raise RaftNotPromotedError()
 
-        logger.info("Restarting patroni")
-        self.restart_patroni()
-        for attempt in Retrying(wait=wait_fixed(5)):
-            with attempt:
-                found_postgres = False
-                for proc in psutil.process_iter(["name"]):
-                    if proc.name() == "postgres":
-                        found_postgres = True
-                        break
-                if not found_postgres:
-                    raise RaftPostgresqlNotUpError()
-        logger.info("Raft should be unstuck")
+    #     logger.info("Restarting patroni")
+    #     self.restart_patroni()
+    #     for attempt in Retrying(wait=wait_fixed(5)):
+    #         with attempt:
+    #             found_postgres = False
+    #             for proc in psutil.process_iter(["name"]):
+    #                 if proc.name() == "postgres":
+    #                     found_postgres = True
+    #                     break
+    #             if not found_postgres:
+    #                 raise RaftPostgresqlNotUpError()
+    #     logger.info("Raft should be unstuck")
 
     def get_running_cluster_members(self) -> list[str]:
         """List running patroni members."""
@@ -780,103 +771,103 @@ class PatroniManager(BaseManager):
         except Exception:
             return []
 
-    def cleanup_raft_cluster(self, watcher_addr) -> bool:
-        """Cleanup RAFT members not belonging to the current cluster or not a related watcher."""
-        # Get Raft cluster status to find all members
-        try:
-            if not self.workload.is_patroni_running():
-                logger.warning("Raft cleanup: Patroni service not running.")
-                return True
-            syncobj_util = TcpUtility(password=self.state.application.raft_password, timeout=3)
-            if raft_status := syncobj_util.executeCommand(f"127.0.0.1:{RAFT_PORT}", ["status"]):
-                # Find all partner nodes in the Raft cluster
-                # Keys look like: partner_node_status_server_10.131.50.142:2222
-                for key in raft_status:
-                    if key.startswith(RAFT_PARTNER_PREFIX) and raft_status[key] != 2:
-                        member_addr = key.replace(RAFT_PARTNER_PREFIX, "")
-                        member_ip = member_addr.split(":")[0]
+    # def cleanup_raft_cluster(self, watcher_addr) -> bool:
+    #     """Cleanup RAFT members not belonging to the current cluster or not a related watcher."""
+    #     # Get Raft cluster status to find all members
+    #     try:
+    #         if not self.workload.is_patroni_running():
+    #             logger.warning("Raft cleanup: Patroni service not running.")
+    #             return True
+    #         syncobj_util = TcpUtility(password=self.state.application.raft_password, timeout=3)
+    #         if raft_status := syncobj_util.executeCommand(f"127.0.0.1:{RAFT_PORT}", ["status"]):
+    #             # Find all partner nodes in the Raft cluster
+    #             # Keys look like: partner_node_status_server_10.131.50.142:2222
+    #             for key in raft_status:
+    #                 if key.startswith(RAFT_PARTNER_PREFIX) and raft_status[key] != 2:
+    #                     member_addr = key.replace(RAFT_PARTNER_PREFIX, "")
+    #                     member_ip = member_addr.split(":")[0]
 
-                        # Check if this is a stale watcher (not a PostgreSQL node and not current watcher)
-                        if member_ip not in self.charm._units_ips and member_addr != watcher_addr:
-                            logger.info(f"Removing stale Raft member: {member_addr}")
-                            self.remove_raft_member(member_addr)
-                            self.charm._remove_from_members_ips(member_ip)
-                return True
-            return False
-        except Exception as e:
-            logger.debug(f"Error during Raft cleanup: {e}")
-            return False
+    #                     # Check if this is a stale watcher (not a PostgreSQL node and not current watcher)
+    #                     if member_ip not in self.charm._units_ips and member_addr != watcher_addr:
+    #                         logger.info(f"Removing stale Raft member: {member_addr}")
+    #                         self.remove_raft_member(member_addr)
+    #                         self.state.application.remove_from_members_ips(member_ip)
+    #             return True
+    #         return False
+    #     except Exception as e:
+    #         logger.debug(f"Error during Raft cleanup: {e}")
+    #         return False
 
-    def _set_stuck_raft_flag(self) -> None:
-        self.charm.set_unit_status(BlockedStatus("Raft majority loss, run: promote-to-primary"))
-        logger.warning("Remove raft member: Stuck raft cluster detected")
-        data_flags = {"raft_stuck": "True"}
-        self.charm.unit_peer_data.update(data_flags)
+    # def _set_stuck_raft_flag(self) -> None:
+    #     self.charm.set_unit_status(BlockedStatus("Raft majority loss, run: promote-to-primary"))
+    #     logger.warning("Remove raft member: Stuck raft cluster detected")
+    #     data_flags = {"raft_stuck": "True"}
+    #     self.state.peer.data.update(data_flags)
 
-        # Leader doesn't always trigger when changing it's own peer data.
-        if self.charm.unit.is_leader():
-            self.charm.on[PEER_RELATION].relation_changed.emit(
-                unit=self.charm.unit,
-                app=self.charm.app,
-                relation=self.charm.model.get_relation(PEER_RELATION),
-            )
+    # Leader doesn't always trigger when changing it's own peer data.
+    # if self.state.peer.unit.is_leader():
+    #     self.charm.on[PEER_RELATION].relation_changed.emit(
+    #         unit=self.state.peer.unit,
+    #         app=self.state.application.app,
+    #         relation=self.state.application.relation,
+    #     )
 
-    def remove_raft_member(self, member_address: str | None) -> None:
-        """Remove a member from the raft cluster.
+    # def remove_raft_member(self, member_address: str | None) -> None:
+    #     """Remove a member from the raft cluster.
 
-        The raft cluster is a different cluster from the Patroni cluster.
-        It is responsible for defining which Patroni member can update
-        the primary member in the DCS.
+    #     The raft cluster is a different cluster from the Patroni cluster.
+    #     It is responsible for defining which Patroni member can update
+    #     the primary member in the DCS.
 
-        Raises:
-            RaftMemberNotFoundError: if the member to be removed
-                is not part of the raft cluster.
-        """
-        if not member_address:
-            logger.debug("Remove raft member: No address provided")
-            return
+    #     Raises:
+    #         RaftMemberNotFoundError: if the member to be removed
+    #             is not part of the raft cluster.
+    #     """
+    #     if not member_address:
+    #         logger.debug("Remove raft member: No address provided")
+    #         return
 
-        if self.charm.has_raft_keys():
-            logger.debug("Remove raft member: Raft already in recovery")
-            return
+    #     if self.state.has_raft_keys():
+    #         logger.debug("Remove raft member: Raft already in recovery")
+    #         return
 
-        # Get the status of the raft cluster.
-        syncobj_util = TcpUtility(password=self.state.application.raft_password, timeout=3)
+    #     # Get the status of the raft cluster.
+    #     syncobj_util = TcpUtility(password=self.state.application.raft_password, timeout=3)
 
-        raft_host = "127.0.0.1:2222"
-        try:
-            raft_status = syncobj_util.executeCommand(raft_host, ["status"])
-        except UtilityException as e:
-            logger.warning("Remove raft member: Cannot connect to raft cluster")
-            raise RemoveRaftMemberFailedError() from e
-        if not raft_status:
-            logger.warning("Remove raft member: No raft status")
-            raise RemoveRaftMemberFailedError() from None
+    #     raft_host = "127.0.0.1:2222"
+    #     try:
+    #         raft_status = syncobj_util.executeCommand(raft_host, ["status"])
+    #     except UtilityException as e:
+    #         logger.warning("Remove raft member: Cannot connect to raft cluster")
+    #         raise RemoveRaftMemberFailedError() from e
+    #     if not raft_status:
+    #         logger.warning("Remove raft member: No raft status")
+    #         raise RemoveRaftMemberFailedError() from None
 
-        # Check whether the member is still part of the raft cluster.
-        if f"{RAFT_PARTNER_PREFIX}{member_address}" not in raft_status:
-            return
+    #     # Check whether the member is still part of the raft cluster.
+    #     if f"{RAFT_PARTNER_PREFIX}{member_address}" not in raft_status:
+    #         return
 
-        # If there's no quorum and the leader left raft cluster is stuck
-        if raft_status["has_quorum"] and not raft_status["leader"]:
-            logger.warning("Remove raft member: No raft leader")
-            raise RemoveRaftMemberFailedError() from None
-        if not raft_status["has_quorum"] and (
-            not raft_status["leader"] or raft_status["leader"].address == member_address
-        ):
-            self._set_stuck_raft_flag()
-            return
+    #     # If there's no quorum and the leader left raft cluster is stuck
+    #     if raft_status["has_quorum"] and not raft_status["leader"]:
+    #         logger.warning("Remove raft member: No raft leader")
+    #         raise RemoveRaftMemberFailedError() from None
+    #     if not raft_status["has_quorum"] and (
+    #         not raft_status["leader"] or raft_status["leader"].address == member_address
+    #     ):
+    #         self._set_stuck_raft_flag()
+    #         return
 
-        # Remove the member from the raft cluster.
-        try:
-            result = syncobj_util.executeCommand(raft_host, ["remove", member_address])
-        except UtilityException as e:
-            logger.debug("Remove raft member: Remove call failed")
-            raise RemoveRaftMemberFailedError() from e
+    #     # Remove the member from the raft cluster.
+    #     try:
+    #         result = syncobj_util.executeCommand(raft_host, ["remove", member_address])
+    #     except UtilityException as e:
+    #         logger.debug("Remove raft member: Remove call failed")
+    #         raise RemoveRaftMemberFailedError() from e
 
-        if not result or not result.startswith("SUCCESS"):
-            logger.debug(f"Remove raft member: Remove call not successful with {result}")
-            raise RemoveRaftMemberFailedError() from None
+    #     if not result or not result.startswith("SUCCESS"):
+    #         logger.debug(f"Remove raft member: Remove call not successful with {result}")
+    #         raise RemoveRaftMemberFailedError() from None
 
     @retry(stop=stop_after_attempt(20), wait=wait_exponential(multiplier=1, min=2, max=10))
     def reload_patroni_configuration(self):
@@ -1074,14 +1065,14 @@ class PatroniManager(BaseManager):
         Returns:
             Return whether the primary endpoint is redirecting connections to the primary pod.
         """
-        if not self.primary_endpoint:
+        if not self.state.primary_endpoint:
             return False
 
         try:
             for attempt in Retrying(stop=stop_after_delay(10), wait=wait_fixed(1)):
                 with attempt:
                     r = requests.get(
-                        f"https://{self.primary_endpoint}:8008/health",
+                        f"https://{self.state.primary_endpoint}:8008/health",
                         verify=self.verify,
                         auth=self._patroni_auth,
                         timeout=API_REQUEST_TIMEOUT,
@@ -1104,7 +1095,7 @@ class PatroniManager(BaseManager):
 
         Returns True if the connection is accepted, False otherwise.
         """
-        host = endpoint if endpoint is not None else self.primary_endpoint
+        host = endpoint if endpoint is not None else self.state.primary_endpoint
         try:
             conn = psycopg2.connect(
                 host=host,

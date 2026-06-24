@@ -165,7 +165,7 @@ class CharmState(Object):
     def endpoint(self) -> str | None:
         """Current unit endpoint."""
         if self.substrate == Substrates.K8S:
-            return self.fqdn
+            return f"{self.peer.unit.name.replace('/', '-')}.{self.application.app.name}-endpoints"
         else:
             return self.unit_ip
 
@@ -173,9 +173,11 @@ class CharmState(Object):
     def endpoints(self) -> set[str]:
         """Returns the list of endpoints of the current members of the cluster."""
         if self.peer_relation:
-            return self.application.endpoints
-        else:
-            return {self.endpoint} if self.endpoint else set()
+            if self.substrate == Substrates.K8S:
+                return self.application.endpoints
+            else:
+                return self.peer_members_ips
+        return {self.endpoint} if self.endpoint else set()
 
     @property
     def model_name(self) -> str:
@@ -185,7 +187,7 @@ class CharmState(Object):
     @cached_property
     def patroni_url(self) -> str:
         """Patroni REST API URL."""
-        return f"https://{self.unit_ip}:8008"
+        return f"https://{self.endpoint}:8008"
 
     @property
     def peer_members_ips(self) -> set[str]:
@@ -429,3 +431,12 @@ class CharmState(Object):
             and self.config.synchronous_mode_strict
             and self.synchronous_node_count > 0,
         }
+
+    def _build_service_name(self, service: str) -> str:
+        """Build a full k8s service name based on the service name."""
+        return f"{self.application.app.name}-{service}.{self.model_name}.svc.cluster.local"
+
+    @property
+    def primary_endpoint(self) -> str:
+        """Returns the endpoint of the primary instance's service."""
+        return self._build_service_name("primary")
