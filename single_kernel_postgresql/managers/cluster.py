@@ -46,7 +46,8 @@ class ClusterManager(BaseManager):
     """
 
     def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
-        super().__init__(state, workload, "cluster_manager", client)
+        super().__init__(state, workload, "cluster_manager")
+        self.postgresql_client = client
 
     def install_workload(self) -> None:
         """Install the workload."""

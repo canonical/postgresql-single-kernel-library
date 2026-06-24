@@ -32,7 +32,6 @@ from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.utils import unit_name_to_pod_name
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.k8s import K8sWorkload
 
 logger = logging.getLogger(__name__)
@@ -44,8 +43,8 @@ class K8sManager(BaseManager):
     This manager is responsible for handling operations related to Kubernetes and Pebble.
     """
 
-    def __init__(self, state: CharmState, workload: K8sWorkload, client: PostgreSQLClient):
-        super().__init__(state, workload, "pebble_manager", client)
+    def __init__(self, state: CharmState, workload: K8sWorkload):
+        super().__init__(state, workload, "pebble_manager")
         self.workload: K8sWorkload = workload  # type: ignore[assignment]
 
     def update_pebble_layers(self, replan: bool = True) -> None:

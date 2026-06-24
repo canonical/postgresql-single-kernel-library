@@ -39,7 +39,8 @@ class ConfigManager(BaseManager):
     """
 
     def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
-        super().__init__(state, workload, "config_manager", client)
+        super().__init__(state, workload, "config_manager")
+        self.postgresql_client = client
 
     @staticmethod
     def _dict_to_hba_string(_dict: dict[str, Any]) -> str:

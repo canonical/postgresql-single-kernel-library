@@ -63,7 +63,6 @@ from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.utils import _change_owner, label2name, parallel_patroni_get_request
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
 
@@ -137,9 +136,8 @@ class PatroniManager(BaseManager):
         self,
         state: CharmState,
         workload: BaseWorkload,
-        client: PostgreSQLClient,
     ):
-        super().__init__(state, workload, "patroni_manager", client)
+        super().__init__(state, workload, "patroni_manager")
         # Variable mapping to requests library verify parameter.
         # The CA bundle file is used to validate the server certificate when
         # TLS is enabled, otherwise True is set because it's the default value.

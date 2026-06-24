@@ -28,7 +28,6 @@ from single_kernel_postgresql.config.literals import (
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -40,8 +39,8 @@ class TLSManager(BaseManager):
     This manager is responsible for handling TLS configuration operations.
     """
 
-    def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
-        super().__init__(state, workload, "tls_manager", client)
+    def __init__(self, state: CharmState, workload: BaseWorkload):
+        super().__init__(state, workload, "tls_manager")
 
     def configure_internal_peer_ca(self) -> None:
         """Configure TLS internal peer CA."""
