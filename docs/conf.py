@@ -33,8 +33,10 @@ copyright = f"{datetime.date.today().year}"
 # To disable the title, set it to an empty string.
 html_title = project + " 14"
 
+version_slug = f"{os.environ.get('READTHEDOCS_VERSION', 'local')}"
+
 # Documentation website URL
-ogp_site_url = os.environ.get("READTHEDOCS_CANONICAL_URL", "/")
+ogp_site_url = f"https://canonical.com/data/postgresql/docs/{version_slug}/"
 
 # Preview name of the documentation website
 # TODO: To use a different name for the project in previews, update the next line.
@@ -111,14 +113,14 @@ html_context = {
 # Project slug
 # TODO: If your documentation is hosted on https://documentation.ubuntu.com/,
 #       uncomment and set to the RTD slug.
-# slug = ''
+slug = 'data/postgresql/docs'
 
 #######################
 # Sitemap configuration: https://sphinx-sitemap.readthedocs.io/
 #######################
 
 # Use RTD canonical URL to ensure duplicate pages have a specific canonical URL
-html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "/")
+html_baseurl = f"https://canonical.com/data/postgresql/docs/{version_slug}/"
 
 # sphinx-sitemap uses html_baseurl to generate the full URL for each page:
 sitemap_url_scheme = "{link}"
@@ -274,6 +276,7 @@ html_css_files = [
 # Adds custom JavaScript files, located remotely or in 'html_static_path'.
 html_js_files = [
     "https://assets.ubuntu.com/v1/287a5e8f-bundle.js",
+    "overwrite_links.js"
 ]
 
 # Appends extra markup to the end of every document written in reST
