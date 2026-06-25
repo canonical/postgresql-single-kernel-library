@@ -219,6 +219,7 @@ class PatroniManager(BaseManager):
     def configure_patroni_on_unit(self):
         """Configure Patroni (configuration files and service) on the unit."""
         patroni_conf_path = str(self.workload.paths.patroni_conf)
+        patroni_conf_file = str(self.workload.paths.patroni_conf / "patroni.yaml")
         patroni_data_path = str(self.workload.paths.data)
         os.makedirs(patroni_conf_path, exist_ok=True)
         # Parent must be _daemon_-owned so Patroni can rename/remove the data dir on reinit.
@@ -226,7 +227,7 @@ class PatroniManager(BaseManager):
         _change_owner(Substrates.VM, patroni_conf_path)
 
         # Create empty base config
-        open(patroni_conf_path, "a").close()
+        open(patroni_conf_file, "a").close()
 
         # Expected permission
         # Replicas refuse to start with the default permissions
