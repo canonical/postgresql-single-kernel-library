@@ -14,8 +14,10 @@ from single_kernel_postgresql.config.literals import (
     SNAP,
     SNAP_COMMON,
     SNAP_DATA,
+    VM_DATA_LOGS_PATH,
     VM_DATA_PATH,
     VM_LOGS_PATH,
+    VM_TEMP_PATH,
 )
 from single_kernel_postgresql.workload.paths.base import Paths
 
@@ -80,18 +82,22 @@ class VMPaths(Paths):
     @property
     def data(self) -> PathProtocol:
         """Path to the data folder of PostgreSQL."""
-        return self.snap_common / VM_DATA_PATH
+        return self.snap_common / VM_DATA_PATH / self.versioned_path
 
     @property
     def logs(self) -> PathProtocol:
         """Path to the logs folder of PostgreSQL."""
-        # TODO: Update path
         return self.snap_common / VM_LOGS_PATH
 
     @property
-    def tmp(self) -> PathProtocol:
+    def wal(self) -> PathProtocol:
+        """Path to the data logs folder of PostgreSQL."""
+        return self.snap_common / VM_DATA_LOGS_PATH / self.versioned_path
+
+    @property
+    def temp(self) -> PathProtocol:
         """Path to the temporary directory."""
-        return self.root / "tmp"
+        return self.snap_common / VM_TEMP_PATH / self.versioned_path
 
     @property
     def pgbackrest_conf(self) -> PathProtocol:

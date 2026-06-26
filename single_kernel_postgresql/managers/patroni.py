@@ -50,7 +50,6 @@ from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     API_REQUEST_TIMEOUT,
     PATRONI_CLUSTER_STATUS_ENDPOINT,
-    PATRONI_VM_SERVICE_DEFAULT_PATH,
     # PEER_RELATION,
     POSTGRESQL_STORAGE_PERMISSIONS,
     # RAFT_PARTNER_PREFIX,
@@ -58,6 +57,7 @@ from single_kernel_postgresql.config.literals import (
     RUNNING_STATES,
     STARTED_STATES,
     TLS_CA_BUNDLE_FILE,
+    VM_PATRONI_SERVICE_DEFAULT_PATH,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
@@ -1031,7 +1031,7 @@ class PatroniManager(BaseManager):
         Returns:
             Patroni systemd service restart condition.
         """
-        with open(PATRONI_VM_SERVICE_DEFAULT_PATH) as patroni_service_file:
+        with open(VM_PATRONI_SERVICE_DEFAULT_PATH) as patroni_service_file:
             patroni_service = patroni_service_file.read()
             found_restart = re.findall(r"Restart=(\w+)", patroni_service)
             if len(found_restart) == 1:
@@ -1047,12 +1047,12 @@ class PatroniManager(BaseManager):
             new_condition: new Patroni systemd service restart condition.
         """
         logger.info(f"setting restart-condition to {new_condition} for patroni service")
-        with open(PATRONI_VM_SERVICE_DEFAULT_PATH) as patroni_service_file:
+        with open(VM_PATRONI_SERVICE_DEFAULT_PATH) as patroni_service_file:
             patroni_service = patroni_service_file.read()
         logger.debug(f"patroni service file: {patroni_service}")
         new_patroni_service = re.sub(r"Restart=\w+", f"Restart={new_condition}", patroni_service)
         logger.debug(f"new patroni service file: {new_patroni_service}")
-        with open(PATRONI_VM_SERVICE_DEFAULT_PATH, "w") as patroni_service_file:
+        with open(VM_PATRONI_SERVICE_DEFAULT_PATH, "w") as patroni_service_file:
             patroni_service_file.write(new_patroni_service)
         subprocess.run(["/bin/systemctl", "daemon-reload"])
 

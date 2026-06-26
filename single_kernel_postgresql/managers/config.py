@@ -243,7 +243,7 @@ class ConfigManager(BaseManager):
                 "log_path": str(self.workload.paths.patroni_logs),
                 "postgresql_log_path": str(self.workload.paths.logs),
                 "data_path": str(self.workload.paths.data),
-                "wal_dir": str(self.workload.paths.data / "logs"),
+                "wal_dir": str(self.workload.paths.wal),
                 "partner_addrs": async_partner_addresses if not no_peers else [],
                 "peers_ips": sorted(self.state.endpoints) if not no_peers else [],
                 "pgbackrest_configuration_file": f"--config={self.workload.paths.pgbackrest_conf / PGBACKREST_CONF_FILE}",

@@ -31,6 +31,9 @@ SNAP_COMMON = "common"
 SNAP = "/snap/charmed-postgresql/current"
 VM_LOGS_PATH = "var/log/postgresql"
 VM_DATA_PATH = "var/lib/postgresql"
+VM_ARCHIVE_PATH = "data/archive"
+VM_DATA_LOGS_PATH = "data/logs"
+VM_TEMP_PATH = "data/temp"
 
 ## K8s Paths
 K8S_DATA_PATH = "var/lib/pg/data"
@@ -169,5 +172,5 @@ RAFT_PORT = 2222
 RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 
 # VM services
-PATRONI_VM_SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
-PATRONI_VM_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{PATRONI_VM_SERVICE_NAME}"
+VM_PATRONI_SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
+VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"

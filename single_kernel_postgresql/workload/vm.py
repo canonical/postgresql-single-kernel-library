@@ -198,7 +198,7 @@ class VMWorkload(BaseWorkload):
     @property
     def paths(self) -> BasePaths:
         """Return Workload's paths."""
-        return VMPaths(self.root)
+        return VMPaths(self.root, self.get_postgresql_version().split(".")[0])
 
     @property
     def root(self) -> PathProtocol:

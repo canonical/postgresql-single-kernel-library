@@ -44,7 +44,13 @@ class K8sPaths(Paths):
         return self.root / "logs"
 
     @property
-    def tmp(self) -> PathProtocol:
+    def wal(self) -> PathProtocol:
+        """Path to the data logs folder of PostgreSQL."""
+        # TODO: Update path
+        return self.root / "logs"
+
+    @property
+    def temp(self) -> PathProtocol:
         """Path to the temporary directory."""
         return self.root / "tmp"
 

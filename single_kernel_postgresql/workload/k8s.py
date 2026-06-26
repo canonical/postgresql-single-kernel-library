@@ -147,7 +147,7 @@ class K8sWorkload(BaseWorkload):
             PebbleError: if file operations fail.
         """
         # PathProtocol exposes text operations.
-        temp_dir_path = directory or self.paths.tmp
+        temp_dir_path = directory or self.paths.temp
         self.mkdir(
             temp_dir_path,
             mode=DIR_PERMISSIONS_READONLY,
@@ -193,7 +193,7 @@ class K8sWorkload(BaseWorkload):
             # this may raise RuntimeError if container isn't set, which is expected
             # during initialization before container is available
             root_path = self.root
-            self._paths = K8sPaths(root_path)
+            self._paths = K8sPaths(root_path, self.get_postgresql_version().split(".")[0])
         return self._paths
 
     @property
