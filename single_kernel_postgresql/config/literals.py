@@ -47,6 +47,10 @@ POSTGRESQL_CONF_FILE = "postgresql.conf"
 ## TLS Paths
 TLS_CA_BUNDLE_FILE = "peer_ca_bundle.pem"
 
+# TLS relation names
+TLS_CLIENT_RELATION = "client-certificates"
+TLS_PEER_RELATION = "peer-certificates"
+
 # Scopes
 SCOPES = Literal["app", "unit"]
 APP_SCOPE = "app"

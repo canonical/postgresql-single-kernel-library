@@ -95,6 +95,45 @@ def test_get_peer_tls_files_falls_back_to_internal(harness):
     assert charm.tls_manager.get_peer_tls_files() == ("IK", "ICA", "IC")
 
 
+def test_clear_client_tls_removes_operator_fields(harness):
+    mgr = harness.charm.tls_manager
+    mgr.store_client_tls(key="K", cert="C", ca="A")
+    mgr.clear_client_tls()
+
+    assert mgr.get_client_tls_files() == (None, None, None)
+
+
+def test_clear_peer_tls_rotates_ca_and_removes_fields(harness):
+    mgr = harness.charm.tls_manager
+    mgr.store_peer_tls(key="K", cert="C", ca="CA")
+    mgr.clear_peer_tls()
+
+    peer = harness.charm.state.peer
+    assert peer.old_ca == "CA"
+    assert peer.current_ca is None
+    assert peer.operator_peer_cert is None
+    assert peer.operator_peer_key is None
+
+
+def test_clear_peer_tls_falls_back_to_internal(harness):
+    charm = harness.charm
+    with (
+        patch.object(charm.cluster_manager, "configure_system_passwords"),
+        patch.object(charm.config_manager, "update_config"),
+    ):
+        harness.set_leader(True)
+
+    peer = charm.state.peer
+    peer.internal_key = "IK"
+    peer.internal_cert = "IC"
+    charm.state.set_secret("app", "internal-ca", "ICA")
+
+    charm.tls_manager.store_peer_tls(key="K", cert="C", ca="CA")
+    charm.tls_manager.clear_peer_tls()
+
+    assert charm.tls_manager.get_peer_tls_files() == ("IK", "ICA", "IC")
+
+
 def test_push_tls_files_writes_expected_files(harness):
     mgr = harness.charm.tls_manager
     mgr.store_client_tls(key="CK", cert="CC", ca="CA")

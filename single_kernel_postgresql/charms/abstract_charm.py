@@ -9,6 +9,7 @@ from ops.charm import CharmBase
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
+from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
@@ -35,6 +36,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         self.tls_manager = TLSManager(
             state=self.state, workload=self.workload, client=self.postgresql
         )
+        self.tls = TLS(self, self.state, self.workload, self.tls_manager)
         self.config_manager = ConfigManager(
             state=self.state, workload=self.workload, client=self.postgresql
         )
