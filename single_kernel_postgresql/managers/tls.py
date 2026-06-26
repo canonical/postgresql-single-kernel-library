@@ -81,7 +81,9 @@ class TLSManager(BaseManager):
         self.state.peer.internal_cert = str(cert)
         self.state.peer.internal_key = str(private_key)
 
-        # self.charm.push_tls_files_to_workload()
+        # NOTE: pushing the internal-peer cert/CA to disk is owned by the config
+        # subsystem (not yet migrated); operator certs are pushed via
+        # TLSManager.push_tls_files from the events.tls handler.
         logger.info(
             "Internal peer certificate generated. Please use a proper TLS operator if possible."
         )
@@ -166,27 +168,37 @@ class TLSManager(BaseManager):
             self.state.peer.internal_cert,
         )
 
+    def _write_tls_file(self, content: str, path) -> None:
+        """Write a TLS file with 0o600 permissions and correct ownership.
+
+        Ownership is forwarded through pathops so it works on both VM
+        (LocalPath uses os.chown) and K8s (ContainerPath uses Pebble push).
+        """
+        self.workload.write_text(
+            content, path, 0o600, user=self.workload.user, group=self.workload.group
+        )
+
     def push_tls_files(self) -> None:
         """Write the client, peer, and CA-bundle TLS files to the workload."""
-        conf = self.workload.paths.conf
+        tls = self.workload.paths.tls
 
         key, ca, cert = self.get_client_tls_files()
         if key is not None:
-            self.workload.write_text(key, conf / TLS_KEY_FILE, 0o600)
+            self._write_tls_file(key, tls / TLS_KEY_FILE)
         if ca is not None:
-            self.workload.write_text(ca, conf / TLS_CA_FILE, 0o600)
+            self._write_tls_file(ca, tls / TLS_CA_FILE)
         if cert is not None:
-            self.workload.write_text(cert, conf / TLS_CERT_FILE, 0o600)
+            self._write_tls_file(cert, tls / TLS_CERT_FILE)
 
         key, ca, cert = self.get_peer_tls_files()
         if key is not None:
-            self.workload.write_text(key, conf / f"peer_{TLS_KEY_FILE}", 0o600)
+            self._write_tls_file(key, tls / f"peer_{TLS_KEY_FILE}")
         if ca is not None:
-            self.workload.write_text(ca, conf / f"peer_{TLS_CA_FILE}", 0o600)
+            self._write_tls_file(ca, tls / f"peer_{TLS_CA_FILE}")
         if cert is not None:
-            self.workload.write_text(cert, conf / f"peer_{TLS_CERT_FILE}", 0o600)
+            self._write_tls_file(cert, tls / f"peer_{TLS_CERT_FILE}")
 
-        self.workload.write_text(self.get_peer_ca_bundle(), conf / TLS_CA_BUNDLE_FILE, 0o600)
+        self._write_tls_file(self.get_peer_ca_bundle(), tls / TLS_CA_BUNDLE_FILE)
 
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False

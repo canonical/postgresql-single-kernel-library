@@ -68,3 +68,9 @@ class Paths(ABC):
     def patroni_logs(self) -> PathProtocol:
         """Path to the patroni logs."""
         pass
+
+    @property
+    @abstractmethod
+    def tls(self) -> PathProtocol:
+        """Directory where TLS files are written for this substrate."""
+        pass

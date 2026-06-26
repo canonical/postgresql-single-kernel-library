@@ -54,8 +54,13 @@ class K8sPaths(Paths):
 
     @property
     def patroni_conf(self) -> PathProtocol:
-        """Path to the patroni configuration file."""
-        return self.conf / PATRONI_CONF_PATH
+        """Path to the patroni configuration directory."""
+        return self.root / PATRONI_CONF_PATH
+
+    @property
+    def tls(self) -> PathProtocol:
+        """Directory where TLS files are written on K8s (the data dir Patroni reads from)."""
+        return self.data
 
     @property
     def patroni_logs(self) -> PathProtocol:

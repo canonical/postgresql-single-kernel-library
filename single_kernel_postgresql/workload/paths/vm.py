@@ -72,6 +72,11 @@ class VMPaths(Paths):
         return self.snap_current / PATRONI_CONF_PATH
 
     @property
+    def tls(self) -> PathProtocol:
+        """Directory where TLS files are written on VM (same as patroni_conf)."""
+        return self.patroni_conf
+
+    @property
     def patroni_logs(self) -> PathProtocol:
         """Path to the patroni logs."""
         return self.snap_common / PATRONI_LOGS_PATH

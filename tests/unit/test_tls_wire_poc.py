@@ -11,28 +11,8 @@ needed (the manager writes CA/cert into state; the file-push is out of scope).
 
 from unittest.mock import patch
 
-import pytest
-from ops.testing import Harness
-from single_kernel_postgresql.charms import k8s_charm, vm_charm
-from single_kernel_postgresql.config.literals import APP_SCOPE, PEER_RELATION
+from single_kernel_postgresql.config.literals import APP_SCOPE
 from single_kernel_postgresql.managers.tls import TLSManager
-
-
-@pytest.fixture(autouse=True)
-def harness(substrate, test_charm_path):
-    with open(test_charm_path + "/metadata.yaml") as meta_file:
-        meta = meta_file.read()
-    with open(test_charm_path + "/actions.yaml") as actions_file:
-        actions = actions_file.read()
-    if substrate == "vm":
-        harness = Harness(vm_charm.PostgreSQLVMCharm, meta=meta, actions=actions)
-    else:
-        harness = Harness(k8s_charm.PostgreSQLK8sCharm, meta=meta, actions=actions)
-    peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
-    harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
-    harness.begin()
-    yield harness
-    harness.cleanup()
 
 
 def test_tls_manager_is_wired_into_the_charm(harness):
