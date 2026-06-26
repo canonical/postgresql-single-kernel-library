@@ -173,3 +173,32 @@ def test_tls_manager_constructs_without_client(harness):
 
     mgr = TLSManager(harness.charm.state, harness.charm.tls_manager.workload)
     assert mgr.postgresql_client is None
+
+
+def test_store_peer_tls_clears_stale_old_ca_on_reenable(harness):
+    """Re-enabling after a disable must not leave a stale pre-disable CA in the bundle."""
+    mgr = harness.charm.tls_manager
+    mgr.store_peer_tls(key="k", cert="c", ca="A")
+    mgr.store_peer_tls(key="k", cert="c", ca="B")  # rotate A -> B
+    assert mgr.state.peer.current_ca == "B"
+    assert mgr.state.peer.old_ca == "A"
+    mgr.clear_peer_tls()  # disable stashes B as old and clears current
+    assert mgr.state.peer.current_ca is None
+    assert mgr.state.peer.old_ca == "B"
+    mgr.store_peer_tls(key="k", cert="c", ca="C")  # re-enable with a fresh CA
+    assert mgr.state.peer.current_ca == "C"
+    assert mgr.state.peer.old_ca is None
+
+
+def test_client_tls_files_on_disk(harness):
+    """Reports presence of the client key/cert/ca files; container errors count as absent."""
+    from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
+
+    mgr = harness.charm.tls_manager
+    with patch.object(mgr.workload, "exists", return_value=True) as _exists:
+        assert mgr.client_tls_files_on_disk() is True
+        assert _exists.call_count == 3
+    with patch.object(mgr.workload, "exists", side_effect=[True, False]):
+        assert mgr.client_tls_files_on_disk() is False
+    with patch.object(mgr.workload, "exists", side_effect=PostgreSQLFileOperationError("down")):
+        assert mgr.client_tls_files_on_disk() is False

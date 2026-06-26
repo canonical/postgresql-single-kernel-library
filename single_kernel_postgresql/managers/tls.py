@@ -21,7 +21,7 @@ from charmlibs.interfaces.tls_certificates import (
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 
-from single_kernel_postgresql.config.exceptions import TlsError
+from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError, TlsError
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
     TLS_CA_BUNDLE_FILE,
@@ -122,6 +122,10 @@ class TLSManager(BaseManager):
         if ca != self.state.peer.current_ca:
             if self.state.peer.current_ca:
                 self.state.peer.old_ca = self.state.peer.current_ca
+            else:
+                # Re-enabling after a disable cleared current-ca: nothing is being
+                # rotated out, so drop any stale old CA left from before the disable.
+                self.state.peer.remove_secret("old-ca")
             self.state.peer.current_ca = ca
 
     def clear_peer_tls(self) -> None:
@@ -143,6 +147,22 @@ class TLSManager(BaseManager):
             self.state.peer.operator_client_ca,
             cert,
         )
+
+    def client_tls_files_on_disk(self) -> bool:
+        """Whether the client TLS files this unit serves are present on disk.
+
+        The reload bridge checks this before enabling TLS in the config so it never
+        renders ssl:on against files the push has not yet written: on K8s the Pebble
+        push can defer while the local config render would still succeed. A workload
+        that cannot be read (container down) counts as not-on-disk, so the caller defers.
+        """
+        tls = self.workload.paths.tls
+        try:
+            return all(
+                self.workload.exists(tls / f) for f in (TLS_KEY_FILE, TLS_CERT_FILE, TLS_CA_FILE)
+            )
+        except PostgreSQLFileOperationError:
+            return False
 
     def get_peer_ca_bundle(self) -> str:
         """Compose the peer CA bundle: current CA, old CA, internal CA."""
