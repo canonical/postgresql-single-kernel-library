@@ -153,11 +153,13 @@ def test_push_tls_files_writes_expected_files(harness):
     assert written["peer_cert.pem"] == "PC"
     assert written["peer_ca.pem"] == "PCA"
     assert written["peer_ca_bundle.pem"] == "PCA"
-    # all TLS files are written with 0o600, user, and group from the workload
+    # all TLS files are written with the workload's substrate-specific mode
+    # (VM 0o600, K8s 0o400), user, and group
+    expected_mode = mgr.workload.tls_file_mode
     expected_user = mgr.workload.user
     expected_group = mgr.workload.group
     for call in mgr.workload.write_text.call_args_list:
-        assert call.args[2] == 0o600
+        assert call.args[2] == expected_mode
         assert call.kwargs["user"] == expected_user
         assert call.kwargs["group"] == expected_group
     # every TLS file is written under the substrate-correct TLS dir (paths.tls)

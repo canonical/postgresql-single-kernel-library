@@ -71,12 +71,13 @@ class TLSManager(BaseManager):
         csr = generate_csr(
             private_key,
             common_name=self.state.peer_common_name,
-            sans_ip=frozenset(self.state.peer.peer_addresses),
+            # substrate-aware: K8s excludes the ip SAN (matches the original charm).
+            sans_ip=frozenset(self.state.peer_addresses),
             sans_dns=frozenset({
                 *self.state.common_hosts,
                 # IP address need to be part of the DNS SANs list due to
                 # https://github.com/pgbackrest/pgbackrest/issues/1977.
-                *self.state.peer.peer_addresses,
+                *self.state.peer_addresses,
             }),
         )
         cert = generate_certificate(csr, ca, ca_key, validity=timedelta(days=7300))
@@ -171,13 +172,18 @@ class TLSManager(BaseManager):
         )
 
     def _write_tls_file(self, content: str, path) -> None:
-        """Write a TLS file with 0o600 permissions and correct ownership.
+        """Write a TLS file with substrate-specific permissions and ownership.
 
-        Ownership is forwarded through pathops so it works on both VM
-        (LocalPath uses os.chown) and K8s (ContainerPath uses Pebble push).
+        The mode comes from the workload (VM 0o600, K8s 0o400, matching the
+        pre-migration charms). Ownership is forwarded through pathops so it works
+        on both VM (LocalPath uses os.chown) and K8s (ContainerPath uses Pebble push).
         """
         self.workload.write_text(
-            content, path, 0o600, user=self.workload.user, group=self.workload.group
+            content,
+            path,
+            self.workload.tls_file_mode,
+            user=self.workload.user,
+            group=self.workload.group,
         )
 
     def push_tls_files(self) -> None:

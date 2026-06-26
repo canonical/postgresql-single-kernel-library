@@ -3,6 +3,7 @@
 
 """Tests for operator-cert TLS state accessors on PostgreSQLPeer."""
 
+import socket
 from unittest.mock import patch
 
 from single_kernel_postgresql.config.enums import Substrates  # noqa: F401  (substrate fixture)
@@ -26,6 +27,8 @@ def test_common_hosts_k8s_includes_service_endpoints(substrate, harness):
         # host/fqdn still present
         assert state.host in hosts
         assert state.fqdn in hosts
+        # the resolved per-pod FQDN is also included (parity with the original charm)
+        assert socket.getfqdn() in hosts
     else:
         # VM: only host/fqdn — no k8s service DNS leaks in
         assert not any(h.endswith(".svc.cluster.local") for h in hosts)

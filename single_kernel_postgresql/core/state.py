@@ -221,6 +221,8 @@ class CharmState(Object):
             hosts |= {
                 f"{self.model.app.name}-primary.{namespace}.svc.cluster.local",
                 f"{self.model.app.name}-replicas.{namespace}.svc.cluster.local",
+                # the original K8s charm also included the resolved per-pod FQDN.
+                socket.getfqdn(),
             }
         return hosts
 
