@@ -646,7 +646,9 @@ class PatroniManager(BaseManager):
             logger.exception(error_message, exc_info=e)
             return False
 
-    def switchover(self, candidate: str | None = None, async_cluster: bool = False) -> None:
+    def switchover(
+        self, candidate: str | None = None, async_cluster: bool = False, wait: bool = True
+    ) -> None:
         """Trigger a switchover."""
         # Try to trigger the switchover.
         for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
@@ -680,6 +682,17 @@ class PatroniManager(BaseManager):
                 raise SwitchoverNotSyncError()
             logger.warning(f"Switchover call failed with code {r.status_code} {r.text}")
             raise SwitchoverFailedError(f"received {r.status_code}")
+
+        if not wait:
+            return
+
+        for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3), reraise=True):
+            with attempt:
+                new_primary = self.get_primary()
+                if (
+                    candidate is not None and new_primary != candidate
+                ) or new_primary == current_primary:
+                    raise SwitchoverFailedError("primary was not switched correctly")
 
     @retry(
         retry=retry_if_result(lambda x: not x),
