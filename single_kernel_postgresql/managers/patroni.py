@@ -64,7 +64,6 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.utils import _change_owner, label2name, parallel_patroni_get_request
 from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -153,8 +152,8 @@ class PatroniManager(BaseManager):
 
     def start_patroni(self) -> bool:
         """Start Patroni."""
-        if self.state.substrate == Substrates.VM and isinstance(self.workload, VMWorkload):
-            return self.workload.start_patroni()
+        if self.state.substrate == Substrates.VM:
+            return self.workload.start_patroni()  # type: ignore
         else:
             # TODO: Implement for other substrates
             return False
@@ -167,18 +166,14 @@ class PatroniManager(BaseManager):
             True if services is ready False otherwise. Retries over a period of 60 seconds times to
             allow server time to start up.
         """
-        if self.state.substrate == Substrates.VM and isinstance(self.workload, VMWorkload):
-            if not self.workload.is_patroni_running():
-                return False
-            try:
-                response = self.cached_patroni_health
-            except RetryError:
-                return False
-
-            return response["state"] in RUNNING_STATES
-        else:
-            # TODO: Implement for other substrates
+        if self.state.substrate == Substrates.VM and not self.workload.is_patroni_running():
             return False
+        try:
+            response = self.cached_patroni_health
+        except RetryError:
+            return False
+
+        return response["state"] in RUNNING_STATES
 
     @cached_property
     def cached_patroni_health(self) -> dict[str, str]:
