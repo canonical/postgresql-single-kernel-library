@@ -1,7 +1,8 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest.mock import MagicMock, patch
+from datetime import timedelta
+from unittest.mock import MagicMock, patch, sentinel
 
 
 def test_store_client_tls_writes_state(harness):
@@ -202,3 +203,82 @@ def test_client_tls_files_on_disk(harness):
         assert mgr.client_tls_files_on_disk() is False
     with patch.object(mgr.workload, "exists", side_effect=PostgreSQLFileOperationError("down")):
         assert mgr.client_tls_files_on_disk() is False
+
+
+def test_generate_internal_peer_ca_stores_secrets(harness):
+    """generate_internal_peer_ca persists the generated CA cert/key into app state."""
+    charm = harness.charm
+    # leadership is required to write the app-scoped internal-ca secrets
+    with (
+        patch.object(charm.cluster_manager, "configure_system_passwords"),
+        patch.object(charm.config_manager, "update_config"),
+    ):
+        harness.set_leader(True)
+
+    with (
+        patch(
+            "single_kernel_postgresql.managers.tls.generate_private_key",
+            return_value=sentinel.ca_key,
+        ),
+        patch(
+            "single_kernel_postgresql.managers.tls.generate_ca",
+            return_value=sentinel.ca,
+        ),
+    ):
+        charm.tls_manager.generate_internal_peer_ca()
+
+    assert charm.state.application.internal_ca_key == str(sentinel.ca_key)
+    assert charm.state.application.internal_ca == str(sentinel.ca)
+
+
+def test_generate_internal_peer_cert_stores_material(harness):
+    """generate_internal_peer_cert persists internal key/cert into peer state and pushes nothing.
+
+    Writing the internal peer cert/CA to disk is owned by the (not-yet-migrated)
+    config subsystem, so generating the material must not touch the workload.
+    """
+    charm = harness.charm
+    mgr = charm.tls_manager
+    # leadership is required to write/read the app-scoped internal-ca secrets the
+    # internal peer cert is signed against
+    with (
+        patch.object(charm.cluster_manager, "configure_system_passwords"),
+        patch.object(charm.config_manager, "update_config"),
+    ):
+        harness.set_leader(True)
+    charm.state.set_secret("app", "internal-ca-key", "ca-key-content")
+    charm.state.set_secret("app", "internal-ca", "ca-content")
+
+    # spy on the only file-writing primitive to prove no push happens
+    mgr.workload.write_text = MagicMock()
+    with (
+        patch(
+            "single_kernel_postgresql.managers.tls.generate_private_key",
+            return_value=sentinel.cert_key,
+        ),
+        patch(
+            "single_kernel_postgresql.managers.tls.generate_csr",
+            return_value=sentinel.cert_csr,
+        ),
+        patch(
+            "single_kernel_postgresql.managers.tls.generate_certificate",
+            return_value=sentinel.cert,
+        ) as _generate_certificate,
+        patch("single_kernel_postgresql.managers.tls.PrivateKey") as _private_key,
+        patch("single_kernel_postgresql.managers.tls.Certificate") as _certificate,
+    ):
+        _private_key.from_string.return_value = sentinel.ca_key
+        _certificate.from_string.return_value = sentinel.ca_cert
+
+        mgr.generate_internal_peer_cert()
+
+        # the CSR is signed by the stored internal CA (cert + key), valid 20 years
+        _generate_certificate.assert_called_once_with(
+            sentinel.cert_csr, sentinel.ca_cert, sentinel.ca_key, validity=timedelta(days=7300)
+        )
+
+    # generated material is persisted in peer-unit state (round-trip)
+    assert charm.state.peer.internal_cert == str(sentinel.cert)
+    assert charm.state.peer.internal_key == str(sentinel.cert_key)
+    # writing the internal peer cert/CA to disk is owned by the config subsystem
+    mgr.workload.write_text.assert_not_called()
