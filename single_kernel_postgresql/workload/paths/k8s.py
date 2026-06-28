@@ -6,7 +6,6 @@ from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.config.literals import (
     K8S_DATA_PATH,
-    PATRONI_CONF_PATH,
     PATRONI_LOGS_PATH,
     PGBACKREST_CONF_PATH,
     POSTGRESQL_CONF_FILE,
@@ -35,13 +34,13 @@ class K8sPaths(Paths):
     @property
     def data(self) -> PathProtocol:
         """Path to the data folder of PostgreSQL."""
-        return self.root / K8S_DATA_PATH
+        return self.root / K8S_DATA_PATH / self.versioned_path
 
     @property
     def logs(self) -> PathProtocol:
         """Path to the logs folder of PostgreSQL."""
         # TODO: Update path
-        return self.root / "logs"
+        return self.root / "var" / "lib" / "pg" / "logs"
 
     @property
     def wal(self) -> PathProtocol:
@@ -62,7 +61,7 @@ class K8sPaths(Paths):
     @property
     def patroni_conf(self) -> PathProtocol:
         """Path to the patroni configuration file."""
-        return self.conf / PATRONI_CONF_PATH
+        return self.root / K8S_DATA_PATH
 
     @property
     def patroni_logs(self) -> PathProtocol:

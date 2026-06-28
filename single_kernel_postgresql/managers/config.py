@@ -260,7 +260,7 @@ class ConfigManager(BaseManager):
                 "endpoints": list(self.state.endpoints),
                 "is_no_sync_member": is_no_sync_member,
                 "namespace": self.state.model_name,
-                "storage_path": str(self.workload.paths.data),
+                "storage_path": str(self.workload.paths.patroni_conf),
                 "logs_storage_path": str(self.workload.paths.logs),
                 "pgdata_path": str(self.workload.paths.data),
                 "restoring_backup": backup_id is not None or pitr_target is not None,
