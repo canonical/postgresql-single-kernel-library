@@ -47,6 +47,14 @@ from tenacity import (
 )
 
 from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.exceptions import (
+    ClusterNotPromotedError,
+    EndpointNotReadyError,
+    StandbyClusterAlreadyPromotedError,
+    SwitchoverFailedError,
+    SwitchoverNotSyncError,
+    UpdateSyncNodeCountError,
+)
 from single_kernel_postgresql.config.literals import (
     API_REQUEST_TIMEOUT,
     PATRONI_CLUSTER_STATUS_ENDPOINT,
@@ -66,50 +74,6 @@ from single_kernel_postgresql.utils import _change_owner, label2name, parallel_p
 from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
-
-
-class RaftPostgresqlNotUpError(Exception):
-    """Postgresql not yet started."""
-
-
-class RaftPostgresqlStillUpError(Exception):
-    """Postgresql not yet down."""
-
-
-class RaftNotPromotedError(Exception):
-    """Leader not yet set when reinitialising raft."""
-
-
-class ClusterNotPromotedError(Exception):
-    """Raised when a cluster is not promoted."""
-
-
-class NotReadyError(Exception):
-    """Raised when not all cluster members healthy or finished initial sync."""
-
-
-class EndpointNotReadyError(Exception):
-    """Raised when an endpoint is not ready."""
-
-
-class StandbyClusterAlreadyPromotedError(Exception):
-    """Raised when a standby cluster is already promoted."""
-
-
-class RemoveRaftMemberFailedError(Exception):
-    """Raised when a remove raft member failed for some reason."""
-
-
-class SwitchoverFailedError(Exception):
-    """Raised when a switchover failed for some reason."""
-
-
-class SwitchoverNotSyncError(SwitchoverFailedError):
-    """Raised when a switchover failed because node is not sync."""
-
-
-class UpdateSyncNodeCountError(Exception):
-    """Raised when updating synchronous_node_count failed for some reason."""
 
 
 class ClusterMember(TypedDict):
