@@ -808,7 +808,7 @@ class PatroniManager(BaseManager):
 
     def update_synchronous_node_count(self) -> None:
         """Update synchronous_node_count to the minority of the planned cluster."""
-        for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
+        for attempt in Retrying(stop=stop_after_delay(15), wait=wait_fixed(3)):
             with attempt:
                 r = requests.patch(
                     f"{self.state.patroni_url}/config",
