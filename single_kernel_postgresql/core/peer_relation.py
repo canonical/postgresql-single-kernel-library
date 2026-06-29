@@ -320,7 +320,7 @@ class PostgreSQLApplication(RelationState):
             return f"patroni-{self.app.name}"
         return self.app.name
 
-    @property
+    @cached_property
     def planned_units(self) -> int:
         """Get the number of planned units for the application."""
         return self.app.planned_units()
