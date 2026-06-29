@@ -6,17 +6,30 @@
 
 import re
 import socket
+from contextlib import suppress
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, get_args
 
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from ops import ConfigData, JujuVersion, ModelError, Object, Relation, SecretNotFoundError, Unit
+from ops import (
+    ConfigData,
+    JujuVersion,
+    ModelError,
+    Object,
+    Relation,
+    RelationNotFoundError,
+    SecretNotFoundError,
+    Unit,
+)
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
+    DATABASE,
     PEER_RELATION,
+    REPLICATION_CONSUMER_RELATION,
+    REPLICATION_OFFER_RELATION,
     SCOPES,
     STATUS_PEERS_RELATION,
 )
@@ -154,6 +167,27 @@ class CharmState(Object):
             return str(binding.network.bind_address)
 
     @property
+    def database_ip(self) -> str | None:
+        """Database endpoint address."""
+        with suppress(RelationNotFoundError):
+            if binding := self.model.get_binding(DATABASE):
+                return str(binding.network.bind_address)
+
+    @property
+    def replication_offer_ip(self) -> str | None:
+        """Async replication offer endpoint address."""
+        with suppress(RelationNotFoundError):
+            if binding := self.model.get_binding(REPLICATION_OFFER_RELATION):
+                return str(binding.network.bind_address)
+
+    @property
+    def replication_consumer_ip(self) -> str | None:
+        """Async replication consumer endpoint address."""
+        with suppress(RelationNotFoundError):
+            if binding := self.model.get_binding(REPLICATION_CONSUMER_RELATION):
+                return str(binding.network.bind_address)
+
+    @property
     def fqdn(self) -> str | None:
         """Current unit fqdn."""
         if self.substrate == Substrates.K8S:
@@ -229,7 +263,12 @@ class CharmState(Object):
         ips = []
         if self.unit_ip:
             ips.append(self.unit_ip)
-        # TODO: Add other ips
+        if self.database_ip and self.database_ip not in ips:
+            ips.append(self.database_ip)
+        if self.replication_offer_ip and self.replication_offer_ip not in ips:
+            ips.append(self.replication_offer_ip)
+        if self.replication_consumer_ip and self.replication_consumer_ip not in ips:
+            ips.append(self.replication_consumer_ip)
         return ips
 
     # -- Secrets
