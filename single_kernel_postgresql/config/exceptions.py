@@ -59,6 +59,10 @@ class RemoveRaftMemberFailedError(Exception):
     """Raised when a remove raft member failed for some reason."""
 
 
+class AddRaftMemberFailedError(Exception):
+    """Raised when adding raft member failed for some reason."""
+
+
 class SwitchoverFailedError(Exception):
     """Raised when a switchover failed for some reason."""
 
