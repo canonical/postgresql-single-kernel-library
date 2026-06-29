@@ -44,9 +44,8 @@ class ClusterManager(BaseManager):
     This manager is responsible for handling cluster-wide operations.
     """
 
-    def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
+    def __init__(self, state: CharmState, workload: BaseWorkload):
         super().__init__(state, workload, "cluster_manager")
-        self.postgresql_client = client
 
     def install_workload(self) -> None:
         """Install the workload."""
@@ -108,14 +107,16 @@ class ClusterManager(BaseManager):
         except ModelError:
             logger.exception("failed to open port")
 
-    def can_connect_to_postgresql(self, retry: bool = True) -> bool:
+    def can_connect_to_postgresql(
+        self, postgresql_client: PostgreSQLClient, retry: bool = True
+    ) -> bool:
         """Whether the local PostgreSQL instance is reachable and responding."""
-        if not self.postgresql_client.password or not self.postgresql_client.current_host:
+        if not postgresql_client.password or not postgresql_client.current_host:
             return False
 
         def _check_connection():
             try:
-                if not self.postgresql_client.get_postgresql_timezones():
+                if not postgresql_client.get_postgresql_timezones():
                     logger.debug("Cannot connect to database (CannotConnectError)")
                     raise PostgreSQLCannotConnectError
             except Exception as e:

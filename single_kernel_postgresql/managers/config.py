@@ -38,9 +38,8 @@ class ConfigManager(BaseManager):
     This manager is responsible for handling configuration operations.
     """
 
-    def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
+    def __init__(self, state: CharmState, workload: BaseWorkload):
         super().__init__(state, workload, "config_manager")
-        self.postgresql_client = client
 
     @staticmethod
     def _dict_to_hba_string(_dict: dict[str, Any]) -> str:
@@ -66,7 +65,9 @@ class ConfigManager(BaseManager):
             self.workload.paths.data, mode=POSTGRESQL_STORAGE_PERMISSIONS, exist_ok=True
         )
 
-    def _build_postgresql_parameters(self) -> dict[str, str] | None:
+    def _build_postgresql_parameters(
+        self, postgresql_client: PostgreSQLClient
+    ) -> dict[str, str] | None:
         """Build PostgreSQL configuration parameters.
 
         Returns:
@@ -77,7 +78,7 @@ class ConfigManager(BaseManager):
             limit_memory = self.state.config.profile_limit_memory * 10**6
 
         # Build PostgreSQL parameters.
-        pg_parameters = self.postgresql_client.build_postgresql_parameters(
+        pg_parameters = postgresql_client.build_postgresql_parameters(
             self.state.model_config, self.workload.get_available_memory(), limit_memory
         )
 
@@ -88,6 +89,7 @@ class ConfigManager(BaseManager):
 
     def update_config(
         self,
+        postgresql_client: PostgreSQLClient,
         is_creating_backup: bool = False,
         # TODO add rel handler
         is_tls_enabled: bool = False,
@@ -107,7 +109,7 @@ class ConfigManager(BaseManager):
     ) -> bool:
         """Updates Patroni config file based on the existence of the TLS files."""
         # Build PostgreSQL parameters
-        pg_parameters = self._build_postgresql_parameters()
+        pg_parameters = self._build_postgresql_parameters(postgresql_client)
 
         # replication_slots = self.logical_replication.replication_slots()
         replication_slots = {}

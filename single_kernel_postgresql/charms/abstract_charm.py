@@ -31,12 +31,8 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         # Managers
         self.tls_manager = TLSManager(state=self.state, workload=self.workload)
         self.patroni_manager = PatroniManager(state=self.state, workload=self.workload)
-        self.cluster_manager = ClusterManager(
-            state=self.state, workload=self.workload, client=self.postgresql
-        )
-        self.config_manager = ConfigManager(
-            state=self.state, workload=self.workload, client=self.postgresql
-        )
+        self.cluster_manager = ClusterManager(state=self.state, workload=self.workload)
+        self.config_manager = ConfigManager(state=self.state, workload=self.workload)
 
         # Events Handler
         self.postgresql_events_handler = PostgreSQLEventsHandler(
