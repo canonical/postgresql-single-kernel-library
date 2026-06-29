@@ -97,12 +97,8 @@ class PatroniManager(BaseManager):
         # The CA bundle file is used to validate the server certificate when
         # TLS is enabled, otherwise True is set because it's the default value.
         if self.state.substrate == Substrates.VM:
-            # if any([primary_endpoint]):
-            #     raise Exception("K8s attributes set with VM substrate")
             self.verify = f"{self.workload.paths.patroni_conf}/{TLS_CA_BUNDLE_FILE}"
         else:
-            # if any([raft_password]):
-            #     raise Exception("VM attributes set with K8s substrate")
             # CA bundle is not secret
             self.verify = f"/tmp/{TLS_CA_BUNDLE_FILE}"  # noqa: S108
 
@@ -122,7 +118,7 @@ class PatroniManager(BaseManager):
             True if services is ready False otherwise. Retries over a period of 60 seconds times to
             allow server time to start up.
         """
-        if self.state.substrate == Substrates.VM and not self.workload.is_patroni_running():
+        if not self.workload.is_patroni_running():
             return False
         try:
             response = self.cached_patroni_health
