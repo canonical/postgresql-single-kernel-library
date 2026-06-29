@@ -23,13 +23,10 @@ import logging
 from collections import OrderedDict
 from typing import Dict, List, Optional, Set, Tuple
 
-try:
-    import psycopg2
-    import psycopg2.errors
-    import psycopg2.extensions
-    from psycopg2.sql import SQL, Identifier, Literal
-except ImportError:
-    pass
+import psycopg2
+import psycopg2.errors
+import psycopg2.extensions
+from psycopg2.sql import SQL, Identifier, Literal
 
 from ..config.literals import (
     BACKUP_USER,

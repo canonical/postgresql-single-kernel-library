@@ -8,7 +8,7 @@ import logging
 
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import SYSTEM_USERS, USER
+from single_kernel_postgresql.config.literals import CONTAINER_NAME, SYSTEM_USERS, USER
 from single_kernel_postgresql.managers.k8s import K8sManager
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.k8s import K8sWorkload
@@ -51,7 +51,9 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         Returns:
             BaseWorkload: The K8sWorkload instance for this charm
         """
-        return K8sWorkload(charm_dir=self.charm_dir, unit=self.unit)
+        return K8sWorkload(
+            charm_dir=self.charm_dir, container=self.unit.get_container(CONTAINER_NAME)
+        )
 
     @property
     def substrate(self) -> Substrates:

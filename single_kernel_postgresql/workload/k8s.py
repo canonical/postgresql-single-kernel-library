@@ -7,18 +7,16 @@ import logging
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
-from functools import cached_property
 from pathlib import Path
 from types import SimpleNamespace
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
-from ops import Container, ModelError, Unit
+from ops import Container, ModelError
 from ops.pebble import Plan, ServiceStatus
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
-    CONTAINER_NAME,
     DIR_PERMISSIONS_READONLY,
     K8S_POSTGRESQL_SERVICE_NAME,
 )
@@ -32,21 +30,16 @@ logger = logging.getLogger(__name__)
 class K8sWorkload(BaseWorkload):
     """Kubernetes PostgreSQL Workload."""
 
-    def __init__(self, charm_dir: Path, unit: Unit):
+    def __init__(self, charm_dir: Path, container: Container):
         """Initialize workload.
 
         Args:
             charm_dir: the path to charm code.
-            unit: unit to lazy load the container from.
+            container: the Container instance.
         """
         super().__init__(charm_dir=charm_dir)
-        self._unit = unit
+        self.container = container
         self._paths: BasePaths | None = None
-
-    @cached_property
-    def container(self) -> Container:
-        """Returns the postgresql container."""
-        return self._unit.get_container(CONTAINER_NAME)
 
     def install(self) -> None:
         """Install the workload."""
