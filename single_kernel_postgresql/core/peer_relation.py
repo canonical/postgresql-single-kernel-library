@@ -99,51 +99,6 @@ class PostgreSQLPeer(RelationState):
         self.set_secret("internal-key", value)
 
     @property
-    def operator_client_key(self) -> str | None:
-        """Operator-provided client private key (unit secret)."""
-        return self.get_secret("operator-client-key")
-
-    @operator_client_key.setter
-    def operator_client_key(self, value: str) -> None:
-        self.set_secret("operator-client-key", value)
-
-    @property
-    def operator_client_cert(self) -> str | None:
-        """Operator-provided client certificate (unit secret)."""
-        return self.get_secret("operator-client-cert")
-
-    @operator_client_cert.setter
-    def operator_client_cert(self, value: str) -> None:
-        self.set_secret("operator-client-cert", value)
-
-    @property
-    def operator_client_ca(self) -> str | None:
-        """CA chain for the operator client certificate (unit secret)."""
-        return self.get_secret("operator-client-ca")
-
-    @operator_client_ca.setter
-    def operator_client_ca(self, value: str) -> None:
-        self.set_secret("operator-client-ca", value)
-
-    @property
-    def operator_peer_key(self) -> str | None:
-        """Operator-provided peer private key (unit secret)."""
-        return self.get_secret("operator-peer-key")
-
-    @operator_peer_key.setter
-    def operator_peer_key(self, value: str) -> None:
-        self.set_secret("operator-peer-key", value)
-
-    @property
-    def operator_peer_cert(self) -> str | None:
-        """Operator-provided peer certificate (unit secret)."""
-        return self.get_secret("operator-peer-cert")
-
-    @operator_peer_cert.setter
-    def operator_peer_cert(self, value: str) -> None:
-        self.set_secret("operator-peer-cert", value)
-
-    @property
     def current_ca(self) -> str | None:
         """Current peer CA (unit secret); part of the peer CA bundle."""
         return self.get_secret("current-ca")

@@ -26,19 +26,21 @@ class RefreshTLSCertificatesEvent(EventBase):
 
 
 class TLS(Object):
-    """Owns the client/peer certificate requirers and pushes assigned certs into state.
+    """Owns the client/peer certificate requirers and pushes assigned certs to the workload.
 
-    Operator-certificate handler: observes certificate_available and stores/pushes
-    via TLSManager. Also owns the refresh_tls_certificates_event that re-requests
-    certificates whenever SANs change (emitted on peer relation_changed).
+    Operator-certificate handler: observes certificate_available and triggers a
+    file-push via TLSManager. Also owns the refresh_tls_certificates_event that
+    re-requests certificates whenever SANs change (emitted on peer relation_changed).
 
     Design notes
     ------------
-    1. **State-backed model.** This handler is deliberately state-backed: it reads
-       certificates from TLSManager (which reads from CharmState/peer databag) rather
-       than calling get_assigned_certificates() on every access.  This diverges from
-       the charm's live-read style; the logic lives in TLSManager and the handler stays
-       thin.  Do not "reconcile" the two copies.
+    1. **Live-fetch model.** Operator cert/key are read live from the requirers
+       (TLSManager.get_*_tls_files call get_assigned_certificates() on demand) and are
+       never persisted — matching the pre-port charm (postgresql-operator/src/relations/
+       tls.py). Only the peer CA is tracked in state (``current-ca`` / ``old-ca``) so the
+       CA bundle can include the previous CA across a rotation; the requirer holds only
+       the current cert. The manager reaches the requirers via the references this
+       handler wires onto it (the V4 sibling structure, cf. mongo-single-kernel-library).
 
     2. **CA bundle terminology.** The ``current_ca`` term used in state mirrors the
        charm's live operator-CA term (postgresql-operator/src/relations/tls.py).  It
@@ -89,6 +91,11 @@ class TLS(Object):
             refresh_events=[self.refresh_tls_certificates_event],
         )
 
+        # Wire the requirers into the manager so its getters can fetch cert/key live
+        # (the manager persists no operator cert/key — only the peer CA, for rotation).
+        self.tls_manager.client_certificate = self.client_certificate
+        self.tls_manager.peer_certificate = self.peer_certificate
+
         self.framework.observe(
             self.client_certificate.on.certificate_available, self._on_certificate_available
         )
@@ -134,29 +141,15 @@ class TLS(Object):
             event.defer()
 
     def _on_certificate_available(self, event) -> None:
-        """Store or clear the operator client cert and push TLS files."""
-        certs, private_key = self.client_certificate.get_assigned_certificates()
-        if certs and private_key is not None:
-            provider_cert = certs[0]
-            self.tls_manager.store_client_tls(
-                key=str(private_key),
-                cert=str(provider_cert.certificate),
-                ca=str(provider_cert.ca),
-            )
-        else:
-            self.tls_manager.clear_client_tls()
+        """Push TLS files; the operator client cert/key is read live at push time."""
         self._push_tls_files(event)
 
     def _on_peer_certificate_available(self, event) -> None:
-        """Store or clear the operator peer cert (rotating the CA) and push TLS files."""
-        certs, private_key = self.peer_certificate.get_assigned_certificates()
-        if certs and private_key is not None:
-            provider_cert = certs[0]
-            self.tls_manager.store_peer_tls(
-                key=str(private_key),
-                cert=str(provider_cert.certificate),
-                ca=str(provider_cert.ca),
-            )
+        """Rotate the peer CA if it changed, then push (cert/key read live at push time)."""
+        certs, _ = self.peer_certificate.get_assigned_certificates()
+        new_ca = str(certs[0].ca) if certs else None
+        if new_ca is not None:
+            self.tls_manager.rotate_peer_ca(new_ca)
         else:
-            self.tls_manager.clear_peer_tls()
+            self.tls_manager.clear_peer_ca()
         self._push_tls_files(event)
