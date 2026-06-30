@@ -34,7 +34,6 @@ from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.utils import new_password
 from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +44,15 @@ class ClusterManager(BaseManager):
     This manager is responsible for handling cluster-wide operations.
     """
 
-    def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
-        super().__init__(state, workload, "cluster_manager", client)
+    def __init__(self, state: CharmState, workload: BaseWorkload):
+        super().__init__(state, workload, "cluster_manager")
 
     def install_workload(self) -> None:
         """Install the workload."""
-        if self.state.substrate == Substrates.VM and isinstance(self.workload, VMWorkload):
-            self.workload.install_snap_package(revision=None)
-            self.workload.create_snap_alias("patronictl")
-            self.workload.create_snap_alias("psql")
+        if self.state.substrate == Substrates.VM:
+            self.workload.install_snap_package(revision=None)  # type: ignore
+            self.workload.create_snap_alias("patronictl")  # type:ignore
+            self.workload.create_snap_alias("psql")  # type: ignore
         else:
             logger.debug(
                 "No workload installation steps defined for substrate %s", self.state.substrate
@@ -108,14 +107,16 @@ class ClusterManager(BaseManager):
         except ModelError:
             logger.exception("failed to open port")
 
-    def can_connect_to_postgresql(self, retry: bool = True) -> bool:
+    def can_connect_to_postgresql(
+        self, postgresql_client: PostgreSQLClient, retry: bool = True
+    ) -> bool:
         """Whether the local PostgreSQL instance is reachable and responding."""
-        if not self.postgresql_client.password or not self.postgresql_client.current_host:
+        if not postgresql_client.password or not postgresql_client.current_host:
             return False
 
         def _check_connection():
             try:
-                if not self.postgresql_client.get_postgresql_timezones():
+                if not postgresql_client.get_postgresql_timezones():
                     logger.debug("Cannot connect to database (CannotConnectError)")
                     raise PostgreSQLCannotConnectError
             except Exception as e:

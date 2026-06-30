@@ -194,6 +194,11 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
+    def is_patroni_running(self) -> bool:
+        """Check if the Patroni service is running."""
+        pass
+
+    @abstractmethod
     def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
         pass
