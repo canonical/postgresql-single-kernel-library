@@ -307,7 +307,7 @@ If something goes wrong, halt the refresh by running:
 juju config postgresql pause-after-unit-refresh=all
 ```
 
-In the command above, replace `postgresql` with the name of the Juju application.
+In the command above, replace `postgresql` with the name of your Juju application.
 
 Next, assess the situation and plan the recovery. Often, the safest recovery path is to {ref}`roll back <roll-back>`.
 
@@ -337,6 +337,7 @@ If applicable, please file a {ref}`bug report <contact>`.
 
 Once you understand what went wrong and have tested that it has been fixed, the refresh can be attempted again.
 
+(monitor-the-refresh)=
 ## Monitor the refresh
 
 Use `juju status` to monitor the progress of the refresh.
