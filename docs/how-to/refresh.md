@@ -6,7 +6,7 @@ myst:
 
 (refresh)=
 # Refresh (upgrade)
-{{vm_k8s}}
+{{vm}}
 
 ````{dropdown} Emergency stop button
 :open:
@@ -23,6 +23,8 @@ Then, consider {ref}`rolling back <roll-back>`.
 ````
 
 Charmed PostgreSQL supports minor version in-place refresh via the [`juju refresh`](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/refresh/#details) command.
+
+**This guide is currently only available for the VM charm. Refresh instructions for K8s are in coming soon.**
 
 ## Determine which version to refresh to
 
@@ -72,6 +74,8 @@ These refreshes are well-tested and should be preferred.
 
 ````{tab-item} K8s
 :sync: k8s
+
+Coming soon.
 
 ```{eval-rst}
 +--------------+------------+----------+--------------+------------+----------+-------------------------------------+
@@ -136,6 +140,8 @@ If possible, use a {ref}`recommended refresh <recommended-refreshes>` instead.
 
 ````{tab-item} K8s
 :sync: k8s
+
+Coming soon.
 
 ```{eval-rst}
 +------------+------------+----------+------------+------------+----------+
@@ -227,18 +233,9 @@ If you anticipate that the refresh will be in progress for an extended duration 
 
 Run the `pre-refresh-check` action on the leader unit to prepare the application for refresh.
 
-````{tab-set}
-```{tab-item} VM
-:sync: vm
-
-    juju run postgresql/leader pre-refresh-check
+```shell
+juju run postgresql/leader pre-refresh-check
 ```
-```{tab-item} K8s
-:sync: k8s
-
-    juju run postgresql-k8s/leader pre-refresh-check
-```
-````
 
 If the action does not succeed, **do not refresh**.
 
@@ -269,18 +266,9 @@ Set the `pause-after-unit-refresh` config option to:
 
 For example:
 
-````{tab-set}
-```{tab-item} VM
-:sync: vm
-
-    juju config postgresql pause-after-unit-refresh=all
+```shell
+juju config postgresql pause-after-unit-refresh=all
 ```
-```{tab-item} K8s
-:sync: k8s
-
-   juju config postgresql-k8s pause-after-unit-refresh=all
-```
-````
 
 ```{dropdown} Automatic pause on health check failure
 :open:
@@ -306,36 +294,18 @@ These operations are not supported while a refresh is in progress:
 
 Use `juju refresh` and specify the charm revision that you are refreshing to.
 
-````{tab-set}
-```{tab-item} VM
-:sync: vm
-
-    juju refresh postgresql --revision <revision-number>
+```shell
+juju refresh postgresql --revision <revision-number>
 ```
-```{tab-item} K8s
-:sync: k8s
-
-    juju refresh postgresql-k8s --revision <revision-number>
-```
-````
 
 (halt-the-refresh)=
 ## Halt the refresh
 
 If something goes wrong, halt the refresh by running:
 
-````{tab-set}
-```{tab-item} VM
-:sync: vm
-
-    juju config postgresql pause-after-unit-refresh=all
+```shell
+juju config postgresql pause-after-unit-refresh=all
 ```
-```{tab-item} K8s
-:sync: k8s
-
-    juju config postgresql-k8s pause-after-unit-refresh=all
-```
-````
 
 In the command above, replace `postgresql` with the name of the Juju application.
 
@@ -357,7 +327,7 @@ In most cases, the rollback command is also displayed in the application's statu
 ### Resume the rollback
 
 If more than one unit was refreshed before the rollback was started and `pause-after-unit-refresh` is set to `all` or `first`, your manual confirmation will be needed to complete the rollback.
-The procedure for the rollback is the same as described in {ref}`monitor-the-refresh.
+The procedure for the rollback is the same as described in {ref}`monitor-the-refresh`.
 
 ### Reflect
 
@@ -377,7 +347,7 @@ If the application status or any of the unit statuses are `blocked`, your action
 
 If the application status or any of the unit statuses are `error`, your action may be required. Monitor `juju debug-log`.
 The error may have been a temporary issue.
-If the error persists, your action is required—consider [rolling back](#roll-back).
+If the error persists, your action is required—consider {ref}`rolling back <roll-back>`.
 
 Monitor the refresh until it successfully finishes.
 When the refresh completes, the application status will go from a message beginning with "Refreshing" to an `active` status with no message.
@@ -391,19 +361,10 @@ The application status in `juju status` will instruct you when your confirmation
 Before running the `resume-refresh` action:
 * Wait until all of the application's unit agent statuses are `idle`
 * Wait until all of the refreshed units' workload statuses are `active`
-* Perform [manual checks](#configure-pause-after-unit-refresh) to ensure that everything is healthy
+* Perform {ref}`manual checks <configure-pause-after-unit-refresh>` to ensure that everything is healthy
 
 Example of running the `resume-refresh` action on unit 1:
 
-````{tab-set}
-```{tab-item} VM
-:sync: vm
-
-    juju run postgresql/1 resume-refresh
+```shell
+juju run postgresql/1 resume-refresh
 ```
-```{tab-item} K8s
-:sync: k8s
-
-    juju run postgresql-k8s/1 resume-refresh
-```
-````
