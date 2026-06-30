@@ -6,6 +6,8 @@
 """State objects for database-peers relation."""
 
 import json
+from collections.abc import MutableMapping
+from functools import cached_property
 
 from ops import Application, BlockedStatus, Relation, Unit
 
@@ -177,6 +179,34 @@ class PostgreSQLPeer(RelationState):
             peer_addrs.add(addr)
         return peer_addrs
 
+    @property
+    def is_unit_departing(self) -> bool:
+        """Returns whether the unit is departing."""
+        if not self.relation:
+            return False
+        return "departing" in self.relation.data[self.unit]
+
+    @property
+    def is_unit_stopped(self) -> bool:
+        """Returns whether the unit is stopped."""
+        if not self.relation:
+            return False
+        return "stopped" in self.relation.data[self.unit]
+
+    @property
+    def is_connectivity_enabled(self) -> bool:
+        """Return whether this unit can be connected externally."""
+        if not self.relation:
+            return True
+        return self.relation.data[self.unit].get("connectivity", "on") == "on"
+
+    @cached_property
+    def data(self) -> MutableMapping[str, str]:
+        """Escape hatch method to access the peer data directly."""
+        if not self.relation:
+            return {}
+        return self.relation.data[self.unit]
+
 
 class PostgreSQLApplication(RelationState):
     """An PostgreSQL Application is the peer application state.
@@ -290,7 +320,7 @@ class PostgreSQLApplication(RelationState):
             return f"patroni-{self.app.name}"
         return self.app.name
 
-    @property
+    @cached_property
     def planned_units(self) -> int:
         """Get the number of planned units for the application."""
         return self.app.planned_units()
@@ -309,6 +339,39 @@ class PostgreSQLApplication(RelationState):
             return set()
         return set(json.loads(self.relation.data[self.app].get("endpoints", "[]")))
 
+    @property
+    def is_cluster_initialised(self) -> bool:
+        """Returns whether the cluster is already initialised."""
+        if not self.relation:
+            return False
+        return "cluster_initialised" in self.relation.data[self.app]
+
+    @property
+    def is_cluster_restoring_backup(self) -> bool:
+        """Returns whether the cluster is restoring a backup."""
+        if not self.relation:
+            return False
+        return "restoring-backup" in self.relation.data[self.app]
+
+    @property
+    def is_cluster_restoring_to_time(self) -> bool:
+        """Returns whether the cluster is restoring a backup to a specific time."""
+        if not self.relation:
+            return False
+        return "restore-to-time" in self.relation.data[self.app]
+
+    @property
+    def is_ldap_charm_related(self) -> bool:
+        """Return whether this unit has an LDAP charm related."""
+        if not self.relation:
+            return False
+        return self.relation.data[self.app].get("ldap_enabled", "False") == "True"
+
+    @property
+    def is_ldap_enabled(self) -> bool:
+        """Return whether this unit has LDAP enabled."""
+        return self.is_ldap_charm_related and self.is_cluster_initialised
+
     def get_secret(self, key: str) -> str | None:
         """Get the secret value for 'key' from the peer relation data."""
         if not self.relation:
@@ -326,3 +389,10 @@ class PostgreSQLApplication(RelationState):
         if not self.relation:
             return
         self.data_interface.delete_relation_data(self.relation.id, [key])
+
+    @cached_property
+    def data(self) -> MutableMapping[str, str]:
+        """Escape hatch method to access the peer data directly."""
+        if not self.relation:
+            return {}
+        return self.relation.data[self.app]

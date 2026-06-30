@@ -25,7 +25,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         assert isinstance(self.workload, K8sWorkload), (  # noqa: S101
             "Workload must be an instance of K8sWorkload"
         )
-        self.k8s_manager = K8sManager(self.state, self.workload, self.postgresql)
+        self.k8s_manager = K8sManager(self.state, self.workload)
 
     @property
     def postgresql(self) -> PostgreSQL:

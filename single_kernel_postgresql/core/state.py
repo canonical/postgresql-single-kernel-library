@@ -6,17 +6,30 @@
 
 import re
 import socket
+from contextlib import suppress
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, get_args
 
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from ops import ConfigData, JujuVersion, ModelError, Object, Relation, SecretNotFoundError, Unit
+from ops import (
+    ConfigData,
+    JujuVersion,
+    ModelError,
+    Object,
+    Relation,
+    RelationNotFoundError,
+    SecretNotFoundError,
+    Unit,
+)
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
+    DATABASE,
     PEER_RELATION,
+    REPLICATION_CONSUMER_RELATION,
+    REPLICATION_OFFER_RELATION,
     SCOPES,
     STATUS_PEERS_RELATION,
 )
@@ -154,6 +167,27 @@ class CharmState(Object):
             return str(binding.network.bind_address)
 
     @property
+    def database_ip(self) -> str | None:
+        """Database endpoint address."""
+        with suppress(RelationNotFoundError):
+            if binding := self.model.get_binding(DATABASE):
+                return str(binding.network.bind_address)
+
+    @property
+    def replication_offer_ip(self) -> str | None:
+        """Async replication offer endpoint address."""
+        with suppress(RelationNotFoundError):
+            if binding := self.model.get_binding(REPLICATION_OFFER_RELATION):
+                return str(binding.network.bind_address)
+
+    @property
+    def replication_consumer_ip(self) -> str | None:
+        """Async replication consumer endpoint address."""
+        with suppress(RelationNotFoundError):
+            if binding := self.model.get_binding(REPLICATION_CONSUMER_RELATION):
+                return str(binding.network.bind_address)
+
+    @property
     def fqdn(self) -> str | None:
         """Current unit fqdn."""
         if self.substrate == Substrates.K8S:
@@ -165,7 +199,7 @@ class CharmState(Object):
     def endpoint(self) -> str | None:
         """Current unit endpoint."""
         if self.substrate == Substrates.K8S:
-            return self.fqdn
+            return f"{self.peer.unit.name.replace('/', '-')}.{self.application.app.name}-endpoints"
         else:
             return self.unit_ip
 
@@ -173,9 +207,11 @@ class CharmState(Object):
     def endpoints(self) -> set[str]:
         """Returns the list of endpoints of the current members of the cluster."""
         if self.peer_relation:
-            return self.application.endpoints
-        else:
-            return {self.endpoint} if self.endpoint else set()
+            if self.substrate == Substrates.K8S:
+                return self.application.endpoints
+            else:
+                return self.peer_members_ips
+        return {self.endpoint} if self.endpoint else set()
 
     @property
     def model_name(self) -> str:
@@ -185,7 +221,7 @@ class CharmState(Object):
     @cached_property
     def patroni_url(self) -> str:
         """Patroni REST API URL."""
-        return f"https://{self.unit_ip}:8007"
+        return f"https://{self.endpoint}:8008"
 
     @property
     def peer_members_ips(self) -> set[str]:
@@ -227,7 +263,12 @@ class CharmState(Object):
         ips = []
         if self.unit_ip:
             ips.append(self.unit_ip)
-        # TODO: Add other ips
+        if self.database_ip and self.database_ip not in ips:
+            ips.append(self.database_ip)
+        if self.replication_offer_ip and self.replication_offer_ip not in ips:
+            ips.append(self.replication_offer_ip)
+        if self.replication_consumer_ip and self.replication_consumer_ip not in ips:
+            ips.append(self.replication_consumer_ip)
         return ips
 
     # -- Secrets
@@ -403,3 +444,38 @@ class CharmState(Object):
             if re.fullmatch(regex_pattern, present_status.message) is not None:
                 return present_status
         return None
+
+    @cached_property
+    def synchronous_node_count(self) -> int:
+        """Number of expected sync standbys."""
+        planned_units = self.application.planned_units
+        if self.config.synchronous_node_count == "all":
+            return planned_units - 1
+        elif self.config.synchronous_node_count == "majority":
+            return planned_units // 2
+        # -1 for leader
+        return (
+            self.config.synchronous_node_count
+            if self.config.synchronous_node_count < planned_units - 1
+            else planned_units - 1
+        )
+
+    @cached_property
+    def synchronous_configuration(self) -> dict[str, Any]:
+        """Synchronous mode configuration."""
+        # Try to update synchronous_node_count.
+        return {
+            "synchronous_node_count": self.synchronous_node_count,
+            "synchronous_mode_strict": len(self.application.members_ips) > 1
+            and self.config.synchronous_mode_strict
+            and self.synchronous_node_count > 0,
+        }
+
+    def _build_service_name(self, service: str) -> str:
+        """Build a full k8s service name based on the service name."""
+        return f"{self.application.app.name}-{service}.{self.model_name}.svc.cluster.local"
+
+    @property
+    def primary_endpoint(self) -> str:
+        """Returns the endpoint of the primary instance's service."""
+        return self._build_service_name("primary")

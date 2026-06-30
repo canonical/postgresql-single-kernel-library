@@ -39,17 +39,20 @@ def harness(substrate, test_charm_path):
         meta = meta_file.read()
     with open(test_charm_path + "/actions.yaml") as actions_file:
         actions = actions_file.read()
+    wl_patch = patch("single_kernel_postgresql.workload.base.BaseWorkload.get_postgresql_version")
     if substrate == "vm":
         harness = Harness(vm_charm.PostgreSQLVMCharm, meta=meta, actions=actions)
     else:
         harness = Harness(k8s_charm.PostgreSQLK8sCharm, meta=meta, actions=actions)
 
     # Set up the initial relation and hooks.
+    wl_patch.start()
     peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
     harness.begin()
     yield harness
     harness.cleanup()
+    wl_patch.stop()
 
 
 @pytest.mark.parametrize("users_exist", [True, False])

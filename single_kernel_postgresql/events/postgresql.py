@@ -177,8 +177,8 @@ class PostgreSQLEventsHandler(Object):
 
         self.tls_manager.configure_internal_peer_ca()
 
-        if self.charm.substrate == Substrates.VM:
-            self.config_manager.update_config()
+        # if self.charm.substrate == Substrates.VM:
+        #     self.config_manager.update_config()
 
         # TODO: Add next steps of leader elected
 
