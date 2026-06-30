@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from ops import Container, ModelError
-from ops.pebble import Plan
+from ops.pebble import Plan, ServiceStatus
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 class K8sWorkload(BaseWorkload):
     """Kubernetes PostgreSQL Workload."""
 
-    def __init__(self, charm_dir: Path, container: Container | None = None):
+    def __init__(self, charm_dir: Path, container: Container):
         """Initialize workload.
 
         Args:
@@ -38,8 +38,6 @@ class K8sWorkload(BaseWorkload):
             container: the Container instance.
         """
         super().__init__(charm_dir=charm_dir)
-        if not container:
-            raise AttributeError("Container is required.")
         self.container = container
         self._paths: BasePaths | None = None
 
@@ -77,6 +75,17 @@ class K8sWorkload(BaseWorkload):
     def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
         raise NotImplementedError
+
+    def is_patroni_running(self) -> bool:
+        """Check if the Patroni service is running."""
+        if not self.container.can_connect():
+            return False
+
+        services = self.container.pebble.get_services(names=[K8S_POSTGRESQL_SERVICE_NAME])
+        if len(services) == 0:
+            return False
+
+        return services[0].current == ServiceStatus.ACTIVE
 
     def run_cmd(
         self,
@@ -136,7 +145,7 @@ class K8sWorkload(BaseWorkload):
             PebbleError: if file operations fail.
         """
         # PathProtocol exposes text operations.
-        temp_dir_path = directory or self.paths.tmp
+        temp_dir_path = directory or self.paths.temp
         self.mkdir(
             temp_dir_path,
             mode=DIR_PERMISSIONS_READONLY,
@@ -182,7 +191,7 @@ class K8sWorkload(BaseWorkload):
             # this may raise RuntimeError if container isn't set, which is expected
             # during initialization before container is available
             root_path = self.root
-            self._paths = K8sPaths(root_path)
+            self._paths = K8sPaths(root_path, self.get_postgresql_version().split(".")[0])
         return self._paths
 
     @property

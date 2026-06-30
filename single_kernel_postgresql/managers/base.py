@@ -11,7 +11,6 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -25,13 +24,10 @@ class BaseManager(ManagerStatusProtocol):
 
     state: CharmState
 
-    def __init__(
-        self, state: CharmState, workload: BaseWorkload, name: str, client: PostgreSQLClient
-    ):
+    def __init__(self, state: CharmState, workload: BaseWorkload, name: str):
         self.state = state
         self.workload = workload
         self.name = name
-        self.postgresql_client = client
 
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False

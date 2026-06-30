@@ -18,14 +18,16 @@ class Paths(ABC):
             bin: Path to the bin/ folder
     """
 
-    def __init__(self, root: PathProtocol):
+    def __init__(self, root: PathProtocol, major_version: str):
         """Initialize the Paths.
 
         Args:
             root: The root path for the PostgreSQL installation.
+            major_version: Postgresql major version
         """
         super().__init__()
         self.root = root
+        self.versioned_path = f"{major_version}/main"
 
     @property
     @abstractmethod
@@ -47,7 +49,13 @@ class Paths(ABC):
 
     @property
     @abstractmethod
-    def tmp(self) -> PathProtocol:
+    def wal(self) -> PathProtocol:
+        """Path to the data logs folder of PostgreSQL."""
+        pass
+
+    @property
+    @abstractmethod
+    def temp(self) -> PathProtocol:
         """Path to the temporary directory."""
         pass
 
@@ -66,5 +74,11 @@ class Paths(ABC):
     @property
     @abstractmethod
     def patroni_logs(self) -> PathProtocol:
+        """Path to the patroni logs."""
+        pass
+
+    @property
+    @abstractmethod
+    def pgbackrest_conf(self) -> PathProtocol:
         """Path to the patroni logs."""
         pass
