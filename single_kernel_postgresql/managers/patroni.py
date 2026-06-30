@@ -11,7 +11,6 @@ such as starting the service and checking its status.
 import glob
 import logging
 import os
-import pathlib
 import re
 import subprocess
 from contextlib import suppress
@@ -24,7 +23,6 @@ with suppress(ImportError):
 import psycopg2
 import psycopg2.extras
 import requests
-import tomli
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from httpx import BasicAuth
@@ -187,11 +185,6 @@ class PatroniManager(BaseManager):
             return {member["name"] for member in self.cluster_status()}
         except Exception:
             return set()
-
-    def get_postgresql_version(self) -> str:
-        """Return the PostgreSQL version from the system."""
-        with pathlib.Path("refresh_versions.toml").open("rb") as file:
-            return tomli.load(file)["workload"]
 
     @cached_property
     def cached_cluster_status(self):
@@ -676,16 +669,6 @@ class PatroniManager(BaseManager):
         )
         logger.debug("API reload_patroni_configuration: %s (%s)", r, r.elapsed.total_seconds())
 
-    def is_patroni_running(self) -> bool:
-        """Check if the Patroni service is running."""
-        try:
-            cache = snap.SnapCache()
-            selected_snap = cache["charmed-postgresql"]
-            return selected_snap.services["patroni"]["active"]
-        except snap.SnapError as e:
-            logger.debug(f"Failed to check Patroni service: {e}")
-            return False
-
     def restart_patroni(self) -> bool:
         """Restart Patroni.
 
@@ -714,18 +697,6 @@ class PatroniManager(BaseManager):
             timeout=API_REQUEST_TIMEOUT,
         )
         logger.debug("API restart_postgresql: %s (%s)", r, r.elapsed.total_seconds())
-
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-    def reinitialize_postgresql(self) -> None:
-        """Reinitialize PostgreSQL."""
-        logger.debug("Reinitializing PostgreSQL...")
-        r = requests.post(
-            f"{self.state.patroni_url}/reinitialize",
-            verify=self.verify,
-            auth=self._patroni_auth,
-            timeout=API_REQUEST_TIMEOUT,
-        )
-        logger.debug("API reinitialize_postgresql: %s (%s)", r, r.elapsed.total_seconds())
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def bulk_update_parameters_controller_by_patroni(
