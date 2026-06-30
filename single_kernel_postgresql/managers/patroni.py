@@ -597,6 +597,9 @@ class PatroniManager(BaseManager):
     ) -> None:
         """Trigger a switchover."""
         # Try to trigger the switchover.
+        if candidate is not None:
+            candidate = candidate.replace("/", "-")
+
         for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
             with attempt:
                 current_primary = (
