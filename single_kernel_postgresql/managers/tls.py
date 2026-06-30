@@ -24,6 +24,10 @@ from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatu
 from single_kernel_postgresql.config.exceptions import TlsError
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
+    TLS_CA_BUNDLE_FILE,
+    TLS_CA_FILE,
+    TLS_CERT_FILE,
+    TLS_KEY_FILE,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
@@ -93,6 +97,81 @@ class TLSManager(BaseManager):
         logger.warning("Internal peer CA generated. Please use a proper TLS operator if possible.")
         self.state.set_secret(APP_SCOPE, "internal-ca-key", str(private_key))
         self.state.set_secret(APP_SCOPE, "internal-ca", str(ca))
+
+    def store_client_tls(self, key: str, cert: str, ca: str) -> None:
+        """Persist the operator-provided client key/cert/ca into peer state."""
+        self.state.peer.operator_client_key = key
+        self.state.peer.operator_client_cert = cert
+        self.state.peer.operator_client_ca = ca
+
+    def store_peer_tls(self, key: str, cert: str, ca: str) -> None:
+        """Persist the operator-provided peer key/cert and rotate the peer CA."""
+        self.state.peer.operator_peer_key = key
+        self.state.peer.operator_peer_cert = cert
+        if ca != self.state.peer.current_ca:
+            if self.state.peer.current_ca:
+                self.state.peer.old_ca = self.state.peer.current_ca
+            self.state.peer.current_ca = ca
+
+    def get_client_tls_files(self) -> tuple[str | None, str | None, str | None]:
+        """Return (key, ca, cert) for the operator client certificate from state."""
+        cert = self.state.peer.operator_client_cert
+        if cert is None:
+            return None, None, None
+        return (
+            self.state.peer.operator_client_key,
+            self.state.peer.operator_client_ca,
+            cert,
+        )
+
+    def get_peer_ca_bundle(self) -> str:
+        """Compose the peer CA bundle: current CA, old CA, internal CA."""
+        cas = [
+            self.state.peer.current_ca,
+            self.state.peer.old_ca,
+            self.state.get_secret(APP_SCOPE, "internal-ca"),
+        ]
+        return "\n".join(ca for ca in cas if ca).strip()
+
+    def get_peer_tls_files(self) -> tuple[str | None, str | None, str | None]:
+        """Return (key, ca, cert) for the peer certificate.
+
+        Prefers the operator-provided peer material (with the composed CA
+        bundle); falls back to the internally generated peer material.
+        """
+        if self.state.peer.operator_peer_cert is not None:
+            return (
+                self.state.peer.operator_peer_key,
+                self.get_peer_ca_bundle(),
+                self.state.peer.operator_peer_cert,
+            )
+        return (
+            self.state.peer.internal_key,
+            self.state.get_secret(APP_SCOPE, "internal-ca"),
+            self.state.peer.internal_cert,
+        )
+
+    def push_tls_files(self) -> None:
+        """Write the client, peer, and CA-bundle TLS files to the workload."""
+        conf = self.workload.paths.conf
+
+        key, ca, cert = self.get_client_tls_files()
+        if key is not None:
+            self.workload.write_text(key, conf / TLS_KEY_FILE, 0o600)
+        if ca is not None:
+            self.workload.write_text(ca, conf / TLS_CA_FILE, 0o600)
+        if cert is not None:
+            self.workload.write_text(cert, conf / TLS_CERT_FILE, 0o600)
+
+        key, ca, cert = self.get_peer_tls_files()
+        if key is not None:
+            self.workload.write_text(key, conf / f"peer_{TLS_KEY_FILE}", 0o600)
+        if ca is not None:
+            self.workload.write_text(ca, conf / f"peer_{TLS_CA_FILE}", 0o600)
+        if cert is not None:
+            self.workload.write_text(cert, conf / f"peer_{TLS_CERT_FILE}", 0o600)
+
+        self.workload.write_text(self.get_peer_ca_bundle(), conf / TLS_CA_BUNDLE_FILE, 0o600)
 
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
