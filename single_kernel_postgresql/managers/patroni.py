@@ -765,7 +765,7 @@ class PatroniManager(BaseManager):
             True if successful, False if Patroni API is not ready.
         """
         try:
-            for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
+            for attempt in Retrying(stop=stop_after_delay(15), wait=wait_fixed(3)):
                 with attempt:
                     current_config = requests.get(
                         f"{self.state.patroni_url}/config",
