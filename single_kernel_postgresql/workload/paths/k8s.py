@@ -6,6 +6,7 @@ from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.config.literals import (
     K8S_DATA_PATH,
+    PATRONI_CONF_PATH,
     PATRONI_LOGS_PATH,
     PGBACKREST_CONF_PATH,
     POSTGRESQL_CONF_FILE,
@@ -60,7 +61,17 @@ class K8sPaths(Paths):
 
     @property
     def patroni_conf(self) -> PathProtocol:
-        """Path to the patroni configuration file."""
+        """Path to the patroni configuration directory."""
+        return self.root / PATRONI_CONF_PATH
+
+    @property
+    def tls(self) -> PathProtocol:
+        """Directory where TLS files are written on K8s (the data dir Patroni reads from).
+
+        This is the *unversioned* data storage root (``/var/lib/pg/data``), which is
+        where the charm-rendered patroni.yml references the ``.pem`` files
+        (``{storage_path}/*.pem``) — NOT the versioned ``data`` subdir (``.../16/main``).
+        """
         return self.root / K8S_DATA_PATH
 
     @property
