@@ -41,6 +41,27 @@ class BaseWorkload(ABC):
         """Return the root path."""
         pass
 
+    @property
+    @abstractmethod
+    def user(self) -> str:
+        """The OS user that owns workload files (substrate-specific)."""
+        pass
+
+    @property
+    @abstractmethod
+    def group(self) -> str:
+        """The OS group that owns workload files (substrate-specific)."""
+        pass
+
+    @property
+    def tls_file_mode(self) -> int:
+        """File mode for TLS material written to disk.
+
+        Defaults to 0o600 (VM); K8s overrides to 0o400 to match the
+        pre-migration charm.
+        """
+        return 0o600
+
     @abstractmethod
     def install(self) -> None:
         """Install the workload."""
@@ -59,7 +80,12 @@ class BaseWorkload(ABC):
         pass
 
     def write_text(
-        self, content: str, path: pathops.PathProtocol, mode: int | None = None
+        self,
+        content: str,
+        path: pathops.PathProtocol,
+        mode: int | None = None,
+        user: str | None = None,
+        group: str | None = None,
     ) -> None:
         """Write content to a file on disk.
 
@@ -67,18 +93,22 @@ class BaseWorkload(ABC):
             content (str): The content to be written.
             path (pathops.PathProtocol): The file path where the content should be written.
             mode (int, optional): The mode/permissions to use when writing the file.
+            user (str, optional): The user to own the file (forwarded to pathops for
+                substrate-correct chown: os.chown on VM, Pebble push on K8s).
+            group (str, optional): The group to own the file (forwarded to pathops).
 
         Raises:
             PostgreSQLFileOperationError: If there is an error during the file write operation.
         """
         try:
-            path.write_text(content, mode=mode)
+            path.write_text(content, mode=mode, user=user, group=group)
         except (
             FileNotFoundError,
             LookupError,
             NotADirectoryError,
             PermissionError,
             pathops.PebbleConnectionError,
+            PebbleError,
             ValueError,
         ) as e:
             raise PostgreSQLFileOperationError(e) from e

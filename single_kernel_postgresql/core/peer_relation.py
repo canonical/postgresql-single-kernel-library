@@ -101,6 +101,24 @@ class PostgreSQLPeer(RelationState):
         self.set_secret("internal-key", value)
 
     @property
+    def current_ca(self) -> str | None:
+        """Current peer CA (unit secret); part of the peer CA bundle."""
+        return self.get_secret("current-ca")
+
+    @current_ca.setter
+    def current_ca(self, value: str) -> None:
+        self.set_secret("current-ca", value)
+
+    @property
+    def old_ca(self) -> str | None:
+        """Previous peer CA (unit secret); retained for the rotation window."""
+        return self.get_secret("old-ca")
+
+    @old_ca.setter
+    def old_ca(self, value: str) -> None:
+        self.set_secret("old-ca", value)
+
+    @property
     def ip(self) -> str | None:
         """Get the unit's IP address from the peer relation data."""
         if not self.relation:
@@ -143,6 +161,13 @@ class PostgreSQLPeer(RelationState):
         if not self.relation:
             return None
         return self.relation.data[self.unit].get("database-peers-address", None)
+
+    @property
+    def database_address(self) -> str | None:
+        """Get the client-facing database endpoint address."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get("database-address", None)
 
     @property
     def replication_address(self) -> str | None:
@@ -206,6 +231,27 @@ class PostgreSQLPeer(RelationState):
         if not self.relation:
             return {}
         return self.relation.data[self.unit]
+
+    @property
+    def peer_addresses_no_ip(self) -> set[str]:
+        """Peer addresses excluding the ``ip`` databag key (original K8s charm behavior).
+
+        The K8s charm never wrote ``ip`` into the operator peer-cert SANs; it relied on
+        ``database-peers-address`` + ``replication-address`` + ``replication-offer-address``
+        + ``private-address``. The VM charm additionally included ``ip``. This property
+        exposes the K8s-shaped set so :class:`CharmState` can pick the right one per
+        substrate without the peer object needing to know the substrate.
+        """
+        peer_addrs: set[str] = set()
+        if addr := self.database_peers_address:
+            peer_addrs.add(addr)
+        if addr := self.replication_address:
+            peer_addrs.add(addr)
+        if addr := self.replication_offer_address:
+            peer_addrs.add(addr)
+        if addr := self.private_address:
+            peer_addrs.add(addr)
+        return peer_addrs
 
 
 class PostgreSQLApplication(RelationState):
