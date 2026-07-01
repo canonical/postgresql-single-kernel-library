@@ -230,6 +230,15 @@ wheels = [
 ]
 
 [[package]]
+name = "charmlibs-systemd"
+version = "1.0.0.post0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/8b/b46c17c458b109dbb9590e994de765fedfa609cee93d6e7cfabe3d599adc/charmlibs_systemd-1.0.0.post0.tar.gz", hash = "sha256:0f978a103524fe1ef34c350930b29b45677ae5c175368e86cea7a1530ccaa0b5", size = 15819, upload-time = "2026-06-16T05:39:46.401Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8c/de/97cb49c150b8c1592483bde9370ce46462be8f6f9c3a8a52748f131fdc56/charmlibs_systemd-1.0.0.post0-py3-none-any.whl", hash = "sha256:9e7578b98344ab237fdc6e48491f98fd80239b8802feb72c5c0ff3a9f70019da", size = 4951, upload-time = "2026-06-16T05:39:45.389Z" },
+]
+
+[[package]]
 name = "charset-normalizer"
 version = "3.4.7"
 source = { registry = "https://pypi.org/simple" }
@@ -1002,6 +1011,7 @@ postgresql = [
 ]
 vm = [
     { name = "charmlibs-snap", marker = "python_full_version >= '3.12'" },
+    { name = "charmlibs-systemd", marker = "python_full_version >= '3.12'" },
     { name = "psutil", marker = "python_full_version >= '3.12'" },
     { name = "pysyncobj", marker = "python_full_version >= '3.12'" },
 ]
@@ -1026,6 +1036,7 @@ requires-dist = [
     { name = "charmlibs-pathops", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=1.0.1" },
     { name = "charmlibs-rollingops", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=1.1.1" },
     { name = "charmlibs-snap", marker = "python_full_version >= '3.12' and extra == 'vm'", specifier = ">=1.0.1" },
+    { name = "charmlibs-systemd", marker = "python_full_version >= '3.12' and extra == 'vm'", specifier = ">=1.0.0.post0" },
     { name = "data-platform-helpers", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=0.1.7" },
     { name = "httpx", marker = "python_full_version >= '3.12' and extra == 'postgresql'" },
     { name = "jinja2", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=3.1.6" },
