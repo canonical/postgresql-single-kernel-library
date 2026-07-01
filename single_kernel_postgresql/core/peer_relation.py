@@ -99,51 +99,6 @@ class PostgreSQLPeer(RelationState):
         self.set_secret("internal-key", value)
 
     @property
-    def operator_client_key(self) -> str | None:
-        """Operator-provided client private key (unit secret)."""
-        return self.get_secret("operator-client-key")
-
-    @operator_client_key.setter
-    def operator_client_key(self, value: str) -> None:
-        self.set_secret("operator-client-key", value)
-
-    @property
-    def operator_client_cert(self) -> str | None:
-        """Operator-provided client certificate (unit secret)."""
-        return self.get_secret("operator-client-cert")
-
-    @operator_client_cert.setter
-    def operator_client_cert(self, value: str) -> None:
-        self.set_secret("operator-client-cert", value)
-
-    @property
-    def operator_client_ca(self) -> str | None:
-        """CA chain for the operator client certificate (unit secret)."""
-        return self.get_secret("operator-client-ca")
-
-    @operator_client_ca.setter
-    def operator_client_ca(self, value: str) -> None:
-        self.set_secret("operator-client-ca", value)
-
-    @property
-    def operator_peer_key(self) -> str | None:
-        """Operator-provided peer private key (unit secret)."""
-        return self.get_secret("operator-peer-key")
-
-    @operator_peer_key.setter
-    def operator_peer_key(self, value: str) -> None:
-        self.set_secret("operator-peer-key", value)
-
-    @property
-    def operator_peer_cert(self) -> str | None:
-        """Operator-provided peer certificate (unit secret)."""
-        return self.get_secret("operator-peer-cert")
-
-    @operator_peer_cert.setter
-    def operator_peer_cert(self, value: str) -> None:
-        self.set_secret("operator-peer-cert", value)
-
-    @property
     def current_ca(self) -> str | None:
         """Current peer CA (unit secret); part of the peer CA bundle."""
         return self.get_secret("current-ca")
@@ -244,6 +199,27 @@ class PostgreSQLPeer(RelationState):
         if addr := self.replication_offer_address:
             peer_addrs.add(addr)
         if addr := (self.ip or self.private_address):
+            peer_addrs.add(addr)
+        return peer_addrs
+
+    @property
+    def peer_addresses_no_ip(self) -> set[str]:
+        """Peer addresses excluding the ``ip`` databag key (original K8s charm behavior).
+
+        The K8s charm never wrote ``ip`` into the operator peer-cert SANs; it relied on
+        ``database-peers-address`` + ``replication-address`` + ``replication-offer-address``
+        + ``private-address``. The VM charm additionally included ``ip``. This property
+        exposes the K8s-shaped set so :class:`CharmState` can pick the right one per
+        substrate without the peer object needing to know the substrate.
+        """
+        peer_addrs: set[str] = set()
+        if addr := self.database_peers_address:
+            peer_addrs.add(addr)
+        if addr := self.replication_address:
+            peer_addrs.add(addr)
+        if addr := self.replication_offer_address:
+            peer_addrs.add(addr)
+        if addr := self.private_address:
             peer_addrs.add(addr)
         return peer_addrs
 

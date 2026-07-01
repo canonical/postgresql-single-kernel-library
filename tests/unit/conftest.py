@@ -20,6 +20,9 @@ def harness(substrate, test_charm_path):
         harness = Harness(k8s_charm.PostgreSQLK8sCharm, meta=meta, actions=actions)
     peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
+    # Set before begin(): Model.name (K8s namespace) is read by substrate-aware
+    # state accessors (e.g. common_hosts Service FQDNs).
+    harness.set_model_name("test-model")
     harness.begin()
     yield harness
     harness.cleanup()

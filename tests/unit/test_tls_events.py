@@ -2,9 +2,10 @@
 # See LICENSE file for licensing details.
 """Tests for the TLS events handler (single_kernel_postgresql/events/tls.py).
 
-The extraction path uses str(private_key) / str(provider_cert.certificate) /
-str(provider_cert.ca), mirroring postgresql-operator/src/relations/tls.py
-get_client_tls_files / get_peer_tls_files (lines 183-212).
+The handler is live-fetch: operator cert/key are read from the requirer on demand
+(get_assigned_certificates), never persisted. Only the peer CA is tracked in state
+(current-ca / old-ca) for rotation, mirroring postgresql-operator/src/relations/tls.py
+_on_peer_certificate_available (which stashes current-ca/old-ca and otherwise reads live).
 """
 
 from types import SimpleNamespace
@@ -27,12 +28,6 @@ def _fake_assigned(cert, ca, key):
     """Mimic TLSCertificatesRequiresV4.get_assigned_certificates() return shape.
 
     Returns (list[ProviderCertificate], PrivateKey | None).
-    ProviderCertificate has .certificate and .ca attributes (Certificate objects
-    that str() to their PEM text). PrivateKey str()-s to its PEM text.
-    The handler calls str(private_key), str(provider_cert.certificate),
-    str(provider_cert.ca) — mirroring postgresql-operator/src/relations/tls.py:183-188.
-    Test strings are already their own str() representation so SimpleNamespace suffices
-    for the cert/ca fields.
     """
     provider_cert = SimpleNamespace(certificate=cert, ca=ca)
     return [provider_cert], _FakePrivateKey(key)
@@ -42,9 +37,12 @@ def test_handler_is_wired(harness):
     tls = harness.charm.tls
     assert tls.client_certificate is not None
     assert tls.peer_certificate is not None
+    # the handler wires its requirers onto the manager so the live-fetch getters work
+    assert harness.charm.tls_manager.client_certificate is tls.client_certificate
+    assert harness.charm.tls_manager.peer_certificate is tls.peer_certificate
 
 
-def test_client_certificate_available_stores_and_pushes(harness):
+def test_client_certificate_available_pushes(harness):
     charm = harness.charm
     with (
         patch.object(charm.cluster_manager, "configure_system_passwords"),
@@ -60,14 +58,12 @@ def test_client_certificate_available_stores_and_pushes(harness):
 
     tls._on_certificate_available(MagicMock())
 
-    peer = charm.state.peer
-    assert peer.operator_client_cert == "CC"
-    assert peer.operator_client_ca == "CA"
-    assert peer.operator_client_key == "CK"
+    # no operator client cert/key is persisted; the push reads live
     charm.tls_manager.push_tls_files.assert_called_once()
+    assert charm.tls_manager.get_client_tls_files() == ("CK", "CA", "CC")
 
 
-def test_peer_certificate_available_rotates_and_pushes(harness):
+def test_peer_certificate_available_rotates_ca_and_pushes(harness):
     charm = harness.charm
     with (
         patch.object(charm.cluster_manager, "configure_system_passwords"),
@@ -84,13 +80,14 @@ def test_peer_certificate_available_rotates_and_pushes(harness):
     tls._on_peer_certificate_available(MagicMock())
 
     peer = charm.state.peer
-    assert peer.operator_peer_cert == "PC"
+    # only the CA is tracked in state for rotation; cert/key stay live
     assert peer.current_ca == "PCA"
-    assert peer.operator_peer_key == "PK"
     charm.tls_manager.push_tls_files.assert_called_once()
+    key, _, cert = charm.tls_manager.get_peer_tls_files()
+    assert (key, cert) == ("PK", "PC")
 
 
-def test_certificate_available_clears_on_empty(harness):
+def test_certificate_available_pushes_on_empty(harness):
     charm = harness.charm
     with (
         patch.object(charm.cluster_manager, "configure_system_passwords"),
@@ -99,10 +96,7 @@ def test_certificate_available_clears_on_empty(harness):
         harness.set_leader(True)
 
     tls = charm.tls
-    # First store some material
-    charm.tls_manager.store_client_tls(key="CK", cert="CC", ca="CA")
-
-    # Mock get_assigned_certificates to return empty
+    # requirer reports no assigned cert (relation gone) -> getters return nothing
     tls.client_certificate.get_assigned_certificates = MagicMock(return_value=([], None))
     charm.tls_manager.push_tls_files = MagicMock()
 
@@ -112,7 +106,7 @@ def test_certificate_available_clears_on_empty(harness):
     charm.tls_manager.push_tls_files.assert_called_once()
 
 
-def test_peer_certificate_available_clears_and_rotates_on_empty(harness):
+def test_peer_certificate_available_clears_ca_on_empty(harness):
     charm = harness.charm
     with (
         patch.object(charm.cluster_manager, "configure_system_passwords"),
@@ -121,10 +115,8 @@ def test_peer_certificate_available_clears_and_rotates_on_empty(harness):
         harness.set_leader(True)
 
     tls = charm.tls
-    # First store some peer material with a CA
-    charm.tls_manager.store_peer_tls(key="PK", cert="PC", ca="PCA")
-
-    # Mock get_assigned_certificates to return empty
+    # seed a current CA via a prior rotation, then the relation goes empty
+    charm.tls_manager.rotate_peer_ca("PCA")
     tls.peer_certificate.get_assigned_certificates = MagicMock(return_value=([], None))
     charm.tls_manager.push_tls_files = MagicMock()
 
@@ -133,36 +125,33 @@ def test_peer_certificate_available_clears_and_rotates_on_empty(harness):
     peer = charm.state.peer
     assert peer.old_ca == "PCA"
     assert peer.current_ca is None
-    assert peer.operator_peer_cert is None
     charm.tls_manager.push_tls_files.assert_called_once()
 
 
 def test_relation_broken_client_wired(harness):
-    """relation_broken on TLS_CLIENT_RELATION routes to _on_certificate_available and clears state."""
+    """relation_broken on TLS_CLIENT_RELATION routes to _on_certificate_available (live push)."""
     charm = harness.charm
-    # Pre-load operator client material so the clear path has something to clear.
-    charm.tls_manager.store_client_tls(key="CK", cert="CC", ca="CA")
-
     client_rel_id = harness.add_relation("client-certificates", "tls-provider")
     charm.tls_manager.push_tls_files = MagicMock()
     harness.remove_relation(client_rel_id)
 
-    # The broken handler must have cleared operator client TLS from state.
+    # With the relation gone, the live getter reports nothing.
     assert charm.tls_manager.get_client_tls_files() == (None, None, None)
 
 
 def test_relation_broken_peer_wired(harness):
-    """relation_broken on TLS_PEER_RELATION routes to _on_peer_certificate_available and clears state."""
+    """relation_broken on TLS_PEER_RELATION routes to _on_peer_certificate_available (clears CA)."""
     charm = harness.charm
-    # Pre-load operator peer material so the clear path has something to clear.
-    charm.tls_manager.store_peer_tls(key="PK", cert="PC", ca="PCA")
+    # seed a current CA so the broken path has something to retire
+    charm.tls_manager.rotate_peer_ca("PCA")
 
     peer_rel_id = harness.add_relation("peer-certificates", "tls-provider")
     charm.tls_manager.push_tls_files = MagicMock()
     harness.remove_relation(peer_rel_id)
 
-    # The broken handler must have cleared operator peer key from state.
-    assert charm.state.peer.operator_peer_key is None
+    # The broken handler retired the current CA into old-ca and cleared current.
+    assert charm.state.peer.current_ca is None
+    assert charm.state.peer.old_ca == "PCA"
 
 
 def _set_unit_db(harness, key, value):
@@ -170,21 +159,32 @@ def _set_unit_db(harness, key, value):
     harness.update_relation_data(rel_id, harness.charm.unit.name, {key: value})
 
 
-def test_client_and_peer_requesters_have_distinct_common_names(harness):
+def test_client_and_peer_requesters_have_distinct_common_names(substrate, harness):
     """Client and peer requesters use distinct CNs drawn from different databag keys.
 
     certificate_requests are baked at init time (before the test updates the databag), so
     we verify distinctness via the live state properties (which read directly from the
     databag) and confirm both requester objects were constructed.
+
+    On VM the CNs are host-derived (database-address / database-peers-address). On K8s
+    both CNs collapse to the endpoints FQDN (original charm parity) — still distinct from
+    each other is not required there, only that both are the endpoints FQDN.
     """
     _set_unit_db(harness, "database-address", "10.1.2.3")
     _set_unit_db(harness, "database-peers-address", "10.4.5.6")
 
     state = harness.charm.state
-    # Real distinct values: client CN reads database-address, peer CN reads database-peers-address.
-    assert state.client_common_name == "10.1.2.3"
-    assert state.peer_common_name == "10.4.5.6"
-    assert state.client_common_name != state.peer_common_name
+    if substrate == "vm":
+        # VM: client CN reads database-address, peer CN reads database-peers-address.
+        assert state.client_common_name == "10.1.2.3"
+        assert state.peer_common_name == "10.4.5.6"
+        assert state.client_common_name != state.peer_common_name
+    else:
+        # K8s: both CNs are the unit endpoints FQDN (operator-cert parity).
+        app = state.model.app.name
+        expected = f"{app}-0.{app}-endpoints"
+        assert state.client_common_name == expected
+        assert state.peer_common_name == expected
 
     tls = harness.charm.tls
     assert tls.client_certificate is not None

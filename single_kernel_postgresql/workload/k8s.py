@@ -169,6 +169,11 @@ class K8sWorkload(BaseWorkload):
         return "postgres"
 
     @property
+    def tls_file_mode(self) -> int:
+        """K8s pushes TLS material owner-read-only, matching the original charm."""
+        return 0o400
+
+    @property
     def root(self) -> PathProtocol:
         """Return the root path for container filesystem.
 

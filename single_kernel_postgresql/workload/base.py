@@ -53,6 +53,15 @@ class BaseWorkload(ABC):
         """The OS group that owns workload files (substrate-specific)."""
         pass
 
+    @property
+    def tls_file_mode(self) -> int:
+        """File mode for TLS material written to disk.
+
+        Defaults to 0o600 (VM); K8s overrides to 0o400 to match the
+        pre-migration charm.
+        """
+        return 0o600
+
     @abstractmethod
     def install(self) -> None:
         """Install the workload."""
@@ -99,6 +108,7 @@ class BaseWorkload(ABC):
             NotADirectoryError,
             PermissionError,
             pathops.PebbleConnectionError,
+            PebbleError,
             ValueError,
         ) as e:
             raise PostgreSQLFileOperationError(e) from e

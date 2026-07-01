@@ -4,7 +4,7 @@
 [project]
 name = "postgresql-charms-single-kernel"
 description = "Shared and reusable code for PostgreSQL-related charms"
-version = "16.3.0"
+version = "16.3.2"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -23,7 +23,12 @@ dependencies = [
 
 [project.optional-dependencies]
 postgresql = [
-    "psycopg2>=2.9.10",
+    # psycopg2 is intentionally NOT declared here: the source-vs-binary choice
+    # belongs to the consumer. Charms build from source (psycopg2 in their main
+    # deps) and test with psycopg2-binary (integration group); declaring it in
+    # this shared extra would force a source build into the charm test env, which
+    # fails on arm64 runners that lack pg_config. The lib's own unit/lint envs get
+    # psycopg2-binary from those dependency-groups below.
     "httpx; python_version >= '3.12'",
     "data-platform-helpers>=0.1.7; python_version >= '3.12'",
     "charmlibs-pathops>=1.0.1; python_version >= '3.12'",
@@ -51,11 +56,13 @@ format = [
 ]
 lint = [
     "codespell==2.4.2",
-    "ty==0.0.49"
+    "ty==0.0.49",
+    "psycopg2-binary>=2.9.10",
 ]
 unit = [
     "coverage[toml]==7.14.1",
-    "pytest==9.1.0"
+    "pytest==9.1.0",
+    "psycopg2-binary>=2.9.10",
 ]
 
 

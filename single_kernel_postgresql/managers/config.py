@@ -8,6 +8,7 @@ Responsible for managing the configuration of the PostgreSQL instance.
 """
 
 import logging
+from typing import cast
 
 import charm_refresh
 from data_platform_helpers.advanced_statuses import StatusObject
@@ -34,7 +35,9 @@ class ConfigManager(BaseManager):
     This manager is responsible for handling configuration operations.
     """
 
-    def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
+    def __init__(
+        self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient
+    ) -> None:
         super().__init__(state, workload, "config_manager", client)
 
     def configure_patroni_on_unit(self):
@@ -61,7 +64,9 @@ class ConfigManager(BaseManager):
             limit_memory = self.state.config.profile_limit_memory * 10**6
 
         # Build PostgreSQL parameters.
-        pg_parameters = self.postgresql_client.build_postgresql_parameters(
+        pg_parameters = cast(
+            "PostgreSQLClient", self.postgresql_client
+        ).build_postgresql_parameters(
             self.state.model_config, self.workload.get_available_memory(), limit_memory
         )
 

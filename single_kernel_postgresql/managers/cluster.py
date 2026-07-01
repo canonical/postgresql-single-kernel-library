@@ -8,6 +8,7 @@ Responsible for managing cluster-wide operations.
 """
 
 import logging
+from typing import cast
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -45,7 +46,9 @@ class ClusterManager(BaseManager):
     This manager is responsible for handling cluster-wide operations.
     """
 
-    def __init__(self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient):
+    def __init__(
+        self, state: CharmState, workload: BaseWorkload, client: PostgreSQLClient
+    ) -> None:
         super().__init__(state, workload, "cluster_manager", client)
 
     def install_workload(self) -> None:
@@ -110,12 +113,13 @@ class ClusterManager(BaseManager):
 
     def can_connect_to_postgresql(self, retry: bool = True) -> bool:
         """Whether the local PostgreSQL instance is reachable and responding."""
-        if not self.postgresql_client.password or not self.postgresql_client.current_host:
+        postgresql_client = cast("PostgreSQLClient", self.postgresql_client)
+        if not postgresql_client.password or not postgresql_client.current_host:
             return False
 
         def _check_connection():
             try:
-                if not self.postgresql_client.get_postgresql_timezones():
+                if not postgresql_client.get_postgresql_timezones():
                     logger.debug("Cannot connect to database (CannotConnectError)")
                     raise PostgreSQLCannotConnectError
             except Exception as e:
