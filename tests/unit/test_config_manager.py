@@ -1,14 +1,13 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
-from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch, sentinel
+from unittest.mock import Mock, PropertyMock, mock_open, patch, sentinel
 
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import REWIND_USER
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.config import ConfigManager
-from single_kernel_postgresql.workload.vm import VMWorkload
 from single_kernel_postgresql.workload.k8s import K8sWorkload
+from single_kernel_postgresql.workload.vm import VMWorkload
 
 
 @pytest.fixture(autouse=True)

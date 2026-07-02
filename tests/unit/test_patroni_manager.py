@@ -211,6 +211,10 @@ def test_is_replication_healthy(patroni):
             "single_kernel_postgresql.managers.patroni.stop_after_delay",
             return_value=stop_after_delay(0),
         ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.wait_fixed",
+            return_value=wait_fixed(0),
+        ),
         patch("requests.get") as _get,
         patch(
             "single_kernel_postgresql.managers.patroni.PatroniManager.get_primary"
@@ -887,3 +891,48 @@ def test_are_replicas_up(patroni):
         # Return None on error
         _cluster_status.side_effect = Exception
         assert patroni.are_replicas_up() is None
+
+
+def test_primary_endpoint_ready(substrate, patroni):
+    if substrate == Substrates.VM:
+        pytest.skip("K8s only")
+        return
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.stop_after_delay",
+            return_value=stop_after_delay(0),
+        ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.wait_fixed",
+            return_value=wait_fixed(0),
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.primary_endpoint",
+            new_callable=PropertyMock,
+            return_value=None,
+        ) as _primary_endpoint,
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch("requests.get") as _get,
+    ):
+        # No primary
+        assert not patroni.primary_endpoint_ready
+
+        # Test with an issue when trying to connect to the Patroni API.
+        _primary_endpoint.return_value = "endpoint"
+        _get.side_effect = RetryError
+        assert not patroni.primary_endpoint_ready
+
+        # Mock the request return values.
+        _get.side_effect = None
+        _get.return_value.json.return_value = {"state": "stopped"}
+
+        # Test with the primary endpoint not ready yet.
+        assert not patroni.primary_endpoint_ready
+
+        # Test with the primary endpoint ready.
+        _get.return_value.json.return_value = {"state": "running"}
+        assert patroni.primary_endpoint_ready
