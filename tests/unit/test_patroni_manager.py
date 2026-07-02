@@ -1,28 +1,24 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
-
-from single_kernel_postgresql.workload.vm import VMWorkload
-from single_kernel_postgresql.workload.k8s import K8sWorkload
-from single_kernel_postgresql.core.state import CharmState
-from single_kernel_postgresql.managers.patroni import PatroniManager
 import os
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, PropertyMock, call, mock_open, patch, sentinel
 
 import pytest
 import requests
 from charmlibs import snap
-from pysyncobj.utility import UtilityException
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import (
     SwitchoverFailedError,
     SwitchoverNotSyncError,
 )
-from single_kernel_postgresql.config.literals import API_REQUEST_TIMEOUT, REWIND_USER
+from single_kernel_postgresql.config.literals import API_REQUEST_TIMEOUT
+from single_kernel_postgresql.core.state import CharmState
+from single_kernel_postgresql.managers.patroni import PatroniManager
+from single_kernel_postgresql.workload.k8s import K8sWorkload
+from single_kernel_postgresql.workload.vm import VMWorkload
 from tenacity import RetryError, stop_after_delay, wait_fixed
 
 PATRONI_SERVICE = "patroni"
-CREATE_CLUSTER_CONF_PATH = "/var/snap/charmed-postgresql/current/etc/postgresql/postgresql.conf"
 
 
 # This method will be used by the mock to replace requests.get
@@ -50,13 +46,7 @@ def mocked_requests_get(*args, **kwargs):
 
 
 @pytest.fixture(autouse=True)
-def peers_ips():
-    peers_ips = {"2.2.2.2", "3.3.3.3"}
-    yield peers_ips
-
-
-@pytest.fixture(autouse=True)
-def patroni(peers_ips, substrate):
+def patroni(substrate):
     mock_charm = Mock()
     mock_container = Mock()
     workload = VMWorkload(".") if substrate == Substrates.VM else K8sWorkload(".", mock_container)
@@ -70,276 +60,286 @@ def patroni(peers_ips, substrate):
     yield patroni
 
 
-# def test_get_member_ip(peers_ips, patroni):
-#     with patch(
-#         "cluster.parallel_patroni_get_request", return_value=None
-#     ) as _parallel_patroni_get_request:
-#         # No IP if no members
-#         assert patroni.get_member_ip(patroni.member_name) is None
+def test_get_member_ip(patroni):
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.parallel_patroni_get_request",
+            return_value=None,
+        ) as _parallel_patroni_get_request,
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.endpoints",
+            new_callable=PropertyMock,
+            return_value=["endpoint1", "endpoint2", "endpoint3"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.members_ips",
+            new_callable=PropertyMock,
+            return_value=["ip1", "ip2", "ip3"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.endpoint",
+            new_callable=PropertyMock,
+            return_value="endpoint",
+        ),
+    ):
+        # No IP if no members
+        assert patroni.get_member_ip("test") is None
 
-#         _parallel_patroni_get_request.return_value = {
-#             "members": [
-#                 {
-#                     "name": "postgresql-1",
-#                     "host": "2.2.2.2",
-#                 },
-#                 {
-#                     "name": "postgresql-0",
-#                     "host": "1.1.1.1",
-#                 },
-#             ]
-#         }
-#         assert patroni.get_member_ip(patroni.member_name) == "1.1.1.1"
-
-
-# def test_get_patroni_health(peers_ips, patroni):
-#     with (
-#         patch("cluster.stop_after_delay", new_callable=PropertyMock) as _stop_after_delay,
-#         patch("cluster.wait_fixed", new_callable=PropertyMock) as _wait_fixed,
-#         patch("charm.Patroni._patroni_url", new_callable=PropertyMock) as _patroni_url,
-#         patch("requests.get", side_effect=mocked_requests_get) as _get,
-#     ):
-#         # Test when the Patroni API is reachable.
-#         _patroni_url.return_value = "http://server1"
-#         health = patroni.get_patroni_health()
-
-#         # Check needed to ensure a fast charm deployment.
-#         _stop_after_delay.assert_called_once_with(60)
-#         _wait_fixed.assert_called_once_with(7)
-
-#         assert health == {"state": "running"}
-
-#         # Test when the Patroni API is not reachable.
-#         _patroni_url.return_value = "http://server2"
-#         with pytest.raises(RetryError):
-#             patroni.get_patroni_health()
-#             assert False
-
-
-# def test_get_postgresql_version(peers_ips, patroni):
-#     assert patroni.get_postgresql_version() == "16.14"
+        _parallel_patroni_get_request.return_value = {
+            "members": [
+                {
+                    "name": "postgresql-1",
+                    "host": "2.2.2.2",
+                },
+                {
+                    "name": "postgresql-0",
+                    "host": "1.1.1.1",
+                },
+            ]
+        }
+        assert patroni.get_member_ip("postgresql-0") == "1.1.1.1"
 
 
-# def test_dict_to_hba_string(patroni):
-#     mock_data = {
-#         "ldapbasedn": "dc=example,dc=net",
-#         "ldapbinddn": "cn=serviceuser,dc=example,dc=net",
-#         "ldapbindpasswd": "password",
-#         "ldaptls": False,
-#         "ldapurl": "ldap://0.0.0.0:3893",
-#     }
+def test_get_patroni_health(patroni):
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.stop_after_delay",
+            return_value=stop_after_delay(0),
+        ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.wait_fixed",
+            return_value=wait_fixed(0),
+        ),
+        patch("requests.get", side_effect=mocked_requests_get) as _get,
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.patroni_url",
+            new_callable=PropertyMock,
+        ) as _patroni_url,
+    ):
+        # Test when the Patroni API is reachable.
+        _patroni_url.return_value = "http://server1"
+        health = patroni.get_patroni_health()
 
-#     assert patroni._dict_to_hba_string(mock_data) == (
-#         'ldapbasedn="dc=example,dc=net" '
-#         'ldapbinddn="cn=serviceuser,dc=example,dc=net" '
-#         'ldapbindpasswd="password" '
-#         "ldaptls=0 "
-#         'ldapurl="ldap://0.0.0.0:3893"'
-#     )
+        assert health == {"state": "running"}
 
-
-# def test_get_primary(peers_ips, patroni):
-#     with (
-#         patch(
-#             "cluster.parallel_patroni_get_request", return_value=None
-#         ) as _parallel_patroni_get_request,
-#     ):
-#         # No primary if no members
-#         assert patroni.get_primary() is None
-
-#         _parallel_patroni_get_request.return_value = {
-#             "members": [
-#                 {
-#                     "name": "postgresql-1",
-#                     "role": "replica",
-#                 },
-#                 {
-#                     "name": "postgresql-0",
-#                     "role": "leader",
-#                 },
-#             ]
-#         }
-#         # Test using the current Patroni URL.
-#         assert patroni.get_primary() == "postgresql-0"
-
-#         # Test requesting the primary in the unit name pattern.
-#         assert patroni.get_primary(unit_name_pattern=True) == "postgresql/0"
+        # Test when the Patroni API is not reachable.
+        _patroni_url.return_value = "http://server2"
+        with pytest.raises(RetryError):
+            patroni.get_patroni_health()
+            assert False
 
 
-# def test_is_creating_backup(peers_ips, patroni):
-#     with patch("charm.Patroni.cluster_status") as _cluster_status:
-#         # Test when one member is creating a backup.
-#         _cluster_status.return_value = [
-#             {"name": "postgresql-0"},
-#             {"name": "postgresql-1", "tags": {"is_creating_backup": True}},
-#         ]
-#         assert patroni.is_creating_backup
+def test_get_primary(patroni):
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.parallel_patroni_get_request",
+            return_value=None,
+        ) as _parallel_patroni_get_request,
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.endpoints",
+            new_callable=PropertyMock,
+            return_value=["endpoint1", "endpoint2", "endpoint3"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.members_ips",
+            new_callable=PropertyMock,
+            return_value=["ip1", "ip2", "ip3"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.endpoint",
+            new_callable=PropertyMock,
+            return_value="endpoint",
+        ),
+    ):
+        # No primary if no members
+        assert patroni.get_primary() is None
 
-#         # Test when no member is creating a backup.
-#         del patroni.cached_cluster_status
-#         _cluster_status.return_value = [{"name": "postgresql-0"}, {"name": "postgresql-1"}]
-#         assert not patroni.is_creating_backup
+        _parallel_patroni_get_request.return_value = {
+            "members": [
+                {
+                    "name": "postgresql-1",
+                    "role": "replica",
+                },
+                {
+                    "name": "postgresql-0",
+                    "role": "leader",
+                },
+            ]
+        }
+        # Test using the current Patroni URL.
+        assert patroni.get_primary() == "postgresql-0"
 
-
-# def test_is_replication_healthy(peers_ips, patroni):
-#     with (
-#         patch("requests.get") as _get,
-#         patch("charm.Patroni.get_primary") as _get_primary,
-#         patch("charm.Patroni.get_standby_leader") as _get_standby_leader,
-#         patch("charm.Patroni.get_member_ip"),
-#         patch("cluster.stop_after_delay", return_value=stop_after_delay(0)),
-#     ):
-#         # Test when replication is healthy.
-#         _get.return_value.status_code = 200
-#         assert patroni.is_replication_healthy()
-
-#         # Test when replication is not healthy.
-#         _get.side_effect = [
-#             MagicMock(status_code=200),
-#             MagicMock(status_code=200),
-#             MagicMock(status_code=503),
-#         ]
-#         assert not patroni.is_replication_healthy()
-
-#         # Test no primary
-#         _get.side_effect = None
-#         _get.return_value.status_code = 200
-#         _get_primary.return_value = None
-#         _get_standby_leader.return_value = None
-#         assert not patroni.is_replication_healthy()
-
-#         # Standby leader
-#         _get_standby_leader.return_value = "standby"
-#         assert patroni.is_replication_healthy()
-
-
-# def test_is_member_isolated(peers_ips, patroni):
-#     with (
-#         patch("cluster.stop_after_delay", return_value=stop_after_delay(0)),
-#         patch("cluster.wait_fixed", return_value=wait_fixed(0)),
-#         patch("requests.get", side_effect=mocked_requests_get) as _get,
-#         patch("charm.Patroni._patroni_url", new_callable=PropertyMock) as _patroni_url,
-#     ):
-#         # Test when it wasn't possible to connect to the Patroni API.
-#         _patroni_url.return_value = "http://server3"
-#         assert not patroni.is_member_isolated
-
-#         # Test when the member isn't isolated from the cluster.
-#         _patroni_url.return_value = "http://server1"
-#         assert not patroni.is_member_isolated
-
-#         # Test when the member is isolated from the cluster.
-#         _patroni_url.return_value = "http://server4"
-#         assert patroni.is_member_isolated
+        # Test requesting the primary in the unit name pattern.
+        assert patroni.get_primary(unit_name_pattern=True) == "postgresql/0"
 
 
-# def test_render_patroni_yml_file(peers_ips, patroni):
-#     with (
-#         patch(
-#             "relations.async_replication.PostgreSQLAsyncReplication.get_partner_addresses",
-#             return_value=["2.2.2.2", "3.3.3.3"],
-#         ),
-#         patch("charm.Patroni.get_postgresql_version") as _get_postgresql_version,
-#         patch("cluster.render_file") as _render_file,
-#         patch(
-#             "charm.PostgresqlOperatorCharm.listen_ips",
-#             new_callable=PropertyMock,
-#             return_value=["1.1.1.1", "192.168.0.1"],
-#         ),
-#     ):
-#         _get_postgresql_version.return_value = "16.6"
+def test_is_creating_backup(patroni):
+    with patch(
+        "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
+    ) as _cluster_status:
+        # Test when one member is creating a backup.
+        _cluster_status.return_value = [
+            {"name": "postgresql-0"},
+            {"name": "postgresql-1", "tags": {"is_creating_backup": True}},
+        ]
+        assert patroni.is_creating_backup
 
-#         # Define variables to render in the template.
-#         member_name = "postgresql-0"
-#         scope = "postgresql"
-#         superuser_password = "fake-superuser-password"
-#         replication_password = "fake-replication-password"
-#         rewind_password = "fake-rewind-password"
-#         raft_password = "fake-raft-password"
-#         patroni_password = "fake-patroni-password"
-#         postgresql_version = "16"
-
-#         # Get the expected content from a file.
-#         with open("templates/patroni.yml.j2") as file:
-#             contents = file.read()
-#             template = Template(contents)
-#             # Setup a mock for the `open` method, set returned data to patroni.yml template.
-#             mock = mock_open(read_data=contents)
-
-#         expected_content = template.render(
-#             conf_path=PATRONI_CONF_PATH,
-#             data_path=POSTGRESQL_DATA_DIR,
-#             log_path=PATRONI_LOGS_PATH,
-#             postgresql_log_path=POSTGRESQL_LOGS_PATH,
-#             wal_dir=LOGS_DATA_DIR,
-#             member_name=member_name,
-#             partner_addrs=["2.2.2.2", "3.3.3.3"],
-#             peers_ips=sorted(peers_ips),
-#             scope=scope,
-#             self_ip=patroni.unit_ip,
-#             listen_ips=["1.1.1.1", "192.168.0.1"],
-#             superuser="operator",
-#             superuser_password=superuser_password,
-#             replication_password=replication_password,
-#             rewind_user=REWIND_USER,
-#             rewind_password=rewind_password,
-#             version=postgresql_version,
-#             synchronous_node_count=0,
-#             maximum_lag_on_failover=1048576,
-#             raft_password=raft_password,
-#             patroni_password=patroni_password,
-#             instance_password_encryption="scram-sha-256",
-#             slots={},
-#         )
-
-#         # Patch the `open` method with our mock.
-#         with patch("builtins.open", mock, create=True):
-#             # Call the method.
-#             patroni.render_patroni_yml_file()
-
-#         # Check the template is opened read-only in the call to open.
-#         assert mock.call_args_list[0][0] == ("templates/patroni.yml.j2",)
-#         # Ensure the correct rendered template is sent to _render_file method.
-#         _render_file.assert_called_once_with(
-#             Substrates.VM,
-#             "/var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml",
-#             expected_content,
-#             0o600,
-#         )
+        # Test when no member is creating a backup.
+        del patroni.cached_cluster_status
+        _cluster_status.return_value = [{"name": "postgresql-0"}, {"name": "postgresql-1"}]
+        assert not patroni.is_creating_backup
 
 
-# def test_start_patroni(peers_ips, patroni):
-#     with patch("charm.snap.SnapCache") as _snap_cache:
-#         _cache = _snap_cache.return_value
-#         _selected_snap = _cache.__getitem__.return_value
-#         _selected_snap.start.side_effect = [None, snap.SnapError]
+def test_is_replication_healthy(patroni):
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.stop_after_delay",
+            return_value=stop_after_delay(0),
+        ),
+        patch("requests.get") as _get,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.get_primary"
+        ) as _get_primary,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.get_standby_leader"
+        ) as _get_standby_leader,
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.endpoints",
+            new_callable=PropertyMock,
+            return_value=["endpoint1", "endpoint2", "endpoint3"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.members_ips",
+            new_callable=PropertyMock,
+            return_value=["ip1", "ip2", "ip3"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.endpoint",
+            new_callable=PropertyMock,
+            return_value="endpoint",
+        ),
+    ):
+        # Test when replication is healthy.
+        _get.return_value.status_code = 200
+        assert patroni.is_replication_healthy()
 
-#         # Test a success scenario.
-#         assert patroni.start_patroni()
-#         _cache.__getitem__.assert_called_once_with("charmed-postgresql")
-#         _selected_snap.start.assert_called_once_with(services=[PATRONI_SERVICE])
+        # Test when replication is not healthy.
+        _get.side_effect = [
+            MagicMock(status_code=200),
+            MagicMock(status_code=200),
+            MagicMock(status_code=503),
+        ]
+        assert not patroni.is_replication_healthy()
 
-#         # Test a fail scenario.
-#         assert not patroni.start_patroni()
+        # Test no primary
+        _get.side_effect = None
+        _get.return_value.status_code = 200
+        _get_primary.return_value = None
+        _get_standby_leader.return_value = None
+        assert not patroni.is_replication_healthy()
+
+        # Standby leader
+        _get_standby_leader.return_value = "standby"
+        assert patroni.is_replication_healthy()
 
 
-# def test_stop_patroni(peers_ips, patroni):
-#     with patch("charm.snap.SnapCache") as _snap_cache:
-#         _cache = _snap_cache.return_value
-#         _selected_snap = _cache.__getitem__.return_value
-#         _selected_snap.stop.side_effect = [None, snap.SnapError]
-#         _selected_snap.services.__getitem__.return_value.__getitem__.return_value = False
+def test_is_member_isolated(patroni):
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.stop_after_delay",
+            return_value=stop_after_delay(0),
+        ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.wait_fixed",
+            return_value=wait_fixed(0),
+        ),
+        patch("requests.get", side_effect=mocked_requests_get) as _get,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.get_primary"
+        ) as _get_primary,
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.patroni_url",
+            new_callable=PropertyMock,
+        ) as _patroni_url,
+    ):
+        # Test when it wasn't possible to connect to the Patroni API.
+        _patroni_url.return_value = "http://server3"
+        assert not patroni.is_member_isolated
 
-#         # Test a success scenario.
-#         assert patroni.stop_patroni()
-#         _cache.__getitem__.assert_called_once_with("charmed-postgresql")
-#         _selected_snap.stop.assert_called_once_with(services=[PATRONI_SERVICE])
-#         _selected_snap.services.__getitem__.return_value.__getitem__.assert_called_once_with(
-#             "active"
-#         )
+        # Test when the member isn't isolated from the cluster.
+        _patroni_url.return_value = "http://server1"
+        assert not patroni.is_member_isolated
 
-#         # Test a fail scenario.
-#         assert not patroni.stop_patroni()
+        # Test when the member is isolated from the cluster.
+        _patroni_url.return_value = "http://server4"
+        assert patroni.is_member_isolated
+
+
+def test_start_patroni(substrate, patroni):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+        return
+
+    with patch("single_kernel_postgresql.managers.patroni.snap.SnapCache") as _snap_cache:
+        _cache = _snap_cache.return_value
+        _selected_snap = _cache.__getitem__.return_value
+        _selected_snap.start.side_effect = [None, snap.SnapError]
+
+        # Test a success scenario.
+        assert patroni.start_patroni()
+        _cache.__getitem__.assert_called_once_with("charmed-postgresql")
+        _selected_snap.start.assert_called_once_with(services=[PATRONI_SERVICE])
+
+        # Test a fail scenario.
+        assert not patroni.start_patroni()
+
+
+def test_stop_patroni(substrate, patroni):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+        return
+
+    with patch("single_kernel_postgresql.managers.patroni.snap.SnapCache") as _snap_cache:
+        _cache = _snap_cache.return_value
+        _selected_snap = _cache.__getitem__.return_value
+        _selected_snap.stop.side_effect = [None, snap.SnapError]
+        _selected_snap.services.__getitem__.return_value.__getitem__.return_value = False
+
+        # Test a success scenario.
+        assert patroni.stop_patroni()
+        _cache.__getitem__.assert_called_once_with("charmed-postgresql")
+        _selected_snap.stop.assert_called_once_with(services=[PATRONI_SERVICE])
+        _selected_snap.services.__getitem__.return_value.__getitem__.assert_called_once_with(
+            "active"
+        )
+
+        # Test a fail scenario.
+        assert not patroni.stop_patroni()
 
 
 def test_switchover(patroni):
@@ -425,7 +425,7 @@ def test_switchover(patroni):
             assert False
 
 
-def test_update_synchronous_node_count(peers_ips, patroni):
+def test_update_synchronous_node_count(patroni):
     with (
         patch(
             "single_kernel_postgresql.managers.patroni.stop_after_delay",
@@ -469,7 +469,7 @@ def test_update_synchronous_node_count(peers_ips, patroni):
             assert False
 
 
-def test_set_max_timelines_history(peers_ips, patroni):
+def test_set_max_timelines_history(patroni):
     with (
         patch("requests.patch") as _patch,
         patch(
@@ -494,42 +494,52 @@ def test_set_max_timelines_history(peers_ips, patroni):
         )
 
 
-# def test_configure_patroni_on_unit(peers_ips, patroni):
-#     with (
-#         patch("os.makedirs") as _makedirs,
-#         patch("os.chmod") as _chmod,
-#         patch("builtins.open") as _open,
-#         patch("os.chown") as _chown,
-#         patch("pwd.getpwnam") as _getpwnam,
-#     ):
-#         _getpwnam.return_value.pw_uid = sentinel.uid
-#         _getpwnam.return_value.pw_gid = sentinel.gid
+def test_configure_patroni_on_unit(substrate, patroni):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+        return
 
-#         patroni.configure_patroni_on_unit()
-
-#         assert _getpwnam.call_args_list == [call("_daemon_"), call("_daemon_")]
-#         _makedirs.assert_called_once_with(POSTGRESQL_DATA_DIR, exist_ok=True)
-
-#         # Parent and data dir are both chowned (parent enables Patroni reinit rename/remove).
-#         _chown.assert_any_call(
-#             os.path.dirname(POSTGRESQL_DATA_DIR),
-#             uid=sentinel.uid,
-#             gid=sentinel.gid,
-#         )
-#         _chown.assert_any_call(
-#             POSTGRESQL_DATA_DIR,
-#             uid=sentinel.uid,
-#             gid=sentinel.gid,
-#         )
-#         assert _chown.call_count == 2
-
-#         _open.assert_called_once_with(CREATE_CLUSTER_CONF_PATH, "a")
-#         _chmod.assert_called_once_with(POSTGRESQL_DATA_DIR, 448)
-
-
-def test_member_started_true(peers_ips, patroni):
     with (
-        patch("single_kernel_postgresql.managers.patroni.requests.get") as _get,
+        patch("os.makedirs") as _makedirs,
+        patch("os.chmod") as _chmod,
+        patch("builtins.open") as _open,
+        patch("os.chown") as _chown,
+        patch("pwd.getpwnam") as _getpwnam,
+        patch(
+            "single_kernel_postgresql.workload.base.BaseWorkload.get_postgresql_version",
+            return_value="16.6",
+        ),
+    ):
+        _getpwnam.return_value.pw_uid = sentinel.uid
+        _getpwnam.return_value.pw_gid = sentinel.gid
+
+        patroni.configure_patroni_on_unit()
+
+        assert _getpwnam.call_args_list == [call("_daemon_"), call("_daemon_")]
+        _makedirs.assert_called_once_with(str(patroni.workload.paths.data), exist_ok=True)
+
+        # Parent and data dir are both chowned (parent enables Patroni reinit rename/remove).
+        _chown.assert_any_call(
+            os.path.dirname(str(patroni.workload.paths.data)),
+            uid=sentinel.uid,
+            gid=sentinel.gid,
+        )
+        _chown.assert_any_call(
+            str(patroni.workload.paths.data),
+            uid=sentinel.uid,
+            gid=sentinel.gid,
+        )
+        assert _chown.call_count == 2
+
+        _open.assert_called_once_with(
+            str(patroni.workload.paths.patroni_conf / "patroni.yaml"), "a"
+        )
+        _chmod.assert_called_once_with(str(patroni.workload.paths.data), 448)
+
+
+def test_member_started_true(patroni):
+    with (
+        patch("requests.get") as _get,
         patch(
             "single_kernel_postgresql.managers.patroni.stop_after_delay",
             return_value=stop_after_delay(0),
@@ -565,9 +575,9 @@ def test_member_started_true(peers_ips, patroni):
         )
 
 
-def test_member_started_false(peers_ips, patroni):
+def test_member_started_false(patroni):
     with (
-        patch("single_kernel_postgresql.managers.patroni.requests.get") as _get,
+        patch("requests.get") as _get,
         patch(
             "single_kernel_postgresql.managers.patroni.stop_after_delay",
             return_value=stop_after_delay(0),
@@ -603,9 +613,9 @@ def test_member_started_false(peers_ips, patroni):
         )
 
 
-def test_member_started_error(peers_ips, patroni):
+def test_member_started_error(patroni):
     with (
-        patch("single_kernel_postgresql.managers.patroni.requests.get") as _get,
+        patch("requests.get") as _get,
         patch(
             "single_kernel_postgresql.managers.patroni.stop_after_delay",
             return_value=stop_after_delay(0),
@@ -641,9 +651,9 @@ def test_member_started_error(peers_ips, patroni):
         )
 
 
-def test_member_inactive_true(peers_ips, patroni):
+def test_member_inactive_true(patroni):
     with (
-        patch("single_kernel_postgresql.managers.patroni.requests.get") as _get,
+        patch("requests.get") as _get,
         patch(
             "single_kernel_postgresql.managers.patroni.stop_after_delay",
             return_value=stop_after_delay(0),
@@ -679,9 +689,9 @@ def test_member_inactive_true(peers_ips, patroni):
         )
 
 
-def test_member_inactive_false(peers_ips, patroni):
+def test_member_inactive_false(patroni):
     with (
-        patch("single_kernel_postgresql.managers.patroni.requests.get") as _get,
+        patch("requests.get") as _get,
         patch(
             "single_kernel_postgresql.managers.patroni.stop_after_delay",
             return_value=stop_after_delay(0),
@@ -717,9 +727,9 @@ def test_member_inactive_false(peers_ips, patroni):
         )
 
 
-def test_member_inactive_error(peers_ips, patroni):
+def test_member_inactive_error(patroni):
     with (
-        patch("single_kernel_postgresql.managers.patroni.requests.get") as _get,
+        patch("requests.get") as _get,
         patch(
             "single_kernel_postgresql.managers.patroni.stop_after_delay",
             return_value=stop_after_delay(0),
@@ -755,9 +765,9 @@ def test_member_inactive_error(peers_ips, patroni):
         )
 
 
-def test_member_inactive_patroni_not_running(peers_ips, patroni):
+def test_member_inactive_patroni_not_running(patroni):
     with (
-        patch("single_kernel_postgresql.managers.patroni.requests.get") as _get,
+        patch("requests.get") as _get,
         patch(
             "single_kernel_postgresql.workload.vm.VMWorkload.is_patroni_running",
             return_value=False,
