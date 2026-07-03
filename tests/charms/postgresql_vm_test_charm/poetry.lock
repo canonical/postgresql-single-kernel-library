@@ -514,24 +514,24 @@ ssh = ["bcrypt (>=3.1.5)"]
 
 [[package]]
 name = "data-platform-helpers"
-version = "0.1.7"
+version = "1.1.0"
 description = ""
 optional = false
 python-versions = "<4.0,>=3.10"
 groups = ["main"]
 files = [
-    {file = "data_platform_helpers-0.1.7-py3-none-any.whl", hash = "sha256:cf01caef414a4c07911ecf2c009c19b8f69cae154b540dd578ddbe2af8fd3b98"},
-    {file = "data_platform_helpers-0.1.7.tar.gz", hash = "sha256:04445f3f4309730bb1c569a04464caeb27390b0d6e07829d09dacd8882fcfcd1"},
+    {file = "data_platform_helpers-1.1.0-py3-none-any.whl", hash = "sha256:71b2c2ba31d1bc01c55c9da82d02b0cb654b99231172916722ecaf4c469d27c4"},
+    {file = "data_platform_helpers-1.1.0.tar.gz", hash = "sha256:7539ef1c1047fec36ee8298aa4c75fe2bb36419544193b691805c12ca407a797"},
 ]
 
 [package.dependencies]
-ops = ">=2.15.0"
-pydantic = ">=2.0"
+ops = ">=3,<4"
+pydantic = ">=2.11,<3"
 rich = "*"
 
 [package.extras]
-all = ["pytest_operator (==0.36.0)"]
-tests = ["pytest_operator (==0.36.0)"]
+all = ["pytest-operator"]
+tests = ["pytest-operator"]
 
 [[package]]
 name = "h11"
@@ -1741,4 +1741,4 @@ h11 = ">=0.16.0,<1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "94fa868555d7c8d996ef4034a9d38fc5532bbeb643eff0f831f959afc4b110f8"
+content-hash = "d23f9ee20cf49e13301bbd7e5e2761ff08eb7507ff410992057f46a29a599011"
