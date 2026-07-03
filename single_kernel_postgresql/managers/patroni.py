@@ -12,7 +12,6 @@ import glob
 import logging
 import os
 import re
-import subprocess
 from contextlib import suppress
 from functools import cached_property
 from typing import Any, Literal, TypedDict
@@ -20,6 +19,7 @@ from typing import Any, Literal, TypedDict
 # Platform specific imports
 with suppress(ImportError):
     from charmlibs import snap
+    from charmlibs.systemd import daemon_reload
 import psycopg2
 import psycopg2.extras
 import requests
@@ -412,6 +412,8 @@ class PatroniManager(BaseManager):
             True if services is not running, starting or restarting. Retries over a period of 60
             seconds times to allow server time to start up.
         """
+        if not self.workload.is_patroni_running():
+            return True
         try:
             response = self.cached_patroni_health
         except RetryError:
@@ -828,7 +830,7 @@ class PatroniManager(BaseManager):
         logger.debug(f"new patroni service file: {new_patroni_service}")
         with open(VM_PATRONI_SERVICE_DEFAULT_PATH, "w") as patroni_service_file:
             patroni_service_file.write(new_patroni_service)
-        subprocess.run(["/bin/systemctl", "daemon-reload"])
+        daemon_reload()
 
     @property
     def primary_endpoint_ready(self) -> bool:
