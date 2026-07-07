@@ -281,9 +281,7 @@ class CharmState(Object):
         """K8s operator-cert CN: the unit endpoints FQDN, wildcarded if too long.
 
         Matches the original K8s charm: ``<app>-<unit_id>.<app>-endpoints``, collapsing to
-        ``*.<app>-endpoints`` when the full FQDN exceeds the 64-char CN limit. The
-        migration had switched this to the VM-style ``database_address/peers_address or
-        host``; restore the endpoints-FQDN CN for K8s parity.
+        ``*.<app>-endpoints`` when the full FQDN exceeds the 64-char CN limit.
         """
         full = self._get_hostname_from_unit(unit_name_to_pod_name(self.model.unit.name))
         if len(full) > 64:
