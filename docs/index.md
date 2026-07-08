@@ -49,8 +49,8 @@ This documentation uses the [Diátaxis documentation structure](https://diataxis
 
 * The {ref}`tutorial` provides step-by-step guidance for a beginner through the basics of a deployment in a local machine.
 * {ref}`how-to` are more focused, and assume you already have basic familiarity with the product.
-* {ref}`reference` contains structured information for quick lookup, such as system requirements and configuration parameters
-* {ref}`explanation` gives more background and context about key topics
+* {ref}`reference` contains structured information for quick lookup, such as system requirements and configuration parameters.
+* {ref}`explanation` gives more background and context about key topics.
 
 ## Project and community
 
