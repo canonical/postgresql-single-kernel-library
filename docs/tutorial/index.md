@@ -236,7 +236,7 @@ Now we have all the information required to access PostgreSQL. Run the command b
 :user: ubuntu
 :host: my-vm
 
-juju ssh --container postgresql postgresql/leader bash
+juju ssh postgresql postgresql/leader bash
 ```
 
 ### Create a database
@@ -591,7 +591,7 @@ Use `endpoints`, `username`, `password` from above to connect newly created data
 :user: ubuntu
 :host: my-vm
 
-juju ssh --container postgresql postgresql/leader bash
+juju ssh postgresql postgresql/leader bash
 ```
 
 This time, your `host` is the postgresql leader unit (see the `endpoints:` field in the previous output), but your `username`, `password`, and database name are different since we are accessing the PostgreSQL server via a `data-integrator` user.
@@ -664,7 +664,7 @@ If you try to connect to the same PostgreSQL unit you used in the previous secti
 :user: ubuntu
 :host: my-vm
 
-juju ssh --container postgresql postgresql/leader bash
+juju ssh postgresql postgresql/leader bash
 ```
 
 ```{terminal}
