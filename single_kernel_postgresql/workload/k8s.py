@@ -168,6 +168,21 @@ class K8sWorkload(BaseWorkload):
                     logger.warning(f"Failed to delete temporary file {file_path}: {e}")
 
     @property
+    def user(self) -> str:
+        """The OS user that owns workload files in the K8s container."""
+        return "postgres"
+
+    @property
+    def group(self) -> str:
+        """The OS group that owns workload files in the K8s container."""
+        return "postgres"
+
+    @property
+    def tls_file_mode(self) -> int:
+        """K8s pushes TLS material owner-read-only, matching the original charm."""
+        return 0o400
+
+    @property
     def root(self) -> PathProtocol:
         """Return the root path for container filesystem.
 
