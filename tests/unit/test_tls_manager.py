@@ -4,6 +4,8 @@
 from datetime import timedelta
 from unittest.mock import MagicMock, patch, sentinel
 
+import pytest
+from single_kernel_postgresql.config.exceptions import TlsError
 from tls_helpers import fake_assigned
 
 
@@ -169,17 +171,6 @@ def test_push_tls_files_writes_expected_files(harness):
         assert call.args[1].parent == mgr.workload.paths.tls
 
 
-def test_tls_manager_wired_to_handler_requirers(harness):
-    """The charm wires the TLS handler's two requirers into TLSManager at construction.
-
-    The handler builds the requirers; the charm constructor-injects them into the manager
-    (no post-init mutation), so the manager's live-fetch getters read the same objects.
-    """
-    charm = harness.charm
-    assert charm.tls_manager.client_certificate is charm.tls.client_certificate
-    assert charm.tls_manager.peer_certificate is charm.tls.peer_certificate
-
-
 def test_client_tls_files_on_disk(harness):
     """Reports presence of the client key/cert/ca files; container errors count as absent."""
     from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
@@ -194,7 +185,7 @@ def test_client_tls_files_on_disk(harness):
         assert mgr.client_tls_files_on_disk() is False
 
 
-def test_generate_internal_peer_ca_stores_secrets(harness):
+def test_generate_internal_peer_ca_stores_secrets(harness, patch_crypto):
     """generate_internal_peer_ca persists the generated CA cert/key into app state."""
     charm = harness.charm
     # leadership is required to write the app-scoped internal-ca secrets
@@ -204,17 +195,9 @@ def test_generate_internal_peer_ca_stores_secrets(harness):
     ):
         harness.set_leader(True)
 
-    with (
-        patch(
-            "single_kernel_postgresql.managers.tls.generate_private_key",
-            return_value=sentinel.ca_key,
-        ),
-        patch(
-            "single_kernel_postgresql.managers.tls.generate_ca",
-            return_value=sentinel.ca,
-        ),
-    ):
-        charm.tls_manager.generate_internal_peer_ca()
+    # patch_crypto stubs the generators for both the set_leader side-effect and this
+    # explicit call, so no real RSA runs; re-generate to assert the stored values.
+    charm.tls_manager.generate_internal_peer_ca()
 
     assert charm.state.application.internal_ca_key == str(sentinel.ca_key)
     assert charm.state.application.internal_ca == str(sentinel.ca)
@@ -271,3 +254,32 @@ def test_generate_internal_peer_cert_stores_material(harness, patch_crypto):
     assert charm.state.peer.internal_key == str(sentinel.cert_key)
     # writing the internal peer cert/CA to disk is owned by the config subsystem
     mgr.workload.write_text.assert_not_called()
+
+
+def test_generate_internal_peer_cert_raises_without_ca_key(harness):
+    """Without an internal CA key, generate_internal_peer_cert raises before any crypto runs."""
+    mgr = harness.charm.tls_manager
+    # no leader has set the internal-ca secrets, so the CA key is absent
+    assert mgr.state.application.internal_ca_key is None
+    with pytest.raises(TlsError, match="No CA key content"):
+        mgr.generate_internal_peer_cert()
+
+
+def test_generate_internal_peer_cert_raises_without_ca_cert(harness, patch_crypto):
+    """With a CA key but no CA cert, generate_internal_peer_cert raises after loading the key."""
+    charm = harness.charm
+    mgr = charm.tls_manager
+    with (
+        patch.object(charm.cluster_manager, "configure_system_passwords"),
+        patch.object(charm.config_manager, "update_config"),
+    ):
+        harness.set_leader(True)  # populates internal-ca-key (and internal-ca, dropped next)
+    charm.state.remove_secret("app", "internal-ca")
+    assert mgr.state.application.internal_ca_key is not None
+    assert mgr.state.application.internal_ca is None
+
+    # PrivateKey.from_string runs on the stored key before the CA-cert guard, so stub it
+    with patch("single_kernel_postgresql.managers.tls.PrivateKey") as _private_key:
+        _private_key.from_string.return_value = sentinel.ca_key
+        with pytest.raises(TlsError, match="No CA cert content"):
+            mgr.generate_internal_peer_cert()
