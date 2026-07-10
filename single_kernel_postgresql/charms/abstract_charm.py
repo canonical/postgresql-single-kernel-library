@@ -9,6 +9,7 @@ from ops.charm import CharmBase
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
+from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
@@ -28,8 +29,17 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         # State
         self.state = CharmState(charm=self, substrate=self.substrate)
 
+        # TLS events handler owns the two certificate requirers; build it before the
+        # TLS manager so the manager can constructor-inject them for its live-fetch getters.
+        self.tls = TLS(self, self.state)
+
         # Managers
-        self.tls_manager = TLSManager(state=self.state, workload=self.workload)
+        self.tls_manager = TLSManager(
+            state=self.state,
+            workload=self.workload,
+            client_certificate=self.tls.client_certificate,
+            peer_certificate=self.tls.peer_certificate,
+        )
         self.patroni_manager = PatroniManager(state=self.state, workload=self.workload)
         self.cluster_manager = ClusterManager(state=self.state, workload=self.workload)
         self.config_manager = ConfigManager(state=self.state, workload=self.workload)
