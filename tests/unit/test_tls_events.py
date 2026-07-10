@@ -4,8 +4,8 @@
 
 The handler is live-fetch: operator cert/key are read from the requirer on demand
 (get_assigned_certificates), never persisted. Only the peer CA is tracked in state
-(current-ca / old-ca) for rotation, mirroring postgresql-operator/src/relations/tls.py
-_on_peer_certificate_available (which stashes current-ca/old-ca and otherwise reads live).
+(current-ca / old-ca) for rotation, matching the pre-port charm's peer-cert handler
+(which stashes current-ca/old-ca and otherwise reads live).
 """
 
 from types import SimpleNamespace
@@ -129,7 +129,12 @@ def test_peer_certificate_available_clears_ca_on_empty(harness):
 
 
 def test_relation_broken_client_wired(harness):
-    """relation_broken on TLS_CLIENT_RELATION routes to _on_certificate_available (live push)."""
+    """relation_broken on TLS_CLIENT_RELATION routes to the live-push path without crashing.
+
+    Distinct from the peer variant (which retires the CA): the client route has no
+    state side-effect to assert, so this smoke-tests that removal doesn't crash and
+    the live getter reports absent cert material afterward.
+    """
     charm = harness.charm
     client_rel_id = harness.add_relation("client-certificates", "tls-provider")
     charm.tls_manager.push_tls_files = MagicMock()
@@ -210,8 +215,8 @@ def test_refresh_event_defined_and_wired(harness):
 def test_certificate_available_defers_when_internal_ca_absent(harness):
     """When internal-ca is not yet set, _on_certificate_available defers and skips push.
 
-    Mirrors postgresql-operator/src/relations/tls.py lines 157-161: the handler must
-    not attempt file writes before the CA is present (K8s Pebble may not be ready).
+    The handler must not attempt file writes before the CA is present (K8s Pebble
+    may not be ready), matching the pre-port charm's defer-before-CA-present guard.
     """
     tls = harness.charm.tls
     tls.client_certificate.get_assigned_certificates = MagicMock(
@@ -247,9 +252,8 @@ def test_peer_certificate_available_defers_when_internal_ca_absent(harness):
 def test_certificate_available_defers_on_workload_file_error(harness):
     """When push_tls_files raises PostgreSQLFileOperationError, the handler defers.
 
-    Mirrors postgresql-operator/src/relations/tls.py lines 162-170: workload
-    file-write failures (e.g. Pebble not yet ready on K8s) must defer rather
-    than crash the hook.
+    Workload file-write failures (e.g. Pebble not yet ready on K8s) must defer
+    rather than crash the hook, matching the pre-port charm's defer-on-write-failure guard.
     """
     charm = harness.charm
     with (

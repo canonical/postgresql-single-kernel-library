@@ -37,7 +37,7 @@ def _set_empty(requirer):
     requirer.get_assigned_certificates = MagicMock(return_value=([], None))
 
 
-# --- CA rotation (current-ca / old-ca are 16/edge secrets, kept; cert/key are NOT stored) ---
+# --- CA rotation (current-ca / old-ca are tracked in state for rotation; cert/key are NOT stored) ---
 
 
 def test_rotate_peer_ca_sets_current(harness):
