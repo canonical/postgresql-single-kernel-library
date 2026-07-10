@@ -8,29 +8,10 @@ The handler is live-fetch: operator cert/key are read from the requirer on deman
 (which stashes current-ca/old-ca and otherwise reads live).
 """
 
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
-
-
-class _FakePrivateKey:
-    """Minimal stand-in for PrivateKey: str(key) returns the raw PEM string."""
-
-    def __init__(self, raw: str) -> None:
-        self._raw = raw
-
-    def __str__(self) -> str:
-        return self._raw
-
-
-def _fake_assigned(cert, ca, key):
-    """Mimic TLSCertificatesRequiresV4.get_assigned_certificates() return shape.
-
-    Returns (list[ProviderCertificate], PrivateKey | None).
-    """
-    provider_cert = SimpleNamespace(certificate=cert, ca=ca)
-    return [provider_cert], _FakePrivateKey(key)
+from tls_helpers import fake_assigned
 
 
 def test_handler_is_wired(harness):
@@ -42,7 +23,7 @@ def test_handler_is_wired(harness):
     assert harness.charm.tls_manager.peer_certificate is tls.peer_certificate
 
 
-def test_client_certificate_available_pushes(harness):
+def test_client_certificate_available_pushes(harness, patch_crypto):
     charm = harness.charm
     with (
         patch.object(charm.cluster_manager, "configure_system_passwords"),
@@ -52,7 +33,7 @@ def test_client_certificate_available_pushes(harness):
 
     tls = charm.tls
     tls.client_certificate.get_assigned_certificates = MagicMock(
-        return_value=_fake_assigned("CC", "CA", "CK")
+        return_value=fake_assigned("CC", "CA", "CK")
     )
     charm.tls_manager.push_tls_files = MagicMock()
 
@@ -63,7 +44,7 @@ def test_client_certificate_available_pushes(harness):
     assert charm.tls_manager.get_client_tls_files() == ("CK", "CA", "CC")
 
 
-def test_peer_certificate_available_rotates_ca_and_pushes(harness):
+def test_peer_certificate_available_rotates_ca_and_pushes(harness, patch_crypto):
     charm = harness.charm
     with (
         patch.object(charm.cluster_manager, "configure_system_passwords"),
@@ -73,7 +54,7 @@ def test_peer_certificate_available_rotates_ca_and_pushes(harness):
 
     tls = charm.tls
     tls.peer_certificate.get_assigned_certificates = MagicMock(
-        return_value=_fake_assigned("PC", "PCA", "PK")
+        return_value=fake_assigned("PC", "PCA", "PK")
     )
     charm.tls_manager.push_tls_files = MagicMock()
 
@@ -87,7 +68,7 @@ def test_peer_certificate_available_rotates_ca_and_pushes(harness):
     assert (key, cert) == ("PK", "PC")
 
 
-def test_certificate_available_pushes_on_empty(harness):
+def test_certificate_available_pushes_on_empty(harness, patch_crypto):
     charm = harness.charm
     with (
         patch.object(charm.cluster_manager, "configure_system_passwords"),
@@ -106,7 +87,7 @@ def test_certificate_available_pushes_on_empty(harness):
     charm.tls_manager.push_tls_files.assert_called_once()
 
 
-def test_peer_certificate_available_clears_ca_on_empty(harness):
+def test_peer_certificate_available_clears_ca_on_empty(harness, patch_crypto):
     charm = harness.charm
     with (
         patch.object(charm.cluster_manager, "configure_system_passwords"),
@@ -128,19 +109,31 @@ def test_peer_certificate_available_clears_ca_on_empty(harness):
     charm.tls_manager.push_tls_files.assert_called_once()
 
 
-def test_relation_broken_client_wired(harness):
-    """relation_broken on TLS_CLIENT_RELATION routes to the live-push path without crashing.
+def test_relation_broken_client_routes_to_live_push(harness, patch_crypto):
+    """relation_broken on TLS_CLIENT_RELATION routes to the live-push path.
 
-    Distinct from the peer variant (which retires the CA): the client route has no
-    state side-effect to assert, so this smoke-tests that removal doesn't crash and
-    the live getter reports absent cert material afterward.
+    Distinct from the peer variant (which retires the CA): the client route only pushes,
+    so routing is verified by the push being reached (internal-ca present via leadership)
+    while peer CA rotation is left untouched.
     """
     charm = harness.charm
-    client_rel_id = harness.add_relation("client-certificates", "tls-provider")
+    # seed a peer CA so we can prove the client route does not touch peer rotation
+    charm.tls_manager.rotate_peer_ca("PCA")
+    with (
+        patch.object(charm.cluster_manager, "configure_system_passwords"),
+        patch.object(charm.config_manager, "update_config"),
+    ):
+        harness.set_leader(True)  # internal-ca present so the route reaches push
     charm.tls_manager.push_tls_files = MagicMock()
+
+    client_rel_id = harness.add_relation("client-certificates", "tls-provider")
     harness.remove_relation(client_rel_id)
 
-    # With the relation gone, the live getter reports nothing.
+    # the client broken route reached the live push; peer CA rotation was not touched
+    charm.tls_manager.push_tls_files.assert_called_once()
+    assert charm.state.peer.current_ca == "PCA"
+    assert charm.state.peer.old_ca is None
+    # with the relation gone, the live getter reports nothing
     assert charm.tls_manager.get_client_tls_files() == (None, None, None)
 
 
@@ -196,20 +189,15 @@ def test_client_and_peer_requesters_have_distinct_common_names(substrate, harnes
     assert tls.peer_certificate is not None
 
 
-def test_refresh_event_defined_and_wired(harness):
-    """refresh_tls_certificates_event exists; peer relation_changed emits it without error."""
-    tls = harness.charm.tls
-    assert hasattr(tls, "refresh_tls_certificates_event")
+def test_peer_relation_changed_emits_refresh(harness):
+    """Peer relation_changed emits refresh_tls_certificates_event to re-request certs with updated SANs."""
+    from single_kernel_postgresql.events.tls import TLS
 
     charm = harness.charm
-    peer_rel_id = harness.model.get_relation("database-peers").id
-    with (
-        patch.object(charm.cluster_manager, "configure_system_passwords", return_value=None),
-        patch.object(charm.config_manager, "update_config", return_value=None),
-    ):
-        harness.update_relation_data(
-            peer_rel_id, charm.unit.name, {"database-address": "10.9.8.7"}
-        )
+    with patch.object(TLS, "refresh_tls_certificates_event") as _refresh:
+        charm.tls._on_peer_relation_changed(MagicMock())
+
+    _refresh.emit.assert_called_once()
 
 
 def test_certificate_available_defers_when_internal_ca_absent(harness):
@@ -220,7 +208,7 @@ def test_certificate_available_defers_when_internal_ca_absent(harness):
     """
     tls = harness.charm.tls
     tls.client_certificate.get_assigned_certificates = MagicMock(
-        return_value=_fake_assigned("CC", "CA", "CK")
+        return_value=fake_assigned("CC", "CA", "CK")
     )
     harness.charm.tls_manager.push_tls_files = MagicMock()
 
@@ -237,7 +225,7 @@ def test_peer_certificate_available_defers_when_internal_ca_absent(harness):
     """When internal-ca is not yet set, _on_peer_certificate_available defers and skips push."""
     tls = harness.charm.tls
     tls.peer_certificate.get_assigned_certificates = MagicMock(
-        return_value=_fake_assigned("PC", "PCA", "PK")
+        return_value=fake_assigned("PC", "PCA", "PK")
     )
     harness.charm.tls_manager.push_tls_files = MagicMock()
 
@@ -249,7 +237,7 @@ def test_peer_certificate_available_defers_when_internal_ca_absent(harness):
     harness.charm.tls_manager.push_tls_files.assert_not_called()
 
 
-def test_certificate_available_defers_on_workload_file_error(harness):
+def test_certificate_available_defers_on_workload_file_error(harness, patch_crypto):
     """When push_tls_files raises PostgreSQLFileOperationError, the handler defers.
 
     Workload file-write failures (e.g. Pebble not yet ready on K8s) must defer
@@ -264,7 +252,7 @@ def test_certificate_available_defers_on_workload_file_error(harness):
 
     tls = charm.tls
     tls.client_certificate.get_assigned_certificates = MagicMock(
-        return_value=_fake_assigned("CC", "CA", "CK")
+        return_value=fake_assigned("CC", "CA", "CK")
     )
     charm.tls_manager.push_tls_files = MagicMock(
         side_effect=PostgreSQLFileOperationError("disk full")
@@ -276,7 +264,7 @@ def test_certificate_available_defers_on_workload_file_error(harness):
     event.defer.assert_called_once()
 
 
-def test_peer_certificate_available_defers_on_workload_file_error(harness):
+def test_peer_certificate_available_defers_on_workload_file_error(harness, patch_crypto):
     """When push_tls_files raises PostgreSQLFileOperationError, the peer handler defers."""
     charm = harness.charm
     with (
@@ -287,7 +275,7 @@ def test_peer_certificate_available_defers_on_workload_file_error(harness):
 
     tls = charm.tls
     tls.peer_certificate.get_assigned_certificates = MagicMock(
-        return_value=_fake_assigned("PC", "PCA", "PK")
+        return_value=fake_assigned("PC", "PCA", "PK")
     )
     charm.tls_manager.push_tls_files = MagicMock(
         side_effect=PostgreSQLFileOperationError("pebble not ready")

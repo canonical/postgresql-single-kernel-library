@@ -2,34 +2,20 @@
 # See LICENSE file for licensing details.
 
 from datetime import timedelta
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, sentinel
 
-
-class _FakePrivateKey:
-    """Minimal stand-in for PrivateKey: str(key) returns the raw PEM string."""
-
-    def __init__(self, raw: str) -> None:
-        self._raw = raw
-
-    def __str__(self) -> str:
-        return self._raw
-
-
-def _fake_assigned(cert, ca, key):
-    """Mimic TLSCertificatesRequiresV4.get_assigned_certificates() -> (list, PrivateKey|None)."""
-    return [SimpleNamespace(certificate=cert, ca=ca)], _FakePrivateKey(key)
+from tls_helpers import fake_assigned
 
 
 def _set_client(mgr, cert, ca, key):
     mgr.client_certificate.get_assigned_certificates = MagicMock(
-        return_value=_fake_assigned(cert, ca, key)
+        return_value=fake_assigned(cert, ca, key)
     )
 
 
 def _set_peer(mgr, cert, ca, key):
     mgr.peer_certificate.get_assigned_certificates = MagicMock(
-        return_value=_fake_assigned(cert, ca, key)
+        return_value=fake_assigned(cert, ca, key)
     )
 
 
@@ -109,7 +95,7 @@ def test_get_client_tls_files_returns_live(harness):
     assert mgr.get_client_tls_files() == ("K", "A", "C")
 
 
-def test_get_peer_ca_bundle_composes_live_old_internal(harness):
+def test_get_peer_ca_bundle_composes_live_old_internal(harness, patch_crypto):
     charm = harness.charm
     # leadership is required to write the app-scoped internal-ca secret
     with (
@@ -134,7 +120,7 @@ def test_get_peer_tls_files_prefers_live_operator(harness):
     assert ca == "PCA"  # bundle = live operator CA only (no old, no internal here)
 
 
-def test_get_peer_tls_files_falls_back_to_internal(harness):
+def test_get_peer_tls_files_falls_back_to_internal(harness, patch_crypto):
     charm = harness.charm
     # leadership is required to write the app-scoped internal-ca secret
     with (
@@ -183,27 +169,15 @@ def test_push_tls_files_writes_expected_files(harness):
         assert call.args[1].parent == mgr.workload.paths.tls
 
 
-def test_tls_manager_constructor_injects_requirers(harness):
-    """TLSManager takes the two cert requirers at construction (no post-init mutation).
+def test_tls_manager_wired_to_handler_requirers(harness):
+    """The charm wires the TLS handler's two requirers into TLSManager at construction.
 
-    The manager holds no PostgreSQL client (it never uses one); it reads operator
-    cert/key live from the constructor-injected requirers.
+    The handler builds the requirers; the charm constructor-injects them into the manager
+    (no post-init mutation), so the manager's live-fetch getters read the same objects.
     """
-    from single_kernel_postgresql.managers.tls import TLSManager
-
-    client_req = harness.charm.tls.client_certificate
-    peer_req = harness.charm.tls.peer_certificate
-    mgr = TLSManager(
-        harness.charm.state,
-        harness.charm.tls_manager.workload,
-        client_certificate=client_req,
-        peer_certificate=peer_req,
-    )
-    assert mgr.client_certificate is client_req
-    assert mgr.peer_certificate is peer_req
-    # the charm-wired manager gets the same requirers the TLS handler built
-    assert harness.charm.tls_manager.client_certificate is harness.charm.tls.client_certificate
-    assert harness.charm.tls_manager.peer_certificate is harness.charm.tls.peer_certificate
+    charm = harness.charm
+    assert charm.tls_manager.client_certificate is charm.tls.client_certificate
+    assert charm.tls_manager.peer_certificate is charm.tls.peer_certificate
 
 
 def test_client_tls_files_on_disk(harness):
@@ -246,7 +220,7 @@ def test_generate_internal_peer_ca_stores_secrets(harness):
     assert charm.state.application.internal_ca == str(sentinel.ca)
 
 
-def test_generate_internal_peer_cert_stores_material(harness):
+def test_generate_internal_peer_cert_stores_material(harness, patch_crypto):
     """generate_internal_peer_cert persists internal key/cert into peer state and pushes nothing.
 
     Writing the internal peer cert/CA to disk is owned by the (not-yet-migrated)
