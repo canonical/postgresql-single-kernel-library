@@ -251,7 +251,11 @@ class PatroniManager(BaseManager):
                 couldn't be retrieved yet.
         """
         # Request info from cluster endpoint (which returns all members of the cluster).
-        cluster_status = self.cluster_status()
+        try:
+            cluster_status = self.cluster_status()
+        except RetryError:
+            logger.debug("Unable to get member status. Cluster status unreachable")
+            return ""
         if cluster_status:
             for member in cluster_status:
                 if member["name"] == member_name:

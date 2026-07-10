@@ -105,6 +105,46 @@ def test_get_member_ip(patroni):
         assert patroni.get_member_ip("postgresql-0") == "1.1.1.1"
 
 
+def test_get_member_status(patroni):
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.parallel_patroni_get_request",
+            return_value=None,
+        ) as _parallel_patroni_get_request,
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.endpoints",
+            new_callable=PropertyMock,
+            return_value=["endpoint1", "endpoint2", "endpoint3"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.members_ips",
+            new_callable=PropertyMock,
+            return_value=["ip1", "ip2", "ip3"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.endpoint",
+            new_callable=PropertyMock,
+            return_value="endpoint",
+        ),
+    ):
+        # An unreachable cluster (cluster_status raises RetryError) yields an empty
+        # status instead of propagating the exception.
+        assert patroni.get_member_status("postgresql-0") == ""
+
+        _parallel_patroni_get_request.return_value = {
+            "members": [
+                {"name": "postgresql-1", "state": "running"},
+                {"name": "postgresql-0", "state": "streaming"},
+            ]
+        }
+        assert patroni.get_member_status("postgresql-0") == "streaming"
+
+
 def test_get_patroni_health(patroni):
     with (
         patch(
