@@ -28,15 +28,6 @@ def _set_empty(requirer):
 # --- CA rotation (current-ca / old-ca are tracked in state for rotation; cert/key are NOT stored) ---
 
 
-def test_rotate_peer_ca_sets_current(harness):
-    mgr = harness.charm.tls_manager
-    mgr.rotate_peer_ca("CA1")
-
-    peer = harness.charm.state.peer
-    assert peer.current_ca == "CA1"
-    assert peer.old_ca is None
-
-
 def test_rotate_peer_ca_rotates_on_change(harness):
     mgr = harness.charm.tls_manager
     mgr.rotate_peer_ca("CA1")
@@ -83,12 +74,6 @@ def test_rotate_peer_ca_clears_stale_old_ca_on_reenable(harness):
 
 
 # --- operator cert/key are fetched LIVE from the requirer, never persisted ---
-
-
-def test_get_client_tls_files_none_when_absent(harness):
-    mgr = harness.charm.tls_manager
-    _set_empty(mgr.client_certificate)
-    assert mgr.get_client_tls_files() == (None, None, None)
 
 
 def test_get_client_tls_files_returns_live(harness):

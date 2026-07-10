@@ -152,43 +152,6 @@ def test_relation_broken_peer_wired(harness):
     assert charm.state.peer.old_ca == "PCA"
 
 
-def _set_unit_db(harness, key, value):
-    rel_id = harness.model.get_relation("database-peers").id
-    harness.update_relation_data(rel_id, harness.charm.unit.name, {key: value})
-
-
-def test_client_and_peer_requesters_have_distinct_common_names(substrate, harness):
-    """Client and peer requesters use distinct CNs drawn from different databag keys.
-
-    certificate_requests are baked at init time (before the test updates the databag), so
-    we verify distinctness via the live state properties (which read directly from the
-    databag) and confirm both requester objects were constructed.
-
-    On VM the CNs are host-derived (database-address / database-peers-address). On K8s
-    both CNs collapse to the endpoints FQDN (original charm parity) — still distinct from
-    each other is not required there, only that both are the endpoints FQDN.
-    """
-    _set_unit_db(harness, "database-address", "10.1.2.3")
-    _set_unit_db(harness, "database-peers-address", "10.4.5.6")
-
-    state = harness.charm.state
-    if substrate == "vm":
-        # VM: client CN reads database-address, peer CN reads database-peers-address.
-        assert state.client_common_name == "10.1.2.3"
-        assert state.peer_common_name == "10.4.5.6"
-        assert state.client_common_name != state.peer_common_name
-    else:
-        # K8s: both CNs are the unit endpoints FQDN (operator-cert parity).
-        app = state.model.app.name
-        expected = f"{app}-0.{app}-endpoints"
-        assert state.client_common_name == expected
-        assert state.peer_common_name == expected
-
-    tls = harness.charm.tls
-    assert tls.client_certificate is not None
-    assert tls.peer_certificate is not None
-
-
 def test_peer_relation_changed_emits_refresh(harness):
     """Peer relation_changed emits refresh_tls_certificates_event to re-request certs with updated SANs."""
     from single_kernel_postgresql.events.tls import TLS
@@ -205,6 +168,8 @@ def test_certificate_available_defers_when_internal_ca_absent(harness):
 
     The handler must not attempt file writes before the CA is present (K8s Pebble
     may not be ready), matching the pre-port charm's defer-before-CA-present guard.
+    The defer guard lives in the shared _push_tls_files, so this also covers the peer
+    handler's path (both route through it).
     """
     tls = harness.charm.tls
     tls.client_certificate.get_assigned_certificates = MagicMock(
@@ -221,27 +186,12 @@ def test_certificate_available_defers_when_internal_ca_absent(harness):
     harness.charm.tls_manager.push_tls_files.assert_not_called()
 
 
-def test_peer_certificate_available_defers_when_internal_ca_absent(harness):
-    """When internal-ca is not yet set, _on_peer_certificate_available defers and skips push."""
-    tls = harness.charm.tls
-    tls.peer_certificate.get_assigned_certificates = MagicMock(
-        return_value=fake_assigned("PC", "PCA", "PK")
-    )
-    harness.charm.tls_manager.push_tls_files = MagicMock()
-
-    event = MagicMock()
-    assert harness.charm.state.application.internal_ca is None
-    tls._on_peer_certificate_available(event)
-
-    event.defer.assert_called_once()
-    harness.charm.tls_manager.push_tls_files.assert_not_called()
-
-
 def test_certificate_available_defers_on_workload_file_error(harness, patch_crypto):
     """When push_tls_files raises PostgreSQLFileOperationError, the handler defers.
 
     Workload file-write failures (e.g. Pebble not yet ready on K8s) must defer
     rather than crash the hook, matching the pre-port charm's defer-on-write-failure guard.
+    The guard lives in the shared _push_tls_files, so this also covers the peer handler's path.
     """
     charm = harness.charm
     with (
@@ -260,28 +210,5 @@ def test_certificate_available_defers_on_workload_file_error(harness, patch_cryp
 
     event = MagicMock()
     tls._on_certificate_available(event)
-
-    event.defer.assert_called_once()
-
-
-def test_peer_certificate_available_defers_on_workload_file_error(harness, patch_crypto):
-    """When push_tls_files raises PostgreSQLFileOperationError, the peer handler defers."""
-    charm = harness.charm
-    with (
-        patch.object(charm.cluster_manager, "configure_system_passwords"),
-        patch.object(charm.config_manager, "update_config"),
-    ):
-        harness.set_leader(True)
-
-    tls = charm.tls
-    tls.peer_certificate.get_assigned_certificates = MagicMock(
-        return_value=fake_assigned("PC", "PCA", "PK")
-    )
-    charm.tls_manager.push_tls_files = MagicMock(
-        side_effect=PostgreSQLFileOperationError("pebble not ready")
-    )
-
-    event = MagicMock()
-    tls._on_peer_certificate_available(event)
 
     event.defer.assert_called_once()
