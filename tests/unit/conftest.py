@@ -1,12 +1,34 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest.mock import patch
+from unittest.mock import patch, sentinel
 
 import pytest
 from ops.testing import Harness
 from single_kernel_postgresql.charms import k8s_charm, vm_charm
 from single_kernel_postgresql.config.literals import PEER_RELATION
+
+
+@pytest.fixture
+def patch_crypto():
+    """Stub the tls-crypto generators so leader-elected paths skip real RSA keygen.
+
+    set_leader() fires _on_leader_elected -> configure_internal_peer_ca, which would
+    otherwise run real generate_private_key/generate_ca. The dedicated generate_* tests
+    patch with their own sentinels to assert call args; this fixture is for the
+    incidental paths that only need internal-ca to be present, not its content.
+    """
+    with (
+        patch(
+            "single_kernel_postgresql.managers.tls.generate_private_key",
+            return_value=sentinel.ca_key,
+        ),
+        patch(
+            "single_kernel_postgresql.managers.tls.generate_ca",
+            return_value=sentinel.ca,
+        ),
+    ):
+        yield
 
 
 @pytest.fixture
