@@ -43,6 +43,18 @@ how-to/deploy/gce how-to/deploy/vm-clouds/gce
 h-deploy-azure/ how-to/deploy/vm-clouds/azure
 how-to/deploy/azure how-to/deploy/vm-clouds/azure
 
+h-deploy-aks/ how-to/deploy/k8s-clouds/aks
+how-to/deploy/aks how-to/deploy/k8s-clouds/aks
+
+h-deploy-canonical-k8s/ how-to/deploy/k8s-clouds/canonical-k8s
+how-to/deploy/canonical-k8s how-to/deploy/k8s-clouds/canonical-k8s
+
+h-deploy-eks/ how-to/deploy/k8s-clouds/eks
+how-to/deploy/eks how-to/deploy/k8s-clouds/eks
+
+h-deploy-gke/ how-to/deploy/k8s-clouds/gke
+how-to/deploy/gke how-to/deploy/k8s-clouds/gke
+
 h-deploy-juju-storage/ how-to/deploy/juju-storage
 
 h-deploy-multi-az/ how-to/deploy/multi-az
@@ -183,8 +195,10 @@ e-architecture/ explanation/architecture
 e-interfaces-endpoints/ explanation/interfaces-and-endpoints
 
 e-juju-details/ release-notes
+explanation/juju release-notes
 
 e-legacy-charm/ explanation/charm-versions
+explanation/legacy-charm explanation/charm-versions
 
 e-units/ explanation/units
 
@@ -197,5 +211,15 @@ e-logs/ explanation/logs
 e-connection-pooling/ explanation/connection-pooling
 
 e-security/ explanation/security-hardening/overview
+explanation/security explanation/security-hardening/overview
 
 e-cryptography/ explanation/security-hardening/cryptography
+explanation/security/cryptography explanation/security-hardening/cryptography
+
+explanation/flowcharts explanation
+
+explanation/flowcharts/backups explanation
+
+explanation/flowcharts/charm explanation
+
+explanation/flowcharts/relations explanation
