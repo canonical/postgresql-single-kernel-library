@@ -6,10 +6,6 @@
 # The old path must be a file that doesn"t exist in the source. The current path must be
 # a file that does exist in the source.
 
-# How-to guides
-# 
-
-
 ##### How-to guides #####
 
 how-to/deploy/sunbeam how-to/deploy/vm-clouds/sunbeam
@@ -21,6 +17,14 @@ how-to/deploy/aws-ec2 how-to/deploy/vm-clouds/aws-ec2
 how-to/deploy/gce how-to/deploy/vm-clouds/gce
 
 how-to/deploy/azure how-to/deploy/vm-clouds/azure
+
+how-to/deploy/canonical-k8s how-to/deploy/k8s-clouds/canonical-k8s
+
+how-to/deploy/gke how-to/deploy/k8s-clouds/gke
+
+how-to/deploy/eks how-to/deploy/k8s-clouds/eks
+
+how-to/deploy/aks how-to/deploy/k8s-clouds/aks
 
 h-deploy-juju-spaces how-to/deploy/juju-spaces
 
@@ -42,6 +46,9 @@ how-to/enable-plugins-extensions how-to/extensions/enable-extension
 
 how-to/enable-plugins-extensions/enable-timescaledb how-to/extensions/enable-timescaledb
 
+how-to/logical-replication/re-enable how-to/logical-replication
+how-to/logical-replication/set-up-clusters how-to/logical-replication
+
 how-to/monitoring-cos/ how-to/observability-cos
 
 how-to/monitoring-cos/enable-monitoring how-to/observability-cos/enable-monitoring
@@ -51,6 +58,7 @@ how-to/monitoring-cos/enable-alert-rules how-to/observability-cos/enable-alert-r
 how-to/monitoring-cos/enable-tracing how-to/observability-cos/enable-tracing
 
 how-to/monitoring-cos/enable-profiling how-to/observability-cos/enable-profiling
+
 how-to/upgrade/ how-to/refresh
 
 how-to/upgrade/perform-a-minor-upgrade how-to/refresh/
@@ -68,6 +76,7 @@ how-to/cross-regional-async-replication/remove-or-recover-a-cluster how-to/clust
 how-to/development/ how-to
 
 how-to/development/integrate-with-your-charm how-to/integrate
+how-to/integrate-with-your-charm how-to/integrate
 
 how-to/development/migrate-data-via-pg-dump how-to/data-migration/migrate-data-via-pg-dump
 
@@ -94,3 +103,23 @@ reference/alert-rules how-to/observability-cos/enable-alert-rules
 reference/statuses reference/charm-statuses
 
 reference/contacts contact
+
+##### Explanation #####
+
+explanation/juju release-notes
+
+explanation/flowcharts explanation
+
+explanation/flowcharts/charm explanation
+
+explanation/flowcharts/backups explanation
+
+explanation/flowcharts/relations explanation
+
+explanation/security explanation/security-hardening/overview
+
+explanation/security/cryptography explanation/security-hardening/cryptography
+
+explanation/charm-versions/legacy-charm explanation/charm-versions
+
+explanation/charm-versions/modern-charm explanation/charm-versions
