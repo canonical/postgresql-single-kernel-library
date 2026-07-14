@@ -45,18 +45,18 @@ files = [
 
 [[package]]
 name = "boto3"
-version = "1.43.37"
+version = "1.43.47"
 description = "The AWS SDK for Python"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "boto3-1.43.37-py3-none-any.whl", hash = "sha256:f409f931e836f2f24e168e8f93901010cb8055c7f2ddcfcfbd72b25f8c4e306c"},
-    {file = "boto3-1.43.37.tar.gz", hash = "sha256:cf7e75963229b337d1b0e37c46de6f3c2c2290d186157729c8e7afb12909bfc0"},
+    {file = "boto3-1.43.47-py3-none-any.whl", hash = "sha256:aef0cccd5bc4a443fb3e64fada023f7b5b9da36864cb4255b68cf93067476676"},
+    {file = "boto3-1.43.47.tar.gz", hash = "sha256:09a8ce4abab4391bf08315e2dcc449b4b33e97ce7654ee9398d9fe4ef73a33da"},
 ]
 
 [package.dependencies]
-botocore = ">=1.43.37,<1.44.0"
+botocore = ">=1.43.47,<1.44.0"
 jmespath = ">=0.7.1,<2.0.0"
 s3transfer = ">=0.19.0,<0.20.0"
 
@@ -65,14 +65,14 @@ crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 
 [[package]]
 name = "botocore"
-version = "1.43.37"
+version = "1.43.47"
 description = "Low-level, data-driven core of boto 3."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "botocore-1.43.37-py3-none-any.whl", hash = "sha256:8b7e8408aa7eca7dca9ae9824fb7677daf64d40ed675366ed7b9248470d08757"},
-    {file = "botocore-1.43.37.tar.gz", hash = "sha256:46a7982815579cfe8c7851036b1f51237e35e7937456341df55bc5c36a316145"},
+    {file = "botocore-1.43.47-py3-none-any.whl", hash = "sha256:4d16559a3a1866fa7b9e651dd1422c1a033497e069f8a73cae5eebafe70ff39c"},
+    {file = "botocore-1.43.47.tar.gz", hash = "sha256:9e04d8da7f9cff8a911b14284829f78b74e1ce785444833199837decb5ecc17a"},
 ]
 
 [package.dependencies]
@@ -735,14 +735,14 @@ referencing = ">=0.31.0"
 
 [[package]]
 name = "lightkube"
-version = "0.21.0"
+version = "0.22.0"
 description = "Lightweight kubernetes client library"
 optional = false
 python-versions = ">=3.8"
 groups = ["main"]
 files = [
-    {file = "lightkube-0.21.0-py3-none-any.whl", hash = "sha256:5218c9a7029b5ba8a3e90534141795c6bb3ec3e96894afccb55f0581ca8d59b2"},
-    {file = "lightkube-0.21.0.tar.gz", hash = "sha256:720910200de4bd88e0d7b5d2edfb45a4f6be292798b8776d7b551ef5a5ccdc15"},
+    {file = "lightkube-0.22.0-py3-none-any.whl", hash = "sha256:5e35a46c216cae694aa6f75f5bcbfb7dd2999424ac910eab605bebc065fdb2de"},
+    {file = "lightkube-0.22.0.tar.gz", hash = "sha256:8de27f9015fa8263569b725b39d51829f83040e15c9b344a54a51babaf55fb5f"},
 ]
 
 [package.dependencies]
@@ -954,42 +954,42 @@ typing-extensions = ">=4.5.0"
 
 [[package]]
 name = "ops"
-version = "3.7.1"
+version = "3.8.0"
 description = "The Python library behind great charms"
 optional = false
 python-versions = ">=3.10"
 groups = ["main", "charm-libs"]
 files = [
-    {file = "ops-3.7.1-py3-none-any.whl", hash = "sha256:559dc6770e551da5f4b9686a5605ed927c140182eb38bcc31c1c531c2f98923a"},
-    {file = "ops-3.7.1.tar.gz", hash = "sha256:1765bf6d1cff376ea27608542e183b055c89f2c5f54bca602072bcc817195abc"},
+    {file = "ops-3.8.0-py3-none-any.whl", hash = "sha256:03f788091b10c5ed37a0a290e814b1a90aa0dcec6006a87875a085072df2261d"},
+    {file = "ops-3.8.0.tar.gz", hash = "sha256:bdbf4bbcd0622acade9ef0b156ddefc31be59f0ef55d563081a094cf7dd6665c"},
 ]
 
 [package.dependencies]
 opentelemetry-api = ">=1.0,<2.0"
-ops-tracing = {version = "3.7.1", optional = true, markers = "extra == \"tracing\""}
+ops-tracing = {version = "3.8.0", optional = true, markers = "extra == \"tracing\""}
 PyYAML = "==6.*"
 websocket-client = "==1.*"
 
 [package.extras]
-testing = ["ops-scenario (==8.7.1)"]
-tracing = ["ops-tracing (==3.7.1)"]
+testing = ["ops-scenario (==8.8.0)"]
+tracing = ["ops-tracing (==3.8.0)"]
 
 [[package]]
 name = "ops-tracing"
-version = "3.7.1"
+version = "3.8.0"
 description = "The tracing facility for the Ops library."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "ops_tracing-3.7.1-py3-none-any.whl", hash = "sha256:6b7a74e61477e0e47b42460aafc1669dfee98ec2e4a2f0360f0b86e8e6c49c3f"},
-    {file = "ops_tracing-3.7.1.tar.gz", hash = "sha256:fc433a58c868d36a64fe708ef8c9318ec925af7908490057ce6274c116f49af8"},
+    {file = "ops_tracing-3.8.0-py3-none-any.whl", hash = "sha256:e0129caad0d361b52d956194efbfce18d2dfd6ac3cea7836b654a12ca78c3141"},
+    {file = "ops_tracing-3.8.0.tar.gz", hash = "sha256:eafc70935e5303d72466cb331bc2d3807fa34e4ddb25a71cc6c1095e6d42d205"},
 ]
 
 [package.dependencies]
 opentelemetry-api = ">=1.0,<2.0"
 opentelemetry-sdk = ">=1.30,<2.0"
-ops = "3.7.1"
+ops = "3.8.0"
 pydantic = "*"
 
 [[package]]
@@ -1707,4 +1707,4 @@ h11 = ">=0.16.0,<1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "68f4cc9f600300249aa1e22f5c3031303c9a79a59e7b86b4e7e3ff5460855f6e"
+content-hash = "dd67e08ba3650261db68442d6eb0cfcc73035647d41a28732e0d2b837293abf1"
