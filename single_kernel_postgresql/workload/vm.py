@@ -238,3 +238,8 @@ class VMWorkload(BaseWorkload):
     def get_available_resources(self) -> tuple[int, int]:
         """Returns the available (cpu_cores, memory_bytes) for the workload."""
         return os.cpu_count() or 1, self.get_available_memory()
+
+    def get_snap_revision(self) -> str:
+        """Returns the installed workload snap revision."""
+        cache = snap.SnapCache()
+        return cache[charm_refresh.snap_name()].revision
