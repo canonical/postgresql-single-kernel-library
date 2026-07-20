@@ -212,3 +212,109 @@ def test_certificate_available_defers_on_workload_file_error(harness, patch_cryp
     tls._on_certificate_available(event)
 
     event.defer.assert_called_once()
+
+
+def test_certificate_available_emits_tls_files_pushed_on_success(harness, patch_crypto):
+    """A successful push emits tls_files_pushed, coupling the charm reload to the push.
+
+    The reload bridge observes this event instead of certificate_available directly, so a
+    deferred push (which does not emit) cannot leave the charm reloading against files the
+    lib never wrote.
+    """
+    from single_kernel_postgresql.events.tls import TLS
+
+    charm = harness.charm
+    with (
+        patch.object(charm.cluster_manager, "configure_system_passwords"),
+        patch.object(charm.config_manager, "update_config"),
+    ):
+        harness.set_leader(True)
+
+    tls = charm.tls
+    tls.client_certificate.get_assigned_certificates = MagicMock(
+        return_value=fake_assigned("CC", "CA", "CK")
+    )
+    charm.tls_manager.push_tls_files = MagicMock()
+
+    event = MagicMock()
+    with patch.object(TLS, "tls_files_pushed") as _pushed:
+        tls._on_certificate_available(event)
+
+    charm.tls_manager.push_tls_files.assert_called_once()
+    _pushed.emit.assert_called_once()
+    event.defer.assert_not_called()
+
+
+def test_relation_broken_emits_tls_files_pushed_on_disable(harness, patch_crypto):
+    """TLS disable (relation_broken, no certs) still emits tls_files_pushed.
+
+    The emit gates on the internal CA, not on certs being present, so removing TLS reloads
+    the charm to ssl:off — without this the disable path would push cleared files but never
+    signal the reload. Distinct from the cert-available emit, which has certs on disk.
+    """
+    from single_kernel_postgresql.events.tls import TLS
+
+    charm = harness.charm
+    with (
+        patch.object(charm.cluster_manager, "configure_system_passwords"),
+        patch.object(charm.config_manager, "update_config"),
+    ):
+        harness.set_leader(True)  # internal-ca present so the push is reached
+    charm.tls_manager.push_tls_files = MagicMock()
+
+    client_rel_id = harness.add_relation("client-certificates", "tls-provider")
+    with patch.object(TLS, "tls_files_pushed") as _pushed:
+        harness.remove_relation(client_rel_id)
+
+    charm.tls_manager.push_tls_files.assert_called_once()
+    _pushed.emit.assert_called_once()
+
+
+def test_no_tls_files_pushed_when_internal_ca_absent(harness):
+    """A deferred push (internal CA absent) does not emit tls_files_pushed, so no reload fires."""
+    from single_kernel_postgresql.events.tls import TLS
+
+    tls = harness.charm.tls
+    tls.client_certificate.get_assigned_certificates = MagicMock(
+        return_value=fake_assigned("CC", "CA", "CK")
+    )
+    harness.charm.tls_manager.push_tls_files = MagicMock()
+
+    event = MagicMock()
+    assert harness.charm.state.application.internal_ca is None
+    with patch.object(TLS, "tls_files_pushed") as _pushed:
+        tls._on_certificate_available(event)
+
+    event.defer.assert_called_once()
+    _pushed.emit.assert_not_called()
+
+
+def test_no_tls_files_pushed_on_workload_file_error(harness, patch_crypto):
+    """A push that fails mid-write (Pebble not ready) defers without emitting tls_files_pushed.
+
+    This is the renewal race the event fixes: the push defers, so no reload runs against the
+    stale on-disk files; the retried push emits and the reload then picks up the new cert.
+    """
+    from single_kernel_postgresql.events.tls import TLS
+
+    charm = harness.charm
+    with (
+        patch.object(charm.cluster_manager, "configure_system_passwords"),
+        patch.object(charm.config_manager, "update_config"),
+    ):
+        harness.set_leader(True)
+
+    tls = charm.tls
+    tls.client_certificate.get_assigned_certificates = MagicMock(
+        return_value=fake_assigned("CC", "CA", "CK")
+    )
+    charm.tls_manager.push_tls_files = MagicMock(
+        side_effect=PostgreSQLFileOperationError("disk full")
+    )
+
+    event = MagicMock()
+    with patch.object(TLS, "tls_files_pushed") as _pushed:
+        tls._on_certificate_available(event)
+
+    event.defer.assert_called_once()
+    _pushed.emit.assert_not_called()
