@@ -273,3 +273,8 @@ class BaseWorkload(ABC):
     def get_available_memory(self) -> int:
         """Returns the system available memory in bytes."""
         pass
+
+    @abstractmethod
+    def get_available_resources(self) -> tuple[int, int]:
+        """Returns the available (cpu_cores, memory_bytes) for the workload."""
+        pass

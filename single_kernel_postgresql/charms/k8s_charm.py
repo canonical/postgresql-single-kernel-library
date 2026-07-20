@@ -52,7 +52,10 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             BaseWorkload: The K8sWorkload instance for this charm
         """
         return K8sWorkload(
-            charm_dir=self.charm_dir, container=self.unit.get_container(CONTAINER_NAME)
+            charm_dir=self.charm_dir,
+            container=self.unit.get_container(CONTAINER_NAME),
+            unit_name=self.unit.name,
+            namespace=self.model.name,
         )
 
     @property
