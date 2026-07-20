@@ -34,6 +34,9 @@ def test_label2name():
 def test_any_cpu_to_cores():
     assert any_cpu_to_cores("12") == 12
     assert any_cpu_to_cores("1000m") == 1
+    # A sub-core millicore limit floors to at least 1, never 0 (0 would yield a
+    # nonsensical 0-worker / 100-connection config).
+    assert any_cpu_to_cores("500m") == 1
 
 
 def test_new_password():
