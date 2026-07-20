@@ -277,3 +277,7 @@ class BaseWorkload(ABC):
         """Return the PostgreSQL version from the system."""
         with pathlib.Path("refresh_versions.toml").open("rb") as file:
             return tomli.load(file)["workload"]
+
+    def get_snap_revision(self) -> str:
+        """Returns the installed workload snap revision (VM only)."""
+        raise NotImplementedError
