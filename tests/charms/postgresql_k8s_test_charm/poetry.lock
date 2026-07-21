@@ -45,18 +45,18 @@ files = [
 
 [[package]]
 name = "boto3"
-version = "1.43.46"
+version = "1.43.51"
 description = "The AWS SDK for Python"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "boto3-1.43.46-py3-none-any.whl", hash = "sha256:69453e2c1bcb9fd9806527ab99950cacfc2826cb0dce9a3a0414d19270c06c3c"},
-    {file = "boto3-1.43.46.tar.gz", hash = "sha256:66c0d943b049a46a492ec4ec2ebe73c930b1842c7137bee83aad6d93e95d4d96"},
+    {file = "boto3-1.43.51-py3-none-any.whl", hash = "sha256:a97057bb609fd38c80448db6a93db770786775dabd651401debf09816d4553d7"},
+    {file = "boto3-1.43.51.tar.gz", hash = "sha256:b5a416cc703db73b69b22bef563c89c1fb14a4b10a93628d3c7abc4dd1aaf979"},
 ]
 
 [package.dependencies]
-botocore = ">=1.43.46,<1.44.0"
+botocore = ">=1.43.51,<1.44.0"
 jmespath = ">=0.7.1,<2.0.0"
 s3transfer = ">=0.19.0,<0.20.0"
 
@@ -65,14 +65,14 @@ crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 
 [[package]]
 name = "botocore"
-version = "1.43.46"
+version = "1.43.51"
 description = "Low-level, data-driven core of boto 3."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "botocore-1.43.46-py3-none-any.whl", hash = "sha256:cb673891e623ae6e6a1bf24d94ef169504f3eb02584adb5d5bee2f6aae819b60"},
-    {file = "botocore-1.43.46.tar.gz", hash = "sha256:59f2e1ac3cdc66d191cae91c0804bc41847ce817dc8147cf43eaada8f76a5533"},
+    {file = "botocore-1.43.51-py3-none-any.whl", hash = "sha256:7c2c538c932bddc95834e177ce6f91dcc388c6a7934b4f8d0db13caa30e3e543"},
+    {file = "botocore-1.43.51.tar.gz", hash = "sha256:e0e5e88585fdb01dcb6b533ac2dd3f18d5d45092a14ccbfd330e3576a4152128"},
 ]
 
 [package.dependencies]
@@ -81,7 +81,7 @@ python-dateutil = ">=2.1,<3.0.0"
 urllib3 = ">=1.25.4,<2.2.0 || >2.2.0,<3"
 
 [package.extras]
-crt = ["awscrt (==0.32.2)"]
+crt = ["awscrt (==0.36.0)"]
 
 [[package]]
 name = "certifi"
@@ -260,14 +260,14 @@ tomli = ">=2.0.1"
 
 [[package]]
 name = "charmlibs-interfaces-tls-certificates"
-version = "1.8.3"
+version = "1.10.0"
 description = "The charmlibs.interfaces.tls_certificates package."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "charmlibs_interfaces_tls_certificates-1.8.3-py3-none-any.whl", hash = "sha256:fa0aa150b4e4513d439c7afb7eb0ceaf00363671143b27b09382758deea8a0cc"},
-    {file = "charmlibs_interfaces_tls_certificates-1.8.3.tar.gz", hash = "sha256:6bc35ee330681f2e0c58cf67e41133b144f3281f73d27293714c9ca918ee7cbc"},
+    {file = "charmlibs_interfaces_tls_certificates-1.10.0-py3-none-any.whl", hash = "sha256:65a97f71241ff3cb8a8babaf5b6e64c239ba2f87d76fed5c3fd9d9ca1ea2b99a"},
+    {file = "charmlibs_interfaces_tls_certificates-1.10.0.tar.gz", hash = "sha256:df29a5dd551bba51049ea40741662a8e99afb18c16a38d287d58836caf32c744"},
 ]
 
 [package.dependencies]
@@ -410,17 +410,18 @@ files = [
 
 [[package]]
 name = "cosl"
-version = "1.9.2"
+version = "1.10.2"
 description = "Utils for COS Lite charms"
 optional = false
 python-versions = ">=3.8"
 groups = ["charm-libs"]
 files = [
-    {file = "cosl-1.9.2-py3-none-any.whl", hash = "sha256:b78248720fc250fb8f3b872c2e0eae760129d80ac76829a556ecc963fe793b81"},
-    {file = "cosl-1.9.2.tar.gz", hash = "sha256:4999be5574c679f8070806f125b2c50fc4bdaa78e8f8247b17868af20e82bcfd"},
+    {file = "cosl-1.10.2-py3-none-any.whl", hash = "sha256:ff4aa756ab084def1f49fe31b49781aa584176ac7eec107dd192ae0c87899fc0"},
+    {file = "cosl-1.10.2.tar.gz", hash = "sha256:911981f89a3447dd3f26e1f69f8cdd44b5935fb1e2cfdbd60e75c28d86a17e6d"},
 ]
 
 [package.dependencies]
+diskcache = "*"
 ops = "*"
 pydantic = "*"
 pyyaml = "*"
@@ -512,6 +513,18 @@ rich = "*"
 [package.extras]
 all = ["pytest-operator"]
 tests = ["pytest-operator"]
+
+[[package]]
+name = "diskcache"
+version = "5.6.3"
+description = "Disk Cache -- Disk and file backed persistent cache."
+optional = false
+python-versions = ">=3"
+groups = ["charm-libs"]
+files = [
+    {file = "diskcache-5.6.3-py3-none-any.whl", hash = "sha256:5e31b2d5fbad117cc363ebaf6b689474db18a1f6438bc82358b024abd4c2ca19"},
+    {file = "diskcache-5.6.3.tar.gz", hash = "sha256:2c3a3fa2743d8535d832ec61c2054a1641f41775aa7c556758a109941e33e4fc"},
+]
 
 [[package]]
 name = "h11"
@@ -1673,4 +1686,4 @@ h11 = ">=0.16.0,<1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "dd67e08ba3650261db68442d6eb0cfcc73035647d41a28732e0d2b837293abf1"
+content-hash = "75c02c764338c8908d0014c9c735832b3eff6b24fd0a63c92ec84ca6040cab3b"
