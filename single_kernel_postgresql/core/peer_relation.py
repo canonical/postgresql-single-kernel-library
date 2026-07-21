@@ -225,6 +225,48 @@ class PostgreSQLPeer(RelationState):
             return True
         return self.relation.data[self.unit].get("connectivity", "on") == "on"
 
+    @property
+    def config_hash(self) -> str | None:
+        """Get the last-applied PostgreSQL config hash from the peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get("config_hash")
+
+    @config_hash.setter
+    def config_hash(self, value: str) -> None:
+        """Set the last-applied PostgreSQL config hash in the peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["config_hash"] = value
+
+    @property
+    def user_hash(self) -> str | None:
+        """Get the last-applied users hash from the peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get("user_hash")
+
+    @user_hash.setter
+    def user_hash(self, value: str) -> None:
+        """Set the last-applied users hash in the peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["user_hash"] = value
+
+    @property
+    def tls(self) -> bool:
+        """Get the last-rendered TLS flag from the peer relation data."""
+        if not self.relation:
+            return False
+        return self.relation.data[self.unit].get("tls") == "enabled"
+
+    @tls.setter
+    def tls(self, value: bool) -> None:
+        """Set the last-rendered TLS flag in the peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["tls"] = "enabled" if value else ""
+
     @cached_property
     def data(self) -> MutableMapping[str, str]:
         """Escape hatch method to access the peer data directly."""
@@ -417,6 +459,20 @@ class PostgreSQLApplication(RelationState):
     def is_ldap_enabled(self) -> bool:
         """Return whether this unit has LDAP enabled."""
         return self.is_ldap_charm_related and self.is_cluster_initialised
+
+    @property
+    def user_hash(self) -> str | None:
+        """Get the last-applied users hash from the peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("user_hash")
+
+    @user_hash.setter
+    def user_hash(self, value: str) -> None:
+        """Set the last-applied users hash in the peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["user_hash"] = value
 
     def get_secret(self, key: str) -> str | None:
         """Get the secret value for 'key' from the peer relation data."""
