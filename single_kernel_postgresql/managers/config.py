@@ -235,7 +235,7 @@ class ConfigManager(BaseManager):
         Returns:
             Dictionary of PostgreSQL parameters or None if base parameters couldn't be built.
         """
-        cpu_cores, available_memory = self.workload.get_available_resources()
+        cpu_cores, available_memory = self.state.available_resources
 
         limit_memory = None
         if self.state.config.profile_limit_memory:

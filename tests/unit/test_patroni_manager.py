@@ -49,11 +49,7 @@ def mocked_requests_get(*args, **kwargs):
 def patroni(substrate):
     mock_charm = Mock()
     mock_container = Mock()
-    workload = (
-        VMWorkload(".")
-        if substrate == Substrates.VM
-        else K8sWorkload(".", mock_container, unit_name="postgresql-k8s/0", namespace="test-model")
-    )
+    workload = VMWorkload(".") if substrate == Substrates.VM else K8sWorkload(".", mock_container)
     with patch(
         "single_kernel_postgresql.workload.base.BaseWorkload.get_postgresql_version",
         return_value="16.6",

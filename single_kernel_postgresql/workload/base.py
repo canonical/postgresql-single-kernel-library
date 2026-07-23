@@ -10,6 +10,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Protocol
 
 import tomli
 from charmlibs import pathops
@@ -20,6 +21,14 @@ from ops.pebble import Error as PebbleError
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import DIR_PERMISSIONS_READONLY
 from single_kernel_postgresql.workload.paths.base import Paths
+
+
+class ResourceProvider(Protocol):
+    """Reports the unit's available (cpu_cores, memory_bytes)."""
+
+    def get_available_resources(self) -> tuple[int, int]:
+        """Return the available (cpu_cores, memory_bytes)."""
+        ...
 
 
 # --- Base Workload
@@ -268,13 +277,3 @@ class BaseWorkload(ABC):
         """Return the PostgreSQL version from the system."""
         with pathlib.Path("refresh_versions.toml").open("rb") as file:
             return tomli.load(file)["workload"]
-
-    @abstractmethod
-    def get_available_memory(self) -> int:
-        """Returns the system available memory in bytes."""
-        pass
-
-    @abstractmethod
-    def get_available_resources(self) -> tuple[int, int]:
-        """Returns the available (cpu_cores, memory_bytes) for the workload."""
-        pass

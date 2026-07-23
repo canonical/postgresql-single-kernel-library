@@ -8,7 +8,7 @@ import re
 import socket
 from contextlib import suppress
 from functools import cached_property
-from typing import Any, get_args
+from typing import TYPE_CHECKING, Any, get_args
 
 from data_platform_helpers.advanced_statuses import StatusesState, StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -44,6 +44,9 @@ from single_kernel_postgresql.utils import unit_name_to_pod_name
 from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
 from single_kernel_postgresql.utils.status import format_status
 
+if TYPE_CHECKING:
+    from single_kernel_postgresql.workload.base import ResourceProvider
+
 
 class CharmState(Object):
     """The global PostgreSQL Charm State."""
@@ -60,6 +63,16 @@ class CharmState(Object):
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
 
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
+
+        # Set by the charm to the substrate's resource introspector (VM workload / K8s manager).
+        self.resource_provider: ResourceProvider | None = None
+
+    @property
+    def available_resources(self) -> tuple[int, int]:
+        """(cpu_cores, memory_bytes) for this unit, via the substrate's provider."""
+        if self.resource_provider is None:
+            raise RuntimeError("resource_provider was not set by the charm")
+        return self.resource_provider.get_available_resources()
 
     # -- Charm Config
     @cached_property

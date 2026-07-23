@@ -9,7 +9,6 @@ import logging
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import SYSTEM_USERS, USER
-from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
@@ -21,6 +20,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
     def __init__(self, *args):
         """Initialize the PostgreSQL VM Charm."""
         super().__init__(*args)
+        self.state.resource_provider = self.workload
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -38,13 +38,13 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         )
 
     @property
-    def workload(self) -> BaseWorkload:
+    def workload(self) -> VMWorkload:
         """Access current workload instance.
 
         Returns the workload object.
 
         Returns:
-            BaseWorkload: The VMWorkload instance for this charm
+            VMWorkload: The VMWorkload instance for this charm
         """
         return VMWorkload(charm_dir=self.charm_dir)
 
