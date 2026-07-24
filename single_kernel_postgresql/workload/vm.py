@@ -4,6 +4,7 @@
 """Machine Workload."""
 
 import logging
+import os
 import pathlib
 import platform
 import subprocess
@@ -233,3 +234,7 @@ class VMWorkload(BaseWorkload):
                     return int(line.split()[1]) * 1024
 
         return 0
+
+    def get_available_resources(self) -> tuple[int, int]:
+        """Returns the available (cpu_cores, memory_bytes) for the workload."""
+        return os.cpu_count() or 1, self.get_available_memory()

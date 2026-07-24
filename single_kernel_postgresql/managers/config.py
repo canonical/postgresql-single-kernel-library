@@ -65,6 +65,168 @@ class ConfigManager(BaseManager):
             self.workload.paths.data, mode=POSTGRESQL_STORAGE_PERMISSIONS, exist_ok=True
         )
 
+    def _calculate_max_worker_processes(self, cpu_cores: int) -> str | None:
+        """Calculate cpu_max_worker_processes configuration value."""
+        if self.state.config.cpu_max_worker_processes == "auto":
+            # auto = minimum(8, 2 * vCores)
+            return str(min(8, 2 * cpu_cores))
+        elif self.state.config.cpu_max_worker_processes is not None:
+            value = self.state.config.cpu_max_worker_processes
+            cap = 10 * cpu_cores
+            if value > cap:
+                raise ValueError(
+                    f"cpu-max-worker-processes value {value} exceeds maximum allowed "
+                    f"of {cap} (10 * vCores). Please set a value <= {cap}."
+                )
+            return str(value)
+        return None
+
+    def _validate_worker_config_value(self, param_name: str, value: int, cpu_cores: int) -> str:
+        """Shared validation logic for worker process parameters.
+
+        Args:
+            param_name: the configuration parameter name (for error messages).
+            value: the integer value to validate.
+            cpu_cores: the number of available CPU cores.
+
+        Returns:
+            String representation of the validated value.
+
+        Raises:
+            ValueError: if value exceeds 10 * vCores.
+        """
+        cap = 10 * cpu_cores
+        if value > cap:
+            raise ValueError(
+                f"{param_name} value {value} exceeds maximum allowed "
+                f"of {cap} (10 * vCores). Please set a value <= {cap}."
+            )
+        return str(value)
+
+    def _calculate_max_parallel_workers(self, base_max_workers: int, cpu_cores: int) -> str | None:
+        """Calculate cpu_max_parallel_workers configuration value."""
+        if self.state.config.cpu_max_parallel_workers == "auto":
+            return str(base_max_workers)
+        elif self.state.config.cpu_max_parallel_workers is not None:
+            validated_value_str = self._validate_worker_config_value(
+                "cpu-max-parallel-workers", self.state.config.cpu_max_parallel_workers, cpu_cores
+            )
+            # Apply the min constraint with base_max_workers
+            return str(min(int(validated_value_str), base_max_workers))
+        return None
+
+    def _calculate_max_parallel_maintenance_workers(
+        self, base_max_workers: int, cpu_cores: int
+    ) -> str | None:
+        """Calculate cpu_max_parallel_maintenance_workers configuration value."""
+        if self.state.config.cpu_max_parallel_maintenance_workers == "auto":
+            return str(base_max_workers)
+        elif self.state.config.cpu_max_parallel_maintenance_workers is not None:
+            return self._validate_worker_config_value(
+                "cpu-max-parallel-maintenance-workers",
+                self.state.config.cpu_max_parallel_maintenance_workers,
+                cpu_cores,
+            )
+        return None
+
+    def _calculate_max_logical_replication_workers(
+        self, base_max_workers: int, cpu_cores: int
+    ) -> str | None:
+        """Calculate cpu_max_logical_replication_workers configuration value."""
+        if self.state.config.cpu_max_logical_replication_workers == "auto":
+            return str(base_max_workers)
+        elif self.state.config.cpu_max_logical_replication_workers is not None:
+            return self._validate_worker_config_value(
+                "cpu-max-logical-replication-workers",
+                self.state.config.cpu_max_logical_replication_workers,
+                cpu_cores,
+            )
+        return None
+
+    def _calculate_max_sync_workers_per_subscription(
+        self, base_max_workers: int, cpu_cores: int
+    ) -> str | None:
+        """Calculate cpu_max_sync_workers_per_subscription configuration value."""
+        if self.state.config.cpu_max_sync_workers_per_subscription == "auto":
+            return str(base_max_workers)
+        elif self.state.config.cpu_max_sync_workers_per_subscription is not None:
+            return self._validate_worker_config_value(
+                "cpu-max-sync-workers-per-subscription",
+                self.state.config.cpu_max_sync_workers_per_subscription,
+                cpu_cores,
+            )
+        return None
+
+    def _calculate_max_parallel_apply_workers_per_subscription(
+        self, base_max_workers: int, cpu_cores: int
+    ) -> str | None:
+        """Calculate cpu_max_parallel_apply_workers_per_subscription configuration value."""
+        if self.state.config.cpu_max_parallel_apply_workers_per_subscription == "auto":
+            return str(base_max_workers)
+        elif self.state.config.cpu_max_parallel_apply_workers_per_subscription is not None:
+            return self._validate_worker_config_value(
+                "cpu-max-parallel-apply-workers-per-subscription",
+                self.state.config.cpu_max_parallel_apply_workers_per_subscription,
+                cpu_cores,
+            )
+        return None
+
+    def _calculate_worker_process_config(self, cpu_cores: int) -> dict[str, str]:
+        """Calculate worker process configuration values.
+
+        Handles 'auto' values and capping logic for worker process parameters.
+        Returns a dictionary with the calculated values ready for PostgreSQL.
+        """
+        result: dict[str, str] = {}
+
+        # Calculate cpu_max_worker_processes (baseline for other worker configs)
+        cpu_max_worker_processes_value = self._calculate_max_worker_processes(cpu_cores)
+        if cpu_max_worker_processes_value is not None:
+            result["max_worker_processes"] = cpu_max_worker_processes_value
+
+        # Get the effective cpu_max_worker_processes for dependent configs
+        # Use the calculated value, or fall back to PostgreSQL default (8)
+        base_max_workers = int(result.get("max_worker_processes", "8"))
+
+        # Calculate other worker parameters
+        cpu_max_parallel_workers_value = self._calculate_max_parallel_workers(
+            base_max_workers, cpu_cores
+        )
+        if cpu_max_parallel_workers_value is not None:
+            result["max_parallel_workers"] = cpu_max_parallel_workers_value
+
+        cpu_max_parallel_maintenance_workers_value = (
+            self._calculate_max_parallel_maintenance_workers(base_max_workers, cpu_cores)
+        )
+        if cpu_max_parallel_maintenance_workers_value is not None:
+            result["max_parallel_maintenance_workers"] = cpu_max_parallel_maintenance_workers_value
+
+        cpu_max_logical_replication_workers_value = (
+            self._calculate_max_logical_replication_workers(base_max_workers, cpu_cores)
+        )
+        if cpu_max_logical_replication_workers_value is not None:
+            result["max_logical_replication_workers"] = cpu_max_logical_replication_workers_value
+
+        cpu_max_sync_workers_per_subscription_value = (
+            self._calculate_max_sync_workers_per_subscription(base_max_workers, cpu_cores)
+        )
+        if cpu_max_sync_workers_per_subscription_value is not None:
+            result["max_sync_workers_per_subscription"] = (
+                cpu_max_sync_workers_per_subscription_value
+            )
+
+        cpu_max_parallel_apply_workers_per_subscription_value = (
+            self._calculate_max_parallel_apply_workers_per_subscription(
+                base_max_workers, cpu_cores
+            )
+        )
+        if cpu_max_parallel_apply_workers_per_subscription_value is not None:
+            result["max_parallel_apply_workers_per_subscription"] = (
+                cpu_max_parallel_apply_workers_per_subscription_value
+            )
+
+        return result
+
     def _build_postgresql_parameters(
         self, postgresql_client: PostgreSQLClient
     ) -> dict[str, str] | None:
@@ -73,17 +235,33 @@ class ConfigManager(BaseManager):
         Returns:
             Dictionary of PostgreSQL parameters or None if base parameters couldn't be built.
         """
+        cpu_cores, available_memory = self.state.available_resources
+
         limit_memory = None
         if self.state.config.profile_limit_memory:
             limit_memory = self.state.config.profile_limit_memory * 10**6
 
         # Build PostgreSQL parameters.
         pg_parameters = postgresql_client.build_postgresql_parameters(
-            self.state.model_config, self.workload.get_available_memory(), limit_memory
+            self.state.model_config, available_memory, limit_memory
         )
 
         # Calculate and merge worker process configurations
-        # TODO: Add additional parameters
+        worker_configs = self._calculate_worker_process_config(cpu_cores)
+
+        # Add cpu_wal_compression configuration (separate from worker processes)
+        if self.state.config.cpu_wal_compression is not None:
+            cpu_wal_compression = "on" if self.state.config.cpu_wal_compression else "off"
+        else:
+            # Use config.yaml default when unset (default: true)
+            cpu_wal_compression = "on"
+
+        if pg_parameters is not None:
+            pg_parameters.update(worker_configs)
+            pg_parameters["wal_compression"] = cpu_wal_compression
+        else:
+            pg_parameters = dict(worker_configs)
+            pg_parameters["wal_compression"] = cpu_wal_compression
 
         return pg_parameters
 

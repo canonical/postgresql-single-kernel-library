@@ -981,6 +981,10 @@ db-driver = [
     { name = "psycopg2", version = "2.9.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "psycopg2", version = "2.9.12", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
 ]
+k8s = [
+    { name = "lightkube", marker = "python_full_version >= '3.12'" },
+    { name = "lightkube-models", marker = "python_full_version >= '3.12'" },
+]
 postgresql = [
     { name = "charm-refresh", marker = "python_full_version >= '3.12'" },
     { name = "charmlibs-interfaces-tls-certificates", marker = "python_full_version >= '3.12'" },
@@ -1024,6 +1028,8 @@ requires-dist = [
     { name = "data-platform-helpers", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=0.1.7" },
     { name = "httpx", marker = "python_full_version >= '3.12' and extra == 'postgresql'" },
     { name = "jinja2", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=3.1.6" },
+    { name = "lightkube", marker = "python_full_version >= '3.12' and extra == 'k8s'", specifier = ">=0.21.0" },
+    { name = "lightkube-models", marker = "python_full_version >= '3.12' and extra == 'k8s'", specifier = ">=1.28.1.4" },
     { name = "ops", specifier = ">=2.0.0" },
     { name = "psutil", marker = "python_full_version >= '3.12' and extra == 'vm'", specifier = ">=7.2.2" },
     { name = "psycopg2", marker = "extra == 'db-driver'", specifier = ">=2.9.10" },
@@ -1033,7 +1039,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tomli", marker = "python_full_version >= '3.12' and extra == 'postgresql'" },
 ]
-provides-extras = ["postgresql", "vm", "db-driver"]
+provides-extras = ["postgresql", "vm", "k8s", "db-driver"]
 
 [package.metadata.requires-dev]
 format = [{ name = "ruff", marker = "python_full_version >= '3.12'", specifier = "==0.15.22" }]

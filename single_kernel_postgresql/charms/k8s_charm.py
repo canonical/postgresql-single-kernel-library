@@ -26,6 +26,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             "Workload must be an instance of K8sWorkload"
         )
         self.k8s_manager = K8sManager(self.state, self.workload)
+        self.state.resource_provider = self.k8s_manager
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -52,7 +53,8 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             BaseWorkload: The K8sWorkload instance for this charm
         """
         return K8sWorkload(
-            charm_dir=self.charm_dir, container=self.unit.get_container(CONTAINER_NAME)
+            charm_dir=self.charm_dir,
+            container=self.unit.get_container(CONTAINER_NAME),
         )
 
     @property

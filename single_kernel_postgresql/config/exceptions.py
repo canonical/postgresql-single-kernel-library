@@ -73,3 +73,7 @@ class SwitchoverNotSyncError(SwitchoverFailedError):
 
 class UpdateSyncNodeCountError(Exception):
     """Raised when updating synchronous_node_count failed for some reason."""
+
+
+class DeployedWithoutTrustError(Exception):
+    """Raised when the K8s API denies access because the app wasn't deployed with --trust."""

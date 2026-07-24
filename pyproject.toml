@@ -40,6 +40,10 @@ vm = [
     "charmlibs-snap>=1.0.1; python_version >= '3.12'",
     "charmlibs-systemd>=1.0.0.post0; python_version >= '3.12'"
 ]
+k8s = [
+    "lightkube>=0.21.0; python_version >= '3.12'",
+    "lightkube-models>=1.28.1.4; python_version >= '3.12'",
+]
 db-driver = [
     "psycopg2>=2.9.10",
 ]
