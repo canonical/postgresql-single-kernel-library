@@ -45,18 +45,18 @@ files = [
 
 [[package]]
 name = "boto3"
-version = "1.43.56"
+version = "1.43.62"
 description = "The AWS SDK for Python"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "boto3-1.43.56-py3-none-any.whl", hash = "sha256:feb699d4ab241ef5c1b80bb58277be2aaad365cd4b672d7817e0bc59ee45131b"},
-    {file = "boto3-1.43.56.tar.gz", hash = "sha256:57c90df9fb026f2e6ae22530861198130203733c5c9ec4e5cca3a4037f5a8db4"},
+    {file = "boto3-1.43.62-py3-none-any.whl", hash = "sha256:0bb298e7ffd72b91615df44bf71c417df80a29d844971e5d665b8bd743a4bb35"},
+    {file = "boto3-1.43.62.tar.gz", hash = "sha256:0bf920e0739346e81c7310b685a3f783bf1fcc62ce7d5c7016508fa25c0d261f"},
 ]
 
 [package.dependencies]
-botocore = ">=1.43.56,<1.44.0"
+botocore = ">=1.43.62,<1.44.0"
 jmespath = ">=0.7.1,<2.0.0"
 s3transfer = ">=0.19.0,<0.20.0"
 
@@ -65,14 +65,14 @@ crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 
 [[package]]
 name = "botocore"
-version = "1.43.56"
+version = "1.43.62"
 description = "Low-level, data-driven core of boto 3."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "botocore-1.43.56-py3-none-any.whl", hash = "sha256:aafc741f1b10f6fd63253eaf6ea029680c1ff436d87e1b8969d62aefa0c76976"},
-    {file = "botocore-1.43.56.tar.gz", hash = "sha256:6c01f85f0ff9863076f4c761e74ee3aa96c5ccc1ad09fc1efd62ef8f2d22bf57"},
+    {file = "botocore-1.43.62-py3-none-any.whl", hash = "sha256:76de153de1ba3e242b2e6df6a13ab8a3fb35d17db562462969e661457b63166e"},
+    {file = "botocore-1.43.62.tar.gz", hash = "sha256:94efc419c9f0f41dc2415e4b6b62f04ae21b3ce3930fac47214c4d3f361ea8b8"},
 ]
 
 [package.dependencies]
@@ -947,42 +947,42 @@ typing-extensions = ">=4.5.0"
 
 [[package]]
 name = "ops"
-version = "3.8.0"
+version = "3.8.1"
 description = "The Python library behind great charms"
 optional = false
 python-versions = ">=3.10"
 groups = ["main", "charm-libs"]
 files = [
-    {file = "ops-3.8.0-py3-none-any.whl", hash = "sha256:03f788091b10c5ed37a0a290e814b1a90aa0dcec6006a87875a085072df2261d"},
-    {file = "ops-3.8.0.tar.gz", hash = "sha256:bdbf4bbcd0622acade9ef0b156ddefc31be59f0ef55d563081a094cf7dd6665c"},
+    {file = "ops-3.8.1-py3-none-any.whl", hash = "sha256:6da38925e40ee4d72f9c5a9bf3e3228d18f0d25fa7ae9894b9c2f34b43771159"},
+    {file = "ops-3.8.1.tar.gz", hash = "sha256:fc420a77dea9bc36093ce1ae9f1f98825c3945bc027b4a859c67faa96798fca3"},
 ]
 
 [package.dependencies]
 opentelemetry-api = ">=1.0,<2.0"
-ops-tracing = {version = "3.8.0", optional = true, markers = "extra == \"tracing\""}
+ops-tracing = {version = "3.8.1", optional = true, markers = "extra == \"tracing\""}
 PyYAML = "==6.*"
 websocket-client = "==1.*"
 
 [package.extras]
-testing = ["ops-scenario (==8.8.0)"]
-tracing = ["ops-tracing (==3.8.0)"]
+testing = ["ops-scenario (==8.8.1)"]
+tracing = ["ops-tracing (==3.8.1)"]
 
 [[package]]
 name = "ops-tracing"
-version = "3.8.0"
+version = "3.8.1"
 description = "The tracing facility for the Ops library."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "ops_tracing-3.8.0-py3-none-any.whl", hash = "sha256:e0129caad0d361b52d956194efbfce18d2dfd6ac3cea7836b654a12ca78c3141"},
-    {file = "ops_tracing-3.8.0.tar.gz", hash = "sha256:eafc70935e5303d72466cb331bc2d3807fa34e4ddb25a71cc6c1095e6d42d205"},
+    {file = "ops_tracing-3.8.1-py3-none-any.whl", hash = "sha256:b43b108cf1997c12cf5b0526b8ae0bfbba11c704b4017d6be71dcf5335c883eb"},
+    {file = "ops_tracing-3.8.1.tar.gz", hash = "sha256:04f32240bc93e32269ae64b3c9a4b00fcd6831088bdf02bf01b3278e3d52b73f"},
 ]
 
 [package.dependencies]
 opentelemetry-api = ">=1.0,<2.0"
 opentelemetry-sdk = ">=1.30,<2.0"
-ops = "3.8.0"
+ops = "3.8.1"
 pydantic = "*"
 
 [[package]]
@@ -1720,4 +1720,4 @@ h11 = ">=0.16.0,<1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "39466a6f23ad8ec811a4c651b7b9f999f7f2c11eb7960ab1685c3c214a4ff4ad"
+content-hash = "7086038821486b67887438f3d3b8cf0ac1e27326df36f8fe9ecbf29784672a22"
