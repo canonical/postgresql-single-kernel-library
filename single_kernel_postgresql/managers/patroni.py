@@ -163,7 +163,7 @@ class PatroniManager(BaseManager):
 
     def configure_patroni_on_unit(self):
         """Configure Patroni (configuration files and service) on the unit."""
-        patroni_conf_file = str(self.workload.paths.patroni_conf / "patroni.yaml")
+        patroni_conf_file = str(self.workload.paths.patroni_config)
         patroni_data_path = str(self.workload.paths.data)
         os.makedirs(patroni_data_path, exist_ok=True)
         # Parent must be _daemon_-owned so Patroni can rename/remove the data dir on reinit.

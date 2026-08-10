@@ -141,7 +141,7 @@ def test_render_patroni_yml_file(substrate, config):
         _config.return_value.instance_password_encryption = sentinel.instance_password_encryption
         _template.return_value.render.return_value = sentinel.template_output
 
-        config.render_patroni_yml_file()
+        config.render_patroni_yml_file(watcher_raft_address="10.5.5.5:2222")
 
         _template.assert_called_once_with("template")
         if substrate == Substrates.K8S:
@@ -185,8 +185,10 @@ def test_render_patroni_yml_file(substrate, config):
                 pgdata_path="/var/lib/pg/data/16/main",
             )
             _render_file.assert_called_once_with(
-                substrate, "/var/lib/pg/data/patroni.yaml", sentinel.template_output, 0o644
+                substrate, "/var/lib/pg/data/patroni.yml", sentinel.template_output, 0o644
             )
+            # Same path object the Pebble layer launches Patroni with — never a literal.
+            assert _render_file.call_args.args[1] == str(config.workload.paths.patroni_config)
         else:
             _template.return_value.render.assert_called_once_with(
                 substrate="vm",
@@ -231,7 +233,8 @@ def test_render_patroni_yml_file(substrate, config):
                 self_ip=sentinel.unit_ip,
                 listen_ips=sentinel.listen_ips,
                 raft_password=sentinel.raft_pass,
-                watcher=None,
+                watcher="10.5.5.5:2222",
+                watcher_addr="10.5.5.5",
             )
             _render_file.assert_called_once_with(
                 substrate,

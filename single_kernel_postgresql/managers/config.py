@@ -673,6 +673,10 @@ class ConfigManager(BaseManager):
                 "listen_ips": self.state.listen_ips,
                 "raft_password": self.state.application.raft_password,
                 "watcher": watcher_raft_address,
+                # The pg_hba rule matches a host, so the Raft port has to go.
+                "watcher_addr": watcher_raft_address.rsplit(":", 1)[0]
+                if watcher_raft_address
+                else None,
             })
             perms = 0o600
         else:
@@ -690,7 +694,7 @@ class ConfigManager(BaseManager):
         rendered = template.render(**confs)
         render_file(
             self.state.substrate,
-            str(self.workload.paths.patroni_conf / "patroni.yaml"),
+            str(self.workload.paths.patroni_config),
             rendered,
             perms,
         )
