@@ -1,3 +1,4 @@
+{%- set hba_type = 'hostssl' if enable_tls else 'host' -%}
 {%- if substrate == 'vm' -%}
 #########################################################################################
 # [ WARNING ]
@@ -178,43 +179,43 @@ postgresql:
     - local all backup peer map=operator
     - local all operator scram-sha-256
     - local all monitoring password
-    - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_stats 0.0.0.0/0 scram-sha-256
-    - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_read 0.0.0.0/0 scram-sha-256
-    - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_dml 0.0.0.0/0 scram-sha-256
-    - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_backup 0.0.0.0/0 scram-sha-256
-    - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_dba 0.0.0.0/0 scram-sha-256
-    - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_admin 0.0.0.0/0 scram-sha-256
-    - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_databases_owner 0.0.0.0/0 scram-sha-256
+    - {{ hba_type }} all +charmed_stats 0.0.0.0/0 scram-sha-256
+    - {{ hba_type }} all +charmed_read 0.0.0.0/0 scram-sha-256
+    - {{ hba_type }} all +charmed_dml 0.0.0.0/0 scram-sha-256
+    - {{ hba_type }} all +charmed_backup 0.0.0.0/0 scram-sha-256
+    - {{ hba_type }} all +charmed_dba 0.0.0.0/0 scram-sha-256
+    - {{ hba_type }} all +charmed_admin 0.0.0.0/0 scram-sha-256
+    - {{ hba_type }} all +charmed_databases_owner 0.0.0.0/0 scram-sha-256
     {%- if not connectivity %}
-    - {{ 'hostssl' if enable_tls else 'host' }} all all {{ self_ip }}/32 {{ instance_password_encryption }}
-    - {{ 'hostssl' if enable_tls else 'host' }} all all 0.0.0.0/0 reject
+    - {{ hba_type }} all all {{ self_ip }}/32 {{ instance_password_encryption }}
+    - {{ hba_type }} all all 0.0.0.0/0 reject
     {%- elif enable_ldap %}
-    - {{ 'hostssl' if enable_tls else 'host' }} all +identity_access 0.0.0.0/0 ldap {{ ldap_parameters }}
-    - {{ 'hostssl' if enable_tls else 'host' }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
+    - {{ hba_type }} all +identity_access 0.0.0.0/0 ldap {{ ldap_parameters }}
+    - {{ hba_type }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
     {%-   for user, databases in user_databases_map.items() %}
-    - {{ 'hostssl' if enable_tls else 'host' }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
+    - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
     {%-   endfor %}
     {%- else %}
-    - {{ 'hostssl' if enable_tls else 'host' }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
+    - {{ hba_type }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
     {%-   for user, databases in user_databases_map.items() %}
     {%-     if 'pgbouncer_auth_relation_' in user %}
-    - {{ 'hostssl' if enable_tls else 'host' }} {{ databases }} {{ user }} 0.0.0.0/0 md5
+    - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 md5
     {%-     else %}
-    - {{ 'hostssl' if enable_tls else 'host' }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
+    - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
     {%-     endif %}
     {%-   endfor %}
     {%- endif %}
     {%- if watcher_addr %}
     # Allow watcher to connect for health checks
-    - {{ 'hostssl' if enable_tls else 'host' }} postgres watcher {{ watcher_addr }}/32 scram-sha-256
+    - {{ hba_type }} postgres watcher {{ watcher_addr }}/32 scram-sha-256
     {%- endif %}
-    - {{ 'hostssl' if enable_tls else 'host' }} replication replication 127.0.0.1/32 scram-sha-256
+    - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
     # Allow replications connections from other cluster members.
     {%- for endpoint in extra_replication_endpoints %}
-    - {{ 'hostssl' if enable_tls else 'host' }} replication replication {{ endpoint }}/32 scram-sha-256
+    - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
     {%- endfor %}
     {%- for peer_ip in peers_ips %}
-    - {{ 'hostssl' if enable_tls else 'host' }} replication replication {{ peer_ip }}/0 scram-sha-256
+    - {{ hba_type }} replication replication {{ peer_ip }}/0 scram-sha-256
     {%- endfor %}
 
   pg_ident:
@@ -343,10 +344,10 @@ bootstrap:
   - waldir: {{ logs_storage_path }}/16/main/pg_wal
   {%- endif %}
   pg_hba:
-  - {{ 'hostssl' if enable_tls else 'host' }} all all 0.0.0.0/0 {{ instance_password_encryption }}
-  - {{ 'hostssl' if enable_tls else 'host' }} replication replication 127.0.0.1/32 scram-sha-256
+  - {{ hba_type }} all all 0.0.0.0/0 {{ instance_password_encryption }}
+  - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
   {%- for endpoint in extra_replication_endpoints %}
-  - {{ 'hostssl' if enable_tls else 'host' }} replication replication {{ endpoint }}/32 scram-sha-256
+  - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
   {%- endfor %}
 bypass_api_service: true
 log:
@@ -404,39 +405,39 @@ postgresql:
   pg_hba:
   - local all backup peer map=operator
   - local all monitoring password
-  - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_stats 0.0.0.0/0 scram-sha-256
-  - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_read 0.0.0.0/0 scram-sha-256
-  - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_dml 0.0.0.0/0 scram-sha-256
-  - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_backup 0.0.0.0/0 scram-sha-256
-  - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_dba 0.0.0.0/0 scram-sha-256
-  - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_admin 0.0.0.0/0 scram-sha-256
-  - {{ 'hostssl' if enable_tls else 'host' }} all +charmed_databases_owner 0.0.0.0/0 scram-sha-256
+  - {{ hba_type }} all +charmed_stats 0.0.0.0/0 scram-sha-256
+  - {{ hba_type }} all +charmed_read 0.0.0.0/0 scram-sha-256
+  - {{ hba_type }} all +charmed_dml 0.0.0.0/0 scram-sha-256
+  - {{ hba_type }} all +charmed_backup 0.0.0.0/0 scram-sha-256
+  - {{ hba_type }} all +charmed_dba 0.0.0.0/0 scram-sha-256
+  - {{ hba_type }} all +charmed_admin 0.0.0.0/0 scram-sha-256
+  - {{ hba_type }} all +charmed_databases_owner 0.0.0.0/0 scram-sha-256
   {%- if not connectivity %}
-  - {{ 'hostssl' if enable_tls else 'host' }} all all {{ endpoint }}.{{ namespace }}.svc.cluster.local {{ instance_password_encryption }}
-  - {{ 'hostssl' if enable_tls else 'host' }} all all 0.0.0.0/0 reject
+  - {{ hba_type }} all all {{ endpoint }}.{{ namespace }}.svc.cluster.local {{ instance_password_encryption }}
+  - {{ hba_type }} all all 0.0.0.0/0 reject
   {%- elif enable_ldap %}
-  - {{ 'hostssl' if enable_tls else 'host' }} all +identity_access 0.0.0.0/0 ldap {{ ldap_parameters }}
-  - {{ 'hostssl' if enable_tls else 'host' }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
+  - {{ hba_type }} all +identity_access 0.0.0.0/0 ldap {{ ldap_parameters }}
+  - {{ hba_type }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
   {%-   for user, databases in user_databases_map.items() %}
-  - {{ 'hostssl' if enable_tls else 'host' }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
+  - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
   {%-   endfor %}
   {%- else %}
-  - {{ 'hostssl' if enable_tls else 'host' }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
+  - {{ hba_type }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
   {%-   for user, databases in user_databases_map.items() %}
   {%-     if 'pgbouncer_auth_relation_' in user %}
-  - {{ 'hostssl' if enable_tls else 'host' }} {{ databases }} {{ user }} 0.0.0.0/0 md5
+  - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 md5
   {%-     else %}
-  - {{ 'hostssl' if enable_tls else 'host' }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
+  - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
   {%-     endif %}
   {%-   endfor %}
   {%- endif %}
-  - {{ 'hostssl' if enable_tls else 'host' }} replication replication 127.0.0.1/32 scram-sha-256
-  - {{ 'hostssl' if enable_tls else 'host' }} replication replication 127.0.0.6/32 scram-sha-256
+  - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
+  - {{ hba_type }} replication replication 127.0.0.6/32 scram-sha-256
   {%- for endpoint in extra_replication_endpoints %}
-  - {{ 'hostssl' if enable_tls else 'host' }} replication replication {{ endpoint }}/32 scram-sha-256
+  - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
   {%- endfor %}
   {%- for endpoint in endpoints %}
-  - {{ 'hostssl' if enable_tls else 'host' }} replication replication {{ endpoint }}.{{ namespace }}.svc.cluster.local scram-sha-256
+  - {{ hba_type }} replication replication {{ endpoint }}.{{ namespace }}.svc.cluster.local scram-sha-256
   {%- endfor %}
   pg_ident:
   - operator postgres backup
