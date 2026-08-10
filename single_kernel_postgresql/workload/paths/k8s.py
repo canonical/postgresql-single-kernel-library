@@ -63,10 +63,15 @@ class K8sPaths(Paths):
         """Path to the patroni configuration directory.
 
         This is the data storage root (``/var/lib/pg/data``) where the Patroni
-        config subsystem renders ``patroni.yaml`` — matching #172's Patroni port.
+        config subsystem renders its config file.
         (The TLS ``.pem`` files go to the ``tls`` path, which is the same dir.)
         """
         return self.root / K8S_DATA_PATH
+
+    @property
+    def patroni_config(self) -> PathProtocol:
+        """Path to the patroni config file the Pebble layer launches Patroni with."""
+        return self.patroni_conf / "patroni.yml"
 
     @property
     def tls(self) -> PathProtocol:
