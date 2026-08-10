@@ -456,7 +456,7 @@ class ConfigManager(BaseManager):
         rendered = template.render(**confs)
         render_file(
             self.state.substrate,
-            str(self.workload.paths.patroni_conf / "patroni.yaml"),
+            str(self.workload.paths.patroni_config),
             rendered,
             perms,
         )
