@@ -221,30 +221,19 @@ postgresql:
   pg_ident:
   - operator _daemon_ backup
   authentication:
-    replication:
-      username: replication
-      password: {{ replication_password }}
+  {%- for role, user, password in [
+        ('replication', 'replication', replication_password),
+        ('rewind', rewind_user, rewind_password),
+        ('superuser', superuser, superuser_password)] %}
+    {{ role }}:
+      username: {{ user }}
+      password: {{ password }}
       {%- if enable_tls %}
       sslrootcert: {{ conf_path }}/ca.pem
       {%- endif %}
       sslcert: {{ conf_path }}/nonexistent_cert.pem
       sslkey: {{ conf_path }}/nonexistent_key.pem
-    rewind:
-      username: {{ rewind_user }}
-      password: {{ rewind_password }}
-      {%- if enable_tls %}
-      sslrootcert: {{ conf_path }}/ca.pem
-      {%- endif %}
-      sslcert: {{ conf_path }}/nonexistent_cert.pem
-      sslkey: {{ conf_path }}/nonexistent_key.pem
-    superuser:
-      username: {{ superuser }}
-      password: {{ superuser_password }}
-      {%- if enable_tls %}
-      sslrootcert: {{ conf_path }}/ca.pem
-      {%- endif %}
-      sslcert: {{ conf_path }}/nonexistent_cert.pem
-      sslkey: {{ conf_path }}/nonexistent_key.pem
+  {%- endfor %}
 use_unix_socket: true
 {%- if is_creating_backup %}
 tags:
@@ -442,25 +431,20 @@ postgresql:
   pg_ident:
   - operator postgres backup
   authentication:
-    replication:
-      password: {{ replication_password }}
+  {%- for role, user, password in [
+        ('replication', none, replication_password),
+        ('rewind', rewind_user, rewind_password),
+        ('superuser', none, superuser_password)] %}
+    {{ role }}:
+      {%- if user %}
+      username: {{ user }}
+      {%- endif %}
+      password: {{ password }}
       {%- if enable_tls %}
       sslcert: {{ conf_path }}/nonexistent_cert.pem
       sslkey: {{ conf_path }}/nonexistent_key.pem
       {%- endif %}
-    rewind:
-      username: {{ rewind_user }}
-      password: {{ rewind_password }}
-      {%- if enable_tls %}
-      sslcert: {{ conf_path }}/nonexistent_cert.pem
-      sslkey: {{ conf_path }}/nonexistent_key.pem
-      {%- endif %}
-    superuser:
-      password: {{ superuser_password }}
-      {%- if enable_tls %}
-      sslcert: {{ conf_path }}/nonexistent_cert.pem
-      sslkey: {{ conf_path }}/nonexistent_key.pem
-      {%- endif %}
+  {%- endfor %}
 use_endpoints: true
 use_unix_socket: true
 {%- if is_no_sync_member or is_creating_backup %}
