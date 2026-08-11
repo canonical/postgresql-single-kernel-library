@@ -1,12 +1,15 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
-"""Golden tests: the merged lib template must render byte-for-byte like each charm's original.
+"""Golden tests: the merged lib template must render the same configuration as each charm's original.
 
 The single ``single_kernel_postgresql/templates/patroni.yml.j2`` branches on a ``substrate``
-context var. For every conditional dimension of the render it must reproduce, verbatim, the
-output the pre-merge charm template produced for that substrate. The fixtures under
-``tests/fixtures/`` are byte copies of those originals; each case renders both with the same
-context and asserts equality, so one divergent byte fails the suite.
+context var. For every conditional dimension of the render it must reproduce the configuration
+the pre-merge charm template produced for that substrate. The fixtures under ``tests/fixtures/``
+are byte copies of those originals; each case renders both with the same context and compares
+the parsed documents, so any changed value, added key or reordered rule fails the suite.
+
+Parsed rather than byte comparison because the merged template emits one field order for both
+substrates instead of reproducing each charm's; mapping order is not part of the configuration.
 """
 
 import importlib.resources
@@ -14,6 +17,7 @@ import itertools
 from pathlib import Path
 
 import pytest
+import yaml
 from jinja2 import Template
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
@@ -191,11 +195,15 @@ def test_merged_template_matches_original(substrate, overrides):
     expected = _ORIGINAL_TEMPLATES[substrate].render(**context)
     actual = _MERGED_TEMPLATE.render(substrate=substrate, **context)
 
-    assert actual == expected
+    # Compared as parsed documents rather than bytes: the merged template emits one field
+    # order for both substrates instead of each charm's, and YAML mapping order carries no
+    # meaning. Sequences still compare in order, so pg_hba - where PostgreSQL takes the
+    # first matching rule - and partner_addrs stay pinned.
+    assert yaml.safe_load(actual) == yaml.safe_load(expected)
 
 
 def test_template_loads_via_importlib_resources():
     """The merged template must resolve as package data, independent of the CWD."""
     source = _merged_template_source()
-    assert "{%- if substrate == 'vm' -%}" in source
-    assert "{%- else -%}" in source
+    assert "{%- set is_vm = substrate == 'vm' -%}" in source
+    assert Template(source).render(substrate="vm", **_base_context())
