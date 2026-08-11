@@ -1,5 +1,13 @@
+{%- set is_vm = substrate == 'vm' -%}
 {%- set hba_type = 'hostssl' if enable_tls else 'host' -%}
-{%- if substrate == 'vm' -%}
+{%- set node_addr = self_ip if is_vm else endpoint -%}
+{%- set tls_dir = conf_path if is_vm else storage_path -%}
+{%- set data_dir = data_path if is_vm else pgdata_path -%}
+{%- set wal_path = wal_dir if is_vm else logs_storage_path ~ '/16/main/pg_wal' -%}
+{%- set patroni_log_dir = log_path if is_vm else logs_storage_path ~ '/16/main/patroni_logs' -%}
+{%- set pg_log_dir = postgresql_log_path if is_vm else logs_storage_path ~ '/16/main/pg_logs' -%}
+{%- set pg_bin_dir = '/snap/charmed-postgresql/current/usr/lib/postgresql/' ~ version ~ '/bin' if is_vm else '/usr/lib/postgresql/' ~ version ~ '/bin' -%}
+{%- set pgb_flag = pgbackrest_configuration_file ~ ' ' if is_vm else '' -%}
 #########################################################################################
 # [ WARNING ]
 # patroni configuration file maintained by the postgres-operator
@@ -7,55 +15,63 @@
 #########################################################################################
 # For a complete reference of all the options for this configuration file,
 # please refer to https://patroni.readthedocs.io/en/latest/SETTINGS.html.
+{%- if is_vm %}
 
 # Name of the cluster.
 scope: {{ scope }}
 namespace: /db/
 name: {{ member_name }}
+{%- endif %}
 
 log:
-  dir: {{ log_path }}
+  dir: {{ patroni_log_dir }}
   dateformat: "%Y-%m-%d %H:%M:%S %Z"
   format: "%(asctime)s [%(process)d]: %(levelname)s: %(message)s "
   file_num: 10080
   file_size: 600
 
 restapi:
-  listen: '{{ self_ip }}:8008'
-  connect_address: '{{ self_ip }}:8008'
+  listen: '{{ self_ip if is_vm else '0.0.0.0' }}:8008'
+  connect_address: '{{ node_addr }}:8008'
   {%- if patroni_password %}
   authentication:
     username: patroni
     password: {{ patroni_password }}
   {%- endif %}
-  cafile: {{ conf_path }}/peer_ca.pem
-  certfile: {{ conf_path }}/peer_cert.pem
-  keyfile: {{ conf_path }}/peer_key.pem
+  cafile: {{ tls_dir }}/peer_ca.pem
+  certfile: {{ tls_dir }}/peer_cert.pem
+  keyfile: {{ tls_dir }}/peer_key.pem
 
 ctl:
-  cacert: {{ conf_path }}/peer_ca.pem
+  cacert: {{ tls_dir }}/peer_ca.pem
+{%- if is_vm %}
 
 raft:
   data_dir: {{ conf_path }}/raft
   self_addr: '{{ self_ip }}:2222'
   password: {{ raft_password }}
-  {% if partner_addrs or watcher -%}
+  {%- if partner_addrs or watcher %}
   partner_addrs:
-  {% endif -%}
-  {% for partner_addr in partner_addrs -%}
+  {%- endif %}
+  {%- for partner_addr in partner_addrs %}
   - {{ partner_addr }}:2222
-  {% endfor %}
+  {%- endfor %}
   {%- if watcher %}
   - {{ watcher }}
-  {% endif %}
+  {%- endif %}
+{%- endif %}
 
 bootstrap:
   dcs:
+    {%- if is_vm %}
     # Settings related to the time without communication
     # to the leader before triggering a failover.
     ttl: 30
     loop_wait: 10
     retry_timeout: 10
+    {%- else %}
+    failsafe_mode: true
+    {%- endif %}
     maximum_lag_on_failover: {{ maximum_lag_on_failover }}
     synchronous_mode: true
     synchronous_mode_strict: false
@@ -65,11 +81,14 @@ bootstrap:
       use_pg_rewind: true
       remove_data_directory_on_rewind_failure: false
       remove_data_directory_on_diverged_timelines: false
+      {%- if not is_vm %}
+      bin_dir: {{ pg_bin_dir }}
+      {%- endif %}
       parameters:
         synchronous_standby_names: "*"
         {%- if enable_pgbackrest_archiving %}
-        archive_command: 'pgbackrest {{ pgbackrest_configuration_file }} --stanza={{ stanza }} archive-push %p'
-        {% else %}
+        archive_command: 'pgbackrest {{ pgb_flag }}--stanza={{ stanza }} archive-push %p'
+        {%- else %}
         archive_command: /bin/true
         {%- endif %}
         archive_mode: on
@@ -83,7 +102,7 @@ bootstrap:
         log_autovacuum_min_duration: 60000
         log_checkpoints: 'on'
         log_destination: 'stderr'
-        log_directory: '{{ postgresql_log_path }}'
+        log_directory: '{{ pg_log_dir }}'
         log_error_verbosity: 'verbose'
         log_file_mode: '0600'
         log_filename: 'postgresql-%w_%H%M.log'
@@ -108,19 +127,21 @@ bootstrap:
         set_user.block_log_statement: 'on'
         set_user.exit_on_error: 'on'
         set_user.superuser_allowlist: '+charmed_dba'
+    {%- if slots or is_vm %}
     slots:
     {%- for slot, database in slots.items() %}
       {{slot}}:
         database: {{database}}
         plugin: pgoutput
         type: logical
-    {%- endfor -%}
+    {%- endfor %}
+    {%- endif %}
 
   {%- if restoring_backup %}
   method: pgbackrest
   pgbackrest:
     command: >
-      pgbackrest {{ pgbackrest_configuration_file }} --stanza={{ restore_stanza }} --pg1-path={{ data_path }}
+      pgbackrest {{ pgb_flag }}--stanza={{ restore_stanza }} --pg1-path={{ data_dir }}
       {%- if backup_id %} --set={{ backup_id }} {%- endif %}
       {%- if restore_timeline %} --target-timeline="0x{{ restore_timeline }}" {% endif %}
       {%- if restore_to_latest %} --type=default {%- else %}
@@ -129,26 +150,40 @@ bootstrap:
       restore
     no_params: True
     keep_existing_recovery_conf: True
-  {% elif primary_cluster_endpoint %}
+  {%- elif primary_cluster_endpoint %}
     standby_cluster:
       host: {{ primary_cluster_endpoint }}
       port: 5432
       create_replica_methods: ["basebackup"]
-  {% else %}
+  {%- else %}
   initdb:
+  {%- if not is_vm %}
+  - auth-host: scram-sha-256
+  - auth-local: trust
+  {%- endif %}
   - encoding: UTF8
   - data-checksums
-  - waldir: {{ wal_dir }}
+  - waldir: {{ wal_path }}
   {%- endif %}
+  {%- if not is_vm %}
+  pg_hba:
+  - {{ hba_type }} all all 0.0.0.0/0 {{ instance_password_encryption }}
+  - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
+  {%- for endpoint in extra_replication_endpoints %}
+  - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
+  {%- endfor %}
+bypass_api_service: true
+pod_ip: '{{ endpoint }}'
+{%- endif %}
 
 postgresql:
-  listen: {% for ip in listen_ips %}{{ ip }}{%- if not loop.last %},{% endif %}{% endfor %}:5432
+  listen: {{ listen_ips | join(',') if is_vm else '0.0.0.0' }}:5432
   basebackup:
-    - waldir: {{ wal_dir }}
-  connect_address: '{{ self_ip }}:5432'
+    - waldir: {{ wal_path }}
+  connect_address: '{{ node_addr }}:5432'
   # Path to PostgreSQL binaries used in the database bootstrap process.
-  bin_dir: /snap/charmed-postgresql/current/usr/lib/postgresql/{{ version }}/bin
-  data_dir: {{ data_path }}
+  bin_dir: {{ pg_bin_dir }}
+  data_dir: {{ data_dir }}
   parameters:
     shared_preload_libraries: 'timescaledb,pgaudit,set_user,pg_stat_statements'
     session_preload_libraries: 'login_hook'
@@ -156,18 +191,20 @@ postgresql:
     set_user.exit_on_error: 'on'
     set_user.superuser_allowlist: '+charmed_dba'
     {%- if enable_pgbackrest_archiving %}
-    archive_command: 'pgbackrest {{ pgbackrest_configuration_file }} --stanza={{ stanza }} archive-push %p'
-    {% else %}
+    archive_command: 'pgbackrest {{ pgb_flag }}--stanza={{ stanza }} archive-push %p'
+    {%- else %}
     archive_command: /bin/true
     {%- endif %}
     {%- if enable_tls %}
     ssl: on
-    ssl_ca_file: {{ conf_path }}/ca.pem
-    ssl_cert_file: {{ conf_path }}/cert.pem
-    ssl_key_file: {{ conf_path }}/key.pem
+    ssl_ca_file: {{ tls_dir }}/ca.pem
+    ssl_cert_file: {{ tls_dir }}/cert.pem
+    ssl_key_file: {{ tls_dir }}/key.pem
     {%- endif %}
     temp_tablespaces: temp
+    {%- if is_vm %}
     unix_socket_directories: /tmp
+    {%- endif %}
     pg_stat_statements.max: 10000
     {%- if pg_parameters %}
     {%- for key, value in pg_parameters.items() %}
@@ -177,13 +214,15 @@ postgresql:
   pgpass: /tmp/pgpass
   pg_hba:
     - local all backup peer map=operator
+    {%- if is_vm %}
     - local all operator scram-sha-256
+    {%- endif %}
     - local all monitoring password
     {%- for role in ['charmed_stats', 'charmed_read', 'charmed_dml', 'charmed_backup', 'charmed_dba', 'charmed_admin', 'charmed_databases_owner'] %}
     - {{ hba_type }} all +{{ role }} 0.0.0.0/0 scram-sha-256
     {%- endfor %}
     {%- if not connectivity %}
-    - {{ hba_type }} all all {{ self_ip }}/32 {{ instance_password_encryption }}
+    - {{ hba_type }} all all {{ self_ip ~ '/32' if is_vm else endpoint ~ '.' ~ namespace ~ '.svc.cluster.local' }} {{ instance_password_encryption }}
     - {{ hba_type }} all all 0.0.0.0/0 reject
     {%- elif enable_ldap %}
     - {{ hba_type }} all +identity_access 0.0.0.0/0 ldap {{ ldap_parameters }}
@@ -201,247 +240,57 @@ postgresql:
     {%-     endif %}
     {%-   endfor %}
     {%- endif %}
-    {%- if watcher_addr %}
+    {%- if is_vm and watcher_addr %}
     # Allow watcher to connect for health checks
     - {{ hba_type }} postgres watcher {{ watcher_addr }}/32 scram-sha-256
     {%- endif %}
     - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
+    {%- if not is_vm %}
+    - {{ hba_type }} replication replication 127.0.0.6/32 scram-sha-256
+    {%- endif %}
     # Allow replications connections from other cluster members.
     {%- for endpoint in extra_replication_endpoints %}
     - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
     {%- endfor %}
+    {%- if is_vm %}
     {%- for peer_ip in peers_ips %}
     - {{ hba_type }} replication replication {{ peer_ip }}/0 scram-sha-256
     {%- endfor %}
+    {%- else %}
+    {%- for endpoint in endpoints %}
+    - {{ hba_type }} replication replication {{ endpoint }}.{{ namespace }}.svc.cluster.local scram-sha-256
+    {%- endfor %}
+    {%- endif %}
 
   pg_ident:
-  - operator _daemon_ backup
+  - operator {{ '_daemon_' if is_vm else 'postgres' }} backup
   authentication:
+  {#- conf_path is VM-only, so on K8s these render bare - as the pre-merge charm did. #}
   {%- for role, user, password in [
-        ('replication', 'replication', replication_password),
+        ('replication', 'replication' if is_vm else none, replication_password),
         ('rewind', rewind_user, rewind_password),
-        ('superuser', superuser, superuser_password)] %}
-    {{ role }}:
-      username: {{ user }}
-      password: {{ password }}
-      {%- if enable_tls %}
-      sslrootcert: {{ conf_path }}/ca.pem
-      {%- endif %}
-      sslcert: {{ conf_path }}/nonexistent_cert.pem
-      sslkey: {{ conf_path }}/nonexistent_key.pem
-  {%- endfor %}
-use_unix_socket: true
-{%- if is_creating_backup %}
-tags:
-  is_creating_backup: {{ is_creating_backup }}
-{%- endif %}
-{%- else -%}
-bootstrap:
-  dcs:
-    failsafe_mode: true
-    maximum_lag_on_failover: {{ maximum_lag_on_failover }}
-    synchronous_mode: true
-    synchronous_mode_strict: false
-    synchronous_node_count: {{ synchronous_node_count }}
-    max_timelines_history: 50
-    postgresql:
-      use_pg_rewind: true
-      remove_data_directory_on_rewind_failure: false
-      remove_data_directory_on_diverged_timelines: false
-      bin_dir: /usr/lib/postgresql/{{ version }}/bin
-      parameters:
-        synchronous_standby_names: "*"
-        {%- if enable_pgbackrest_archiving %}
-        archive_command: 'pgbackrest --stanza={{ stanza }} archive-push %p'
-        {% else %}
-        archive_command: /bin/true
-        {%- endif %}
-        archive_mode: on
-        autovacuum: true
-        debug_print_plan: 'off'
-        debug_print_parse: 'off'
-        debug_print_rewritten: 'off'
-        fsync: true
-        full_page_writes: true
-        lc_messages: 'en_US.UTF8'
-        log_autovacuum_min_duration: 60000
-        log_checkpoints: 'on'
-        log_destination: 'stderr'
-        log_directory: '{{ logs_storage_path }}/16/main/pg_logs'
-        log_error_verbosity: 'verbose'
-        log_file_mode: '0600'
-        log_filename: 'postgresql-%w_%H%M.log'
-        log_hostname: 'off'
-        log_line_prefix: '%t [%p]: user=%u,db=%d,app=%a,client=%h,line=%l '
-        log_min_duration_sample: -1
-        log_min_error_statement: 'warning'
-        log_recovery_conflict_waits: 'on'
-        log_replication_commands: 'on'
-        log_rotation_age: 1
-        log_rotation_size: 0
-        log_statement: ddl
-        log_statement_sample_rate: 1
-        log_statement_stats: 'off'
-        log_temp_files: 1
-        log_timezone: 'UTC'
-        log_truncate_on_rotation: 'on'
-        logging_collector: 'on'
-        wal_level: logical
-        shared_preload_libraries: 'timescaledb,pgaudit,set_user,pg_stat_statements'
-        session_preload_libraries: 'login_hook'
-        set_user.block_log_statement: 'on'
-        set_user.exit_on_error: 'on'
-        set_user.superuser_allowlist: '+charmed_dba'
-    {%- if slots %}
-    slots:
-    {%- for slot, database in slots.items() %}
-      {{slot}}:
-        database: {{database}}
-        plugin: pgoutput
-        type: logical
-    {%- endfor -%}
-    {% endif %}
-
-  {%- if restoring_backup %}
-  method: pgbackrest
-  pgbackrest:
-    command: >
-      pgbackrest --stanza={{ restore_stanza }} --pg1-path={{ pgdata_path }}
-      {%- if backup_id %} --set={{ backup_id }} {%- endif %}
-      {%- if restore_timeline %} --target-timeline="0x{{ restore_timeline }}" {% endif %}
-      {%- if restore_to_latest %} --type=default {%- else %}
-      --target-action=promote {%- if pitr_target %} --target="{{ pitr_target }}" --type=time {%- else %} --type=immediate {%- endif %}
-      {%- endif %}
-      restore
-    no_params: True
-    keep_existing_recovery_conf: True
-  {% elif primary_cluster_endpoint %}
-    standby_cluster:
-      host: {{ primary_cluster_endpoint }}
-      port: 5432
-      create_replica_methods: ["basebackup"]
-  {% else %}
-  initdb:
-  - auth-host: scram-sha-256
-  - auth-local: trust
-  - encoding: UTF8
-  - data-checksums
-  - waldir: {{ logs_storage_path }}/16/main/pg_wal
-  {%- endif %}
-  pg_hba:
-  - {{ hba_type }} all all 0.0.0.0/0 {{ instance_password_encryption }}
-  - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
-  {%- for endpoint in extra_replication_endpoints %}
-  - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
-  {%- endfor %}
-bypass_api_service: true
-log:
-  dir: {{ logs_storage_path }}/16/main/patroni_logs
-  dateformat: "%Y-%m-%d %H:%M:%S %Z"
-  format: "%(asctime)s [%(process)d]: %(levelname)s: %(message)s "
-  file_num: 10080
-  file_size: 600
-restapi:
-  connect_address: '{{ endpoint }}:8008'
-  listen: 0.0.0.0:8008
-  {%- if patroni_password %}
-  authentication:
-    username: patroni
-    password: {{ patroni_password }}
-  {%- endif %}
-  cafile: {{ storage_path }}/peer_ca.pem
-  certfile: {{ storage_path }}/peer_cert.pem
-  keyfile: {{ storage_path }}/peer_key.pem
-ctl:
-  cacert: {{ storage_path }}/peer_ca.pem
-pod_ip: '{{ endpoint }}'
-postgresql:
-  basebackup:
-    - waldir: {{ logs_storage_path }}/16/main/pg_wal
-  connect_address: '{{ endpoint }}:5432'
-  data_dir: {{ pgdata_path }}
-  bin_dir: /usr/lib/postgresql/{{ version }}/bin
-  listen: 0.0.0.0:5432
-  parameters:
-    shared_preload_libraries: 'timescaledb,pgaudit,set_user,pg_stat_statements'
-    session_preload_libraries: 'login_hook'
-    set_user.block_log_statement: 'on'
-    set_user.exit_on_error: 'on'
-    set_user.superuser_allowlist: '+charmed_dba'
-    {%- if enable_pgbackrest_archiving %}
-    archive_command: 'pgbackrest --stanza={{ stanza }} archive-push %p'
-    {% else %}
-    archive_command: /bin/true
-    {%- endif %}
-    {%- if enable_tls %}
-    ssl: on
-    ssl_ca_file: {{ storage_path }}/ca.pem
-    ssl_cert_file: {{ storage_path }}/cert.pem
-    ssl_key_file: {{ storage_path }}/key.pem
-    {%- endif %}
-    temp_tablespaces: temp
-    pg_stat_statements.max: 10000
-    {%- if pg_parameters %}
-    {%- for key, value in pg_parameters.items() %}
-    {{key}}: {{value}}
-    {%- endfor -%}
-    {% endif %}
-  pgpass: /tmp/pgpass
-  pg_hba:
-  - local all backup peer map=operator
-  - local all monitoring password
-  {%- for role in ['charmed_stats', 'charmed_read', 'charmed_dml', 'charmed_backup', 'charmed_dba', 'charmed_admin', 'charmed_databases_owner'] %}
-  - {{ hba_type }} all +{{ role }} 0.0.0.0/0 scram-sha-256
-  {%- endfor %}
-  {%- if not connectivity %}
-  - {{ hba_type }} all all {{ endpoint }}.{{ namespace }}.svc.cluster.local {{ instance_password_encryption }}
-  - {{ hba_type }} all all 0.0.0.0/0 reject
-  {%- elif enable_ldap %}
-  - {{ hba_type }} all +identity_access 0.0.0.0/0 ldap {{ ldap_parameters }}
-  - {{ hba_type }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
-  {%-   for user, databases in user_databases_map.items() %}
-  - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
-  {%-   endfor %}
-  {%- else %}
-  - {{ hba_type }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
-  {%-   for user, databases in user_databases_map.items() %}
-  {%-     if 'pgbouncer_auth_relation_' in user %}
-  - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 md5
-  {%-     else %}
-  - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
-  {%-     endif %}
-  {%-   endfor %}
-  {%- endif %}
-  - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
-  - {{ hba_type }} replication replication 127.0.0.6/32 scram-sha-256
-  {%- for endpoint in extra_replication_endpoints %}
-  - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
-  {%- endfor %}
-  {%- for endpoint in endpoints %}
-  - {{ hba_type }} replication replication {{ endpoint }}.{{ namespace }}.svc.cluster.local scram-sha-256
-  {%- endfor %}
-  pg_ident:
-  - operator postgres backup
-  authentication:
-  {%- for role, user, password in [
-        ('replication', none, replication_password),
-        ('rewind', rewind_user, rewind_password),
-        ('superuser', none, superuser_password)] %}
+        ('superuser', superuser if is_vm else none, superuser_password)] %}
     {{ role }}:
       {%- if user %}
       username: {{ user }}
       {%- endif %}
       password: {{ password }}
-      {%- if enable_tls %}
+      {%- if is_vm and enable_tls %}
+      sslrootcert: {{ conf_path }}/ca.pem
+      {%- endif %}
+      {%- if is_vm or enable_tls %}
       sslcert: {{ conf_path }}/nonexistent_cert.pem
       sslkey: {{ conf_path }}/nonexistent_key.pem
       {%- endif %}
   {%- endfor %}
+{%- if not is_vm %}
 use_endpoints: true
+{%- endif %}
 use_unix_socket: true
-{%- if is_no_sync_member or is_creating_backup %}
+{%- if is_creating_backup or (not is_vm and is_no_sync_member) %}
 tags:
+  {%- if not is_vm %}
   nosync: {{ is_no_sync_member }}
+  {%- endif %}
   is_creating_backup: {{ is_creating_backup }}
 {%- endif %}
-{%- endif -%}
