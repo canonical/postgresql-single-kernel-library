@@ -271,7 +271,7 @@ postgresql:
         ('rewind', rewind_user, rewind_password),
         ('superuser', superuser if is_vm else none, superuser_password)] %}
     {{ role }}:
-      {%- if user %}
+      {%- if user is not none %}
       username: {{ user }}
       {%- endif %}
       password: {{ password }}
