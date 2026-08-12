@@ -207,3 +207,25 @@ def test_template_loads_via_importlib_resources():
     source = _merged_template_source()
     assert "{%- set is_vm = substrate == 'vm' -%}" in source
     assert Template(source).render(substrate="vm", **_base_context())
+
+
+@pytest.mark.parametrize("version", ["16", "17"])
+def test_k8s_paths_follow_the_workload_version(version):
+    """The K8s data paths must track the running major version, like ``bin_dir`` already did.
+
+    The pre-merge charm template hardcoded ``/16/`` in the WAL, PostgreSQL-log and
+    Patroni-log paths while parameterising ``bin_dir``, so on a 17 workload those three
+    would have kept pointing at a 16 directory. The golden matrix cannot see this: it pins
+    ``version`` at "16", where both spellings render the same bytes.
+    """
+    context = _base_context()
+    context["version"] = version
+    rendered = yaml.safe_load(_MERGED_TEMPLATE.render(substrate="k8s", **context))
+
+    assert rendered["postgresql"]["bin_dir"] == f"/usr/lib/postgresql/{version}/bin"
+    assert rendered["postgresql"]["basebackup"][0]["waldir"].split("/")[-3] == version
+    assert rendered["log"]["dir"].split("/")[-3] == version
+    assert (
+        rendered["bootstrap"]["dcs"]["postgresql"]["parameters"]["log_directory"].split("/")[-3]
+        == version
+    )
