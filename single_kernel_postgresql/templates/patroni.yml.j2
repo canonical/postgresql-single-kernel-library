@@ -3,9 +3,9 @@
 {%- set node_addr = self_ip if is_vm else endpoint -%}
 {%- set tls_dir = conf_path if is_vm else storage_path -%}
 {%- set data_dir = data_path if is_vm else pgdata_path -%}
-{%- set wal_path = wal_dir if is_vm else logs_storage_path ~ '/16/main/pg_wal' -%}
-{%- set patroni_log_dir = log_path if is_vm else logs_storage_path ~ '/16/main/patroni_logs' -%}
-{%- set pg_log_dir = postgresql_log_path if is_vm else logs_storage_path ~ '/16/main/pg_logs' -%}
+{%- set wal_path = wal_dir if is_vm else logs_storage_path ~ '/' ~ version ~ '/main/pg_wal' -%}
+{%- set patroni_log_dir = log_path if is_vm else logs_storage_path ~ '/' ~ version ~ '/main/patroni_logs' -%}
+{%- set pg_log_dir = postgresql_log_path if is_vm else logs_storage_path ~ '/' ~ version ~ '/main/pg_logs' -%}
 {%- set pg_bin_dir = '/snap/charmed-postgresql/current/usr/lib/postgresql/' ~ version ~ '/bin' if is_vm else '/usr/lib/postgresql/' ~ version ~ '/bin' -%}
 {%- set pgb_flag = pgbackrest_configuration_file ~ ' ' if is_vm else '' -%}
 #########################################################################################
