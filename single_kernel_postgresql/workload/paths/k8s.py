@@ -69,11 +69,6 @@ class K8sPaths(Paths):
         return self.root / K8S_DATA_PATH
 
     @property
-    def patroni_config(self) -> PathProtocol:
-        """Path to the patroni config file the Pebble layer launches Patroni with."""
-        return self.patroni_conf / "patroni.yaml"
-
-    @property
     def tls(self) -> PathProtocol:
         """Directory where TLS files are written on K8s (the data dir Patroni reads from).
 
