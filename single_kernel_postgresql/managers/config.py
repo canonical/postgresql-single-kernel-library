@@ -475,7 +475,7 @@ class ConfigManager(BaseManager):
         relations_user_databases_map = relations_user_databases_map or {}
 
         # Update and reload configuration based on TLS files availability.
-        logger.debug(f"Updating Patroni config file with parameters = {pg_parameters}")
+        logger.info(f"Updating Patroni config file with parameters = {pg_parameters}")
         self.render_patroni_yml_file(
             connectivity=self.state.peer.is_connectivity_enabled,
             is_creating_backup=is_creating_backup,
