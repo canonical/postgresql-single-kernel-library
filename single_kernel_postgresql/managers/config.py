@@ -12,7 +12,7 @@ import logging
 from collections.abc import Callable
 from functools import cached_property
 from hashlib import shake_128
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import charm_refresh
 import psycopg2
@@ -37,7 +37,10 @@ from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import _change_owner, render_file
 from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.workload.vm import VMWorkload
+
+if TYPE_CHECKING:
+    # Import-time only: the VM workload pulls the snap charm lib, which K8s does not ship.
+    from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -543,9 +546,9 @@ class ConfigManager(BaseManager):
         # TODO handle case of scale up while refresh in progress & `refresh` is None
         if (
             self.state.substrate == Substrates.VM
-            and isinstance(self.workload, VMWorkload)
             and refresh is not None
-            and self.workload.get_snap_revision() != refresh.pinned_snap_revision
+            and cast("VMWorkload", self.workload).get_snap_revision()
+            != refresh.pinned_snap_revision
         ):
             logger.debug("Early exit: snap was not refreshed to the right version yet")
             return True
