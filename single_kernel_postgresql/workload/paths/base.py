@@ -85,6 +85,12 @@ class Paths(ABC):
 
     @property
     @abstractmethod
+    def pgbackrest_logs(self) -> PathProtocol:
+        """Path to the pgBackRest logs, the directory logrotate is pointed at."""
+        pass
+
+    @property
+    @abstractmethod
     def tls(self) -> PathProtocol:
         """Directory where TLS files are written for this substrate."""
         pass
