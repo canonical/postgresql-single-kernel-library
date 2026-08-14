@@ -426,11 +426,19 @@ def test_build_postgresql_parameters_none_base_falls_back_to_worker_config_dict(
 
 def test_is_tls_enabled_true_when_all_client_tls_files_present(config):
     config.tls_manager.get_client_tls_files.return_value = ("cert", "key", "ca")
+    config.tls_manager.client_tls_files_on_disk.return_value = True
     assert config.is_tls_enabled is True
 
 
 def test_is_tls_enabled_false_when_any_client_tls_file_missing(config):
     config.tls_manager.get_client_tls_files.return_value = ("cert", None, "ca")
+    assert config.is_tls_enabled is False
+
+
+def test_is_tls_enabled_false_until_the_files_reach_disk(config):
+    """Issued certs are in the databag before the push writes them, so disk decides."""
+    config.tls_manager.get_client_tls_files.return_value = ("cert", "key", "ca")
+    config.tls_manager.client_tls_files_on_disk.return_value = False
     assert config.is_tls_enabled is False
 
 
