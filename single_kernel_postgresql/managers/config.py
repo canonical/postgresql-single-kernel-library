@@ -36,6 +36,7 @@ from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import _change_owner, render_file
 from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -541,6 +542,7 @@ class ConfigManager(BaseManager):
         # TODO handle case of scale up while refresh in progress & `refresh` is None
         if (
             self.state.substrate == Substrates.VM
+            and isinstance(self.workload, VMWorkload)
             and refresh is not None
             and self.workload.get_snap_revision() != refresh.pinned_snap_revision
         ):
