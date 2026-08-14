@@ -91,9 +91,8 @@ def any_cpu_to_cores(cpu_str) -> int:
         cpu_str: a string representing a CPU value, as integer or millis
     """
     if cpu_str.endswith("m"):
-        # convert millis to whole cores, undercommitted but never below 1 — a sub-core
-        # limit like "500m" must still yield at least one core's worth of config, not 0.
-        return max(1, int(cpu_str[:-1]) // 1000)
+        # convert millis to cores, undercommited
+        return int(cpu_str[:-1]) // 1000
     return int(cpu_str)
 
 
