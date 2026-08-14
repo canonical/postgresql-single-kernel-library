@@ -185,7 +185,7 @@ def test_render_patroni_yml_file(substrate, config):
                 pgdata_path="/var/lib/pg/data/16/main",
             )
             _render_file.assert_called_once_with(
-                substrate, "/var/lib/pg/data/patroni.yml", sentinel.template_output, 0o644
+                substrate, "/var/lib/pg/data/patroni.yaml", sentinel.template_output, 0o644
             )
             # Same path object the Pebble layer launches Patroni with — never a literal.
             assert _render_file.call_args.args[1] == str(config.workload.paths.patroni_config)
