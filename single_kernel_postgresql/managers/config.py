@@ -294,8 +294,15 @@ class ConfigManager(BaseManager):
 
     @property
     def is_tls_enabled(self) -> bool:
-        """Return whether client TLS is enabled (all client TLS files are present)."""
-        return all(self.tls_manager.get_client_tls_files())
+        """Return whether client TLS is enabled and the files are serveable.
+
+        Issued certs reach the relation databag before the push writes them to the
+        workload, so the on-disk check is what stops a render turning ssl on against
+        files that are not there yet.
+        """
+        return all(self.tls_manager.get_client_tls_files()) and (
+            self.tls_manager.client_tls_files_on_disk()
+        )
 
     @cached_property
     def generate_config_hash(self) -> str:
