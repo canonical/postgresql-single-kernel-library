@@ -10,6 +10,7 @@ Responsible for managing the configuration of the PostgreSQL instance.
 import importlib.resources
 import logging
 from collections.abc import Callable
+from functools import cached_property
 from hashlib import shake_128
 from typing import Any
 
@@ -293,7 +294,7 @@ class ConfigManager(BaseManager):
         """Return whether client TLS is enabled (all client TLS files are present)."""
         return all(self.tls_manager.get_client_tls_files())
 
-    @property
+    @cached_property
     def generate_config_hash(self) -> str:
         """Generate current configuration hash."""
         return shake_128(str(self.state.config.model_dump()).encode()).hexdigest(16)
