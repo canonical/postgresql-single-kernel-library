@@ -183,3 +183,5 @@ VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME
 ## Snap services backing the backup domain.
 VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
 VM_PGBACKREST_EXPORTER_SERVICE_NAME = "pgbackrest-exporter"
+## The snap exposes pgBackRest only under an alias, never as a bare binary.
+VM_PGBACKREST_EXECUTABLE = "charmed-postgresql.pgbackrest"

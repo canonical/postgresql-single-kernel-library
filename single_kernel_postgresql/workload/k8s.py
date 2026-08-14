@@ -4,6 +4,7 @@
 """Kubernetes Workload."""
 
 import logging
+import signal
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -105,9 +106,33 @@ class K8sWorkload(BaseWorkload):
         """Stop the PostgreSQL service."""
         ...
 
-    def start_service(self):
-        """Start the PostgreSQL service."""
-        ...
+    def start_service(self, service_name: str) -> None:
+        """Start a Pebble service."""
+        self.container.start(service_name)
+
+    def stop_service(self, service_name: str) -> None:
+        """Stop a Pebble service."""
+        self.container.stop(service_name)
+
+    def restart_service(self, service_name: str) -> None:
+        """Restart a Pebble service."""
+        self.container.restart(service_name)
+
+    def reload_service(self, service_name: str) -> None:
+        """Signal a Pebble service to re-read its configuration without dropping state."""
+        self.container.pebble.send_signal(signal.SIGHUP, services=[service_name])
+
+    def is_service_running(self, service_name: str) -> bool:
+        """Whether the named Pebble service is active.
+
+        An unknown service reads as not running, which is how a workload container
+        that has not had the layer applied yet presents.
+        """
+        if not self.container.can_connect():
+            return False
+
+        services = self.container.pebble.get_services(names=[service_name])
+        return len(services) > 0 and services[0].current == ServiceStatus.ACTIVE
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
@@ -166,6 +191,11 @@ class K8sWorkload(BaseWorkload):
                     self.unlink(file_path, missing_ok=True)
                 except PostgreSQLFileOperationError as e:
                     logger.warning(f"Failed to delete temporary file {file_path}: {e}")
+
+    @property
+    def pgbackrest_executable(self) -> str:
+        """The pgBackRest binary, on PATH inside the workload container."""
+        return "pgbackrest"
 
     @property
     def user(self) -> str:
