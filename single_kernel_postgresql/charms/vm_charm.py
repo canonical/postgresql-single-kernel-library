@@ -20,7 +20,6 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
     def __init__(self, *args):
         """Initialize the PostgreSQL VM Charm."""
         super().__init__(*args)
-        self.state.resource_provider = self.workload
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -60,6 +59,10 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
     # The concrete production charm owns these bridges (pops postgresql_restarted +
     # acquire_lock, update_endpoints, snap metrics/ldap restarts), so they default to
     # no-ops here.
+    def get_resource_provider(self) -> VMWorkload:
+        """Return the substrate's (cpu_cores, memory_bytes) introspector."""
+        return self.workload
+
     def request_restart(self) -> None:
         """Run the substrate pre-restart side effect and acquire the restart lock."""
 

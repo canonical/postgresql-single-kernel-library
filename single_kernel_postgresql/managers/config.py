@@ -36,7 +36,7 @@ from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import _change_owner, render_file
 from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
-from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
 if TYPE_CHECKING:
     # Import-time only: the VM workload pulls the snap charm lib, which K8s does not ship.
@@ -57,6 +57,7 @@ class ConfigManager(BaseManager):
         workload: BaseWorkload,
         tls_manager: TLSManager,
         patroni_manager: PatroniManager,
+        resource_provider: Callable[[], ResourceProvider],
         request_restart: Callable[[], None],
         refresh_endpoints: Callable[[], None],
         restart_services: Callable[[], None],
@@ -64,6 +65,9 @@ class ConfigManager(BaseManager):
         super().__init__(state, workload, "config_manager")
         self.tls_manager = tls_manager
         self.patroni_manager = patroni_manager
+        # Resolved on use, not at construction: the K8s manager that provides it is built
+        # after this manager in the charm's __init__.
+        self.resource_provider = resource_provider
         # Charm-side bridges: the substrate-tangled restart trigger, endpoint refresh and
         # monitoring/ldap service restarts stay in the charm until their own migration phases.
         self.request_restart = request_restart
@@ -468,7 +472,7 @@ class ConfigManager(BaseManager):
         # Snapshot resources once so parameter-building and the API patch agree. On K8s
         # these are lightkube reads; re-fetching per callee doubled the API calls and
         # could disagree mid-scaling.
-        cpu_cores, available_memory = self.state.available_resources
+        cpu_cores, available_memory = self.resource_provider().get_available_resources()
 
         # Build PostgreSQL parameters
         pg_parameters = self._build_postgresql_parameters(
