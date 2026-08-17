@@ -72,6 +72,11 @@ class Paths(ABC):
         pass
 
     @property
+    def patroni_config(self) -> PathProtocol:
+        """Path to the patroni config file Patroni is launched with."""
+        return self.patroni_conf / "patroni.yaml"
+
+    @property
     @abstractmethod
     def patroni_logs(self) -> PathProtocol:
         """Path to the patroni logs."""

@@ -63,7 +63,7 @@ class K8sPaths(Paths):
         """Path to the patroni configuration directory.
 
         This is the data storage root (``/var/lib/pg/data``) where the Patroni
-        config subsystem renders ``patroni.yaml`` — matching #172's Patroni port.
+        config subsystem renders its config file.
         (The TLS ``.pem`` files go to the ``tls`` path, which is the same dir.)
         """
         return self.root / K8S_DATA_PATH
@@ -73,7 +73,7 @@ class K8sPaths(Paths):
         """Directory where TLS files are written on K8s (the data dir Patroni reads from).
 
         This is the *unversioned* data storage root (``/var/lib/pg/data``), which is
-        where the charm-rendered patroni.yml references the ``.pem`` files
+        where the charm-rendered patroni.yaml references the ``.pem`` files
         (``{storage_path}/*.pem``) — NOT the versioned ``data`` subdir (``.../16/main``).
         """
         return self.root / K8S_DATA_PATH

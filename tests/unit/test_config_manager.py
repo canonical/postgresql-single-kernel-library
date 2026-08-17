@@ -1,6 +1,6 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
-from unittest.mock import Mock, PropertyMock, mock_open, patch, sentinel
+from unittest.mock import Mock, PropertyMock, patch, sentinel
 
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
@@ -124,8 +124,9 @@ def test_render_patroni_yml_file(substrate, config):
             new_callable=PropertyMock,
             return_value=sentinel.member_name,
         ),
-        patch("builtins.open", mock_open(read_data="template")),
+        patch("single_kernel_postgresql.managers.config.importlib.resources.files") as _files,
     ):
+        _files.return_value.joinpath.return_value.read_text.return_value = "template"
         _config.return_value.synchronous_node_count = 1
         _config.return_value.durability_maximum_lag_on_failover = (
             sentinel.durability_maximum_lag_on_failover
@@ -138,6 +139,7 @@ def test_render_patroni_yml_file(substrate, config):
         _template.assert_called_once_with("template")
         if substrate == Substrates.K8S:
             _template.return_value.render.assert_called_once_with(
+                substrate="k8s",
                 connectivity=False,
                 enable_ldap=False,
                 enable_tls=False,
@@ -178,8 +180,11 @@ def test_render_patroni_yml_file(substrate, config):
             _render_file.assert_called_once_with(
                 substrate, "/var/lib/pg/data/patroni.yaml", sentinel.template_output, 0o644
             )
+            # Same path object the Pebble layer launches Patroni with — never a literal.
+            assert _render_file.call_args.args[1] == str(config.workload.paths.patroni_config)
         else:
             _template.return_value.render.assert_called_once_with(
+                substrate="vm",
                 connectivity=False,
                 enable_ldap=False,
                 enable_tls=False,

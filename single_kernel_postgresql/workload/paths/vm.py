@@ -71,7 +71,7 @@ class VMPaths(Paths):
 
     @property
     def patroni_conf(self) -> PathProtocol:
-        """Path to the patroni.yaml file."""
+        """Path to the patroni config directory."""
         return self.snap_current / PATRONI_CONF_PATH
 
     @property
