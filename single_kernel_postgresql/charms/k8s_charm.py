@@ -6,6 +6,8 @@
 
 import logging
 
+from ops import StatusBase
+
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import CONTAINER_NAME, SYSTEM_USERS, USER
@@ -66,8 +68,8 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         return Substrates.K8S
 
     # The concrete production charm owns these bridges (update_scrape_job_spec +
-    # acquire_lock, update_endpoints, pebble metrics/ldap restarts), so they default to
-    # no-ops here.
+    # acquire_lock, pebble metrics/ldap restarts, the refresh-aware status write and the
+    # config re-render), so they are minimal here.
     def get_resource_provider(self) -> K8sManager:
         """Return the substrate's (cpu_cores, memory_bytes) introspector."""
         return self.k8s_manager
@@ -75,8 +77,18 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def request_restart(self) -> None:
         """Run the substrate pre-restart side effect and acquire the restart lock."""
 
-    def refresh_endpoints(self) -> None:
-        """Refresh the client relation endpoints."""
-
     def restart_services(self) -> None:
         """Restart the monitoring and LDAP-sync sidecar services."""
+
+    def set_unit_status(self, status: StatusBase) -> None:
+        """Set the unit status without overriding a higher-priority refresh status."""
+        self.unit.status = status
+
+    def update_config(self) -> bool:
+        """Re-render the Patroni configuration and apply it."""
+        return self.config_manager.update_config(self.postgresql)
+
+    @property
+    def primary_endpoint(self) -> str | None:
+        """Address of the cluster primary's Service."""
+        return self.state.primary_endpoint
