@@ -40,6 +40,7 @@ from single_kernel_postgresql.workload.base import BaseWorkload
 
 if TYPE_CHECKING:
     # Import-time only: the VM workload pulls the snap charm lib, which K8s does not ship.
+    from single_kernel_postgresql.managers.database import DatabaseManager
     from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
@@ -57,17 +58,17 @@ class ConfigManager(BaseManager):
         workload: BaseWorkload,
         tls_manager: TLSManager,
         patroni_manager: PatroniManager,
+        database_manager: "DatabaseManager",
         request_restart: Callable[[], None],
-        refresh_endpoints: Callable[[], None],
         restart_services: Callable[[], None],
     ):
         super().__init__(state, workload, "config_manager")
         self.tls_manager = tls_manager
         self.patroni_manager = patroni_manager
-        # Charm-side bridges: the substrate-tangled restart trigger, endpoint refresh and
-        # monitoring/ldap service restarts stay in the charm until their own migration phases.
+        self.database_manager = database_manager
+        # Charm-side bridges: the substrate-tangled restart trigger and the monitoring/ldap
+        # service restarts stay in the charm until their own migration phases.
         self.request_restart = request_restart
-        self.refresh_endpoints = refresh_endpoints
         self.restart_services = restart_services
 
     @staticmethod
@@ -432,7 +433,7 @@ class ConfigManager(BaseManager):
                 pass
 
         self.state.peer.tls = self.is_tls_enabled
-        self.refresh_endpoints()
+        self.database_manager.update_endpoints()
 
         # Restart PostgreSQL if TLS configuration has changed
         # (so the both old and new connections use the configuration).
@@ -443,7 +444,6 @@ class ConfigManager(BaseManager):
     def update_config(
         self,
         postgresql_client: PostgreSQLClient,
-        user_hash: str,
         is_creating_backup: bool = False,
         # TODO add rel handler
         relations_user_databases_map: dict[str, Any] | None = None,
@@ -513,7 +513,7 @@ class ConfigManager(BaseManager):
             # in a bundle together with the TLS certificates operator. This flag is used to
             # know when to call the Patroni API using HTTP or HTTPS.
             self.state.peer.tls = self.is_tls_enabled
-            self.refresh_endpoints()
+            self.database_manager.update_endpoints()
             logger.debug("Early exit update_config: Workload not started yet")
             return True
 
@@ -562,6 +562,7 @@ class ConfigManager(BaseManager):
 
         self.restart_services()
 
+        user_hash = self.database_manager.user_hash
         self.state.peer.user_hash = user_hash
         self.state.peer.config_hash = self.generate_config_hash
         if self.state.peer.is_app_leader:

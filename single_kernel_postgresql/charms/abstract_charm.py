@@ -5,9 +5,11 @@
 from abc import ABC, abstractmethod
 
 from data_platform_helpers.advanced_statuses import StatusHandler
+from ops import StatusBase
 from ops.charm import CharmBase
 
 from single_kernel_postgresql.core.state import CharmState
+from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.managers.cluster import ClusterManager
@@ -42,13 +44,21 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         )
         self.patroni_manager = PatroniManager(state=self.state, workload=self.workload)
         self.cluster_manager = ClusterManager(state=self.state, workload=self.workload)
+
+        # Client-relation handler owns DatabaseProvides and builds the DatabaseManager the
+        # config manager refreshes endpoints and reads the user hash through.
+        self.database = DatabaseEventsHandler(
+            self, self.state, self.patroni_manager, self.tls_manager
+        )
+        self.database_manager = self.database.manager
+
         self.config_manager = ConfigManager(
             state=self.state,
             workload=self.workload,
             tls_manager=self.tls_manager,
             patroni_manager=self.patroni_manager,
+            database_manager=self.database_manager,
             request_restart=self.request_restart,
-            refresh_endpoints=self.refresh_endpoints,
             restart_services=self.restart_services,
         )
 
@@ -93,20 +103,33 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         """Access current substrate."""
         pass
 
-    # Config-update bridges: charm-side callables the ConfigManager invokes for the
-    # substrate-tangled restart trigger, endpoint refresh and monitoring/ldap service
-    # restarts. They stay in the charm until their own migration phases.
+    # Charm-side bridges the lib calls back into. request_restart/restart_services are
+    # substrate-tangled and stay until their own migration phases; update_config still
+    # supplies the ldap/async/watcher values those phases own; primary_endpoint is the
+    # VM's Patroni-derived primary lookup. set_unit_status is permanent: it gates status
+    # writes on charm_refresh priority, and charm_refresh is not a migration target.
     @abstractmethod
     def request_restart(self) -> None:
         """Run the substrate pre-restart side effect and acquire the restart lock."""
         pass
 
     @abstractmethod
-    def refresh_endpoints(self) -> None:
-        """Refresh the client relation endpoints."""
+    def restart_services(self) -> None:
+        """Restart the monitoring and LDAP-sync sidecar services."""
         pass
 
     @abstractmethod
-    def restart_services(self) -> None:
-        """Restart the monitoring and LDAP-sync sidecar services."""
+    def set_unit_status(self, status: StatusBase) -> None:
+        """Set the unit status without overriding a higher-priority refresh status."""
+        pass
+
+    @abstractmethod
+    def update_config(self) -> bool:
+        """Re-render the Patroni configuration and apply it."""
+        pass
+
+    @property
+    @abstractmethod
+    def primary_endpoint(self) -> str | None:
+        """Address of the cluster primary, or None when there is not one."""
         pass

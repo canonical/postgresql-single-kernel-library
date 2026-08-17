@@ -6,6 +6,8 @@
 
 import logging
 
+from ops import StatusBase
+
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import SYSTEM_USERS, USER
@@ -58,13 +60,24 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         return Substrates.VM
 
     # The concrete production charm owns these bridges (pops postgresql_restarted +
-    # acquire_lock, update_endpoints, snap metrics/ldap restarts), so they default to
-    # no-ops here.
+    # acquire_lock, snap metrics/ldap restarts, the refresh-aware status write, the
+    # Patroni-derived primary lookup and the config re-render), so they are minimal here.
     def request_restart(self) -> None:
         """Run the substrate pre-restart side effect and acquire the restart lock."""
 
-    def refresh_endpoints(self) -> None:
-        """Refresh the client relation endpoints."""
-
     def restart_services(self) -> None:
         """Restart the monitoring and LDAP-sync sidecar services."""
+
+    def set_unit_status(self, status: StatusBase) -> None:
+        """Set the unit status without overriding a higher-priority refresh status."""
+        self.unit.status = status
+
+    def update_config(self) -> bool:
+        """Re-render the Patroni configuration and apply it."""
+        return self.config_manager.update_config(self.postgresql)
+
+    @property
+    def primary_endpoint(self) -> str | None:
+        """Address of the cluster primary, or None when there is not one."""
+        primary = self.patroni_manager.get_primary()
+        return self.patroni_manager.get_member_ip(primary) if primary else None
