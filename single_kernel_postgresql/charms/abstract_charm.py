@@ -14,7 +14,7 @@ from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
-from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
 from ..config.enums import Substrates
 from ..utils.postgresql import PostgreSQL
@@ -47,6 +47,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             workload=self.workload,
             tls_manager=self.tls_manager,
             patroni_manager=self.patroni_manager,
+            resource_provider=self.get_resource_provider,
             request_restart=self.request_restart,
             refresh_endpoints=self.refresh_endpoints,
             restart_services=self.restart_services,
@@ -96,6 +97,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     # Config-update bridges: charm-side callables the ConfigManager invokes for the
     # substrate-tangled restart trigger, endpoint refresh and monitoring/ldap service
     # restarts. They stay in the charm until their own migration phases.
+    @abstractmethod
+    def get_resource_provider(self) -> ResourceProvider:
+        """Return the substrate's (cpu_cores, memory_bytes) introspector."""
+        pass
+
     @abstractmethod
     def request_restart(self) -> None:
         """Run the substrate pre-restart side effect and acquire the restart lock."""
