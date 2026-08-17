@@ -26,7 +26,6 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             "Workload must be an instance of K8sWorkload"
         )
         self.k8s_manager = K8sManager(self.state, self.workload)
-        self.state.resource_provider = self.k8s_manager
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -69,6 +68,10 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     # The concrete production charm owns these bridges (update_scrape_job_spec +
     # acquire_lock, update_endpoints, pebble metrics/ldap restarts), so they default to
     # no-ops here.
+    def get_resource_provider(self) -> K8sManager:
+        """Return the substrate's (cpu_cores, memory_bytes) introspector."""
+        return self.k8s_manager
+
     def request_restart(self) -> None:
         """Run the substrate pre-restart side effect and acquire the restart lock."""
 
