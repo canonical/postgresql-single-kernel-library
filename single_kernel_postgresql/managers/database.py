@@ -377,19 +377,6 @@ class DatabaseManager(BaseManager):
             postgresql_client.create_user(user, password, extra_user_roles=extra_user_roles)
             postgresql_client.add_user_to_databases(user, databases, extra_user_roles)
 
-    def publish_request_result(
-        self,
-        postgresql_client: PostgreSQLClient,
-        relation_id: int,
-        user: str,
-        password: str,
-        database: str,
-    ) -> None:
-        """Share the credentials, version and database name with the requesting app."""
-        self.database_provides.set_credentials(relation_id, user, password)
-        self.database_provides.set_version(relation_id, postgresql_client.get_postgresql_version())
-        self.database_provides.set_database(relation_id, database)
-
     def delete_relation_user(self, postgresql_client: PostgreSQLClient, relation_id: int) -> None:
         """Delete the relation user and drop it from every mapping cache."""
         user = self.get_username_mapping().get(
