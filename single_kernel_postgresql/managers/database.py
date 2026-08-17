@@ -17,13 +17,14 @@ from typing import TypedDict
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from ops import ActiveStatus, BlockedStatus, ModelError, Relation, StatusBase
+from ops import ActiveStatus, BlockedStatus, ModelError, Relation, StatusBase, Unit
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
     DATABASE,
     DATABASE_MAPPING_LABEL,
+    DATABASE_PORT,
     PLUGIN_OVERRIDES,
     SPI_MODULE,
     SYSTEM_USERS,
@@ -37,7 +38,7 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
-from single_kernel_postgresql.utils import new_password
+from single_kernel_postgresql.utils import label2name, new_password
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
     ACCESS_GROUPS,
@@ -438,6 +439,141 @@ class DatabaseManager(BaseManager):
                     logger.error("Failed to delete user %s", user)
             else:
                 logger.info("Stale relation user detected: %s", user)
+
+    # -- Endpoint publishing
+
+    def _unit_ip(self, unit: Unit) -> str | None:
+        """The client-facing address a peer unit published for this relation."""
+        if not self.state.peer_relation:
+            return None
+        try:
+            return self.state.peer_relation.data[unit].get(f"{self.relation_name}-address")
+        except KeyError:
+            return None
+
+    def _vm_endpoints(self) -> tuple[str, str, str]:
+        """(rw_endpoint, ro_endpoints, ro_hosts) from the online Patroni members."""
+        online_members = [
+            member
+            for member in self.patroni_manager.online_cluster_members()
+            if not member.get("tags", {}).get("nosync", False)
+        ]
+
+        primary_unit_ip, rw_endpoint, ro_hosts, ro_endpoints = "", "", "", ""
+        for member in online_members:
+            unit = self.state.model.get_unit(label2name(member["name"]))
+            if member["role"] == "leader":
+                primary_unit_ip = self._unit_ip(unit) or ""
+                rw_endpoint = f"{primary_unit_ip}:{DATABASE_PORT}"
+            else:
+                replica_ip = self._unit_ip(unit)
+                if not replica_ip:
+                    continue
+                if ro_hosts:
+                    ro_hosts = f"{ro_hosts},{replica_ip}"
+                    ro_endpoints = f"{ro_endpoints},{replica_ip}:{DATABASE_PORT}"
+                else:
+                    ro_hosts = replica_ip
+                    ro_endpoints = f"{replica_ip}:{DATABASE_PORT}"
+        if not ro_hosts and primary_unit_ip:
+            # If there are no replicas, fallback to primary
+            ro_endpoints = rw_endpoint
+            ro_hosts = primary_unit_ip
+        return rw_endpoint, ro_endpoints, ro_hosts
+
+    def _k8s_endpoints(self) -> tuple[str, str, str]:
+        """(rw_endpoint, ro_endpoints, ro_hosts) from the primary/replicas Services."""
+        peer_relation = self.state.peer_relation
+        ro_hosts = (
+            self.state.replicas_endpoint
+            if peer_relation and len(peer_relation.units) > 0
+            else self.state.primary_endpoint
+        )
+        return (
+            f"{self.state.primary_endpoint}:{DATABASE_PORT}",
+            f"{ro_hosts}:{DATABASE_PORT}",
+            ro_hosts,
+        )
+
+    def update_endpoints(self, relation_id: int | None = None) -> None:  # noqa: C901
+        """Set the read/write and read-only endpoints on the client relations.
+
+        Args:
+            relation_id: restrict the update to one relation; all of them when None.
+        """
+        if not self.state.peer.is_app_leader:
+            return
+
+        relations_ids = [relation_id] if relation_id is not None else None
+        rel_data = self.database_provides.fetch_relation_data(
+            relations_ids, ["external-node-connectivity", "database"]
+        )
+
+        # skip if no relation data
+        if not rel_data:
+            return
+
+        secret_data = (
+            self.database_provides.fetch_my_relation_data(relations_ids, ["username", "password"])
+            or {}
+        )
+
+        if self.state.substrate == Substrates.K8S:
+            rw_endpoint, ro_endpoints, ro_hosts = self._k8s_endpoints()
+        else:
+            rw_endpoint, ro_endpoints, ro_hosts = self._vm_endpoints()
+
+        tls = "True" if self.is_tls_enabled else "False"
+        ca = None
+        if tls == "True":
+            _, ca, _ = self.tls_manager.get_client_tls_files()
+        if not ca:
+            ca = ""
+
+        prefix_database_mapping = self.get_databases_prefix_mapping()
+
+        for current_id in rel_data:
+            database = rel_data[current_id].get("database")
+            databases = None
+            prefix_def = prefix_database_mapping.get(str(current_id))
+            if prefix_def is not None:
+                databases = prefix_def["databases"]
+                self.database_provides.set_prefix_databases(current_id, databases)
+                database = databases[0] if len(databases) else database
+            user = secret_data.get(current_id, {}).get("username")
+            password = secret_data.get(current_id, {}).get("password")
+            if not database or not password:
+                continue
+
+            self.database_provides.set_endpoints(current_id, rw_endpoint)
+            self.database_provides.set_read_only_endpoints(current_id, ro_endpoints)
+            self.database_provides.set_tls(current_id, tls)
+            self.database_provides.set_tls_ca(current_id, ca)
+            if databases is None or len(databases):
+                # Set connection string URI.
+                self.database_provides.set_uris(
+                    current_id,
+                    f"postgresql://{user}:{password}@{rw_endpoint}/{database}",
+                )
+                # Make sure that the URI will be a secret
+                if (
+                    secret_fields := self.database_provides.fetch_relation_field(
+                        current_id, "requested-secrets"
+                    )
+                ) and "read-only-uris" in secret_fields:
+                    self.database_provides.set_read_only_uris(
+                        current_id,
+                        f"postgresql://{user}:{password}@{ro_hosts}:{DATABASE_PORT}/{database}",
+                    )
+            else:
+                # No database matches prefix, no valid URI
+                self.database_provides.delete_relation_data(current_id, ["uris", "read-only-uris"])
+            self.set_rel_to_db_mapping()
+
+    @property
+    def is_tls_enabled(self) -> bool:
+        """Whether the client-facing TLS files have been issued."""
+        return all(self.tls_manager.get_client_tls_files())
 
     # -- Blocking-status validation
 

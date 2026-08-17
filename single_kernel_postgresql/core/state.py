@@ -539,3 +539,8 @@ class CharmState(Object):
     def primary_endpoint(self) -> str:
         """Returns the endpoint of the primary instance's service."""
         return self._build_service_name("primary")
+
+    @property
+    def replicas_endpoint(self) -> str:
+        """Returns the endpoint of the replicas instances' service."""
+        return self._build_service_name("replicas")
