@@ -4,7 +4,6 @@
 """Client-relation events handler — owns DatabaseProvides, delegates to DatabaseManager."""
 
 import logging
-from typing import TYPE_CHECKING
 
 from ops import BlockedStatus, Object, RelationBrokenEvent, RelationDepartedEvent
 
@@ -23,9 +22,6 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLCreateUserError,
 )
 
-if TYPE_CHECKING:
-    from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
-
 logger = logging.getLogger(__name__)
 
 
@@ -40,11 +36,15 @@ class DatabaseEventsHandler(Object):
     Each handler keeps its guard and its work in one observer: ``defer()`` is
     per-observer, so splitting the readiness check from the action would let a deferred
     action retry alone against state its guard never re-checked.
+
+    ``charm`` is deliberately untyped, as in the TLS handler: the production charms do
+    not derive from :class:`AbstractPostgreSQLCharm` until the cutover phase, and they
+    are the callers that construct this.
     """
 
     def __init__(
         self,
-        charm: "AbstractPostgreSQLCharm",
+        charm,
         state: CharmState,
         patroni_manager: PatroniManager,
         tls_manager: TLSManager,
