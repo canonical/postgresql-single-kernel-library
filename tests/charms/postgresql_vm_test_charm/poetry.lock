@@ -45,18 +45,18 @@ files = [
 
 [[package]]
 name = "boto3"
-version = "1.43.67"
+version = "1.43.72"
 description = "The AWS SDK for Python"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "boto3-1.43.67-py3-none-any.whl", hash = "sha256:082cf9df068168cb44028a1703822374c1eb7e48fa49470d7e8a76f0c977d0bc"},
-    {file = "boto3-1.43.67.tar.gz", hash = "sha256:75fe983b70d39cfdc274dc51f9bb02b8a0a104bdad4fa073c1af85a35e707c91"},
+    {file = "boto3-1.43.72-py3-none-any.whl", hash = "sha256:f1bbbad5ed8d8a8c64edb0cd092dc443c95a85623b2ac88b6f6d633717605f00"},
+    {file = "boto3-1.43.72.tar.gz", hash = "sha256:6280ce03cc85e9110fd9fb7e2fbf11eae0b1177cb041a0d69aa88edc9d178cf9"},
 ]
 
 [package.dependencies]
-botocore = ">=1.43.67,<1.44.0"
+botocore = ">=1.43.72,<1.44.0"
 jmespath = ">=0.7.1,<2.0.0"
 s3transfer = ">=0.19.0,<0.20.0"
 
@@ -65,14 +65,14 @@ crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 
 [[package]]
 name = "botocore"
-version = "1.43.67"
+version = "1.43.72"
 description = "Low-level, data-driven core of boto 3."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "botocore-1.43.67-py3-none-any.whl", hash = "sha256:48ab8e9fac26fbc2a700d57010251003e6a5f731cf74d8540fb796bc8f3fc0ef"},
-    {file = "botocore-1.43.67.tar.gz", hash = "sha256:6fe5cfa0c8676ba809efe505b618ec00f30d1af2d014bf316a7aa4ee86accb20"},
+    {file = "botocore-1.43.72-py3-none-any.whl", hash = "sha256:de5a1bcf8d7602c6cefc15016f15dad82981e339192531f31fa9483e11feea47"},
+    {file = "botocore-1.43.72.tar.gz", hash = "sha256:1b878c69081e8e9d55aa4c0d85683e7b07f0e274a5554662f9507a46641be3d2"},
 ]
 
 [package.dependencies]
@@ -410,14 +410,14 @@ files = [
 
 [[package]]
 name = "cosl"
-version = "1.10.2"
+version = "1.10.3"
 description = "Utils for COS Lite charms"
 optional = false
 python-versions = ">=3.8"
 groups = ["charm-libs"]
 files = [
-    {file = "cosl-1.10.2-py3-none-any.whl", hash = "sha256:ff4aa756ab084def1f49fe31b49781aa584176ac7eec107dd192ae0c87899fc0"},
-    {file = "cosl-1.10.2.tar.gz", hash = "sha256:911981f89a3447dd3f26e1f69f8cdd44b5935fb1e2cfdbd60e75c28d86a17e6d"},
+    {file = "cosl-1.10.3-py3-none-any.whl", hash = "sha256:7e514b161ca3d227a23c88377138176e16f23aff92bf218837bc3551dba1ebf7"},
+    {file = "cosl-1.10.3.tar.gz", hash = "sha256:95ac498d3820a7d1f4096e6662b22de639911d7f77e1a25b0cfad963f83836bc"},
 ]
 
 [package.dependencies]
@@ -1356,13 +1356,13 @@ windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
 name = "pysyncobj"
-version = "0.3.15"
+version = "0.3.16"
 description = "A library for replicating your python class between multiple servers, based on raft protocol"
 optional = false
 python-versions = "*"
 groups = ["main"]
 files = [
-    {file = "pysyncobj-0.3.15.tar.gz", hash = "sha256:7b98f523bc7810203763f5a6ef569ff2dd5de889fb7f5f0ccc8c8b6c87df9680"},
+    {file = "pysyncobj-0.3.16.tar.gz", hash = "sha256:72afd7bbc34c0797d9d635273032e2bcc0aefc8baa553f26f6099e0ce5d620a0"},
 ]
 
 [[package]]
@@ -1843,4 +1843,4 @@ h11 = ">=0.16.0,<1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "a0e231246af8e8cbbf081c85f62daab94bacc3cc0941615568ebc0ade511ad1a"
+content-hash = "5141a4cf9b94656319b31e9d75d7e57a63265a88026d03e921245baf2daa0265"
