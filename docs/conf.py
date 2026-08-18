@@ -170,8 +170,8 @@ rediraffe_dir_only = True
 # <first sentence of home page>".
 llms_txt_description = textwrap.dedent(
     """\
-    This is the documentation for the Sphinx Stack, a template repository that helps you
-    set up, build, and publish Sphinx documentation.
+    This is the documentation for Charmed PostgreSQL, an operator designed to deploy and
+    operate PostgreSQL on machine clouds and Kubernetes with Juju.
     """
 )
 
