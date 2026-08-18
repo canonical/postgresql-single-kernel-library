@@ -9,14 +9,20 @@ Responsible for managing the configuration of the PostgreSQL instance.
 
 import importlib.resources
 import logging
-from typing import Any
+from collections.abc import Callable
+from functools import cached_property
+from hashlib import shake_128
+from typing import TYPE_CHECKING, Any, cast
 
 import charm_refresh
+import psycopg2
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from jinja2 import Template
+from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.exceptions import PostgreSQLCannotConnectError
 from single_kernel_postgresql.config.literals import (
     PGBACKREST_CONF_FILE,
     POSTGRESQL_STORAGE_PERMISSIONS,
@@ -26,9 +32,15 @@ from single_kernel_postgresql.config.literals import (
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.managers.patroni import PatroniManager
+from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import _change_owner, render_file
 from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 from single_kernel_postgresql.workload.base import BaseWorkload
+
+if TYPE_CHECKING:
+    # Import-time only: the VM workload pulls the snap charm lib, which K8s does not ship.
+    from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +51,24 @@ class ConfigManager(BaseManager):
     This manager is responsible for handling configuration operations.
     """
 
-    def __init__(self, state: CharmState, workload: BaseWorkload):
+    def __init__(
+        self,
+        state: CharmState,
+        workload: BaseWorkload,
+        tls_manager: TLSManager,
+        patroni_manager: PatroniManager,
+        request_restart: Callable[[], None],
+        refresh_endpoints: Callable[[], None],
+        restart_services: Callable[[], None],
+    ):
         super().__init__(state, workload, "config_manager")
+        self.tls_manager = tls_manager
+        self.patroni_manager = patroni_manager
+        # Charm-side bridges: the substrate-tangled restart trigger, endpoint refresh and
+        # monitoring/ldap service restarts stay in the charm until their own migration phases.
+        self.request_restart = request_restart
+        self.refresh_endpoints = refresh_endpoints
+        self.restart_services = restart_services
 
     @staticmethod
     def _dict_to_hba_string(_dict: dict[str, Any]) -> str:
@@ -229,15 +257,13 @@ class ConfigManager(BaseManager):
         return result
 
     def _build_postgresql_parameters(
-        self, postgresql_client: PostgreSQLClient
+        self, postgresql_client: PostgreSQLClient, cpu_cores: int, available_memory: int
     ) -> dict[str, str] | None:
         """Build PostgreSQL configuration parameters.
 
         Returns:
             Dictionary of PostgreSQL parameters or None if base parameters couldn't be built.
         """
-        cpu_cores, available_memory = self.state.available_resources
-
         limit_memory = None
         if self.state.config.profile_limit_memory:
             limit_memory = self.state.config.profile_limit_memory * 10**6
@@ -266,12 +292,159 @@ class ConfigManager(BaseManager):
 
         return pg_parameters
 
+    @property
+    def is_tls_enabled(self) -> bool:
+        """Return whether client TLS is enabled and the files are serveable.
+
+        Issued certs reach the relation databag before the push writes them to the
+        workload, so the on-disk check is what stops a render turning ssl on against
+        files that are not there yet.
+        """
+        return all(self.tls_manager.get_client_tls_files()) and (
+            self.tls_manager.client_tls_files_on_disk()
+        )
+
+    @cached_property
+    def generate_config_hash(self) -> str:
+        """Generate current configuration hash."""
+        return shake_128(str(self.state.config.model_dump()).encode()).hexdigest(16)
+
+    def _can_connect_to_postgresql(self, postgresql_client: PostgreSQLClient) -> bool:
+        if self.state.substrate == Substrates.VM and (
+            not postgresql_client.password or not postgresql_client.current_host
+        ):
+            return False
+        try:
+            for attempt in Retrying(stop=stop_after_delay(10), wait=wait_fixed(3)):
+                with attempt:
+                    if not postgresql_client.get_postgresql_timezones():
+                        logger.debug("Cannot connect to database (CannotConnectError)")
+                        raise PostgreSQLCannotConnectError
+        except RetryError:
+            logger.debug("Cannot connect to database (RetryError)")
+            return False
+        return True
+
+    def is_restart_pending(self, postgresql_client: PostgreSQLClient) -> bool:
+        """Query pg_settings for pending restart."""
+        connection = None
+        try:
+            with (
+                postgresql_client._connect_to_database(
+                    database_host=postgresql_client.current_host
+                ) as connection,
+                connection.cursor() as cursor,
+            ):
+                cursor.execute("SELECT COUNT(*) FROM pg_settings WHERE pending_restart=True;")
+                result = cursor.fetchone()
+                if result is not None:
+                    return result[0] > 0
+                else:
+                    return False
+        except psycopg2.OperationalError:
+            logger.warning("Failed to connect to PostgreSQL.")
+            return False
+        except psycopg2.Error as e:
+            logger.error(f"Failed to check if restart is pending: {e}")
+            return False
+        finally:
+            if connection:
+                connection.close()
+
+    def apply_api_config(
+        self,
+        cpu_cores: int,
+        async_primary_cluster_endpoint: str | None = None,
+    ) -> bool:
+        """Update the parameters controlled by Patroni via its API."""
+        # Use config value if set, calculate otherwise
+        max_connections = (
+            self.state.config.experimental_max_connections
+            if self.state.config.experimental_max_connections
+            else max(4 * cpu_cores, 100)
+        )
+        cfg_patch: dict[str, int | str | None] = {
+            "max_connections": max_connections,
+            "max_prepared_transactions": self.state.config.memory_max_prepared_transactions,
+            "max_replication_slots": 25,
+            "max_wal_senders": 25,
+            "shared_buffers": self.state.config.memory_shared_buffers,
+            "wal_keep_size": self.state.config.durability_wal_keep_size,
+        }
+
+        # Add restart-required worker process parameters via Patroni API
+        worker_configs = self._calculate_worker_process_config(cpu_cores)
+        if "max_worker_processes" in worker_configs:
+            cfg_patch["max_worker_processes"] = worker_configs["max_worker_processes"]
+        if "max_logical_replication_workers" in worker_configs:
+            cfg_patch["max_logical_replication_workers"] = worker_configs[
+                "max_logical_replication_workers"
+            ]
+
+        base_patch = {
+            **self.state.synchronous_configuration,
+            "maximum_lag_on_failover": self.state.config.durability_maximum_lag_on_failover,
+        }
+        if async_primary_cluster_endpoint:
+            base_patch["standby_cluster"] = {"host": async_primary_cluster_endpoint}
+        try:
+            self.patroni_manager.bulk_update_parameters_controller_by_patroni(
+                cfg_patch, base_patch
+            )
+        except RetryError:
+            return False
+        return True
+
+    def handle_restart_need(
+        self, postgresql_client: PostgreSQLClient, config_changed: bool
+    ) -> None:
+        """Handle PostgreSQL restart need based on the TLS configuration and configuration changes."""
+        if self._can_connect_to_postgresql(postgresql_client):
+            # check_current_host is a VM-only precision in the live TLS probe.
+            check_current_host = (
+                {"check_current_host": True} if (self.state.substrate == Substrates.VM) else {}
+            )
+            restart_postgresql = self.is_tls_enabled != postgresql_client.is_tls_enabled(
+                **check_current_host
+            )
+        else:
+            restart_postgresql = False
+
+        try:
+            self.patroni_manager.reload_patroni_configuration()
+        except Exception as e:
+            logger.error(f"Reload patroni call failed! error: {e!s}")
+
+        if config_changed and not restart_postgresql:
+            # Wait for some more time than the Patroni's loop_wait default value (10 seconds),
+            # which tells how much time Patroni will wait before checking the configuration
+            # file again to reload it.
+            try:
+                for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(3)):
+                    with attempt:
+                        restart_postgresql = restart_postgresql or self.is_restart_pending(
+                            postgresql_client
+                        )
+                        if not restart_postgresql:
+                            raise Exception
+            except RetryError:
+                # Ignore the error, as it happens only to indicate that the configuration has not changed.
+                pass
+
+        self.state.peer.tls = self.is_tls_enabled
+        self.refresh_endpoints()
+
+        # Restart PostgreSQL if TLS configuration has changed
+        # (so the both old and new connections use the configuration).
+        if restart_postgresql:
+            logger.info("PostgreSQL restart required")
+            self.request_restart()
+
     def update_config(
         self,
         postgresql_client: PostgreSQLClient,
+        user_hash: str,
         is_creating_backup: bool = False,
-        # TODO add rel handler
-        is_tls_enabled: bool = False,
         # TODO add rel handler
         relations_user_databases_map: dict[str, Any] | None = None,
         # TODO add rel handler
@@ -286,9 +459,21 @@ class ConfigManager(BaseManager):
         *,
         refresh: charm_refresh.Machines | None = None,
     ) -> bool:
-        """Updates Patroni config file based on the existence of the TLS files."""
+        """Updates Patroni config file based on the existence of the TLS files.
+
+        Raises:
+            DeployedWithoutTrustError: on K8s when the app lacks cluster trust; the caller
+                is expected to catch this.
+        """
+        # Snapshot resources once so parameter-building and the API patch agree. On K8s
+        # these are lightkube reads; re-fetching per callee doubled the API calls and
+        # could disagree mid-scaling.
+        cpu_cores, available_memory = self.state.available_resources
+
         # Build PostgreSQL parameters
-        pg_parameters = self._build_postgresql_parameters(postgresql_client)
+        pg_parameters = self._build_postgresql_parameters(
+            postgresql_client, cpu_cores, available_memory
+        )
 
         # replication_slots = self.logical_replication.replication_slots()
         replication_slots = {}
@@ -297,12 +482,13 @@ class ConfigManager(BaseManager):
         relations_user_databases_map = relations_user_databases_map or {}
 
         # Update and reload configuration based on TLS files availability.
+        logger.info("Updating Patroni config file")
         logger.debug(f"Calling render_patroni_yml_file with parameters = {pg_parameters}")
         self.render_patroni_yml_file(
             connectivity=self.state.peer.is_connectivity_enabled,
             is_creating_backup=is_creating_backup,
             enable_ldap=self.state.application.is_ldap_enabled,
-            enable_tls=is_tls_enabled,
+            enable_tls=self.is_tls_enabled,
             backup_id=self.state.application.data.get("restoring-backup"),
             pitr_target=self.state.application.data.get("restore-to-time"),
             restore_timeline=self.state.application.data.get("restore-timeline"),
@@ -319,6 +505,68 @@ class ConfigManager(BaseManager):
             watcher_raft_address=watcher_raft_address,
             no_peers=no_peers,
         )
+        if no_peers:
+            return True
+
+        if not self.workload.is_patroni_running():
+            # If Patroni/PostgreSQL has not started yet and TLS relations was initialised,
+            # then mark TLS as enabled. This commonly happens when the charm is deployed
+            # in a bundle together with the TLS certificates operator. This flag is used to
+            # know when to call the Patroni API using HTTP or HTTPS.
+            self.state.peer.tls = self.is_tls_enabled
+            self.refresh_endpoints()
+            logger.debug("Early exit update_config: Workload not started yet")
+            return True
+
+        if not self.patroni_manager.member_started:
+            if self.is_tls_enabled:
+                logger.debug(
+                    "Early exit update_config: patroni not responding but TLS is enabled."
+                )
+                self.handle_restart_need(postgresql_client, True)
+                return True
+            logger.debug("Early exit update_config: Patroni not started yet")
+            return False
+
+        # Try to connect. Patroni's REST API patch (below) doesn't need the PG-client
+        # connection, so this standalone gate is VM-only; K8s proceeds straight to it.
+        if self.state.substrate == Substrates.VM and not self._can_connect_to_postgresql(
+            postgresql_client
+        ):
+            logger.warning("Early exit update_config: Cannot connect to Postgresql")
+            return False
+
+        if not self.apply_api_config(cpu_cores, async_primary_cluster_endpoint):
+            logger.warning("Early exit update_config: Unable to patch Patroni API")
+            return False
+
+        if self.state.substrate == Substrates.K8S and not (
+            self.patroni_manager.ensure_slots_controller_by_patroni(replication_slots)
+        ):
+            logger.warning(
+                "Failed to sync replication slots with Patroni — will retry on next config update"
+            )
+
+        self.handle_restart_need(
+            postgresql_client, self.state.peer.config_hash != self.generate_config_hash
+        )
+
+        # TODO handle case of scale up while refresh in progress & `refresh` is None
+        if (
+            self.state.substrate == Substrates.VM
+            and refresh is not None
+            and cast("VMWorkload", self.workload).get_snap_revision()
+            != refresh.pinned_snap_revision
+        ):
+            logger.debug("Early exit: snap was not refreshed to the right version yet")
+            return True
+
+        self.restart_services()
+
+        self.state.peer.user_hash = user_hash
+        self.state.peer.config_hash = self.generate_config_hash
+        if self.state.peer.is_app_leader:
+            self.state.application.user_hash = user_hash
         return True
 
     def render_patroni_yml_file(

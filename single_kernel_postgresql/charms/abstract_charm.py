@@ -42,7 +42,15 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         )
         self.patroni_manager = PatroniManager(state=self.state, workload=self.workload)
         self.cluster_manager = ClusterManager(state=self.state, workload=self.workload)
-        self.config_manager = ConfigManager(state=self.state, workload=self.workload)
+        self.config_manager = ConfigManager(
+            state=self.state,
+            workload=self.workload,
+            tls_manager=self.tls_manager,
+            patroni_manager=self.patroni_manager,
+            request_restart=self.request_restart,
+            refresh_endpoints=self.refresh_endpoints,
+            restart_services=self.restart_services,
+        )
 
         # Events Handler
         self.postgresql_events_handler = PostgreSQLEventsHandler(
@@ -83,4 +91,22 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     @abstractmethod
     def substrate(self) -> Substrates:
         """Access current substrate."""
+        pass
+
+    # Config-update bridges: charm-side callables the ConfigManager invokes for the
+    # substrate-tangled restart trigger, endpoint refresh and monitoring/ldap service
+    # restarts. They stay in the charm until their own migration phases.
+    @abstractmethod
+    def request_restart(self) -> None:
+        """Run the substrate pre-restart side effect and acquire the restart lock."""
+        pass
+
+    @abstractmethod
+    def refresh_endpoints(self) -> None:
+        """Refresh the client relation endpoints."""
+        pass
+
+    @abstractmethod
+    def restart_services(self) -> None:
+        """Restart the monitoring and LDAP-sync sidecar services."""
         pass

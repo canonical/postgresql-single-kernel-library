@@ -65,3 +65,15 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             Substrates: always Substrates.K8S for this charm
         """
         return Substrates.K8S
+
+    # The concrete production charm owns these bridges (update_scrape_job_spec +
+    # acquire_lock, update_endpoints, pebble metrics/ldap restarts), so they default to
+    # no-ops here.
+    def request_restart(self) -> None:
+        """Run the substrate pre-restart side effect and acquire the restart lock."""
+
+    def refresh_endpoints(self) -> None:
+        """Refresh the client relation endpoints."""
+
+    def restart_services(self) -> None:
+        """Restart the monitoring and LDAP-sync sidecar services."""

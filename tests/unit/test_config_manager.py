@@ -20,7 +20,13 @@ def config(substrate):
         return_value="16.6",
     ):
         config = ConfigManager(
-            state=CharmState(charm=mock_charm, substrate=substrate), workload=workload
+            state=CharmState(charm=mock_charm, substrate=substrate),
+            workload=workload,
+            tls_manager=Mock(),
+            patroni_manager=Mock(),
+            request_restart=Mock(),
+            refresh_endpoints=Mock(),
+            restart_services=Mock(),
         )
     yield config
 

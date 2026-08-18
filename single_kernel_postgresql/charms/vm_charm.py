@@ -56,3 +56,15 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
             Substrates: always Substrates.VM for this charm
         """
         return Substrates.VM
+
+    # The concrete production charm owns these bridges (pops postgresql_restarted +
+    # acquire_lock, update_endpoints, snap metrics/ldap restarts), so they default to
+    # no-ops here.
+    def request_restart(self) -> None:
+        """Run the substrate pre-restart side effect and acquire the restart lock."""
+
+    def refresh_endpoints(self) -> None:
+        """Refresh the client relation endpoints."""
+
+    def restart_services(self) -> None:
+        """Restart the monitoring and LDAP-sync sidecar services."""
