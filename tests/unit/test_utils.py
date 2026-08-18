@@ -34,6 +34,8 @@ def test_label2name():
 def test_any_cpu_to_cores():
     assert any_cpu_to_cores("12") == 12
     assert any_cpu_to_cores("1000m") == 1
+    # A sub-core limit still leaves a core's worth of workload to configure.
+    assert any_cpu_to_cores("500m") == 1
 
 
 def test_new_password():
