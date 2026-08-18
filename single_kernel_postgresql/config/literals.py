@@ -34,9 +34,11 @@ VM_DATA_PATH = "var/lib/postgresql"
 VM_ARCHIVE_PATH = "data/archive"
 VM_DATA_LOGS_PATH = "data/logs"
 VM_TEMP_PATH = "data/temp"
+VM_PGBACKREST_LOGS_PATH = "var/log/pgbackrest"
 
 ## K8s Paths
 K8S_DATA_PATH = "var/lib/pg/data"
+K8S_PGBACKREST_LOGS_DIR = "pgbackrest_logs"
 
 ## Shared Paths
 # NOTE: The paths don't have leading slahes since pathops
@@ -178,3 +180,8 @@ RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 # VM services
 VM_PATRONI_SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
 VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"
+## Snap services backing the backup domain.
+VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
+VM_PGBACKREST_EXPORTER_SERVICE_NAME = "pgbackrest-exporter"
+## The snap exposes pgBackRest only under an alias, never as a bare binary.
+VM_PGBACKREST_EXECUTABLE = "charmed-postgresql.pgbackrest"

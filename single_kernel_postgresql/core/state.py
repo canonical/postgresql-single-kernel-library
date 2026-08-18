@@ -531,6 +531,16 @@ class CharmState(Object):
             and self.synchronous_node_count > 0,
         }
 
+    @property
+    def stanza(self) -> str | None:
+        """The pgBackRest stanza this unit archives to, or None before initialisation.
+
+        A primary that is not the leader publishes the stanza on its own databag
+        first; the leader adopts it onto the application databag afterwards, so a
+        reader has to consult both.
+        """
+        return self.application.stanza or self.peer.stanza
+
     def _build_service_name(self, service: str) -> str:
         """Build a full k8s service name based on the service name."""
         return f"{self.application.app.name}-{service}.{self.model_name}.svc.cluster.local"
