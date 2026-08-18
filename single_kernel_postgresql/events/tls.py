@@ -25,6 +25,10 @@ class RefreshTLSCertificatesEvent(EventBase):
     """Event emitted to trigger a re-request of TLS certificates with updated SANs."""
 
 
+class TLSFilesPushedEvent(EventBase):
+    """Event emitted after the handler successfully pushes cert files to the workload."""
+
+
 class TLS(Object):
     """Owns the client/peer certificate requirers and pushes assigned certs to the workload.
 
@@ -50,9 +54,18 @@ class TLS(Object):
        trigger.  The client/peer SANs in the certificate requests remain inert until
        the cluster (address-writer) code migrates and starts writing
        ``database-address`` / ``database-peers-address`` keys into the peer databag.
+
+    4. **Push-completion event.** ``tls_files_pushed`` fires only after a successful
+       ``push_tls_files()``. The charm's reload bridge observes it rather than
+       ``certificate_available`` directly, so a deferred push (Pebble not ready, or the
+       internal CA not yet present) does not trigger a reload against files that were
+       never written -- the retried push is what emits and reloads. Defer is per-observer,
+       so coupling the reload to this event is the only way a deferred push and its reload
+       retry together.
     """
 
     refresh_tls_certificates_event = EventSource(RefreshTLSCertificatesEvent)
+    tls_files_pushed = EventSource(TLSFilesPushedEvent)
 
     def __init__(self, charm, state):
         super().__init__(charm, key="tls")
@@ -118,13 +131,16 @@ class TLS(Object):
         self.refresh_tls_certificates_event.emit()
 
     def _push_tls_files(self, event) -> None:
-        """Guard-then-push helper: defer if the workload is not yet ready.
+        """Guard, push, then emit ``tls_files_pushed`` on success; defer if not ready.
 
         Two conditions must hold before files can be written:
         1. The internal CA secret must exist — it is written by the leader on
            leader-elected, so non-leaders and early hooks may see it absent.
         2. The workload must accept file writes — on K8s the Pebble container
            may not be ready yet, causing PostgreSQLFileOperationError.
+
+        Either guard defers without emitting, so nothing reloads against unwritten files;
+        the emit happens only once the push has actually landed.
         """
         if not self.state.application.internal_ca:
             logger.debug("Internal CA not yet present; deferring TLS file push.")
@@ -135,6 +151,8 @@ class TLS(Object):
         except PostgreSQLFileOperationError:
             logger.debug("Workload not ready for TLS file write; deferring.")
             event.defer()
+            return
+        self.tls_files_pushed.emit()
 
     def _on_certificate_available(self, event) -> None:
         """Push TLS files; the operator client cert/key is read live at push time."""
