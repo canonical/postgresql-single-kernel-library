@@ -379,11 +379,96 @@ def test_update_endpoints_publishes_rw_ro_and_uris(substrate, manager, harness):
         harness.update_relation_data(
             peer_rel_id, "postgresql-single-kernel/1", {f"{RELATION_NAME}-address": "2.2.2.2"}
         )
+        other_rel_id = harness.add_relation(RELATION_NAME, "other-application")
+        harness.update_relation_data(other_rel_id, "other-application", {"database": "other_db"})
 
     with (
         patch(
             "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
             return_value=CLUSTER_STATUS[:2],
+        ),
+        patch(
+            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
+            new_callable=PropertyMock,
+            return_value=False,
+        ),
+        patch.object(
+            manager.database_provides,
+            "fetch_my_relation_data",
+            return_value={
+                rel_id: {"username": "u", "password": "pw"},
+                other_rel_id: {"username": "other", "password": "other-pw"},
+            },
+        ),
+    ):
+        manager.update_endpoints(rel_id)
+
+    data = harness.get_relation_data(rel_id, harness.charm.app.name)
+    if substrate == "k8s":
+        app = harness.charm.app.name
+        assert data["endpoints"] == f"{app}-primary.test-model.svc.cluster.local:5432"
+        assert data["read-only-endpoints"] == f"{app}-replicas.test-model.svc.cluster.local:5432"
+        assert (
+            data["uris"] == f"postgresql://u:pw@{app}-primary.test-model.svc.cluster.local:5432/test_db"
+        )
+    else:
+        assert data["endpoints"] == "1.1.1.1:5432"
+        assert data["read-only-endpoints"] == "2.2.2.2:5432"
+        assert data["uris"] == "postgresql://u:pw@1.1.1.1:5432/test_db"
+    assert data["tls"] == "False"
+    # A relation-scoped update touches only that relation's databag.
+    assert harness.get_relation_data(other_rel_id, harness.charm.app.name) == {}
+
+
+def test_update_endpoints_skips_a_relation_without_credentials(manager, harness):
+    rel_id = harness.model.get_relation(RELATION_NAME).id
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(rel_id, "application", {"database": "test_db"})
+        harness.update_relation_data(
+            peer_rel_id, "postgresql-single-kernel/0", {f"{RELATION_NAME}-address": "1.1.1.1"}
+        )
+
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
+            return_value=CLUSTER_STATUS[:1],
+        ),
+        patch(
+            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
+            new_callable=PropertyMock,
+            return_value=False,
+        ),
+        patch.object(
+            manager.database_provides,
+            "fetch_my_relation_data",
+            return_value={},
+        ),
+    ):
+        manager.update_endpoints(rel_id)
+
+    assert harness.get_relation_data(rel_id, harness.charm.app.name) == {}
+
+
+def test_update_endpoints_clears_stale_uris_when_no_database_matches_the_prefix(
+    substrate, manager, harness
+):
+    rel_id = harness.model.get_relation(RELATION_NAME).id
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    manager.set_databases_prefix_mapping(rel_id, "custom", "pre", [])
+    with harness.hooks_disabled():
+        harness.update_relation_data(rel_id, "application", {"database": "pre*"})
+        harness.update_relation_data(
+            peer_rel_id, "postgresql-single-kernel/0", {f"{RELATION_NAME}-address": "1.1.1.1"}
+        )
+        harness.update_relation_data(
+            rel_id, harness.charm.app.name, {"uris": "stale", "read-only-uris": "stale"}
+        )
+
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
+            return_value=CLUSTER_STATUS[:1],
         ),
         patch(
             "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
@@ -399,14 +484,13 @@ def test_update_endpoints_publishes_rw_ro_and_uris(substrate, manager, harness):
         manager.update_endpoints(rel_id)
 
     data = harness.get_relation_data(rel_id, harness.charm.app.name)
+    assert "uris" not in data
+    assert "read-only-uris" not in data
     if substrate == "k8s":
         app = harness.charm.app.name
         assert data["endpoints"] == f"{app}-primary.test-model.svc.cluster.local:5432"
-        assert data["read-only-endpoints"] == f"{app}-replicas.test-model.svc.cluster.local:5432"
     else:
         assert data["endpoints"] == "1.1.1.1:5432"
-        assert data["read-only-endpoints"] == "2.2.2.2:5432"
-    assert data["tls"] == "False"
 
 
 def test_update_endpoints_read_only_uri_carries_one_port(substrate, manager, harness):
