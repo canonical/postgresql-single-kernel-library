@@ -6,8 +6,11 @@ from contextlib import contextmanager
 from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
-from ops import ActiveStatus, BlockedStatus, Unit
+from ops import ActiveStatus, BlockedStatus, ModelError, Unit
 from single_kernel_postgresql.config.literals import PEER_RELATION
+from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
+    DatabaseRequestedEvent,
+)
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
     PostgreSQLCreateDatabaseError,
@@ -171,6 +174,40 @@ def test_database_requested_blocks_on_a_version_error(harness, events, postgresq
         request_database(harness)
 
     assert isinstance(harness.model.unit.status, BlockedStatus)
+
+
+def test_database_requested_blocks_when_the_requested_entity_secret_is_not_readable(
+    harness, events, postgresql
+):
+    """An ungranted requested-entity secret blocks the unit instead of crashing the hook."""
+    with (
+        cluster_ready(harness, postgresql),
+        patch.object(
+            DatabaseRequestedEvent,
+            "requested_entity_secret_content",
+            new_callable=PropertyMock,
+        ) as _content,
+    ):
+        _content.side_effect = ModelError()
+        request_database(harness)
+
+    assert harness.model.unit.status == BlockedStatus("Missing grant to requested entity secret")
+    postgresql.create_database.assert_not_called()
+
+
+def test_database_requested_is_a_noop_for_a_follower(harness, events, postgresql):
+    """The provider library already filters non-leaders; the handler guard is belt-and-braces."""
+    with harness.hooks_disabled():
+        harness.set_leader(False)
+    event = Mock()
+    event.relation = harness.model.get_relation(RELATION_NAME)
+
+    with cluster_ready(harness, postgresql):
+        events._on_database_requested(event)
+
+    postgresql.create_database.assert_not_called()
+    rel_id = harness.model.get_relation(RELATION_NAME).id
+    assert "username" not in harness.get_relation_data(rel_id, harness.charm.app.name)
 
 
 def test_database_requested_publishes_k8s_service_endpoints_inline(

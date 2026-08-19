@@ -5,7 +5,7 @@
 
 import logging
 
-from ops import BlockedStatus, Object, RelationBrokenEvent, RelationDepartedEvent
+from ops import BlockedStatus, ModelError, Object, RelationBrokenEvent, RelationDepartedEvent
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import DATABASE, DATABASE_PORT
@@ -14,7 +14,11 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
     DatabaseProvides,
     DatabaseRequestedEvent,
 )
-from single_kernel_postgresql.managers.database import DatabaseManager, DatabaseRequest
+from single_kernel_postgresql.managers.database import (
+    NO_ACCESS_TO_SECRET_MSG,
+    DatabaseManager,
+    DatabaseRequest,
+)
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils.postgresql import (
@@ -110,12 +114,20 @@ class DatabaseEventsHandler(Object):
             event.defer()
             return
 
+        # The vendored property resolves the secret on access: until the grant lands it
+        # raises ModelError, which the manager's own guard can no longer see.
+        try:
+            requested_entity_secret_content = event.requested_entity_secret_content
+        except ModelError:
+            self.charm.set_unit_status(BlockedStatus(NO_ACCESS_TO_SECRET_MSG))
+            return
+
         request = DatabaseRequest(
             relation_id=event.relation.id,
             database=event.database or "",
             extra_user_roles=event.extra_user_roles,
             prefix_matching=event.prefix_matching,
-            requested_entity_secret_content=event.requested_entity_secret_content,
+            requested_entity_secret_content=requested_entity_secret_content,
         )
         postgresql = self.charm.postgresql
 
