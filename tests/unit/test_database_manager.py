@@ -122,9 +122,7 @@ def test_set_rel_to_db_mapping_caches_the_databases(manager, harness):
 
     manager.set_rel_to_db_mapping()
 
-    assert (
-        json.loads(manager.state.application.data["rel_databases"]) == {str(rel_id): "test_db"}
-    )
+    assert json.loads(manager.state.application.data["rel_databases"]) == {str(rel_id): "test_db"}
 
 
 def test_user_hash_freezes_for_the_manager_lifetime(manager, harness):
@@ -451,7 +449,8 @@ def test_update_endpoints_publishes_rw_ro_and_uris(substrate, manager, harness):
         assert data["endpoints"] == f"{app}-primary.test-model.svc.cluster.local:5432"
         assert data["read-only-endpoints"] == f"{app}-replicas.test-model.svc.cluster.local:5432"
         assert (
-            data["uris"] == f"postgresql://u:pw@{app}-primary.test-model.svc.cluster.local:5432/test_db"
+            data["uris"]
+            == f"postgresql://u:pw@{app}-primary.test-model.svc.cluster.local:5432/test_db"
         )
     else:
         assert data["endpoints"] == "1.1.1.1:5432"
@@ -790,7 +789,9 @@ def test_unblock_custom_user_errors_keeps_the_block_on_invalid_extra_user_roles(
     other_rel_id = harness.add_relation(RELATION_NAME, "other-application")
     with harness.hooks_disabled():
         # The relation the check skips is the one carrying the invalid roles.
-        harness.update_relation_data(other_rel_id, "other-application", {"extra-user-roles": "bogus"})
+        harness.update_relation_data(
+            other_rel_id, "other-application", {"extra-user-roles": "bogus"}
+        )
 
     manager.unblock_custom_user_errors(postgresql, relation)
 
@@ -807,9 +808,7 @@ def test_unblock_custom_user_errors_keeps_the_block_on_a_forbidden_user(
 
     with (
         patch.object(manager.database_provides, "fetch_my_relation_field", return_value=None),
-        patch.object(
-            manager.database_provides, "fetch_relation_field", return_value="secret-uri"
-        ),
+        patch.object(manager.database_provides, "fetch_relation_field", return_value="secret-uri"),
         patch.object(manager.state.model, "get_secret", return_value=secret),
     ):
         manager.unblock_custom_user_errors(postgresql, relation)
@@ -825,9 +824,7 @@ def test_unblock_custom_user_errors_keeps_the_block_while_the_secret_is_unreadab
 
     with (
         patch.object(manager.database_provides, "fetch_my_relation_field", return_value=None),
-        patch.object(
-            manager.database_provides, "fetch_relation_field", return_value="secret-uri"
-        ),
+        patch.object(manager.database_provides, "fetch_relation_field", return_value="secret-uri"),
         patch.object(manager.state.model, "get_secret", side_effect=ModelError),
     ):
         manager.unblock_custom_user_errors(postgresql, relation)
