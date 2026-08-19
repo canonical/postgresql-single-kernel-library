@@ -6,7 +6,7 @@ import json
 from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
-from ops import ActiveStatus, BlockedStatus
+from ops import ActiveStatus, BlockedStatus, ModelError
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
@@ -214,10 +214,32 @@ def test_get_credentials_blocks_when_the_secret_is_not_readable(manager, postgre
         database="db",
         extra_user_roles=None,
         prefix_matching=None,
-        requested_entity_secret_content=Mock(items=Mock(side_effect=__import__("ops").ModelError)),
+        requested_entity_secret_content=Mock(items=Mock(side_effect=ModelError)),
     )
     assert manager.get_credentials(postgresql, request) is None
     assert harness.model.unit.status == BlockedStatus("Missing grant to requested entity secret")
+
+
+def test_get_credentials_uses_the_requested_custom_username(manager, postgresql):
+    postgresql.list_users.return_value = set()
+    with patch("single_kernel_postgresql.managers.database.new_password", return_value="gen"):
+        granted = DatabaseRequest(
+            relation_id=4,
+            database="db",
+            extra_user_roles=None,
+            prefix_matching=None,
+            requested_entity_secret_content={"custom": "pw"},
+        )
+        assert manager.get_credentials(postgresql, granted) == ("custom", "pw")
+
+        ungranted = DatabaseRequest(
+            relation_id=4,
+            database="db",
+            extra_user_roles=None,
+            prefix_matching=None,
+            requested_entity_secret_content={"custom": None},
+        )
+        assert manager.get_credentials(postgresql, ungranted) == ("custom", "gen")
 
 
 def test_collect_databases_plain_database(manager, postgresql):
@@ -748,6 +770,69 @@ def test_update_unit_status_keeps_a_prefix_block_while_a_short_prefix_remains(
     manager.update_unit_status(postgresql, relation)
 
     assert harness.model.unit.status == BlockedStatus("Prefix too short")
+
+
+def test_unblock_custom_user_errors_clears_the_status(manager, postgresql, harness):
+    postgresql.list_valid_privileges_and_roles.return_value = (set(), set())
+    relation = harness.model.get_relation(RELATION_NAME)
+    harness.model.unit.status = BlockedStatus("Requesting an existing username")
+
+    manager.unblock_custom_user_errors(postgresql, relation)
+
+    assert harness.model.unit.status == ActiveStatus()
+
+
+def test_unblock_custom_user_errors_keeps_the_block_on_invalid_extra_user_roles(
+    manager, postgresql, harness
+):
+    postgresql.list_valid_privileges_and_roles.return_value = (set(), set())
+    relation = harness.model.get_relation(RELATION_NAME)
+    other_rel_id = harness.add_relation(RELATION_NAME, "other-application")
+    with harness.hooks_disabled():
+        # The relation the check skips is the one carrying the invalid roles.
+        harness.update_relation_data(other_rel_id, "other-application", {"extra-user-roles": "bogus"})
+
+    manager.unblock_custom_user_errors(postgresql, relation)
+
+    assert harness.model.unit.status == BlockedStatus("invalid role(s) for extra user roles")
+
+
+def test_unblock_custom_user_errors_keeps_the_block_on_a_forbidden_user(
+    manager, postgresql, harness
+):
+    postgresql.list_valid_privileges_and_roles.return_value = (set(), set())
+    postgresql.list_users.return_value = {"taken"}
+    relation = harness.model.get_relation(RELATION_NAME)
+    secret = Mock(get_content=Mock(return_value={"taken": "pw"}))
+
+    with (
+        patch.object(manager.database_provides, "fetch_my_relation_field", return_value=None),
+        patch.object(
+            manager.database_provides, "fetch_relation_field", return_value="secret-uri"
+        ),
+        patch.object(manager.state.model, "get_secret", return_value=secret),
+    ):
+        manager.unblock_custom_user_errors(postgresql, relation)
+
+    assert harness.model.unit.status == BlockedStatus("Requesting an existing username")
+
+
+def test_unblock_custom_user_errors_keeps_the_block_while_the_secret_is_unreadable(
+    manager, postgresql, harness
+):
+    postgresql.list_valid_privileges_and_roles.return_value = (set(), set())
+    relation = harness.model.get_relation(RELATION_NAME)
+
+    with (
+        patch.object(manager.database_provides, "fetch_my_relation_field", return_value=None),
+        patch.object(
+            manager.database_provides, "fetch_relation_field", return_value="secret-uri"
+        ),
+        patch.object(manager.state.model, "get_secret", side_effect=ModelError),
+    ):
+        manager.unblock_custom_user_errors(postgresql, relation)
+
+    assert harness.model.unit.status == BlockedStatus("Missing grant to requested entity secret")
 
 
 def test_is_tls_enabled_tracks_the_client_files(manager):
