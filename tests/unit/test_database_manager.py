@@ -14,12 +14,7 @@ from single_kernel_postgresql.config.literals import (
     PEER_RELATION,
     USERNAME_MAPPING_LABEL,
 )
-from single_kernel_postgresql.managers.database import (
-    FORBIDDEN_USER_MSG,
-    NO_ACCESS_TO_SECRET_MSG,
-    PREFIX_TOO_SHORT_MSG,
-    DatabaseRequest,
-)
+from single_kernel_postgresql.managers.database import DatabaseRequest
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
     PostgreSQLDeleteUserError,
@@ -119,6 +114,19 @@ def test_collect_user_relations_skips_relations_without_a_database(manager):
     assert manager.collect_user_relations() == {}
 
 
+def test_set_rel_to_db_mapping_caches_the_databases(manager, harness):
+    """The Patroni pg_hba render reads this app-data cache under the same key."""
+    rel_id = harness.model.get_relation(RELATION_NAME).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(rel_id, "application", {"database": "test_db"})
+
+    manager.set_rel_to_db_mapping()
+
+    assert (
+        json.loads(manager.state.application.data["rel_databases"]) == {str(rel_id): "test_db"}
+    )
+
+
 def test_user_hash_freezes_for_the_manager_lifetime(manager, harness):
     """Both charms cached the hash per hook, so a mid-hook mapping change must not alter it."""
     frozen = manager.user_hash
@@ -197,7 +205,7 @@ def test_get_credentials_blocks_on_an_existing_username(manager, postgresql, har
         requested_entity_secret_content={"taken": "pw"},
     )
     assert manager.get_credentials(postgresql, request) is None
-    assert harness.model.unit.status == BlockedStatus(FORBIDDEN_USER_MSG)
+    assert harness.model.unit.status == BlockedStatus("Requesting an existing username")
 
 
 def test_get_credentials_blocks_when_the_secret_is_not_readable(manager, postgresql, harness):
@@ -209,7 +217,7 @@ def test_get_credentials_blocks_when_the_secret_is_not_readable(manager, postgre
         requested_entity_secret_content=Mock(items=Mock(side_effect=__import__("ops").ModelError)),
     )
     assert manager.get_credentials(postgresql, request) is None
-    assert harness.model.unit.status == BlockedStatus(NO_ACCESS_TO_SECRET_MSG)
+    assert harness.model.unit.status == BlockedStatus("Missing grant to requested entity secret")
 
 
 def test_collect_databases_plain_database(manager, postgresql):
@@ -246,7 +254,7 @@ def test_collect_databases_blocks_on_a_too_short_prefix(manager, postgresql, har
         requested_entity_secret_content=None,
     )
     assert manager.collect_databases(postgresql, "user", request) is None
-    assert harness.model.unit.status == BlockedStatus(PREFIX_TOO_SHORT_MSG)
+    assert harness.model.unit.status == BlockedStatus("Prefix too short")
     postgresql.list_databases.assert_not_called()
 
 
@@ -273,21 +281,29 @@ def test_create_relation_user_and_database_prefixed_skips_create_database(manage
 
 def test_delete_relation_user_clears_every_mapping(manager, postgresql, harness):
     rel_id = harness.model.get_relation(RELATION_NAME).id
+    other_rel_id = harness.add_relation(RELATION_NAME, "other-application")
     manager.update_username_mapping(rel_id, "custom")
-    manager.set_databases_prefix_mapping(rel_id, "custom", "pre", ["pre_a"])
+    # The deleted relation's database still sits in another relation's prefix.
+    manager.set_databases_prefix_mapping(other_rel_id, "other-user", "pre", ["pre_a"])
+    harness.charm.app_data_setter = None
     manager.state.application.data["rel_databases"] = json.dumps({str(rel_id): "pre_a"})
 
     manager.delete_relation_user(postgresql, rel_id)
 
     postgresql.delete_user.assert_called_once_with("custom")
+    postgresql.remove_user_from_databases.assert_called_once_with("other-user", ["pre_a"])
     assert manager.get_username_mapping() == {}
-    assert manager.get_databases_prefix_mapping() == {}
+    assert manager.get_databases_prefix_mapping() == {
+        str(other_rel_id): {"prefix": "pre", "username": "other-user", "databases": []}
+    }
 
 
 def test_delete_relation_user_blocks_when_the_drop_fails(manager, postgresql, harness):
     postgresql.delete_user.side_effect = PostgreSQLDeleteUserError
     manager.delete_relation_user(postgresql, 4)
-    assert isinstance(harness.model.unit.status, BlockedStatus)
+    assert harness.model.unit.status == BlockedStatus(
+        "Failed to delete user during database relation broken event"
+    )
 
 
 def test_oversee_users_deletes_only_users_without_a_relation(manager, postgresql, harness):
@@ -298,10 +314,14 @@ def test_oversee_users_deletes_only_users_without_a_relation(manager, postgresql
         stale,
         "postgres",
     }
+    manager.state.set_secret(APP_SCOPE, stale, "pw")
+    manager.state.set_secret(APP_SCOPE, f"{stale}-database", "pw")
 
     manager.oversee_users(postgresql)
 
     postgresql.delete_user.assert_called_once_with(stale)
+    assert manager.state.get_secret(APP_SCOPE, stale) is None
+    assert manager.state.get_secret(APP_SCOPE, f"{stale}-database") is None
 
 
 def test_oversee_users_honours_the_suppress_flag(manager, postgresql):
@@ -723,11 +743,11 @@ def test_update_unit_status_keeps_a_prefix_block_while_a_short_prefix_remains(
     relation = harness.model.get_relation(RELATION_NAME)
     with harness.hooks_disabled():
         harness.update_relation_data(relation.id, "application", {"database": "a*"})
-    harness.model.unit.status = BlockedStatus(PREFIX_TOO_SHORT_MSG)
+    harness.model.unit.status = BlockedStatus("Prefix too short")
 
     manager.update_unit_status(postgresql, relation)
 
-    assert harness.model.unit.status == BlockedStatus(PREFIX_TOO_SHORT_MSG)
+    assert harness.model.unit.status == BlockedStatus("Prefix too short")
 
 
 def test_is_tls_enabled_tracks_the_client_files(manager):
