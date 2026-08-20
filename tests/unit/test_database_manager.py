@@ -206,18 +206,6 @@ def test_get_credentials_blocks_on_an_existing_username(manager, postgresql, har
     assert harness.model.unit.status == BlockedStatus("Requesting an existing username")
 
 
-def test_get_credentials_blocks_when_the_secret_is_not_readable(manager, postgresql, harness):
-    request = DatabaseRequest(
-        relation_id=4,
-        database="db",
-        extra_user_roles=None,
-        prefix_matching=None,
-        requested_entity_secret_content=Mock(items=Mock(side_effect=ModelError)),
-    )
-    assert manager.get_credentials(postgresql, request) is None
-    assert harness.model.unit.status == BlockedStatus("Missing grant to requested entity secret")
-
-
 def test_get_credentials_uses_the_requested_custom_username(manager, postgresql):
     postgresql.list_users.return_value = set()
     with patch("single_kernel_postgresql.managers.database.new_password", return_value="gen"):

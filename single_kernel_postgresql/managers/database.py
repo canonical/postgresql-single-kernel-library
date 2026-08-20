@@ -300,16 +300,12 @@ class DatabaseManager(BaseManager):
         self, postgresql_client: PostgreSQLClient, request: DatabaseRequest
     ) -> tuple[str, str] | None:
         """Resolve the user and password for a request, or block and return None."""
-        try:
-            if requested_entities := request["requested_entity_secret_content"]:
-                for key, val in requested_entities.items():
-                    if key in SYSTEM_USERS or key in postgresql_client.list_users():
-                        self.set_unit_status(BlockedStatus(FORBIDDEN_USER_MSG))
-                        return None
-                    return key, val or new_password()
-        except ModelError:
-            self.set_unit_status(BlockedStatus(NO_ACCESS_TO_SECRET_MSG))
-            return None
+        if requested_entities := request["requested_entity_secret_content"]:
+            for key, val in requested_entities.items():
+                if key in SYSTEM_USERS or key in postgresql_client.list_users():
+                    self.set_unit_status(BlockedStatus(FORBIDDEN_USER_MSG))
+                    return None
+                return key, val or new_password()
         return self.relation_username(request["relation_id"]), new_password()
 
     def collect_databases(
