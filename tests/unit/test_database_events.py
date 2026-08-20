@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
-from ops import ActiveStatus, BlockedStatus, ModelError, Unit
+from ops import ActiveStatus, BlockedStatus, ModelError
 from single_kernel_postgresql.config.literals import PEER_RELATION
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequestedEvent,
@@ -419,9 +419,7 @@ def test_relation_departed_flags_only_this_unit(harness, events):
 
     with harness.hooks_disabled():
         harness.update_relation_data(peer_rel_id, harness.charm.unit.name, {"departing": ""})
-    event.departing_unit = Unit(
-        f"{harness.charm.app.name}/1", None, harness.charm.app._backend, {}
-    )
+    event.departing_unit = harness.model.get_unit(f"{harness.charm.app.name}/1")
     events._on_relation_departed(event)
     assert "departing" not in harness.get_relation_data(peer_rel_id, harness.charm.unit)
 
