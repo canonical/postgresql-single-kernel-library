@@ -12,6 +12,7 @@ map the Patroni config renders its pg_hba rules from.
 import json
 import logging
 from collections.abc import Callable
+from functools import cached_property
 from hashlib import shake_128
 from typing import TypedDict
 
@@ -208,9 +209,13 @@ class DatabaseManager(BaseManager):
                 user_db_pairs[user] = database
         return user_db_pairs
 
-    @property
+    @cached_property
     def user_hash(self) -> str:
-        """Hash of the expected users and databases, used to detect unsynced peers."""
+        """Hash of the expected users and databases, used to detect unsynced peers.
+
+        Frozen at first read for the manager's lifetime, as both charms cached it per
+        hook: the request flow's second update_config stores the same hash as the first.
+        """
         return shake_128(str(self.collect_user_relations()).encode()).hexdigest(16)
 
     def are_units_in_sync(self) -> bool:
