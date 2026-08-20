@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 """Unit tests for the client-relation events handler."""
 
+import logging
 from contextlib import contextmanager
 from unittest.mock import Mock, PropertyMock, patch
 
@@ -101,7 +102,7 @@ def request_database(harness, database=DATABASE):
     return rel_id
 
 
-def test_database_requested_creates_the_user_and_database(harness, events, postgresql):
+def test_database_requested_creates_the_user_and_database(substrate, harness, events, postgresql):
     with cluster_ready(harness, postgresql) as update_endpoints:
         rel_id = request_database(harness)
 
@@ -113,7 +114,11 @@ def test_database_requested_creates_the_user_and_database(harness, events, postg
         extra_user_roles=["createdb", "createrole", ACCESS_GROUP_RELATION],
         database=DATABASE,
     )
-    update_endpoints.assert_called_once_with(rel_id)
+    if substrate == "k8s":
+        # K8s refreshed every relation from the request handler; VM scoped to the requester.
+        update_endpoints.assert_called_once_with()
+    else:
+        update_endpoints.assert_called_once_with(rel_id)
 
     data = harness.get_relation_data(rel_id, harness.charm.app.name)
     assert data["username"] == user
@@ -132,6 +137,119 @@ def test_database_requested_defers_until_the_cluster_is_ready(harness, events, p
 
     _defer.assert_called_once()
     postgresql.create_database.assert_not_called()
+
+
+def test_the_request_defer_message_is_substrate_specific(
+    substrate, harness, events, postgresql, caplog
+):
+    caplog.set_level(logging.DEBUG, logger="single_kernel_postgresql.events.database")
+    with (
+        cluster_ready(harness, postgresql, ready=False),
+        patch("ops.framework.EventBase.defer"),
+    ):
+        request_database(harness)
+
+    if substrate == "k8s":
+        assert "Cluster must be initialized before database can be requested" in caplog.text
+    else:
+        assert (
+            "cluster not initialized, Patroni not started or primary endpoint not available"
+            in caplog.text
+        )
+
+
+def test_the_request_guard_reads_substrate_specific_inputs(substrate, harness, events):
+    """K8s waits only on the primary endpoint; VM also requires a started member."""
+    with (
+        patch.object(
+            type(harness.charm),
+            "primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="1.1.1.1",
+        ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.member_started",
+            new_callable=PropertyMock,
+            return_value=False,
+        ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.primary_endpoint_ready",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+    ):
+        assert events._ready_for_request() is (substrate == "k8s")
+
+
+def test_the_guards_defer_while_the_cluster_is_not_initialised(substrate, harness, events):
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            peer_rel_id, harness.charm.app.name, {"cluster_initialised": ""}
+        )
+    with (
+        patch.object(
+            type(harness.charm),
+            "primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="1.1.1.1",
+        ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.member_started",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.primary_endpoint_ready",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+    ):
+        assert events._ready_for_request() is False
+        assert events._ready_for_removal() is False
+
+
+def test_database_requested_blocks_before_creating_when_the_username_is_taken(
+    harness, events, postgresql
+):
+    postgresql.list_users.return_value = {"taken"}
+    with (
+        cluster_ready(harness, postgresql),
+        patch.object(
+            DatabaseRequestedEvent,
+            "requested_entity_secret_content",
+            new_callable=PropertyMock,
+            return_value={"taken": "pw"},
+        ),
+    ):
+        rel_id = request_database(harness)
+
+    assert harness.model.unit.status == BlockedStatus("Requesting an existing username")
+    postgresql.create_database.assert_not_called()
+    assert "username" not in harness.get_relation_data(rel_id, harness.charm.app.name)
+
+
+def test_database_requested_blocks_before_creating_when_the_prefix_is_too_short(
+    harness, events, postgresql
+):
+    with cluster_ready(harness, postgresql):
+        rel_id = request_database(harness, database="a*")
+
+    assert harness.model.unit.status == BlockedStatus("Prefix too short")
+    postgresql.create_database.assert_not_called()
+    assert "username" not in harness.get_relation_data(rel_id, harness.charm.app.name)
+
+
+def test_database_requested_publishes_nothing_when_creation_fails(harness, events, postgresql):
+    postgresql.create_database.side_effect = PostgreSQLCreateDatabaseError("bad name")
+    with cluster_ready(harness, postgresql):
+        rel_id = request_database(harness)
+
+    data = harness.get_relation_data(rel_id, harness.charm.app.name)
+    assert "username" not in data
+    assert "uris" not in data
+    assert "version" not in data
+    assert "database" not in data
 
 
 def test_database_requested_defers_until_peers_have_synced(harness, events, postgresql):
@@ -195,6 +313,26 @@ def test_database_requested_blocks_when_the_requested_entity_secret_is_not_reada
     postgresql.create_database.assert_not_called()
 
 
+def test_the_unreadable_secret_block_routes_through_the_status_bridge(harness, events, postgresql):
+    """The missing-grant block goes through the charm's set_unit_status on both substrates."""
+    with (
+        cluster_ready(harness, postgresql),
+        patch.object(type(harness.charm), "set_unit_status", Mock()) as _gated,
+        patch.object(
+            DatabaseRequestedEvent,
+            "requested_entity_secret_content",
+            new_callable=PropertyMock,
+        ) as _content,
+    ):
+        _content.side_effect = ModelError()
+        request_database(harness)
+
+    _gated.assert_called_once()
+    assert _gated.call_args.args[0] == BlockedStatus("Missing grant to requested entity secret")
+    assert not isinstance(harness.model.unit.status, BlockedStatus)
+    postgresql.create_database.assert_not_called()
+
+
 def test_database_requested_is_a_noop_for_a_follower(harness, events, postgresql):
     """The provider library already filters non-leaders; the handler guard is belt-and-braces."""
     with harness.hooks_disabled():
@@ -228,6 +366,50 @@ def test_database_requested_publishes_k8s_service_endpoints_inline(
         assert "endpoints" not in data
 
 
+def test_the_k8s_inline_publish_sets_the_tls_fields_when_tls_is_enabled(
+    substrate, harness, events, postgresql
+):
+    if substrate != "k8s":
+        pytest.skip("Only K8s wrote the TLS fields inside the request handler")
+    with (
+        cluster_ready(harness, postgresql),
+        patch.object(
+            type(events.manager.tls_manager),
+            "get_client_tls_files",
+            return_value=("key", "CA", "cert"),
+        ),
+    ):
+        rel_id = request_database(harness)
+
+    data = harness.get_relation_data(rel_id, harness.charm.app.name)
+    assert data["tls"] == "True"
+    assert data["tls-ca"] == "CA"
+
+
+def test_the_relation_departed_observer_flags_the_departing_unit(harness, events):
+    """Emitted through the framework, so the observer registration is itself exercised."""
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    relation = harness.model.get_relation(RELATION_NAME)
+
+    harness.charm.on[RELATION_NAME].relation_departed.emit(
+        relation, departing_unit_name=harness.charm.unit.name
+    )
+
+    assert "departing" in harness.get_relation_data(peer_rel_id, harness.charm.unit)
+
+
+def test_the_relation_broken_observer_deletes_the_user(harness, events, postgresql):
+    """Emitted through the framework, so the observer registration is itself exercised."""
+    rel_id = harness.model.get_relation(RELATION_NAME).id
+
+    with cluster_ready(harness, postgresql):
+        harness.charm.on[RELATION_NAME].relation_broken.emit(
+            harness.model.get_relation(RELATION_NAME)
+        )
+
+    postgresql.delete_user.assert_called_once_with(events.manager.relation_username(rel_id))
+
+
 def test_relation_departed_flags_only_this_unit(harness, events):
     peer_rel_id = harness.model.get_relation(PEER_RELATION).id
     event = Mock()
@@ -242,6 +424,25 @@ def test_relation_departed_flags_only_this_unit(harness, events):
     )
     events._on_relation_departed(event)
     assert "departing" not in harness.get_relation_data(peer_rel_id, harness.charm.unit)
+
+
+def test_the_broken_defer_message_is_substrate_specific(
+    substrate, harness, events, postgresql, caplog
+):
+    caplog.set_level(logging.DEBUG, logger="single_kernel_postgresql.events.database")
+    event = Mock()
+    event.relation = harness.model.get_relation(RELATION_NAME)
+
+    with cluster_ready(harness, postgresql, ready=False):
+        events._on_relation_broken(event)
+
+    if substrate == "k8s":
+        assert "Cluster must be initialized before user can be deleted" in caplog.text
+    else:
+        assert (
+            "Cluster must be initialized and primary available before user can be deleted"
+            in caplog.text
+        )
 
 
 def test_relation_broken_deletes_the_user(harness, events, postgresql):
