@@ -109,13 +109,14 @@ def test_collect_user_relations_skips_relations_without_a_database(manager):
     assert manager.collect_user_relations() == {}
 
 
-def test_user_hash_tracks_the_collected_relations(manager, harness):
-    empty = manager.user_hash
+def test_user_hash_freezes_for_the_manager_lifetime(manager, harness):
+    """Both charms cached the hash per hook, so a mid-hook mapping change must not alter it."""
+    frozen = manager.user_hash
     rel_id = harness.model.get_relation(RELATION_NAME).id
     with harness.hooks_disabled():
         harness.update_relation_data(rel_id, "application", {"database": "test_db"})
 
-    assert manager.user_hash != empty
+    assert manager.user_hash == frozen
 
 
 def test_are_units_in_sync_compares_every_peer_unit(manager, harness):
