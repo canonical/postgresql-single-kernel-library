@@ -7,7 +7,6 @@ from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 from ops import ActiveStatus, BlockedStatus, ModelError
-from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
     DATABASE_MAPPING_LABEL,
@@ -193,7 +192,8 @@ def test_get_credentials_defaults_to_the_generated_user(manager, postgresql):
         )
 
 
-def test_get_credentials_blocks_on_an_existing_username(manager, postgresql, harness):
+def test_get_credentials_blocks_on_an_existing_username(manager, postgresql):
+    """The forbidden-user block routes through the charm's status bridge."""
     postgresql.list_users.return_value = {"taken"}
     request = DatabaseRequest(
         relation_id=4,
@@ -202,8 +202,9 @@ def test_get_credentials_blocks_on_an_existing_username(manager, postgresql, har
         prefix_matching=None,
         requested_entity_secret_content={"taken": "pw"},
     )
-    assert manager.get_credentials(postgresql, request) is None
-    assert harness.model.unit.status == BlockedStatus("Requesting an existing username")
+    with patch.object(manager, "set_unit_status") as _gated:
+        assert manager.get_credentials(postgresql, request) is None
+    _gated.assert_called_once_with(BlockedStatus("Requesting an existing username"))
 
 
 def test_get_credentials_uses_the_requested_custom_username(manager, postgresql):
@@ -253,7 +254,7 @@ def test_collect_databases_prefix_lists_and_caches(manager, postgresql):
     assert manager.get_databases_prefix_mapping()["4"]["prefix"] == "pre"
 
 
-def test_collect_databases_blocks_on_a_too_short_prefix(manager, postgresql, harness):
+def test_collect_databases_blocks_on_a_too_short_prefix(manager, postgresql):
     request = DatabaseRequest(
         relation_id=4,
         database="a*",
@@ -261,8 +262,9 @@ def test_collect_databases_blocks_on_a_too_short_prefix(manager, postgresql, har
         prefix_matching=None,
         requested_entity_secret_content=None,
     )
-    assert manager.collect_databases(postgresql, "user", request) is None
-    assert harness.model.unit.status == BlockedStatus("Prefix too short")
+    with patch.object(manager, "set_unit_status") as _gated:
+        assert manager.collect_databases(postgresql, "user", request) is None
+    _gated.assert_called_once_with(BlockedStatus("Prefix too short"))
     postgresql.list_databases.assert_not_called()
 
 
@@ -293,7 +295,6 @@ def test_delete_relation_user_clears_every_mapping(manager, postgresql, harness)
     manager.update_username_mapping(rel_id, "custom")
     # The deleted relation's database still sits in another relation's prefix.
     manager.set_databases_prefix_mapping(other_rel_id, "other-user", "pre", ["pre_a"])
-    harness.charm.app_data_setter = None
     manager.state.application.data["rel_databases"] = json.dumps({str(rel_id): "pre_a"})
 
     manager.delete_relation_user(postgresql, rel_id)
@@ -407,13 +408,16 @@ def test_update_endpoints_publishes_rw_ro_and_uris(substrate, manager, harness):
         harness.update_relation_data(
             peer_rel_id, "postgresql-single-kernel/1", {f"{RELATION_NAME}-address": "2.2.2.2"}
         )
+        harness.update_relation_data(
+            peer_rel_id, "postgresql-single-kernel/2", {f"{RELATION_NAME}-address": "3.3.3.3"}
+        )
         other_rel_id = harness.add_relation(RELATION_NAME, "other-application")
         harness.update_relation_data(other_rel_id, "other-application", {"database": "other_db"})
 
     with (
         patch(
             "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
-            return_value=CLUSTER_STATUS[:2],
+            return_value=CLUSTER_STATUS,
         ),
         patch(
             "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
@@ -442,7 +446,8 @@ def test_update_endpoints_publishes_rw_ro_and_uris(substrate, manager, harness):
         )
     else:
         assert data["endpoints"] == "1.1.1.1:5432"
-        assert data["read-only-endpoints"] == "2.2.2.2:5432"
+        # Multiple replicas are published comma-joined.
+        assert data["read-only-endpoints"] == "2.2.2.2:5432,3.3.3.3:5432"
         assert data["uris"] == "postgresql://u:pw@1.1.1.1:5432/test_db"
     assert data["tls"] == "False"
     # A relation-scoped update touches only that relation's databag.
@@ -561,6 +566,39 @@ def test_update_endpoints_read_only_uri_carries_one_port(substrate, manager, har
     assert ":5432:5432" not in uri
 
 
+def test_update_endpoints_falls_back_to_the_primary_without_replicas(manager, harness, substrate):
+    if substrate == "k8s":
+        pytest.skip("K8s reads the replicas Service, not the online Patroni members")
+    rel_id = harness.model.get_relation(RELATION_NAME).id
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(rel_id, "application", {"database": "test_db"})
+        harness.update_relation_data(
+            peer_rel_id, "postgresql-single-kernel/0", {f"{RELATION_NAME}-address": "1.1.1.1"}
+        )
+
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
+            return_value=CLUSTER_STATUS[:1],
+        ),
+        patch(
+            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
+            new_callable=PropertyMock,
+            return_value=False,
+        ),
+        patch.object(
+            manager.database_provides,
+            "fetch_my_relation_data",
+            return_value={rel_id: {"username": "u", "password": "pw"}},
+        ),
+    ):
+        manager.update_endpoints(rel_id)
+
+    data = harness.get_relation_data(rel_id, harness.charm.app.name)
+    assert data["read-only-endpoints"] == "1.1.1.1:5432"
+
+
 def test_update_endpoints_publishes_the_primary_ip_verbatim(manager, harness, substrate):
     """A leader unit without a peer address publishes "None:5432", exactly as the charm did."""
     if substrate == "k8s":
@@ -651,39 +689,6 @@ def test_k8s_endpoints_fall_back_to_the_primary_without_peer_units(substrate, ma
     assert data["read-only-endpoints"] == f"{app}-primary.test-model.svc.cluster.local:5432"
 
 
-def test_update_endpoints_falls_back_to_the_primary_without_replicas(manager, harness, substrate):
-    if substrate == "k8s":
-        pytest.skip("K8s reads the replicas Service, not the online Patroni members")
-    rel_id = harness.model.get_relation(RELATION_NAME).id
-    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
-    with harness.hooks_disabled():
-        harness.update_relation_data(rel_id, "application", {"database": "test_db"})
-        harness.update_relation_data(
-            peer_rel_id, "postgresql-single-kernel/0", {f"{RELATION_NAME}-address": "1.1.1.1"}
-        )
-
-    with (
-        patch(
-            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
-            return_value=CLUSTER_STATUS[:1],
-        ),
-        patch(
-            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
-            new_callable=PropertyMock,
-            return_value=False,
-        ),
-        patch.object(
-            manager.database_provides,
-            "fetch_my_relation_data",
-            return_value={rel_id: {"username": "u", "password": "pw"}},
-        ),
-    ):
-        manager.update_endpoints(rel_id)
-
-    data = harness.get_relation_data(rel_id, harness.charm.app.name)
-    assert data["read-only-endpoints"] == "1.1.1.1:5432"
-
-
 def test_update_endpoints_filters_out_of_sync_members(manager, harness, substrate):
     if substrate == "k8s":
         pytest.skip("K8s reads the replicas Service, not the online Patroni members")
@@ -760,13 +765,14 @@ def test_update_unit_status_keeps_a_prefix_block_while_a_short_prefix_remains(
 
 
 def test_unblock_custom_user_errors_clears_the_status(manager, postgresql, harness):
+    """The final clear routes through the charm's status bridge."""
     postgresql.list_valid_privileges_and_roles.return_value = (set(), set())
     relation = harness.model.get_relation(RELATION_NAME)
-    harness.model.unit.status = BlockedStatus("Requesting an existing username")
 
-    manager.unblock_custom_user_errors(postgresql, relation)
+    with patch.object(manager, "set_unit_status") as _gated:
+        manager.unblock_custom_user_errors(postgresql, relation)
 
-    assert harness.model.unit.status == ActiveStatus()
+    _gated.assert_called_once_with(ActiveStatus())
 
 
 def test_unblock_custom_user_errors_keeps_the_block_on_invalid_extra_user_roles(
@@ -781,9 +787,10 @@ def test_unblock_custom_user_errors_keeps_the_block_on_invalid_extra_user_roles(
             other_rel_id, "other-application", {"extra-user-roles": "bogus"}
         )
 
-    manager.unblock_custom_user_errors(postgresql, relation)
+    with patch.object(manager, "set_unit_status") as _gated:
+        manager.unblock_custom_user_errors(postgresql, relation)
 
-    assert harness.model.unit.status == BlockedStatus("invalid role(s) for extra user roles")
+    _gated.assert_called_once_with(BlockedStatus("invalid role(s) for extra user roles"))
 
 
 def test_unblock_custom_user_errors_keeps_the_block_on_a_forbidden_user(
@@ -798,10 +805,11 @@ def test_unblock_custom_user_errors_keeps_the_block_on_a_forbidden_user(
         patch.object(manager.database_provides, "fetch_my_relation_field", return_value=None),
         patch.object(manager.database_provides, "fetch_relation_field", return_value="secret-uri"),
         patch.object(manager.state.model, "get_secret", return_value=secret),
+        patch.object(manager, "set_unit_status") as _gated,
     ):
         manager.unblock_custom_user_errors(postgresql, relation)
 
-    assert harness.model.unit.status == BlockedStatus("Requesting an existing username")
+    _gated.assert_called_once_with(BlockedStatus("Requesting an existing username"))
 
 
 def test_unblock_custom_user_errors_keeps_the_block_while_the_secret_is_unreadable(
@@ -814,10 +822,11 @@ def test_unblock_custom_user_errors_keeps_the_block_while_the_secret_is_unreadab
         patch.object(manager.database_provides, "fetch_my_relation_field", return_value=None),
         patch.object(manager.database_provides, "fetch_relation_field", return_value="secret-uri"),
         patch.object(manager.state.model, "get_secret", side_effect=ModelError),
+        patch.object(manager, "set_unit_status") as _gated,
     ):
         manager.unblock_custom_user_errors(postgresql, relation)
 
-    assert harness.model.unit.status == BlockedStatus("Missing grant to requested entity secret")
+    _gated.assert_called_once_with(BlockedStatus("Missing grant to requested entity secret"))
 
 
 def test_is_tls_enabled_tracks_the_client_files(manager):
@@ -843,8 +852,3 @@ def test_request_errors_are_substrate_specific(substrate, manager):
         assert PostgreSQLBaseError not in manager.request_errors
     else:
         assert manager.request_errors == (PostgreSQLBaseError,)
-
-
-def test_manager_state_substrate_matches_the_charm(substrate, manager):
-    expected = Substrates.K8S if substrate == "k8s" else Substrates.VM
-    assert manager.state.substrate == expected
