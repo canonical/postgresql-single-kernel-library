@@ -102,8 +102,10 @@ class DatabaseEventsHandler(Object):
 
         if not self._ready_for_request():
             logger.debug(
-                "Deferring on_database_requested: cluster not initialized, Patroni not started "
-                "or primary endpoint not available"
+                "Deferring on_database_requested: %s",
+                "Cluster must be initialized before database can be requested"
+                if self.state.substrate == Substrates.K8S
+                else "cluster not initialized, Patroni not started or primary endpoint not available",
             )
             event.defer()
             return
@@ -144,7 +146,11 @@ class DatabaseEventsHandler(Object):
                 event.relation.id, postgresql.get_postgresql_version()
             )
             self.database_provides.set_database(event.relation.id, database)
-            self.manager.update_endpoints(event.relation.id)
+            if self.state.substrate == Substrates.K8S:
+                # K8s refreshed every relation from the request handler.
+                self.manager.update_endpoints()
+            else:
+                self.manager.update_endpoints(event.relation.id)
             self.manager.update_unit_status(postgresql, event.relation)
             self.charm.update_config()
         except self.manager.request_errors as e:
@@ -195,8 +201,10 @@ class DatabaseEventsHandler(Object):
         """Remove the user created for this relation."""
         if not self.state.peer_relation or not self._ready_for_removal():
             logger.debug(
-                "Deferring on_relation_broken: Cluster must be initialized and primary "
-                "available before user can be deleted"
+                "Deferring on_relation_broken: %s",
+                "Cluster must be initialized before user can be deleted"
+                if self.state.substrate == Substrates.K8S
+                else "Cluster must be initialized and primary available before user can be deleted",
             )
             event.defer()
             return
