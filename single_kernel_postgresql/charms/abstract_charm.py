@@ -107,8 +107,9 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     # Charm-side bridges the lib calls back into. request_restart/restart_services are
     # substrate-tangled and stay until their own migration phases; update_config still
     # supplies the ldap/async/watcher values those phases own; primary_endpoint is the
-    # VM's Patroni-derived primary lookup. set_unit_status is permanent: it gates status
-    # writes on charm_refresh priority, and charm_refresh is not a migration target.
+    # VM's Patroni-derived primary lookup. set_unit_status routes status writes through
+    # the charm_refresh priority gate and stays until the refresh logic itself migrates
+    # into the library, at which point the managers own their status writes.
     @abstractmethod
     def get_resource_provider(self) -> ResourceProvider:
         """Return the substrate's (cpu_cores, memory_bytes) introspector."""
