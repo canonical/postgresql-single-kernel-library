@@ -16,8 +16,6 @@ from functools import cached_property
 from hashlib import shake_128
 from typing import TypedDict
 
-from data_platform_helpers.advanced_statuses import StatusObject
-from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import StatusBase
 
 from single_kernel_postgresql.config.enums import Substrates
@@ -29,7 +27,6 @@ from single_kernel_postgresql.config.literals import (
     SPI_MODULE,
     USERNAME_MAPPING_LABEL,
 )
-from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseProvides,
@@ -54,7 +51,7 @@ class DatabaseManager(BaseManager):
     """PostgreSQL Database Manager.
 
     This manager is responsible for handling the client relation user and database
-    lifecycle. It owns no events; :class:`~single_kernel_postgresql.events.database`
+    lifecycle. It owns no events; :class:`~single_kernel_postgresql.events.database.DatabaseEventsHandler`
     drives it and maps its outcomes onto defer/status.
     """
 
@@ -248,13 +245,3 @@ class DatabaseManager(BaseManager):
             plugins.remove("spi")
             plugins.extend(SPI_MODULE)
         return plugins
-
-    def get_statuses(
-        self, scope: AdvancedStatusesScope, recompute: bool = False
-    ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
-        if not recompute:
-            return self.state.statuses.get(scope, self.name).root or [
-                GeneralStatuses.ACTIVE_IDLE.value
-            ]
-        return [GeneralStatuses.ACTIVE_IDLE.value]
