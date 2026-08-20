@@ -25,6 +25,7 @@ def config(substrate):
             workload=workload,
             tls_manager=Mock(),
             patroni_manager=Mock(),
+            resource_provider=Mock(),
             request_restart=Mock(),
             refresh_endpoints=Mock(),
             restart_services=Mock(),
@@ -718,10 +719,9 @@ def orchestrate(config, postgresql_client):
         patch.object(config, "_can_connect_to_postgresql", return_value=True),
         patch.object(config.workload, "is_patroni_running", return_value=True),
         patch.object(
-            type(config.state),
-            "available_resources",
-            new_callable=PropertyMock,
-            return_value=(4, 8_000_000_000),
+            config,
+            "resource_provider",
+            return_value=Mock(get_available_resources=Mock(return_value=(4, 8_000_000_000))),
         ),
         # render_patroni_yml_file is mocked, but its kwargs are still eagerly evaluated
         # against the state — patch the accessors they read so they don't hit the Mock relation.
