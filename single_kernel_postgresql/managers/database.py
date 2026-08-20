@@ -458,7 +458,9 @@ class DatabaseManager(BaseManager):
         for member in online_members:
             unit = self.state.model.get_unit(label2name(member["name"]))
             if member["role"] == "leader":
-                primary_unit_ip = self._unit_ip(unit) or ""
+                # A stale leader unit without a peer address publishes "None:5432",
+                # as the charm did.
+                primary_unit_ip = self._unit_ip(unit)
                 rw_endpoint = f"{primary_unit_ip}:{DATABASE_PORT}"
             else:
                 replica_ip = self._unit_ip(unit)
