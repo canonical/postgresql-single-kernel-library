@@ -16,7 +16,7 @@ from functools import cached_property
 from hashlib import shake_128
 from typing import TypedDict
 
-from ops import ActiveStatus, BlockedStatus, ModelError, Relation, StatusBase, Unit
+from ops import ActiveStatus, BlockedStatus, ModelError, Relation, StatusBase
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
@@ -431,15 +431,6 @@ class DatabaseManager(BaseManager):
 
     # -- Endpoint publishing
 
-    def _unit_ip(self, unit: Unit) -> str | None:
-        """The client-facing address a peer unit published for this relation."""
-        if not self.state.peer_relation:
-            return None
-        try:
-            return self.state.peer_relation.data[unit].get(f"{self.relation_name}-address")
-        except KeyError:
-            return None
-
     def _vm_endpoints(self, online_members: list[dict]) -> tuple[str, str, str]:
         """(rw_endpoint, ro_endpoints, ro_hosts) from the online Patroni members."""
         members = [
@@ -452,10 +443,10 @@ class DatabaseManager(BaseManager):
             if member["role"] == "leader":
                 # A stale leader unit without a peer address publishes "None:5432",
                 # as the charm did.
-                primary_unit_ip = self._unit_ip(unit)
+                primary_unit_ip = self.state.unit_database_address(unit, self.relation_name)
                 rw_endpoint = f"{primary_unit_ip}:{DATABASE_PORT}"
             else:
-                replica_ip = self._unit_ip(unit)
+                replica_ip = self.state.unit_database_address(unit, self.relation_name)
                 if not replica_ip:
                     continue
                 if ro_hosts:
