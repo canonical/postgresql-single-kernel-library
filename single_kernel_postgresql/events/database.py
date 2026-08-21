@@ -54,14 +54,16 @@ class DatabaseEventsHandler(Object):
         self.charm = charm
         self.state = state
         self.relation_name = relation_name
+        # Held for the readiness guards and the endpoint-input gathers: the manager
+        # takes no peer-manager references (akram09's review on the mappings PR).
+        self.patroni_manager = patroni_manager
+        self.tls_manager = tls_manager
 
         self.database_provides = DatabaseProvides(charm, relation_name=relation_name)
         self.manager = DatabaseManager(
             state=state,
             workload=charm.workload,
             database_provides=self.database_provides,
-            patroni_manager=patroni_manager,
-            tls_manager=tls_manager,
             set_unit_status=charm.set_unit_status,
             relation_name=relation_name,
         )
@@ -79,8 +81,8 @@ class DatabaseEventsHandler(Object):
         if not self.state.application.is_cluster_initialised:
             return False
         if self.state.substrate == Substrates.K8S:
-            return self.manager.patroni_manager.primary_endpoint_ready
-        return bool(self.manager.patroni_manager.member_started and self.charm.primary_endpoint)
+            return self.patroni_manager.primary_endpoint_ready
+        return bool(self.patroni_manager.member_started and self.charm.primary_endpoint)
 
     def _ready_for_removal(self) -> bool:
         """Whether the cluster can serve a relation removal right now.
@@ -91,8 +93,8 @@ class DatabaseEventsHandler(Object):
         if not self.state.application.is_cluster_initialised:
             return False
         if self.state.substrate == Substrates.K8S:
-            return self.manager.patroni_manager.member_started
-        return bool(self.manager.patroni_manager.member_started and self.charm.primary_endpoint)
+            return self.patroni_manager.member_started
+        return bool(self.patroni_manager.member_started and self.charm.primary_endpoint)
 
     def _on_database_requested(self, event: DatabaseRequestedEvent) -> None:
         """Generate password and handle user and database creation for the related app."""
@@ -148,9 +150,15 @@ class DatabaseEventsHandler(Object):
             self.database_provides.set_database(event.relation.id, database)
             if self.state.substrate == Substrates.K8S:
                 # K8s refreshed every relation from the request handler.
-                self.manager.update_endpoints()
+                self.manager.update_endpoints(
+                    client_tls_files=self.tls_manager.get_client_tls_files()
+                )
             else:
-                self.manager.update_endpoints(event.relation.id)
+                self.manager.update_endpoints(
+                    event.relation.id,
+                    online_members=self.patroni_manager.online_cluster_members(),
+                    client_tls_files=self.tls_manager.get_client_tls_files(),
+                )
             self.manager.update_unit_status(postgresql, event.relation)
             self.charm.update_config()
         except self.manager.request_errors as e:
@@ -182,12 +190,10 @@ class DatabaseEventsHandler(Object):
         self.database_provides.set_uris(
             relation_id, f"postgresql://{user}:{password}@{primary}/{database}"
         )
-        self.database_provides.set_tls(
-            relation_id, "True" if self.manager.is_tls_enabled else "False"
-        )
-        if self.manager.is_tls_enabled:
-            _, ca, _ = self.manager.tls_manager.get_client_tls_files()
-            self.database_provides.set_tls_ca(relation_id, ca or "")
+        client_tls_files = self.tls_manager.get_client_tls_files()
+        self.database_provides.set_tls(relation_id, "True" if all(client_tls_files) else "False")
+        if all(client_tls_files):
+            self.database_provides.set_tls_ca(relation_id, client_tls_files[1] or "")
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
         """Set a flag to avoid deleting database users when not wanted."""

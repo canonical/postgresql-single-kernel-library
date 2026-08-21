@@ -34,6 +34,7 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
     DatabaseProvides,
 )
 from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.managers.patroni import ClusterMember
 from single_kernel_postgresql.utils import label2name, new_password
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
@@ -431,7 +432,7 @@ class DatabaseManager(BaseManager):
 
     # -- Endpoint publishing
 
-    def _vm_endpoints(self, online_members: list[dict]) -> tuple[str, str, str]:
+    def _vm_endpoints(self, online_members: list[ClusterMember]) -> tuple[str, str, str]:
         """(rw_endpoint, ro_endpoints, ro_hosts) from the online Patroni members."""
         members = [
             member for member in online_members if not member.get("tags", {}).get("nosync", False)
@@ -478,7 +479,7 @@ class DatabaseManager(BaseManager):
     def update_endpoints(
         self,
         relation_id: int | None = None,
-        online_members: list[dict] | None = None,
+        online_members: list[ClusterMember] | None = None,
         client_tls_files: tuple[str | None, str | None, str | None] | None = None,
     ) -> None:
         """Set the read/write and read-only endpoints on the client relations.
