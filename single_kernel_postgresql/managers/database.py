@@ -16,7 +16,7 @@ from functools import cached_property
 from hashlib import shake_128
 from typing import TypedDict
 
-from ops import ActiveStatus, BlockedStatus, ModelError, Relation, StatusBase, Unit
+from ops import ActiveStatus, BlockedStatus, ModelError, Relation, StatusBase
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
@@ -34,8 +34,6 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
     DatabaseProvides,
 )
 from single_kernel_postgresql.managers.base import BaseManager
-from single_kernel_postgresql.managers.patroni import PatroniManager
-from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import label2name, new_password
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
@@ -94,8 +92,6 @@ class DatabaseManager(BaseManager):
         state: CharmState,
         workload: BaseWorkload,
         database_provides: DatabaseProvides,
-        patroni_manager: PatroniManager,
-        tls_manager: TLSManager,
         set_unit_status: Callable[[StatusBase], None],
         relation_name: str = DATABASE,
     ) -> None:
@@ -103,8 +99,6 @@ class DatabaseManager(BaseManager):
         # Constructor-injected by events.database.DatabaseEventsHandler, which owns the
         # provider interface and the ops observers.
         self.database_provides = database_provides
-        self.patroni_manager = patroni_manager
-        self.tls_manager = tls_manager
         # Injected only while the charm_refresh priority gate is still charm-side; once
         # the refresh logic migrates into the library the manager owns its status writes.
         self.set_unit_status = set_unit_status
@@ -437,33 +431,22 @@ class DatabaseManager(BaseManager):
 
     # -- Endpoint publishing
 
-    def _unit_ip(self, unit: Unit) -> str | None:
-        """The client-facing address a peer unit published for this relation."""
-        if not self.state.peer_relation:
-            return None
-        try:
-            return self.state.peer_relation.data[unit].get(f"{self.relation_name}-address")
-        except KeyError:
-            return None
-
-    def _vm_endpoints(self) -> tuple[str, str, str]:
+    def _vm_endpoints(self, online_members: list[dict]) -> tuple[str, str, str]:
         """(rw_endpoint, ro_endpoints, ro_hosts) from the online Patroni members."""
-        online_members = [
-            member
-            for member in self.patroni_manager.online_cluster_members()
-            if not member.get("tags", {}).get("nosync", False)
+        members = [
+            member for member in online_members if not member.get("tags", {}).get("nosync", False)
         ]
 
         primary_unit_ip, rw_endpoint, ro_hosts, ro_endpoints = "", "", "", ""
-        for member in online_members:
+        for member in members:
             unit = self.state.model.get_unit(label2name(member["name"]))
             if member["role"] == "leader":
                 # A stale leader unit without a peer address publishes "None:5432",
                 # as the charm did.
-                primary_unit_ip = self._unit_ip(unit)
+                primary_unit_ip = self.state.unit_database_address(unit, self.relation_name)
                 rw_endpoint = f"{primary_unit_ip}:{DATABASE_PORT}"
             else:
-                replica_ip = self._unit_ip(unit)
+                replica_ip = self.state.unit_database_address(unit, self.relation_name)
                 if not replica_ip:
                     continue
                 if ro_hosts:
@@ -492,11 +475,19 @@ class DatabaseManager(BaseManager):
             ro_hosts,
         )
 
-    def update_endpoints(self, relation_id: int | None = None) -> None:  # noqa: C901
+    def update_endpoints(
+        self,
+        relation_id: int | None = None,
+        online_members: list[dict] | None = None,
+        client_tls_files: tuple[str | None, str | None, str | None] | None = None,
+    ) -> None:
         """Set the read/write and read-only endpoints on the client relations.
 
         Args:
             relation_id: restrict the update to one relation; all of them when None.
+            online_members: the Patroni cluster members (VM only; gathered by the caller,
+                as the manager holds no peer-manager references).
+            client_tls_files: the (key, ca, cert) client TLS files, for the TLS flag and CA.
         """
         if not self.state.peer.is_app_leader:
             return
@@ -518,14 +509,13 @@ class DatabaseManager(BaseManager):
         if self.state.substrate == Substrates.K8S:
             rw_endpoint, ro_endpoints, ro_hosts = self._k8s_endpoints()
         else:
-            rw_endpoint, ro_endpoints, ro_hosts = self._vm_endpoints()
+            if online_members is None:
+                raise ValueError("online_members is required on the VM substrate")
+            rw_endpoint, ro_endpoints, ro_hosts = self._vm_endpoints(online_members)
 
-        tls = "True" if self.is_tls_enabled else "False"
-        ca = None
-        if tls == "True":
-            _, ca, _ = self.tls_manager.get_client_tls_files()
-        if not ca:
-            ca = ""
+        client_tls_files = client_tls_files or (None, None, None)
+        tls = "True" if all(client_tls_files) else "False"
+        ca = client_tls_files[1] or ""
 
         prefix_database_mapping = self.get_databases_prefix_mapping()
 
@@ -566,11 +556,6 @@ class DatabaseManager(BaseManager):
                 # No database matches prefix, no valid URI
                 self.database_provides.delete_relation_data(current_id, ["uris", "read-only-uris"])
             self.set_rel_to_db_mapping()
-
-    @property
-    def is_tls_enabled(self) -> bool:
-        """Whether the client-facing TLS files have been issued."""
-        return all(self.tls_manager.get_client_tls_files())
 
     # -- Blocking-status validation
 
