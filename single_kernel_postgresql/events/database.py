@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-"""Client-relation events handler — owns DatabaseProvides, delegates to DatabaseManager."""
+"""Client-relation events handler — owns the client-relation observers."""
 
 import logging
 
@@ -11,7 +11,6 @@ from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import DATABASE, DATABASE_PORT
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
-    DatabaseProvides,
     DatabaseRequestedEvent,
 )
 from single_kernel_postgresql.managers.database import DatabaseManager, DatabaseRequest
@@ -28,10 +27,9 @@ logger = logging.getLogger(__name__)
 class DatabaseEventsHandler(Object):
     """Handles the ``database`` (``postgresql_client``) provider relation.
 
-    Owns the :class:`DatabaseProvides` interface and the three observers the client
-    relation needs, and constructor-injects the interface into
-    :class:`~single_kernel_postgresql.managers.database.DatabaseManager`, mirroring how
-    the TLS handler owns its requirers.
+    Owns the three observers the client relation needs and drives the
+    :class:`~single_kernel_postgresql.managers.database.DatabaseManager` the charm
+    constructs, mirroring how the postgresql events handler receives its managers.
 
     Each handler keeps its guard and its work in one observer: ``defer()`` is
     per-observer, so splitting the readiness check from the action would let a deferred
@@ -46,6 +44,7 @@ class DatabaseEventsHandler(Object):
         self,
         charm,
         state: CharmState,
+        database_manager: DatabaseManager,
         patroni_manager: PatroniManager,
         tls_manager: TLSManager,
         relation_name: str = DATABASE,
@@ -54,19 +53,14 @@ class DatabaseEventsHandler(Object):
         self.charm = charm
         self.state = state
         self.relation_name = relation_name
+        # The charm is the composition root: it constructs the manager and the provider
+        # interface; this handler owns the observers and the guard/defer decisions.
+        self.manager = database_manager
+        self.database_provides = database_manager.database_provides
         # Held for the readiness guards and the endpoint-input gathers: the manager
         # takes no peer-manager references (akram09's review on the mappings PR).
         self.patroni_manager = patroni_manager
         self.tls_manager = tls_manager
-
-        self.database_provides = DatabaseProvides(charm, relation_name=relation_name)
-        self.manager = DatabaseManager(
-            state=state,
-            workload=charm.workload,
-            database_provides=self.database_provides,
-            set_unit_status=charm.set_unit_status,
-            relation_name=relation_name,
-        )
 
         self.framework.observe(
             charm.on[relation_name].relation_departed, self._on_relation_departed

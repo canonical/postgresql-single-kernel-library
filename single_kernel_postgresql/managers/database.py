@@ -97,8 +97,8 @@ class DatabaseManager(BaseManager):
         relation_name: str = DATABASE,
     ) -> None:
         super().__init__(state, workload, "database_manager")
-        # Constructor-injected by events.database.DatabaseEventsHandler, which owns the
-        # provider interface and the ops observers.
+        # Constructor-injected by the charm, the composition root: it owns the provider
+        # interface and the ops observers live in the events handler.
         self.database_provides = database_provides
         # Injected only while the charm_refresh priority gate is still charm-side; once
         # the refresh logic migrates into the library the manager owns its status writes.
