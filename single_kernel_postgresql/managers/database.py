@@ -34,8 +34,6 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
     DatabaseProvides,
 )
 from single_kernel_postgresql.managers.base import BaseManager
-from single_kernel_postgresql.managers.patroni import PatroniManager
-from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import label2name, new_password
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
@@ -94,8 +92,6 @@ class DatabaseManager(BaseManager):
         state: CharmState,
         workload: BaseWorkload,
         database_provides: DatabaseProvides,
-        patroni_manager: PatroniManager,
-        tls_manager: TLSManager,
         set_unit_status: Callable[[StatusBase], None],
         relation_name: str = DATABASE,
     ) -> None:
@@ -103,8 +99,6 @@ class DatabaseManager(BaseManager):
         # Constructor-injected by events.database.DatabaseEventsHandler, which owns the
         # provider interface and the ops observers.
         self.database_provides = database_provides
-        self.patroni_manager = patroni_manager
-        self.tls_manager = tls_manager
         # Injected only while the charm_refresh priority gate is still charm-side; once
         # the refresh logic migrates into the library the manager owns its status writes.
         self.set_unit_status = set_unit_status
