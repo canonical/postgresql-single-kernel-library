@@ -74,6 +74,10 @@ def cluster_ready(harness, postgresql, ready=True):
             return_value=ready,
         ),
         patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.online_cluster_members",
+            return_value=[],
+        ),
+        patch(
             "single_kernel_postgresql.managers.database.DatabaseManager.get_plugins",
             return_value=["pgaudit"],
         ),
@@ -116,9 +120,11 @@ def test_database_requested_creates_the_user_and_database(substrate, harness, ev
     )
     if substrate == "k8s":
         # K8s refreshed every relation from the request handler; VM scoped to the requester.
-        update_endpoints.assert_called_once_with()
+        update_endpoints.assert_called_once_with(client_tls_files=(None, None, None))
     else:
-        update_endpoints.assert_called_once_with(rel_id)
+        update_endpoints.assert_called_once_with(
+            rel_id, online_members=[], client_tls_files=(None, None, None)
+        )
 
     data = harness.get_relation_data(rel_id, harness.charm.app.name)
     assert data["username"] == user
@@ -374,7 +380,7 @@ def test_the_k8s_inline_publish_sets_the_tls_fields_when_tls_is_enabled(
     with (
         cluster_ready(harness, postgresql),
         patch.object(
-            type(events.manager.tls_manager),
+            type(events.tls_manager),
             "get_client_tls_files",
             return_value=("key", "CA", "cert"),
         ),

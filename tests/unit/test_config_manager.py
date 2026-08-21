@@ -1,6 +1,6 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
-from unittest.mock import MagicMock, Mock, PropertyMock, patch, sentinel
+from unittest.mock import ANY, MagicMock, Mock, PropertyMock, patch, sentinel
 
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
@@ -632,7 +632,9 @@ def test_handle_restart_need_persists_tls_flag_and_refreshes_endpoints(
     postgresql_client.is_tls_enabled.return_value = True
     restart_engine.handle_restart_need(postgresql_client, config_changed=False)
     restart_engine._peer_tls.assert_called_once_with(True)
-    restart_engine.database_manager.update_endpoints.assert_called_once_with()
+    restart_engine.database_manager.update_endpoints.assert_called_once_with(
+        online_members=ANY, client_tls_files=ANY
+    )
 
 
 def test_handle_restart_need_swallows_reload_patroni_error(restart_engine, postgresql_client):
@@ -804,7 +806,9 @@ def test_update_config_workload_not_running_persists_tls_and_refreshes(
     with patch.object(orchestrate.workload, "is_patroni_running", return_value=False):
         assert orchestrate.update_config(postgresql_client) is True
     orchestrate._peer_tls.assert_called_once_with(True)
-    orchestrate.database_manager.update_endpoints.assert_called_once_with()
+    orchestrate.database_manager.update_endpoints.assert_called_once_with(
+        online_members=ANY, client_tls_files=ANY
+    )
     orchestrate.handle_restart_need.assert_not_called()
 
 

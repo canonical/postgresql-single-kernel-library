@@ -12,13 +12,18 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
+from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
+    DatabaseProvides,
+)
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
+from single_kernel_postgresql.managers.database import DatabaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
 from ..config.enums import Substrates
+from ..config.literals import DATABASE
 from ..utils.postgresql import PostgreSQL
 
 
@@ -45,12 +50,17 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         self.patroni_manager = PatroniManager(state=self.state, workload=self.workload)
         self.cluster_manager = ClusterManager(state=self.state, workload=self.workload)
 
-        # Client-relation handler owns DatabaseProvides and builds the DatabaseManager the
-        # config manager refreshes endpoints and reads the user hash through.
-        self.database = DatabaseEventsHandler(
-            self, self.state, self.patroni_manager, self.tls_manager
+        # Client-relation subsystem: the charm is the composition root, as with the
+        # other managers; the handler owns only the observers and guard/defer decisions.
+        self.database_manager = DatabaseManager(
+            state=self.state,
+            workload=self.workload,
+            database_provides=DatabaseProvides(self, relation_name=DATABASE),
+            set_unit_status=self.set_unit_status,
         )
-        self.database_manager = self.database.manager
+        self.database = DatabaseEventsHandler(
+            self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
+        )
 
         self.config_manager = ConfigManager(
             state=self.state,
