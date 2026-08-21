@@ -381,22 +381,15 @@ def test_update_endpoints_publishes_rw_ro_and_uris(substrate, manager, harness):
         )
 
     with (
-        patch(
-            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
-            return_value=CLUSTER_STATUS[:2],
-        ),
-        patch(
-            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
-            new_callable=PropertyMock,
-            return_value=False,
-        ),
         patch.object(
             manager.database_provides,
             "fetch_my_relation_data",
             return_value={rel_id: {"username": "u", "password": "pw"}},
         ),
     ):
-        manager.update_endpoints(rel_id)
+        manager.update_endpoints(
+            rel_id, online_members=CLUSTER_STATUS[:2] if substrate == "vm" else None
+        )
 
     data = harness.get_relation_data(rel_id, harness.charm.app.name)
     if substrate == "k8s":
@@ -424,15 +417,6 @@ def test_update_endpoints_read_only_uri_carries_one_port(substrate, manager, har
         )
 
     with (
-        patch(
-            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
-            return_value=CLUSTER_STATUS[:1],
-        ),
-        patch(
-            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
-            new_callable=PropertyMock,
-            return_value=False,
-        ),
         patch.object(
             manager.database_provides,
             "fetch_my_relation_data",
@@ -440,7 +424,9 @@ def test_update_endpoints_read_only_uri_carries_one_port(substrate, manager, har
         ),
         patch.object(manager.database_provides, "set_read_only_uris") as _set_ro_uris,
     ):
-        manager.update_endpoints(rel_id)
+        manager.update_endpoints(
+            rel_id, online_members=CLUSTER_STATUS[:1] if substrate == "vm" else None
+        )
 
     _set_ro_uris.assert_called_once()
     uri = _set_ro_uris.call_args.args[1]
@@ -456,23 +442,12 @@ def test_update_endpoints_publishes_the_primary_ip_verbatim(manager, harness, su
     with harness.hooks_disabled():
         harness.update_relation_data(rel_id, "application", {"database": "test_db"})
 
-    with (
-        patch(
-            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
-            return_value=CLUSTER_STATUS[:1],
-        ),
-        patch(
-            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
-            new_callable=PropertyMock,
-            return_value=False,
-        ),
-        patch.object(
-            manager.database_provides,
-            "fetch_my_relation_data",
-            return_value={rel_id: {"username": "u", "password": "pw"}},
-        ),
+    with patch.object(
+        manager.database_provides,
+        "fetch_my_relation_data",
+        return_value={rel_id: {"username": "u", "password": "pw"}},
     ):
-        manager.update_endpoints(rel_id)
+        manager.update_endpoints(rel_id, online_members=CLUSTER_STATUS[:1])
 
     data = harness.get_relation_data(rel_id, harness.charm.app.name)
     assert data["endpoints"] == "None:5432"
@@ -487,21 +462,16 @@ def test_update_endpoints_publishes_tls_when_enabled(substrate, manager, harness
             peer_rel_id, "postgresql-single-kernel/0", {f"{RELATION_NAME}-address": "1.1.1.1"}
         )
 
-    with (
-        patch(
-            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
-            return_value=CLUSTER_STATUS[:1],
-        ),
-        patch.object(
-            manager.tls_manager, "get_client_tls_files", return_value=("key", "CA", "cert")
-        ),
-        patch.object(
-            manager.database_provides,
-            "fetch_my_relation_data",
-            return_value={rel_id: {"username": "u", "password": "pw"}},
-        ),
+    with patch.object(
+        manager.database_provides,
+        "fetch_my_relation_data",
+        return_value={rel_id: {"username": "u", "password": "pw"}},
     ):
-        manager.update_endpoints(rel_id)
+        manager.update_endpoints(
+            rel_id,
+            online_members=CLUSTER_STATUS[:1] if substrate == "vm" else None,
+            client_tls_files=("key", "CA", "cert"),
+        )
 
     data = harness.get_relation_data(rel_id, harness.charm.app.name)
     assert data["tls"] == "True"
@@ -519,17 +489,10 @@ def test_k8s_endpoints_fall_back_to_the_primary_without_peer_units(substrate, ma
         harness.remove_relation_unit(peer_rel_id, "postgresql-single-kernel/2")
         harness.update_relation_data(rel_id, "application", {"database": "test_db"})
 
-    with (
-        patch(
-            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
-            new_callable=PropertyMock,
-            return_value=False,
-        ),
-        patch.object(
-            manager.database_provides,
-            "fetch_my_relation_data",
-            return_value={rel_id: {"username": "u", "password": "pw"}},
-        ),
+    with patch.object(
+        manager.database_provides,
+        "fetch_my_relation_data",
+        return_value={rel_id: {"username": "u", "password": "pw"}},
     ):
         manager.update_endpoints(rel_id)
 
@@ -549,23 +512,12 @@ def test_update_endpoints_falls_back_to_the_primary_without_replicas(manager, ha
             peer_rel_id, "postgresql-single-kernel/0", {f"{RELATION_NAME}-address": "1.1.1.1"}
         )
 
-    with (
-        patch(
-            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
-            return_value=CLUSTER_STATUS[:1],
-        ),
-        patch(
-            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
-            new_callable=PropertyMock,
-            return_value=False,
-        ),
-        patch.object(
-            manager.database_provides,
-            "fetch_my_relation_data",
-            return_value={rel_id: {"username": "u", "password": "pw"}},
-        ),
+    with patch.object(
+        manager.database_provides,
+        "fetch_my_relation_data",
+        return_value={rel_id: {"username": "u", "password": "pw"}},
     ):
-        manager.update_endpoints(rel_id)
+        manager.update_endpoints(rel_id, online_members=CLUSTER_STATUS[:1])
 
     data = harness.get_relation_data(rel_id, harness.charm.app.name)
     assert data["read-only-endpoints"] == "1.1.1.1:5432"
@@ -589,23 +541,12 @@ def test_update_endpoints_filters_out_of_sync_members(manager, harness, substrat
         )
 
     nosync = [*CLUSTER_STATUS[:2], {**CLUSTER_STATUS[2], "tags": {"nosync": True}}]
-    with (
-        patch(
-            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
-            return_value=nosync,
-        ),
-        patch(
-            "single_kernel_postgresql.managers.database.DatabaseManager.is_tls_enabled",
-            new_callable=PropertyMock,
-            return_value=False,
-        ),
-        patch.object(
-            manager.database_provides,
-            "fetch_my_relation_data",
-            return_value={rel_id: {"username": "u", "password": "pw"}},
-        ),
+    with patch.object(
+        manager.database_provides,
+        "fetch_my_relation_data",
+        return_value={rel_id: {"username": "u", "password": "pw"}},
     ):
-        manager.update_endpoints(rel_id)
+        manager.update_endpoints(rel_id, online_members=nosync)
 
     data = harness.get_relation_data(rel_id, harness.charm.app.name)
     assert data["read-only-endpoints"] == "2.2.2.2:5432"
@@ -644,13 +585,6 @@ def test_update_unit_status_keeps_a_prefix_block_while_a_short_prefix_remains(
     manager.update_unit_status(postgresql, relation)
 
     assert harness.model.unit.status == BlockedStatus(PREFIX_TOO_SHORT_MSG)
-
-
-def test_is_tls_enabled_tracks_the_client_files(manager):
-    with patch.object(manager.tls_manager, "get_client_tls_files", return_value=("k", "ca", "c")):
-        assert manager.is_tls_enabled is True
-    with patch.object(manager.tls_manager, "get_client_tls_files", return_value=("k", None, "c")):
-        assert manager.is_tls_enabled is False
 
 
 def test_prefix_mapping_secret_labels_are_stable(manager):
