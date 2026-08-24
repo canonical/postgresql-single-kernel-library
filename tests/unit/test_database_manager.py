@@ -736,7 +736,11 @@ def test_unblock_custom_user_errors_keeps_the_block_on_a_forbidden_user(
 
     with (
         patch.object(manager.database_provides, "fetch_my_relation_field", return_value=None),
-        patch.object(manager.database_provides, "fetch_relation_field", return_value="secret-uri"),
+        patch.object(
+            manager.database_provides,
+            "fetch_relation_data",
+            return_value={relation.id: {"requested-entity-secret": "secret-uri"}},
+        ),
         patch.object(manager.state.model, "get_secret", return_value=secret),
         patch.object(manager, "set_unit_status") as _gated,
     ):
@@ -753,7 +757,11 @@ def test_unblock_custom_user_errors_keeps_the_block_while_the_secret_is_unreadab
 
     with (
         patch.object(manager.database_provides, "fetch_my_relation_field", return_value=None),
-        patch.object(manager.database_provides, "fetch_relation_field", return_value="secret-uri"),
+        patch.object(
+            manager.database_provides,
+            "fetch_relation_data",
+            return_value={relation.id: {"requested-entity-secret": "secret-uri"}},
+        ),
         patch.object(manager.state.model, "get_secret", side_effect=ModelError),
         patch.object(manager, "set_unit_status") as _gated,
     ):

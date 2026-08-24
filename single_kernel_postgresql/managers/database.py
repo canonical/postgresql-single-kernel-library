@@ -29,6 +29,7 @@ from single_kernel_postgresql.config.literals import (
     SYSTEM_USERS,
     USERNAME_MAPPING_LABEL,
 )
+from single_kernel_postgresql.core.external_clients import ExternalClientRequest
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseProvides,
@@ -202,15 +203,20 @@ class DatabaseManager(BaseManager):
             self.state.set_secret(APP_SCOPE, DATABASE_MAPPING_LABEL, json.dumps(database_mapping))
         return usernames
 
+    def client_request(self, relation_id: int) -> ExternalClientRequest:
+        """The request payload one relation carries on its (requirer) side."""
+        data = self.database_provides.fetch_relation_data([relation_id])
+        return ExternalClientRequest.model_validate(data.get(relation_id, {}) if data else {})
+
     def set_rel_to_db_mapping(self) -> None:
         """Set mapping between relation and database."""
         if self.state.peer.is_app_leader:
             self.state.application.data["rel_databases"] = json.dumps({
-                key: val["database"]
+                str(key): database
                 for key, val in self.database_provides.fetch_relation_data(
                     None, ["database"]
                 ).items()
-                if val.get("database")
+                if (database := ExternalClientRequest.model_validate(val).database)
             })
 
     def get_rel_to_db_mapping(self) -> dict[str, str] | None:
@@ -227,7 +233,7 @@ class DatabaseManager(BaseManager):
         prefix_database_mapping = self.get_databases_prefix_mapping()
 
         for relation in self.state.model.relations[self.relation_name]:
-            if database := self.database_provides.fetch_relation_field(relation.id, "database"):
+            if database := self.client_request(relation.id).database:
                 user = custom_username_mapping.get(
                     str(relation.id), self.relation_username(relation.id)
                 )
@@ -491,7 +497,7 @@ class DatabaseManager(BaseManager):
 
         relations_ids = [relation_id] if relation_id is not None else None
         rel_data = self.database_provides.fetch_relation_data(
-            relations_ids, ["external-node-connectivity", "database"]
+            relations_ids, ["external-node-connectivity", "database", "requested-secrets"]
         )
 
         # skip if no relation data
@@ -516,7 +522,8 @@ class DatabaseManager(BaseManager):
         prefix_database_mapping = self.get_databases_prefix_mapping()
 
         for current_id in rel_data:
-            database = rel_data[current_id].get("database")
+            request = ExternalClientRequest.model_validate(rel_data[current_id])
+            database = request.database
             databases = None
             prefix_def = prefix_database_mapping.get(str(current_id))
             if prefix_def is not None:
@@ -539,11 +546,7 @@ class DatabaseManager(BaseManager):
                     f"postgresql://{user}:{password}@{rw_endpoint}/{database}",
                 )
                 # Make sure that the URI will be a secret
-                if (
-                    secret_fields := self.database_provides.fetch_relation_field(
-                        current_id, "requested-secrets"
-                    )
-                ) and "read-only-uris" in secret_fields:
+                if "read-only-uris" in (request.requested_secrets or []):
                     self.database_provides.set_read_only_uris(
                         current_id,
                         f"postgresql://{user}:{password}@{ro_hosts}:{DATABASE_PORT}/{database}",
@@ -571,7 +574,8 @@ class DatabaseManager(BaseManager):
             if relation.id == relation_id:
                 continue
             for data in relation.data.values():
-                for extra_user_role in self.sanitize_extra_roles(data.get("extra-user-roles")):
+                request = ExternalClientRequest.model_validate(data)
+                for extra_user_role in self.sanitize_extra_roles(request.extra_user_roles):
                     if (
                         extra_user_role not in valid_privileges
                         and extra_user_role not in valid_roles
@@ -590,10 +594,8 @@ class DatabaseManager(BaseManager):
             if relation.id == relation_id:
                 continue
             for data in relation.data.values():
-                database = data.get("database")
-                if database is not None and (
-                    len(database) > 49 or database in INVALID_DATABASE_NAMES
-                ):
+                database = ExternalClientRequest.model_validate(data).database
+                if database and (len(database) > 49 or database in INVALID_DATABASE_NAMES):
                     return True
         return False
 
@@ -610,11 +612,7 @@ class DatabaseManager(BaseManager):
                 # Relation is not established and custom user was requested
                 if not self.database_provides.fetch_my_relation_field(
                     other.id, "secret-user"
-                ) and (
-                    secret_uri := self.database_provides.fetch_relation_field(
-                        other.id, "requested-entity-secret"
-                    )
-                ):
+                ) and (secret_uri := self.client_request(other.id).requested_entity_secret):
                     content = self.state.model.get_secret(id=secret_uri).get_content()
                     for key in content:
                         if key in SYSTEM_USERS or key in existing_users:
