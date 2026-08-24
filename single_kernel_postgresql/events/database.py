@@ -62,7 +62,7 @@ class DatabaseEventsHandler(Object):
         self.manager = database_manager
         self.database_provides = database_manager.database_provides
         # Held for the readiness guards and the endpoint-input gathers: the manager
-        # takes no peer-manager references (akram09's review on the mappings PR).
+        # takes no peer-manager references.
         self.patroni_manager = patroni_manager
         self.tls_manager = tls_manager
 

@@ -510,9 +510,8 @@ class DatabaseManager(BaseManager):
                 raise ValueError("online_members is required on the VM substrate")
             rw_endpoint, ro_endpoints, ro_hosts = self._vm_endpoints(online_members)
 
-        client_tls_files = client_tls_files or (None, None, None)
-        tls = "True" if all(client_tls_files) else "False"
-        ca = client_tls_files[1] or ""
+        tls = "True" if client_tls_files and all(client_tls_files) else "False"
+        ca = (client_tls_files[1] if client_tls_files else None) or ""
 
         prefix_database_mapping = self.get_databases_prefix_mapping()
 
