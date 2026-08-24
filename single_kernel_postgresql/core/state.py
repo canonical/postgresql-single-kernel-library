@@ -235,6 +235,13 @@ class CharmState(Object):
             addresses.remove(current_unit_ip)
         return addresses
 
+    def unit_database_address(self, unit: Unit, relation_name: str = DATABASE) -> str | None:
+        """The client-facing address a peer unit published for the given relation."""
+        if not (peer_relation := self.peer_relation):
+            return None
+        with suppress(KeyError):
+            return peer_relation.data[unit].get(f"{relation_name}-address")
+
     @property
     def host(self) -> str:
         """Current unit host."""
@@ -526,3 +533,8 @@ class CharmState(Object):
     def primary_endpoint(self) -> str:
         """Returns the endpoint of the primary instance's service."""
         return self._build_service_name("primary")
+
+    @property
+    def replicas_endpoint(self) -> str:
+        """Returns the endpoint of the replicas instances' service."""
+        return self._build_service_name("replicas")

@@ -1,6 +1,6 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
-from unittest.mock import MagicMock, Mock, PropertyMock, patch, sentinel
+from unittest.mock import ANY, MagicMock, Mock, PropertyMock, patch, sentinel
 
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
@@ -27,7 +27,7 @@ def config(substrate):
             patroni_manager=Mock(),
             resource_provider=Mock(),
             request_restart=Mock(),
-            refresh_endpoints=Mock(),
+            database_manager=Mock(),
             restart_services=Mock(),
         )
     yield config
@@ -632,7 +632,9 @@ def test_handle_restart_need_persists_tls_flag_and_refreshes_endpoints(
     postgresql_client.is_tls_enabled.return_value = True
     restart_engine.handle_restart_need(postgresql_client, config_changed=False)
     restart_engine._peer_tls.assert_called_once_with(True)
-    restart_engine.refresh_endpoints.assert_called_once_with()
+    restart_engine.database_manager.update_endpoints.assert_called_once_with(
+        online_members=ANY, client_tls_files=ANY
+    )
 
 
 def test_handle_restart_need_swallows_reload_patroni_error(restart_engine, postgresql_client):
@@ -768,6 +770,7 @@ def orchestrate(config, postgresql_client):
         # patroni_manager is a Mock; member_started / ensure_slots are plain attributes here.
         config.patroni_manager.member_started = True
         config.patroni_manager.ensure_slots_controller_by_patroni.return_value = True
+        config.database_manager.user_hash = "uh"
         config._is_tls = _is_tls
         config._hash = _hash
         config._peer_tls = _peer_tls
@@ -778,21 +781,21 @@ def orchestrate(config, postgresql_client):
 
 
 def test_update_config_no_peers_returns_true_early(orchestrate, postgresql_client):
-    assert orchestrate.update_config(postgresql_client, user_hash="uh", no_peers=True) is True
+    assert orchestrate.update_config(postgresql_client, no_peers=True) is True
     orchestrate.render_patroni_yml_file.assert_called_once()
-    orchestrate.refresh_endpoints.assert_not_called()
+    orchestrate.database_manager.update_endpoints.assert_not_called()
     orchestrate.handle_restart_need.assert_not_called()
 
 
 def test_update_config_threads_tls_flag_into_render(orchestrate, postgresql_client):
     """is_tls_enabled is what update_config passes as render_patroni_yml_file's enable_tls."""
     orchestrate._is_tls.return_value = True
-    orchestrate.update_config(postgresql_client, user_hash="uh", no_peers=True)
+    orchestrate.update_config(postgresql_client, no_peers=True)
     assert orchestrate.render_patroni_yml_file.call_args.kwargs["enable_tls"] is True
 
     orchestrate.render_patroni_yml_file.reset_mock()
     orchestrate._is_tls.return_value = False
-    orchestrate.update_config(postgresql_client, user_hash="uh", no_peers=True)
+    orchestrate.update_config(postgresql_client, no_peers=True)
     assert orchestrate.render_patroni_yml_file.call_args.kwargs["enable_tls"] is False
 
 
@@ -801,9 +804,11 @@ def test_update_config_workload_not_running_persists_tls_and_refreshes(
 ):
     orchestrate._is_tls.return_value = True
     with patch.object(orchestrate.workload, "is_patroni_running", return_value=False):
-        assert orchestrate.update_config(postgresql_client, user_hash="uh") is True
+        assert orchestrate.update_config(postgresql_client) is True
     orchestrate._peer_tls.assert_called_once_with(True)
-    orchestrate.refresh_endpoints.assert_called_once_with()
+    orchestrate.database_manager.update_endpoints.assert_called_once_with(
+        online_members=ANY, client_tls_files=ANY
+    )
     orchestrate.handle_restart_need.assert_not_called()
 
 
@@ -812,14 +817,14 @@ def test_update_config_member_not_started_with_tls_forces_handle_restart_true(
 ):
     orchestrate._is_tls.return_value = True
     orchestrate.patroni_manager.member_started = False
-    assert orchestrate.update_config(postgresql_client, user_hash="uh") is True
+    assert orchestrate.update_config(postgresql_client) is True
     orchestrate.handle_restart_need.assert_called_once_with(postgresql_client, True)
 
 
 def test_update_config_member_not_started_no_tls_returns_false(orchestrate, postgresql_client):
     orchestrate._is_tls.return_value = False
     orchestrate.patroni_manager.member_started = False
-    assert orchestrate.update_config(postgresql_client, user_hash="uh") is False
+    assert orchestrate.update_config(postgresql_client) is False
     orchestrate.handle_restart_need.assert_not_called()
 
 
@@ -828,7 +833,7 @@ def test_update_config_cannot_connect_returns_false(substrate, orchestrate, post
     if substrate != Substrates.VM:
         pytest.skip("standalone connect gate is VM-only")
     with patch.object(orchestrate, "_can_connect_to_postgresql", return_value=False):
-        assert orchestrate.update_config(postgresql_client, user_hash="uh") is False
+        assert orchestrate.update_config(postgresql_client) is False
     orchestrate.apply_api_config.assert_not_called()
 
 
@@ -843,13 +848,13 @@ def test_update_config_k8s_proceeds_without_standalone_connect_gate(
     if substrate != Substrates.K8S:
         pytest.skip("this asserts the K8s-only no-gate behavior")
     with patch.object(orchestrate, "_can_connect_to_postgresql", return_value=False):
-        assert orchestrate.update_config(postgresql_client, user_hash="uh") is True
+        assert orchestrate.update_config(postgresql_client) is True
     orchestrate.apply_api_config.assert_called_once()
 
 
 def test_update_config_api_apply_fails_returns_false(orchestrate, postgresql_client):
     with patch.object(orchestrate, "apply_api_config", return_value=False):
-        assert orchestrate.update_config(postgresql_client, user_hash="uh") is False
+        assert orchestrate.update_config(postgresql_client) is False
     orchestrate.handle_restart_need.assert_not_called()
 
 
@@ -861,7 +866,7 @@ def test_update_config_happy_path_persists_hashes_and_calls_bridges(
         new_callable=PropertyMock,
         return_value=True,
     ):
-        assert orchestrate.update_config(postgresql_client, user_hash="uh") is True
+        assert orchestrate.update_config(postgresql_client) is True
     # config_hash change (old "oldhash" != new "newhash") drives handle_restart_need(True).
     orchestrate.handle_restart_need.assert_called_once_with(postgresql_client, True)
     orchestrate.restart_services.assert_called_once_with()
@@ -876,7 +881,7 @@ def test_update_config_ensure_slots_is_k8s_only(substrate, orchestrate, postgres
         new_callable=PropertyMock,
         return_value=False,
     ):
-        orchestrate.update_config(postgresql_client, user_hash="uh")
+        orchestrate.update_config(postgresql_client)
     if substrate == Substrates.K8S:
         orchestrate.patroni_manager.ensure_slots_controller_by_patroni.assert_called_once()
     else:
@@ -894,9 +899,7 @@ def test_update_config_vm_snap_gate_exits_before_restart_services(
     from unittest.mock import call
 
     with patch.object(orchestrate.workload, "get_snap_revision", return_value="123"):
-        assert (
-            orchestrate.update_config(postgresql_client, user_hash="uh", refresh=refresh) is True
-        )
+        assert orchestrate.update_config(postgresql_client, refresh=refresh) is True
     orchestrate.handle_restart_need.assert_called_once()
     orchestrate.restart_services.assert_not_called()
     # config_hash is read (getter, call()) for the restart decision but never PERSISTED
