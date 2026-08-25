@@ -38,7 +38,6 @@ class ExternalClientRequest(RequirerCommonModel):
 
     requested_secrets: Annotated[list[str] | None, BeforeValidator(_load_json_list)] = None
     requested_entity_secret: str | None = None
-    prefix_matching: str | None = None
     entity_permissions: Annotated[
         list[EntityPermissionModel] | None, BeforeValidator(_load_json_list)
     ] = None

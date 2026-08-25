@@ -27,14 +27,13 @@ def test_request_database_defaults_to_empty():
     assert ExternalClientRequest.model_validate({}).database == ""
 
 
-def test_request_parses_the_postgresql_request_fields():
-    """The postgresql-specific request fields are typed, not loose extras."""
+def test_request_parses_the_entity_secret_field():
+    """Undeclared request fields ride along as extras without failing parsing."""
     request = ExternalClientRequest.model_validate({
         "requested-entity-secret": "secret:9m4e2mr0ui3e8a215n4g",
         "prefix-matching": "all",
     })
     assert request.requested_entity_secret == "secret:9m4e2mr0ui3e8a215n4g"
-    assert request.prefix_matching == "all"
 
 
 def test_request_requested_secrets_absent_is_none():

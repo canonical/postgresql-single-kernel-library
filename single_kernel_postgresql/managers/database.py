@@ -650,7 +650,7 @@ class DatabaseManager(BaseManager):
             for other in self.state.model.relations.get(self.relation_name, []):
                 # Relation is not established and custom user was requested
                 if (
-                    (database := self.database_provides.fetch_relation_field(other.id, "database"))
+                    (database := self.client_request(other.id).database)
                     and database[-1] == "*"
                     and len(database) < MINIMUM_PREFIX_REQUEST_LENGTH
                 ):
