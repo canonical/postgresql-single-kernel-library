@@ -46,3 +46,14 @@ def test_request_round_trips_already_typed_secrets(payload):
     """A list payload parses too, not only the JSON string the wire carries."""
     request = ExternalClientRequest.model_validate({"requested-secrets": payload})
     assert request.requested_secrets == payload
+
+
+def test_request_decodes_the_entity_permissions_wire_format():
+    """The v0 wire encodes entity permissions as a JSON string, not a list."""
+    request = ExternalClientRequest.model_validate({
+        "entity-permissions": json.dumps([
+            {"resource_name": "db1", "resource_type": "DATABASE", "privileges": ["SELECT"]},
+        ]),
+    })
+    assert request.entity_permissions[0].resource_name == "db1"
+    assert request.entity_permissions[0].privileges == ["SELECT"]

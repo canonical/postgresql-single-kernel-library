@@ -113,6 +113,39 @@ def test_collect_user_relations_skips_relations_without_a_database(manager):
     assert manager.collect_user_relations() == {}
 
 
+def test_collect_user_relations_survives_entity_permissions_requests(manager, harness):
+    """A v0 entity request's JSON-string permissions must not crash the user hash."""
+    rel_id = harness.model.get_relation(RELATION_NAME).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            rel_id,
+            "application",
+            {
+                "database": "test_db",
+                "entity-permissions": json.dumps([
+                    {
+                        "resource_name": "db1",
+                        "resource_type": "DATABASE",
+                        "privileges": ["SELECT"],
+                    },
+                ]),
+            },
+        )
+
+    assert manager.collect_user_relations() == {manager.relation_username(rel_id): "test_db"}
+
+
+def test_client_request_selects_the_requested_relation(manager):
+    """Each relation id maps to its own payload when several are in play."""
+    with patch.object(
+        manager.database_provides,
+        "fetch_relation_data",
+        return_value={7: {"database": "db7"}, 8: {"database": "db8"}},
+    ):
+        assert manager.client_request(8).database == "db8"
+        assert manager.client_request(7).database == "db7"
+
+
 def test_set_rel_to_db_mapping_caches_the_databases(manager, harness):
     """The Patroni pg_hba render reads this app-data cache under the same key."""
     rel_id = harness.model.get_relation(RELATION_NAME).id
@@ -534,6 +567,37 @@ def test_update_endpoints_read_only_uri_carries_one_port(substrate, manager, har
     uri = _set_ro_uris.call_args.args[1]
     assert uri.endswith(":5432/test_db")
     assert ":5432:5432" not in uri
+
+
+def test_update_endpoints_omits_the_read_only_uri_without_the_secret_request(
+    substrate, manager, harness
+):
+    """A near-miss secret request must not publish the URI (substring matching would)."""
+    rel_id = harness.model.get_relation(RELATION_NAME).id
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            rel_id,
+            "application",
+            {"database": "test_db", "requested-secrets": json.dumps(["read-only-uris-backup"])},
+        )
+        harness.update_relation_data(
+            peer_rel_id, "postgresql-single-kernel/0", {f"{RELATION_NAME}-address": "1.1.1.1"}
+        )
+
+    with (
+        patch.object(
+            manager.database_provides,
+            "fetch_my_relation_data",
+            return_value={rel_id: {"username": "u", "password": "pw"}},
+        ),
+        patch.object(manager.database_provides, "set_read_only_uris") as _set_ro_uris,
+    ):
+        manager.update_endpoints(
+            rel_id, online_members=CLUSTER_STATUS[:1] if substrate == "vm" else None
+        )
+
+    _set_ro_uris.assert_not_called()
 
 
 def test_update_endpoints_falls_back_to_the_primary_without_replicas(manager, harness, substrate):
