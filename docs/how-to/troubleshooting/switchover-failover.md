@@ -100,7 +100,7 @@ Find the current primary/standby/replica:
 
 ```shell
 $ juju ssh postgresql/0
-ubuntu@juju-422c1a-0:~$ sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml list
+ubuntu@juju-422c1a-0:~$ sudo -H -u snap_daemon patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml list
 + Cluster: postgresql (7499430436963402504) ---+-----------+----+-----------+
 | Member       | Host           | Role         | State     | TL | Lag in MB |
 +--------------+----------------+--------------+-----------+----+-----------+
