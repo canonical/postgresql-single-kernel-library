@@ -82,7 +82,7 @@ Walkthrough of a cross-regional, cluster-cluster deployment and disaster recover
 :maxdepth: 2
 :titlesonly:
 
-Custer-cluster replication <cluster-cluster-replication/index>
+Cluster-cluster replication <cluster-cluster-replication/index>
 ```
 
 ## Extensions (plugins)
