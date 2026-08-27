@@ -107,7 +107,7 @@ The charmed-postgresql snap also ships list of tools used by charm:
 
 To avoid a split-brain scenario, we recommend you do **not** start, stop, and restart snap services manually. See {ref}`this guide <troubleshooting>` for troubleshooting guidance.
 
-All snap resources must be executed under the special **snap user `_daemon_`** only!
+All snap resources must be executed under the special **snap user `snap_daemon`** only!
 ```
 
 ````

@@ -33,7 +33,7 @@ Learn more about Patroni in {ref}`architecture`.
 
 The main Patroni tool is `patronictl`.
 
-**It should only be used under the snap context**, via the root user.
+**It should only be used under the snap context**, via the user `snap_daemon`.
 
 #### Cluster status
 
@@ -46,7 +46,7 @@ $ juju deploy postgresql --channel 14/stable -n 3 # and wait for deployment
 $ juju ssh postgresql/2
 ...
 
-ubuntu@juju-b87344-2:~$ sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml topology
+ubuntu@juju-b87344-2:~$ sudo -H -u snap_daemon patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml topology
 + Cluster: postgresql (7496847632512033809) ------+-----------+----+-----------+
 | Member          | Host           | Role         | State     | TL | Lag in MB |
 +-----------------+----------------+--------------+-----------+----+-----------+
@@ -64,7 +64,7 @@ Use `--help` to find all the available Patroni actions.
 <details><summary>Example: Patroni actions</summary>
 
 ```shell
-$  sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml --help
+$  sudo -H -u snap_daemon patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml --help
 ...
   failover     Failover to a replica
   history      Show the history of failovers/switchovers
@@ -89,7 +89,7 @@ Patroni can perform a low-level [switchover/failover](https://patroni.readthedoc
 <details><summary>Example: switchover (healthy cluster only)</summary>
 
 ```shell
-$ sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml switchover postgresql --candidate postgresql-2 --force
+$ sudo -H -u snap_daemon patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml switchover postgresql --candidate postgresql-2 --force
 Current cluster topology
 + Cluster: postgresql (7496847632512033809) ----+-----------+----+-----------+
 | Member        | Host           | Role         | State     | TL | Lag in MB |
@@ -107,7 +107,7 @@ Current cluster topology
 | postgresql-3  | 10.189.210.26  | Replica | stopped   |    |   unknown |
 +---------------+----------------+---------+-----------+----+-----------+
 
-$ sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml list
+$ sudo -H -u snap_daemon patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml list
 + Cluster: postgresql (7496847632512033809) ----+-----------+----+-----------+
 | Member        | Host           | Role         | State     | TL | Lag in MB |
 +---------------+----------------+--------------+-----------+----+-----------+
@@ -121,7 +121,7 @@ $ sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.ya
 <details><summary>Example: failover</summary>
 
 ```shell
-$ sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml failover postgresql --candidate postgresql-3
+$ sudo -H -u snap_daemon patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml failover postgresql --candidate postgresql-3
 Current cluster list
 + Cluster: postgresql (7496847632512033809) ----+-----------+----+-----------+
 | Member        | Host           | Role         | State     | TL | Lag in MB |
@@ -140,14 +140,14 @@ Are you sure you want to failover cluster postgresql, demoting current leader po
 | postgresql-3  | 10.189.210.26  | Leader  | running |  1 |           |
 +---------------+----------------+---------+---------+----+-----------+
 
-$ sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml history
+$ sudo -H -u snap_daemon patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml history
 +----+-----------+------------------------------+----------------------------------+--------------+
 | TL |       LSN | Reason                       | Timestamp                        | New Leader   |
 +----+-----------+------------------------------+----------------------------------+--------------+
 |  1 | 335544480 | no recovery target specified | 2025-04-25T04:44:53.137152+00:00 | postgresql-3 |
 +----+-----------+------------------------------+----------------------------------+--------------+
 
-$ sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml list
+$ sudo -H -u snap_daemon patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml list
 + Cluster: postgresql (7496847632512033809) ----+-----------+----+-----------+
 | Member        | Host           | Role         | State     | TL | Lag in MB |
 +---------------+----------------+--------------+-----------+----+-----------+
@@ -164,7 +164,7 @@ Sometimes the cluster member might stuck in the middle of nowhere, the easiest w
 <details><summary>Example: cluster member re-initialisation</summary>
 
 ```shell
-$ sudo patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml reinit postgresql postgresql-1
+$ sudo -H -u snap_daemon patronictl -c /var/snap/charmed-postgresql/current/etc/patroni/patroni.yaml reinit postgresql postgresql-1
 + Cluster: postgresql (7496847632512033809) ----+-----------+----+-----------+
 | Member        | Host           | Role         | State     | TL | Lag in MB |
 +---------------+----------------+--------------+-----------+----+-----------+
