@@ -570,7 +570,11 @@ class DatabaseManager(BaseManager):
         for relation in self.state.model.relations.get(self.relation_name, []):
             if relation.id == relation_id:
                 continue
-            for data in relation.data.values():
+            for entity, data in relation.data.items():
+                # Requested data only lives in remote databags; a non-leader unit
+                # cannot read its own application databag (ops forbids that read).
+                if entity in (self.state.model.app, self.state.model.unit):
+                    continue
                 for extra_user_role in self.sanitize_extra_roles(data.get("extra-user-roles")):
                     if (
                         extra_user_role not in valid_privileges
@@ -589,7 +593,11 @@ class DatabaseManager(BaseManager):
         for relation in self.state.model.relations.get(self.relation_name, []):
             if relation.id == relation_id:
                 continue
-            for data in relation.data.values():
+            for entity, data in relation.data.items():
+                # Requested data only lives in remote databags; a non-leader unit
+                # cannot read its own application databag (ops forbids that read).
+                if entity in (self.state.model.app, self.state.model.unit):
+                    continue
                 database = data.get("database")
                 if database is not None and (
                     len(database) > 49 or database in INVALID_DATABASE_NAMES

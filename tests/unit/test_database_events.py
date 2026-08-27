@@ -14,6 +14,7 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
 )
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
+    INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE,
     PostgreSQLCreateDatabaseError,
     PostgreSQLCreateUserError,
     PostgreSQLGetPostgreSQLVersionError,
@@ -402,6 +403,28 @@ def test_the_relation_departed_observer_flags_the_departing_unit(harness, events
     )
 
     assert "departing" in harness.get_relation_data(peer_rel_id, harness.charm.unit)
+
+
+def test_relation_broken_survives_on_a_blocked_follower(harness, events, postgresql):
+    """A non-leader unit carrying a qualifying Blocked status must survive relation-broken.
+
+    ops forbids a follower to read its own application databag; the post-broken
+    status cleanup must therefore only scan remote databags, which is also where
+    requested fields live. Emitted through the framework so the strict relation
+    data access rules apply.
+    """
+    with harness.hooks_disabled():
+        harness.add_relation(RELATION_NAME, "application2")
+        harness.set_leader(False)
+        harness.charm.unit.status = BlockedStatus(INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE)
+
+    rel = next(
+        r for r in harness.charm.model.relations[RELATION_NAME] if r.app.name == "application"
+    )
+    with cluster_ready(harness, postgresql):
+        harness.charm.on[RELATION_NAME].relation_broken.emit(rel)
+
+    assert isinstance(harness.charm.unit.status, ActiveStatus)
 
 
 def test_the_relation_broken_observer_deletes_the_user(harness, events, postgresql):
