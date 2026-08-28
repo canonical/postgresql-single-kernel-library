@@ -18,6 +18,7 @@ from single_kernel_postgresql.managers.database import (
 )
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
+    INVALID_DATABASE_NAME_BLOCKING_MESSAGE,
     INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE,
     PostgreSQLCreateDatabaseError,
     PostgreSQLCreateUserError,
@@ -413,6 +414,7 @@ def test_the_relation_departed_observer_flags_the_departing_unit(harness, events
     "blocked_message",
     [
         INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE,
+        INVALID_DATABASE_NAME_BLOCKING_MESSAGE,
         NO_ACCESS_TO_SECRET_MSG,
         FORBIDDEN_USER_MSG,
     ],
