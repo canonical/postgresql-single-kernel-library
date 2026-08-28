@@ -591,3 +591,24 @@ def test_update_unit_status_runs_before_the_departing_check(harness, events, pos
         events._on_relation_broken(event)
 
     assert harness.model.unit.status == ActiveStatus()
+
+
+def test_a_replayed_request_whose_request_data_is_gone_is_skipped(
+    substrate, harness, events, postgresql, caplog
+):
+    """A deferred notice replayed after its relation died reads the name back as absent."""
+    caplog.set_level(logging.WARNING, logger="single_kernel_postgresql.managers.database")
+    with (
+        cluster_ready(harness, postgresql) as update_endpoints,
+        patch("ops.framework.EventBase.defer") as _defer,
+    ):
+        rel = harness.model.get_relation(RELATION_NAME)
+        # The relation databag carries no request: that is what ops supplies when it
+        # re-emits a deferred notice for a relation removed while the request waited.
+        events.database_provides.on.database_requested.emit(rel, app=rel.app)
+
+    assert "Database name is not set in the relation data, skipping." in caplog.text
+    postgresql.create_database.assert_not_called()
+    postgresql.create_user.assert_not_called()
+    update_endpoints.assert_not_called()
+    _defer.assert_not_called()
