@@ -12,6 +12,10 @@ from single_kernel_postgresql.config.literals import PEER_RELATION
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseRequestedEvent,
 )
+from single_kernel_postgresql.managers.database import (
+    FORBIDDEN_USER_MSG,
+    NO_ACCESS_TO_SECRET_MSG,
+)
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
     INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE,
@@ -405,18 +409,29 @@ def test_the_relation_departed_observer_flags_the_departing_unit(harness, events
     assert "departing" in harness.get_relation_data(peer_rel_id, harness.charm.unit)
 
 
-def test_relation_broken_survives_on_a_blocked_follower(harness, events, postgresql):
+@pytest.mark.parametrize(
+    "blocked_message",
+    [
+        INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE,
+        NO_ACCESS_TO_SECRET_MSG,
+        FORBIDDEN_USER_MSG,
+    ],
+)
+def test_relation_broken_survives_on_a_blocked_follower(
+    harness, events, postgresql, blocked_message
+):
     """A non-leader unit carrying a qualifying Blocked status must survive relation-broken.
 
     ops forbids a follower to read its own application databag; the post-broken
     status cleanup must therefore only scan remote databags, which is also where
     requested fields live. Emitted through the framework so the strict relation
-    data access rules apply.
+    data access rules apply. The three messages exercise both cleanup paths
+    (direct scan and unblock_custom_user_errors).
     """
     with harness.hooks_disabled():
         harness.add_relation(RELATION_NAME, "application2")
         harness.set_leader(False)
-        harness.charm.unit.status = BlockedStatus(INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE)
+        harness.charm.unit.status = BlockedStatus(blocked_message)
 
     rel = next(
         r for r in harness.charm.model.relations[RELATION_NAME] if r.app.name == "application"
