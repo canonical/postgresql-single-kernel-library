@@ -976,3 +976,40 @@ def test_primary_endpoint_ready(substrate, patroni):
         # Test with the primary endpoint ready.
         _get.return_value.json.return_value = {"state": "running"}
         assert patroni.primary_endpoint_ready
+
+
+def test_primary_endpoint_ready_brackets_ipv6(substrate, patroni):
+    if substrate == Substrates.VM:
+        pytest.skip("K8s only")
+        return
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.stop_after_delay",
+            return_value=stop_after_delay(0),
+        ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.wait_fixed",
+            return_value=wait_fixed(0),
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="fd42:a615:ea50:2a68:216:3eff:fef1:6b2",
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch("requests.get") as _get,
+    ):
+        _get.return_value.json.return_value = {"state": "running"}
+
+        assert patroni.primary_endpoint_ready
+
+        _get.assert_called_once_with(
+            "https://[fd42:a615:ea50:2a68:216:3eff:fef1:6b2]:8008/health",
+            verify=patroni.verify,
+            auth=patroni._patroni_auth,
+            timeout=API_REQUEST_TIMEOUT,
+        )
