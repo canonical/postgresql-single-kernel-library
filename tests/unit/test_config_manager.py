@@ -28,6 +28,7 @@ def config(substrate):
             resource_provider=Mock(),
             request_restart=Mock(),
             database_manager=Mock(),
+            ldap_handler=Mock(),
             restart_services=Mock(),
         )
     yield config
@@ -797,6 +798,15 @@ def test_update_config_threads_tls_flag_into_render(orchestrate, postgresql_clie
     orchestrate._is_tls.return_value = False
     orchestrate.update_config(postgresql_client, no_peers=True)
     assert orchestrate.render_patroni_yml_file.call_args.kwargs["enable_tls"] is False
+
+
+def test_update_config_sources_ldap_parameters_from_handler(orchestrate, postgresql_client):
+    """update_config pulls the LDAP auth parameters from the LDAP events handler."""
+    orchestrate.update_config(postgresql_client, no_peers=True)
+    assert (
+        orchestrate.render_patroni_yml_file.call_args.kwargs["ldap_parameters"]
+        == orchestrate.ldap_handler.get_ldap_parameters.return_value
+    )
 
 
 def test_update_config_workload_not_running_persists_tls_and_refreshes(
