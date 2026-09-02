@@ -202,6 +202,36 @@ def test_merged_template_matches_original(substrate, overrides):
     assert yaml.safe_load(actual) == yaml.safe_load(expected)
 
 
+def test_vm_pg_hba_matches_ipv6_clients():
+    """IPv6-bound units must render pg_hba rules matching IPv6 clients.
+
+    The bootstrap role creation connects over TCP from the unit's own IPv6
+    address; with IPv4-only rules PostgreSQL rejects it with FATAL 28000 and
+    Patroni cancels the bootstrap.
+    """
+    context = _base_context() | {
+        "connectivity": True,
+        "self_ip": "fd42:1928:642:0:216:3eff:fedc:283b",
+    }
+    rendered = yaml.safe_load(_MERGED_TEMPLATE.render(substrate="vm", **context))
+    hba = rendered["postgresql"]["pg_hba"]
+    assert "host all +internal_access ::/0 scram-sha-256" in hba
+    assert "host all +charmed_admin ::/0 scram-sha-256" in hba
+    assert "host replication replication ::1/128 scram-sha-256" in hba
+
+
+def test_vm_self_rule_uses_the_ipv6_prefix_length():
+    context = _base_context() | {
+        "connectivity": False,
+        "self_ip": "fd42:1928:642:0:216:3eff:fedc:283b",
+    }
+    rendered = yaml.safe_load(_MERGED_TEMPLATE.render(substrate="vm", **context))
+    hba = rendered["postgresql"]["pg_hba"]
+    assert any(
+        rule == "host all all fd42:1928:642:0:216:3eff:fedc:283b/128 scram-sha-256" for rule in hba
+    )
+
+
 def test_template_loads_via_importlib_resources():
     """The merged template must resolve as package data, independent of the CWD."""
     source = _merged_template_source()

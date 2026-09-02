@@ -168,7 +168,9 @@ bootstrap:
   {%- if not is_vm %}
   pg_hba:
   - {{ hba_type }} all all 0.0.0.0/0 {{ instance_password_encryption }}
+  - {{ hba_type }} all all ::/0 {{ instance_password_encryption }}
   - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
+  - {{ hba_type }} replication replication ::1/128 scram-sha-256
   {%- for endpoint in extra_replication_endpoints %}
   - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
   {%- endfor %}
@@ -220,23 +222,31 @@ postgresql:
     - local all monitoring password
     {%- for role in ['charmed_stats', 'charmed_read', 'charmed_dml', 'charmed_backup', 'charmed_dba', 'charmed_admin', 'charmed_databases_owner'] %}
     - {{ hba_type }} all +{{ role }} 0.0.0.0/0 scram-sha-256
+    - {{ hba_type }} all +{{ role }} ::/0 scram-sha-256
     {%- endfor %}
     {%- if not connectivity %}
-    - {{ hba_type }} all all {{ self_ip ~ '/32' if is_vm else endpoint ~ '.' ~ namespace ~ '.svc.cluster.local' }} {{ instance_password_encryption }}
+    - {{ hba_type }} all all {{ self_ip ~ ('/128' if ':' in self_ip else '/32') if is_vm else endpoint ~ '.' ~ namespace ~ '.svc.cluster.local' }} {{ instance_password_encryption }}
     - {{ hba_type }} all all 0.0.0.0/0 reject
+    - {{ hba_type }} all all ::/0 reject
     {%- elif enable_ldap %}
     - {{ hba_type }} all +identity_access 0.0.0.0/0 ldap {{ ldap_parameters }}
+    - {{ hba_type }} all +identity_access ::/0 ldap {{ ldap_parameters }}
     - {{ hba_type }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
+    - {{ hba_type }} all +internal_access ::/0 {{ instance_password_encryption }}
     {%-   for user, databases in user_databases_map.items() %}
     - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
+    - {{ hba_type }} {{ databases }} {{ user }} ::/0 {{ instance_password_encryption }}
     {%-   endfor %}
     {%- else %}
     - {{ hba_type }} all +internal_access 0.0.0.0/0 {{ instance_password_encryption }}
+    - {{ hba_type }} all +internal_access ::/0 {{ instance_password_encryption }}
     {%-   for user, databases in user_databases_map.items() %}
     {%-     if 'pgbouncer_auth_relation_' in user %}
     - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 md5
+    - {{ hba_type }} {{ databases }} {{ user }} ::/0 md5
     {%-     else %}
     - {{ hba_type }} {{ databases }} {{ user }} 0.0.0.0/0 {{ instance_password_encryption }}
+    - {{ hba_type }} {{ databases }} {{ user }} ::/0 {{ instance_password_encryption }}
     {%-     endif %}
     {%-   endfor %}
     {%- endif %}
@@ -245,6 +255,7 @@ postgresql:
     - {{ hba_type }} postgres watcher {{ watcher_addr }}/32 scram-sha-256
     {%- endif %}
     - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
+    - {{ hba_type }} replication replication ::1/128 scram-sha-256
     {%- if not is_vm %}
     - {{ hba_type }} replication replication 127.0.0.6/32 scram-sha-256
     {%- endif %}
