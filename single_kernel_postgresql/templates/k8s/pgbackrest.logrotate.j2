@@ -1,0 +1,10 @@
+{{ pgbackrest_logs_path }}/*.log {
+    rotate 10
+    missingok
+    notifempty
+    nocompress
+    daily
+    create 0600 postgres postgres
+    dateext
+    dateformat -%Y%m%d_%H%M
+}
