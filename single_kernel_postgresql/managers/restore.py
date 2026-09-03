@@ -296,10 +296,11 @@ class RestoreManager(BaseManager):
             return None, False, "There is no base backup created from the latest timeline"
 
         # Reuse the already-fetched lists rather than re-listing (the charms'
-        # _get_nearest_timeline re-runs _list_backups | _list_timelines internally).
+        # get_nearest_timeline resolves the target from the already-fetched
+        # backups and timelines dicts (no re-invocation).
         # restore_to_time is always non-None here (the no-target case is rejected in
         # _pre_restore_checks); use `or ""` to satisfy the type checker.
-        restore_stanza_timeline = get_nearest_timeline(backups | timelines, restore_to_time or "")
+        restore_stanza_timeline = get_nearest_timeline(restore_to_time or "", backups | timelines)
         if not restore_stanza_timeline:
             return (
                 None,
