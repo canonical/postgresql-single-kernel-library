@@ -6,6 +6,7 @@ from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.config.literals import (
     K8S_DATA_PATH,
+    K8S_PGBACKREST_LOGS_PATH,
     PATRONI_LOGS_PATH,
     PGBACKREST_CONF_PATH,
     POSTGRESQL_CONF_FILE,
@@ -82,6 +83,11 @@ class K8sPaths(Paths):
     def patroni_logs(self) -> PathProtocol:
         """Path to the patroni logs."""
         return self.logs / PATRONI_LOGS_PATH
+
+    @property
+    def pgbackrest_logs(self) -> PathProtocol:
+        """Path to the pgbackrest logs."""
+        return self.logs / K8S_PGBACKREST_LOGS_PATH
 
     @property
     def pgbackrest_conf(self) -> PathProtocol:

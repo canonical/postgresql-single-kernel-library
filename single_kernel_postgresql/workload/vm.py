@@ -7,19 +7,19 @@ import logging
 import os
 import pathlib
 import platform
+import shlex
 import subprocess
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
 
 import charm_refresh
 import tomli
 from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
-from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.base import BaseWorkload, CommandResult
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.vm import VMPaths
 
@@ -137,9 +137,37 @@ class VMWorkload(BaseWorkload):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
-    ) -> SimpleNamespace:
-        """Run Command in CLI."""
-        raise NotImplementedError
+        timeout: float | None = None,
+    ) -> CommandResult:
+        """Run a command on the machine via subprocess.
+
+        The charm runs as root on VM, so the command is not executed as a
+        specific user or group.
+        """
+        cmd = shlex.split(command)
+        if args:
+            cmd += shlex.split(args)
+        try:
+            process = subprocess.run(  # noqa: S603
+                cmd,
+                input=stdin.encode() if stdin else None,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            if not use_errors_replace:
+                raise
+            return CommandResult(
+                return_code=124,
+                stdout=(e.stdout or b"").decode(errors="replace"),
+                stderr=(e.stderr or b"").decode(errors="replace"),
+            )
+        decode_errors = "replace" if use_errors_replace else "strict"
+        return CommandResult(
+            return_code=process.returncode,
+            stdout=process.stdout.decode(errors=decode_errors),
+            stderr=process.stderr.decode(errors=decode_errors),
+        )
 
     def is_failed(self) -> bool:
         """Check if snap service failed."""
@@ -149,9 +177,36 @@ class VMWorkload(BaseWorkload):
         """Stop the PostgreSQL service."""
         ...
 
-    def start_service(self):
-        """Start the PostgreSQL service."""
-        ...
+    def start_service(self, service: str) -> None:
+        """Start a named snap service."""
+        snap.SnapCache()["charmed-postgresql"].start(services=[service])
+
+    def stop_service(self, service: str) -> None:
+        """Stop a named snap service."""
+        snap.SnapCache()["charmed-postgresql"].stop(services=[service])
+
+    def restart_service(self, service: str) -> None:
+        """Restart a named snap service."""
+        snap.SnapCache()["charmed-postgresql"].restart(services=[service])
+
+    def reload_service(self, service: str) -> None:
+        """Reload a named snap service.
+
+        Snap has no signal channel, so a restart is the only reload.
+        """
+        self.restart_service(service)
+
+    def service_is_running(self, service: str) -> bool:
+        """Check whether a named snap service is running.
+
+        A snap revision predating the service omits it from the services
+        mapping; that reads as not running.
+        """
+        try:
+            services = snap.SnapCache()["charmed-postgresql"].services
+        except (snap.SnapError, snap.SnapNotFoundError):
+            return False
+        return services.get(service, {}).get("active", False)
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
