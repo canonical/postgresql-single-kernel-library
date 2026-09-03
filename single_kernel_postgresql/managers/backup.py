@@ -9,7 +9,7 @@ K8s charms). Event orchestration (defer/fail/status writes) stays in the events
 layer; this manager raises or returns values only.
 """
 
-import importlib
+import importlib.resources
 import json
 import logging
 import re
@@ -261,7 +261,7 @@ class BackupManager(BaseManager):
             .joinpath(self.state.substrate.name.lower(), "pgbackrest.conf.j2")
             .read_text()
         )
-        cpu_count, _ = self.workload.get_available_resources()
+        cpu_count, _ = self.resource_provider.get_available_resources()
         rendered = template.render(
             enable_tls=len(self._peer_members) > 0,
             peer_endpoints=self._peer_members,
@@ -645,7 +645,7 @@ class BackupManager(BaseManager):
         if system_identifier_from_instance is None:
             raise Exception("Database system identifier not found in pg_controldata output")
         system_identifier_from_instance = system_identifier_from_instance.split(" ")[-1]
-        stanza_dbs = stanza.get("db")
+        stanza_dbs = stanza.get("db") or []
         system_identifier_from_stanza = (
             str(stanza_dbs[0]["system-id"]) if len(stanza_dbs) else None
         )
@@ -846,7 +846,7 @@ Stderr:
         stderr: str,
         s3_parameters: dict,
         backup_type: str,
-        error: str,
+        error: str = "",
     ) -> tuple[bool, str]:
         """Uploads the failed backup logs and reports the failure message."""
         logger.error(stderr)
