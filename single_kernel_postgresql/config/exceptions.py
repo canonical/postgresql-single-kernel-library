@@ -77,3 +77,7 @@ class UpdateSyncNodeCountError(Exception):
 
 class DeployedWithoutTrustError(Exception):
     """Raised when the K8s API denies access because the app wasn't deployed with --trust."""
+
+
+class ListBackupsError(PostgreSQLBaseError):
+    """Raised when pgBackRest fails to list backups."""
