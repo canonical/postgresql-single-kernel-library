@@ -10,17 +10,24 @@ layer; this manager raises or returns values only.
 """
 
 import importlib
+import json
 import logging
+import re
 import shlex
+import subprocess
 from collections.abc import Callable
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import jinja2
+from ops import JujuVersion
 from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.exceptions import ListBackupsError
 from single_kernel_postgresql.config.literals import (
+    BACKUP_TYPE_OVERRIDES,
     BACKUP_USER,
     PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE,
     PGBACKREST_LOG_LEVEL_STDERR,
@@ -30,15 +37,23 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.utils.backup import (
+    ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
+    BACKUP_LABEL_STDOUT_PATTERN,
     FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
     S3_BLOCK_MESSAGES,
+    STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE,
     extract_error_message,
+    generate_fake_backup_id,
 )
 from single_kernel_postgresql.workload.base import (
     BaseWorkload,
     CommandResult,
     ResourceProvider,
 )
+
+if TYPE_CHECKING:
+    from single_kernel_postgresql.managers.s3_client import S3Client
+
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.managers.s3_client import S3Client
@@ -500,3 +515,357 @@ class BackupManager(BaseManager):
         else:
             self.workload.restart_service(service)
         return True
+
+    # -- Backup settings and permissions -----------------------------------------
+
+    def _are_backup_settings_ok(self) -> tuple[bool, str]:
+        """Validates whether backup settings are OK."""
+        if self.state.s3_relation is None:
+            return (
+                False,
+                "Relation with s3-integrator charm missing, cannot create/restore backup.",
+            )
+
+        _, missing_parameters = self.state.s3_connection_info.retrieve_s3_parameters()
+        if missing_parameters:
+            return False, f"Missing S3 parameters: {missing_parameters}"
+
+        return True, ""
+
+    def _can_unit_perform_backup(self) -> tuple[bool, str | None]:
+        """Validates whether this unit can perform a backup."""
+        if self._is_standby_cluster:
+            return False, STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE
+
+        if self.state.peer.is_blocked:
+            return False, "Unit is in a blocking state"
+
+        # Check if this unit is the primary (if it was not possible to retrieve that information,
+        # then show that the unit cannot perform a backup, because possibly the database is offline).
+        try:
+            is_primary = self.is_primary
+        except RetryError:
+            return False, "Unit cannot perform backups as the database seems to be offline"
+
+        # Only enable backups on primary if there are replicas but TLS is not enabled.
+        if is_primary and self.state.application.planned_units > 1:
+            return False, "Unit cannot perform backups as it is the cluster primary"
+
+        if not self.patroni_manager.member_started:
+            return False, "Unit cannot perform backups as it's not in running state"
+
+        if not self.state.cluster_stanza:
+            return False, "Stanza was not initialised"
+
+        return self._are_backup_settings_ok()
+
+    def _can_initialise_stanza(self) -> bool:
+        """Validates whether this unit can initialise a stanza."""
+        # Don't allow stanza initialisation if this unit hasn't started the database
+        # yet and either hasn't joined the peer relation yet or hasn't configured TLS
+        # yet while other unit already has TLS enabled.
+        return not (
+            not self.patroni_manager.member_started and (len(self.state.application_peers) == 1)
+        )
+
+    def can_use_s3_repository(self) -> tuple[bool, str]:
+        """Returns whether the charm was configured to use another cluster repository."""
+        # Check model uuid
+        s3_parameters, _ = self.state.s3_connection_info.retrieve_s3_parameters()
+        s3_model_uuid = self.s3_client.read_content(
+            "model-uuid.txt",
+            s3_parameters,
+        )
+        if s3_model_uuid and s3_model_uuid.strip() != self.state.model.uuid:
+            logger.debug(
+                f"can_use_s3_repository: incompatible model-uuid s3={s3_model_uuid.strip()}, local={self.state.model.uuid}"
+            )
+            return False, ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE
+
+        try:
+            result = self._execute_pgbackrest(["info", "--output=json"], timeout=30)
+        except ExecError as e:
+            logger.error(f"Failed to execute pgbackrest info: {e!s}")
+            return False, FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE
+        except subprocess.TimeoutExpired as e:
+            # Raise an error if the connection timeouts, so the user has the possibility to
+            # fix network issues and call juju resolve to re-trigger the hook that calls
+            # this method.
+            logger.error(f"error: {e!s} - please fix the error and call juju resolve on this unit")
+            raise TimeoutError from e
+        except TimeoutError as e:
+            # K8s pebble exec timeout: the K8s charm treats any execution failure
+            # as a stanza initialization failure instead of re-raising.
+            if self.state.substrate == Substrates.K8S:
+                logger.error(f"Failed to execute pgbackrest info: {e!s}")
+                return False, FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE
+            raise
+
+        if self.state.substrate == Substrates.VM and result.return_code != 0:
+            extracted_error = extract_error_message(
+                result.stderr, str(self.workload.backup_config.logs_path)
+            )
+            logger.error(f"Failed to run pgbackrest: {extracted_error}")
+            return False, FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE
+
+        for stanza in json.loads(result.stdout):
+            is_valid, validation_message = self._validate_stanza(stanza)
+            if not is_valid:
+                return False, validation_message
+
+        return True, ""
+
+    def _validate_stanza(self, stanza: dict) -> tuple[bool, str]:
+        """Validate one stanza entry from pgBackRest info against this cluster.
+
+        Returns:
+            (is_valid, message); message is empty when the stanza is compatible.
+        """
+        if (stanza_name := stanza.get("name")) and stanza_name == "[invalid]":
+            logger.error("Invalid stanza name from s3")
+            return False, FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE
+        if stanza_name != self.stanza_name:
+            logger.debug(
+                f"can_use_s3_repository: incompatible stanza name s3={stanza_name or ''}, local={self.stanza_name}"
+            )
+            return False, ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE
+
+        # Guard the bare next(): an empty pg_controldata output would raise
+        # StopIteration inside a generator context and mask the real failure.
+        control_data = self._read_pg_controldata()
+        system_identifier_from_instance = next(
+            (line for line in control_data.splitlines() if "Database system identifier" in line),
+            None,
+        )
+        if system_identifier_from_instance is None:
+            raise Exception("Database system identifier not found in pg_controldata output")
+        system_identifier_from_instance = system_identifier_from_instance.split(" ")[-1]
+        stanza_dbs = stanza.get("db")
+        system_identifier_from_stanza = (
+            str(stanza_dbs[0]["system-id"]) if len(stanza_dbs) else None
+        )
+        if system_identifier_from_instance != system_identifier_from_stanza:
+            logger.debug(
+                f"can_use_s3_repository: incompatible system identifier s3={system_identifier_from_stanza}, local={system_identifier_from_instance}"
+            )
+            return False, ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE
+        return True, ""
+
+    def _read_pg_controldata(self) -> str:
+        """Read the pg_controldata output, per substrate.
+
+        VM inspects the return code; on K8s a failing exec raises ExecError
+        (the K8s charm lets it propagate uncaught).
+        """
+        config = self.workload.backup_config
+        command = "{controldata} {data}".format(
+            controldata=config.pg_controldata(
+                self.workload.get_postgresql_version().split(".")[0]
+            ),
+            data=self.workload.paths.data,
+        )
+        if self.state.substrate == Substrates.VM:
+            result = self.workload.run_cmd(command)
+            if not result.ok:
+                raise Exception(result.stderr)
+            return result.stdout
+        return self.workload.run_cmd(command).stdout
+
+    # -- Backup creation ----------------------------------------------------------
+
+    def _change_connectivity_to_database(self, connectivity: bool) -> None:
+        """Enable or disable the connectivity to the database."""
+        self.state.peer.is_connectivity_enabled = connectivity
+        # Reconciled to the K8s form: the K8s charm brackets backup creation with
+        # update_config(is_creating_backup=True) while the VM charm passed no
+        # flag here. The flag marks the cluster as creating a backup in the
+        # Patroni configuration.
+        self.update_config(is_creating_backup=True)
+
+    def create_backup(self, backup_type: str) -> tuple[bool, str]:
+        """Request that pgBackRest creates a backup.
+
+        Args:
+            backup_type: one of "full", "differential", or "incremental".
+
+        Returns:
+            (success, message) tuple; message is "backup created" on success or
+            the validation/error message on failure. The events layer maps
+            these onto action results/failures and unit statuses.
+        """
+        if backup_type not in BACKUP_TYPE_OVERRIDES:
+            error_message = f"Invalid backup type: {backup_type}. Possible values: {', '.join(BACKUP_TYPE_OVERRIDES.keys())}."
+            logger.error(f"Backup failed: {error_message}")
+            return False, error_message
+
+        if (
+            backup_type in ["differential", "incremental"]
+            and len(self._list_backups(show_failed=False)) == 0
+        ):
+            error_message = (
+                f"Invalid backup type: {backup_type}. No previous full backup to reference."
+            )
+            logger.error(f"Backup failed: {error_message}")
+            return False, error_message
+
+        logger.info(f"A {backup_type} backup has been requested on unit")
+        can_unit_perform_backup, validation_message = self._can_unit_perform_backup()
+        if not can_unit_perform_backup:
+            logger.error(f"Backup failed: {validation_message}")
+            return False, validation_message or "Backup failed"
+
+        # Retrieve the S3 Parameters to use when uploading the backup logs to S3.
+        s3_parameters, _ = self.state.s3_connection_info.retrieve_s3_parameters()
+
+        # Test uploading metadata to S3 to test credentials before backup.
+        datetime_backup_requested = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        metadata = f"""Date Backup Requested: {datetime_backup_requested}
+Model Name: {self.state.model_name}
+Application Name: {self.state.model.app.name}
+Unit Name: {self.state.model.unit.name}
+Juju Version: {JujuVersion.from_environ()!s}
+"""
+        if not self.s3_client.upload_content(
+            metadata,
+            f"backup/{self.stanza_name}/latest",
+            s3_parameters,
+        ):
+            error_message = "Failed to upload metadata to provided S3"
+            logger.error(f"Backup failed: {error_message}")
+            return False, error_message
+
+        if not self.is_primary:
+            # Create a rule to mark the cluster as in a creating backup state and update
+            # the Patroni configuration.
+            self._change_connectivity_to_database(connectivity=False)
+
+        try:
+            return self._run_backup(s3_parameters, datetime_backup_requested, backup_type)
+        finally:
+            if not self.is_primary:
+                # Remove the rule that marks the cluster as in a creating backup state
+                # and update the Patroni configuration.
+                self._change_connectivity_to_database(connectivity=True)
+            # Set flag due to missing in progress backups on JSON output
+            # (reference: https://github.com/pgbackrest/pgbackrest/issues/2007)
+            self.update_config(is_creating_backup=False)
+
+    def _run_backup(
+        self,
+        s3_parameters: dict,
+        datetime_backup_requested: str,
+        backup_type: str,
+    ) -> tuple[bool, str]:
+        """Runs the pgBackRest backup command.
+
+        VM: non-streaming execution with a return-code branch, error message
+        extraction, and a backup id recovered from stdout (fake id fallback).
+        K8s: stream-mode execution reconciled to the wave-1 run_cmd (wait_output)
+        with an ExecError branch. Both upload the backup logs to S3.
+
+        Returns:
+            (success, message) tuple; message is "backup created" on success.
+        """
+        command = [
+            f"--stanza={self.stanza_name}",
+            "--log-level-console=debug",
+            f"--type={BACKUP_TYPE_OVERRIDES[backup_type]}",
+            "backup",
+        ]
+        if self.state.substrate == Substrates.K8S:
+            command.insert(2, "--log-subprocess")
+        if self.is_primary:
+            # Force the backup to run in the primary if it's not possible to run it
+            # on the replicas (that happens when TLS is not enabled).
+            command.append("--no-backup-standby")
+
+        backup_id = None
+        if self.state.substrate == Substrates.K8S:
+            try:
+                # The backup id lookup is inside the try, mirroring the K8s charm
+                # where an ExecError from the info command takes the failure
+                # branch too.
+                result = self._execute_pgbackrest(command)
+                backup_id = list(self._list_backups(show_failed=True).keys())[-1]
+                stdout, stderr, return_code = result.stdout, result.stderr, 0
+            except ExecError as e:
+                return self._handle_failed_backup(
+                    e.stdout or "", e.stderr or "", s3_parameters, backup_type, str(e)
+                )
+        else:
+            result = self._execute_pgbackrest(command)
+            stdout, stderr, return_code = result.stdout, result.stderr, result.return_code
+
+        if return_code != 0:
+            return self._handle_failed_backup(stdout, stderr, s3_parameters, backup_type)
+
+        if backup_id is None:
+            try:
+                backup_id = list(self._list_backups(show_failed=True).keys())[-1]
+            except ListBackupsError:
+                error_message = "Failed to retrieve backup id"
+                logger.exception(error_message)
+                logger.error(f"Backup failed: {error_message}")
+                return False, error_message
+
+        # Upload the logs to S3 and fail the action if it doesn't succeed.
+        logs = f"""Stdout:
+{stdout}
+
+Stderr:
+{stderr}
+"""
+        if not self.s3_client.upload_content(
+            logs,
+            f"backup/{self.stanza_name}/{backup_id}/backup.log",
+            s3_parameters,
+        ):
+            error_message = "Error uploading logs to S3"
+            logger.error(f"Backup failed: {error_message}")
+            return False, error_message
+        logger.info(f"Backup succeeded: with backup-id {datetime_backup_requested}")
+        return True, "backup created"
+
+    def _handle_failed_backup(
+        self,
+        stdout: str,
+        stderr: str,
+        s3_parameters: dict,
+        backup_type: str,
+        error: str,
+    ) -> tuple[bool, str]:
+        """Uploads the failed backup logs and reports the failure message."""
+        logger.error(stderr)
+
+        # Recover the backup id from the logs.
+        backup_label_stdout_line = re.findall(BACKUP_LABEL_STDOUT_PATTERN, stdout, re.MULTILINE)
+        if len(backup_label_stdout_line) > 0:
+            backup_id = backup_label_stdout_line[0][1]
+        else:
+            # Generate a backup id from the current date and time if the backup failed before
+            # generating the backup label (our backup id).
+            backup_id = generate_fake_backup_id(
+                backup_type, self._list_backups(show_failed=False, parse=False).keys()
+            )
+
+        # Upload the logs to S3.
+        logs = f"""Stdout:
+{stdout}
+
+Stderr:
+{stderr}
+"""
+        self.s3_client.upload_content(
+            logs,
+            f"backup/{self.stanza_name}/{backup_id}/backup.log",
+            s3_parameters,
+        )
+        if self.state.substrate == Substrates.VM:
+            extracted_error = extract_error_message(
+                stderr, str(self.workload.backup_config.logs_path)
+            )
+            error_message = f"Failed to backup PostgreSQL with error: {extracted_error}"
+        else:
+            error_message = f"Failed to backup PostgreSQL with error: {error}"
+        logger.error(f"Backup failed: {error_message}")
+        return False, error_message
