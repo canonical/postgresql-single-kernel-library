@@ -90,6 +90,12 @@ class Paths(ABC):
 
     @property
     @abstractmethod
+    def pgbackrest_logs(self) -> PathProtocol:
+        """Path to the pgbackrest logs."""
+        pass
+
+    @property
+    @abstractmethod
     def tls(self) -> PathProtocol:
         """Directory where TLS files are written for this substrate."""
         pass
