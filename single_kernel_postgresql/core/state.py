@@ -325,6 +325,22 @@ class CharmState(Object):
             ips.append(self.replication_consumer_ip)
         return ips
 
+    @property
+    def cluster_stanza(self) -> str | None:
+        """Return the pgBackRest stanza of the cluster, whichever unit published it.
+
+        The stanza is written by the primary into its unit databag during S3
+        initialization and only later adopted by the leader into app data, so
+        while a cluster is mid-initialization (or mid-restore) the authoritative
+        copy may still live on a unit. Fetched live on every access.
+        """
+        if stanza := self.application.stanza:
+            return stanza
+        for peer in self.application_peers:
+            if stanza := peer.stanza:
+                return stanza
+        return None
+
     # -- Secrets
     # TODO: This is temporary till data interfaces v1 is integrated
     def get_secret(self, scope: SCOPES, key: str) -> str | None:

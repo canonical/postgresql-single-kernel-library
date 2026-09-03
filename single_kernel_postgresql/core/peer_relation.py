@@ -225,6 +225,55 @@ class PostgreSQLPeer(RelationState):
             return True
         return self.relation.data[self.unit].get("connectivity", "on") == "on"
 
+    @is_connectivity_enabled.setter
+    def is_connectivity_enabled(self, value: bool) -> None:
+        """Enable or disable external connectivity to this unit."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["connectivity"] = "on" if value else "off"
+
+    @property
+    def stanza(self) -> str | None:
+        """Get the pgBackRest stanza name from the unit peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get("stanza")
+
+    @stanza.setter
+    def stanza(self, value: str) -> None:
+        """Set the pgBackRest stanza name in the unit peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["stanza"] = value
+
+    @property
+    def s3_initialization_done(self) -> str | None:
+        """Get the s3-initialization-done marker from the unit peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get("s3-initialization-done")
+
+    @s3_initialization_done.setter
+    def s3_initialization_done(self, value: str) -> None:
+        """Set the s3-initialization-done marker in the unit peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["s3-initialization-done"] = value
+
+    @property
+    def s3_initialization_block_message(self) -> str | None:
+        """Get the s3 initialization block message from the unit peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get("s3-initialization-block-message")
+
+    @s3_initialization_block_message.setter
+    def s3_initialization_block_message(self, value: str) -> None:
+        """Set the s3 initialization block message in the unit peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["s3-initialization-block-message"] = value
+
     @property
     def config_hash(self) -> str | None:
         """Get the last-applied PostgreSQL config hash from the peer relation data."""
@@ -473,6 +522,118 @@ class PostgreSQLApplication(RelationState):
         if not self.relation:
             return
         self.relation.data[self.app]["user_hash"] = value
+
+    @property
+    def stanza(self) -> str | None:
+        """Get the pgBackRest stanza name from the app peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("stanza")
+
+    @stanza.setter
+    def stanza(self, value: str) -> None:
+        """Set the pgBackRest stanza name in the app peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["stanza"] = value
+
+    @property
+    def s3_initialization_start(self) -> str | None:
+        """Get the s3-initialization-start timestamp from the app peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("s3-initialization-start")
+
+    @s3_initialization_start.setter
+    def s3_initialization_start(self, value: str) -> None:
+        """Set the s3-initialization-start timestamp in the app peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["s3-initialization-start"] = value
+
+    @property
+    def s3_initialization_block_message(self) -> str | None:
+        """Get the s3 initialization block message from the app peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("s3-initialization-block-message")
+
+    @s3_initialization_block_message.setter
+    def s3_initialization_block_message(self, value: str) -> None:
+        """Set the s3 initialization block message in the app peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["s3-initialization-block-message"] = value
+
+    @property
+    def s3_initialization_done(self) -> str | None:
+        """Get the s3-initialization-done marker from the app peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("s3-initialization-done")
+
+    @s3_initialization_done.setter
+    def s3_initialization_done(self, value: str) -> None:
+        """Set the s3-initialization-done marker in the app peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["s3-initialization-done"] = value
+
+    @property
+    def restoring_backup(self) -> str | None:
+        """Get the restoring-backup marker from the app peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("restoring-backup")
+
+    @restoring_backup.setter
+    def restoring_backup(self, value: str) -> None:
+        """Set the restoring-backup marker in the app peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["restoring-backup"] = value
+
+    @property
+    def restore_stanza(self) -> str | None:
+        """Get the restore-stanza name from the app peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("restore-stanza")
+
+    @restore_stanza.setter
+    def restore_stanza(self, value: str) -> None:
+        """Set the restore-stanza name in the app peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["restore-stanza"] = value
+
+    @property
+    def restore_timeline(self) -> str | None:
+        """Get the restore-timeline from the app peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("restore-timeline")
+
+    @restore_timeline.setter
+    def restore_timeline(self, value: str) -> None:
+        """Set the restore-timeline in the app peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["restore-timeline"] = value
+
+    @property
+    def restore_to_time(self) -> str | None:
+        """Get the restore-to-time target from the app peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("restore-to-time")
+
+    @restore_to_time.setter
+    def restore_to_time(self, value: str) -> None:
+        """Set the restore-to-time target in the app peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["restore-to-time"] = value
 
     def get_secret(self, key: str) -> str | None:
         """Get the secret value for 'key' from the peer relation data."""
