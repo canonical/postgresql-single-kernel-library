@@ -31,15 +31,18 @@ from single_kernel_postgresql.config.literals import (
     PEER_RELATION,
     REPLICATION_CONSUMER_RELATION,
     REPLICATION_OFFER_RELATION,
+    S3_RELATION_NAME,
     SCOPES,
     STATUS_PEERS_RELATION,
 )
 from single_kernel_postgresql.core.config import CharmConfig
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication, PostgreSQLPeer
+from single_kernel_postgresql.core.s3 import S3ConnectionInfo
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DataPeerData,
     DataPeerUnitData,
 )
+from single_kernel_postgresql.lib.charms.data_platform_libs.v0.s3 import S3Requirer
 from single_kernel_postgresql.utils import unit_name_to_pod_name
 from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
 from single_kernel_postgresql.utils.status import format_status
@@ -60,6 +63,7 @@ class CharmState(Object):
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
 
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
+        self._charm = charm
 
     # -- Charm Config
     @cached_property
@@ -92,6 +96,11 @@ class CharmState(Object):
     def status_peers_relation(self) -> Relation | None:
         """Get status peers relation."""
         return self.model.get_relation(STATUS_PEERS_RELATION)
+
+    @property
+    def s3_relation(self) -> Relation | None:
+        """Get the S3 parameters relation."""
+        return self.model.get_relation(S3_RELATION_NAME)
 
     # -- Core State Components
 
@@ -132,6 +141,16 @@ class CharmState(Object):
             component=self.model.app,
             substrate=self.substrate,
         )
+
+    @cached_property
+    def s3_requirer(self) -> S3Requirer:
+        """Get the S3 requirer, which observes the s3-parameters relation events."""
+        return S3Requirer(self._charm, S3_RELATION_NAME)
+
+    @property
+    def s3_connection_info(self) -> S3ConnectionInfo:
+        """Get the S3 connection info state."""
+        return S3ConnectionInfo(self.s3_requirer)
 
     # -- Cluster state utilities
     def _get_hostname_from_unit(self, member: str) -> str:
