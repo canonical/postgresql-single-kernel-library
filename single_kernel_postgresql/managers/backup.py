@@ -9,19 +9,31 @@ K8s charms). Event orchestration (defer/fail/status writes) stays in the events
 layer; this manager raises or returns values only.
 """
 
+import importlib
 import logging
 import shlex
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from tenacity import RetryError
+import jinja2
+from ops.pebble import ExecError
+from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import PGBACKREST_LOG_LEVEL_STDERR
+from single_kernel_postgresql.config.literals import (
+    BACKUP_USER,
+    PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE,
+    PGBACKREST_LOG_LEVEL_STDERR,
+    PGBACKREST_LOGROTATE_FILE,
+)
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
-from single_kernel_postgresql.utils.backup import S3_BLOCK_MESSAGES
+from single_kernel_postgresql.utils.backup import (
+    FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
+    S3_BLOCK_MESSAGES,
+    extract_error_message,
+)
 from single_kernel_postgresql.workload.base import (
     BaseWorkload,
     CommandResult,
@@ -190,3 +202,295 @@ class BackupManager(BaseManager):
             self.state.peer.stanza = ""
 
     # -- Stanza configuration rendering ----------------------------------------
+
+    @property
+    def _tls_ca_chain_filename(self) -> str:
+        """Returns the path to the TLS CA chain file."""
+        s3_parameters, _ = self.state.s3_connection_info.retrieve_s3_parameters()
+        if s3_parameters.get("tls-ca-chain") is not None:
+            return self.workload.backup_config.tls_ca_chain_path
+        return ""
+
+    def _render_pgbackrest_conf_file(self) -> bool:
+        """Render the pgBackRest configuration and logrotate files.
+
+        Returns:
+            a boolean indicating whether rendering was successful.
+        """
+        s3_parameters, missing_parameters = self.state.s3_connection_info.retrieve_s3_parameters()
+        if missing_parameters:
+            logger.warning(
+                f"Cannot set pgBackRest configurations due to missing S3 parameters: {missing_parameters}"
+            )
+            return False
+
+        config = self.workload.backup_config
+
+        if self._tls_ca_chain_filename != "":
+            self.workload.write_text(
+                "\n".join(s3_parameters["tls-ca-chain"]),
+                self.workload.root / self._tls_ca_chain_filename.lstrip("/"),
+                mode=0o644,
+                user=self.workload.user,
+                group=self.workload.group,
+            )
+
+        template = jinja2.Template(
+            importlib.resources
+            .files("single_kernel_postgresql.templates")
+            .joinpath(self.state.substrate.name.lower(), "pgbackrest.conf.j2")
+            .read_text()
+        )
+        cpu_count, _ = self.workload.get_available_resources()
+        rendered = template.render(
+            enable_tls=len(self._peer_members) > 0,
+            peer_endpoints=self._peer_members,
+            path=s3_parameters["path"],
+            data_path=str(self.workload.paths.data),
+            pgdata_path=str(self.workload.paths.data),
+            log_path=str(config.logs_path),
+            pgbackrest_logs_path=str(config.logs_path),
+            region=s3_parameters.get("region"),
+            endpoint=s3_parameters["endpoint"],
+            bucket=s3_parameters["bucket"],
+            s3_uri_style=s3_parameters["s3-uri-style"],
+            tls_ca_chain=self._tls_ca_chain_filename,
+            access_key=s3_parameters["access-key"],
+            secret_key=s3_parameters["secret-key"],
+            stanza=self.stanza_name,
+            storage_path=config.storage_path,
+            user=BACKUP_USER,
+            retention_full=s3_parameters["delete-older-than-days"],
+            process_max=max(cpu_count - 2, 1),
+        )
+        self.workload.write_text(
+            rendered,
+            self.workload.root / config.configuration_file.lstrip("/"),
+            mode=0o640 if self.state.substrate == Substrates.VM else None,
+            user=self.workload.user,
+            group=self.workload.group,
+        )
+
+        logrotate_template = jinja2.Template(
+            importlib.resources
+            .files("single_kernel_postgresql.templates")
+            .joinpath(self.state.substrate.name.lower(), "pgbackrest.logrotate.j2")
+            .read_text()
+        )
+        self.workload.write_text(
+            logrotate_template.render(pgbackrest_logs_path=str(config.logs_path)),
+            self.workload.root / PGBACKREST_LOGROTATE_FILE.lstrip("/"),
+            mode=0o644,
+            user=None,
+            group=None,
+        )
+        return True
+
+    # -- Stanza lifecycle -------------------------------------------------------
+
+    def _initialise_stanza(self) -> bool:
+        """Initialize the stanza.
+
+        A stanza is the configuration for a PostgreSQL database cluster that defines where it is located, how it will
+        be backed up, archiving options, etc. (more info in
+        https://pgbackrest.org/user-guide.html#quickstart/configure-stanza).
+
+        Returns:
+            whether stanza initialization was successful.
+        """
+        # Enable stanza initialisation if the backup settings were fixed after being invalid
+        # or pointing to a repository where there are backups from another cluster.
+        if self.state.peer.is_blocked and not self._has_s3_block_message:
+            logger.warning("couldn't initialize stanza due to a blocked status")
+            return False
+
+        # Create the stanza.
+        try:
+            # If the tls is enabled, it requires all the units in the cluster to run the pgBackRest service to
+            # successfully complete validation, and upon receiving the same parent event other units should start it.
+            # Therefore, the first retry may fail due to the delay of these other units to start this service. 60s given
+            # for that or else the s3 initialization sequence will fail.
+            for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(10), reraise=True):
+                with attempt:
+                    result = self._execute_pgbackrest([
+                        f"--stanza={self.stanza_name}",
+                        "stanza-create",
+                    ])
+                    if self.state.substrate == Substrates.VM:
+                        if result.return_code == STANZA_CREATE_CONNECTION_TIMEOUT_ERROR_CODE:
+                            # Raise an error if the connection timeouts, so the user has the possibility to
+                            # fix network issues and call juju resolve to re-trigger the hook that calls
+                            # this method.
+                            logger.error(
+                                f"error: {result.stderr} - please fix the error and call juju resolve on this unit"
+                            )
+                            raise TimeoutError
+                        if result.return_code != 0:
+                            raise Exception(result.stderr)
+        except TimeoutError as e:
+            raise e
+        except ExecError:
+            # On K8s a failed stanza-create surfaces as pebble ExecError.
+            logger.exception("Failed to initialise stanza:")
+            self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
+            return False
+        except Exception:
+            # If the stanza-create command doesn't succeed, remove the stanza name
+            # and rollback the configuration.
+            logger.exception("Failed to initialise stanza:")
+            self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
+            return False
+
+        self.start_stop_pgbackrest_service()
+
+        # Rest of the successful s3 initialization sequence such as s3-initialization-start and s3-initialization-done
+        # are left to the check_stanza func.
+        if self.state.peer.is_app_leader:
+            self.state.application.stanza = self.stanza_name
+        else:
+            self.state.peer.stanza = self.stanza_name
+
+        return True
+
+    def check_stanza(self) -> bool:
+        """Runs the pgbackrest stanza validation.
+
+        Returns:
+            whether stanza validation was successful.
+        """
+        # Update the configuration to use pgBackRest as the archiving mechanism.
+        self.update_config()
+
+        try:
+            # If the tls is enabled, it requires all the units in the cluster to run the pgBackRest service to
+            # successfully complete validation, and upon receiving the same parent event other units should start it.
+            # Therefore, the first retry may fail due to the delay of these other units to start this service. 60s given
+            # for that or else the s3 initialization sequence will fail.
+            for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(10), reraise=True):
+                with attempt:
+                    result = self._execute_pgbackrest([f"--stanza={self.stanza_name}", "check"])
+                    if self.state.substrate == Substrates.VM:
+                        if result.return_code == PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE:
+                            # Raise an error if the archive command timeouts, so the user has the possibility
+                            # to fix network issues and call juju resolve to re-trigger the hook that calls
+                            # this method.
+                            extracted_error = extract_error_message(
+                                result.stderr, str(self.workload.backup_config.logs_path)
+                            )
+                            logger.error(
+                                f"error: {extracted_error} - please fix the error and call juju resolve on this unit"
+                            )
+                            raise TimeoutError
+                        if result.return_code != 0:
+                            raise Exception(result.stderr)
+        except TimeoutError as e:
+            if self.state.substrate == Substrates.K8S:
+                # The K8s charm folds every failure (including timeouts) into the
+                # initialization-failure path instead of re-raising.
+                logger.exception("Failed to check stanza:")
+                self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
+                return False
+            # Re-raise to put charm in error state (not blocked), allowing juju resolve
+            raise e
+        except Exception:
+            # If the check command doesn't succeed, remove the stanza name
+            # and rollback the configuration.
+            logger.exception("Failed to check stanza:")
+            self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
+            self.update_config()
+            return False
+
+        if self.state.peer.is_app_leader:
+            self.state.application.s3_initialization_start = ""
+        else:
+            self.state.peer.s3_initialization_done = "True"
+
+        return True
+
+    def coordinate_stanza_fields(self) -> None:
+        """Coordinate the stanza name between the primary and the leader units."""
+        if not self.state.peer.is_app_leader or not self.state.application.s3_initialization_start:
+            return
+
+        for unit_data in [self.state.application, *self.state.application_peers]:
+            if not unit_data.s3_initialization_done:
+                continue
+
+            self.state.application.stanza = unit_data.stanza or ""
+            self.state.application.s3_initialization_block_message = (
+                unit_data.s3_initialization_block_message or ""
+            )
+            self.state.application.s3_initialization_start = ""
+            self.state.application.s3_initialization_done = "True"
+
+            self.update_config()
+            break
+
+    # -- pgBackRest TLS server service -------------------------------------------
+
+    @property
+    def _is_primary_pgbackrest_service_running(self) -> bool:
+        """Returns whether the pgBackRest TLS server is running in the primary unit."""
+        primary_endpoint = self._primary_endpoint
+        if not primary_endpoint:
+            logger.warning("Failed to contact pgBackRest TLS server: no primary endpoint")
+            return False
+        try:
+            result = self._execute_pgbackrest(
+                ["server-ping", "--io-timeout=10", primary_endpoint],
+                with_config=False,
+            )
+        except ExecError as e:
+            logger.warning(
+                f"Failed to contact pgBackRest TLS server on {primary_endpoint} with error {e!s}"
+            )
+            return False
+        extracted_error = extract_error_message(
+            result.stderr, str(self.workload.backup_config.logs_path)
+        )
+        if not result.ok:
+            logger.warning(
+                f"Failed to contact pgBackRest TLS server on {primary_endpoint} with error {extracted_error}"
+            )
+        return result.ok
+
+    def start_stop_pgbackrest_service(self) -> bool:
+        """Start or stop the pgBackRest TLS server service.
+
+        Returns:
+            a boolean indicating whether the operation succeeded.
+        """
+        # Ignore this operation if backups settings aren't ok.
+        are_backup_settings_ok, _ = self._are_backup_settings_ok()
+        if not are_backup_settings_ok:
+            return True
+
+        # Update pgBackRest configuration (to update the TLS settings).
+        if not self._render_pgbackrest_conf_file():
+            return False
+
+        service = self.workload.backup_config.service
+        if self.state.substrate == Substrates.VM and not self.workload.workload_present:
+            logger.error("Cannot start/stop service, snap is not yet installed.")
+            return False
+
+        # Stop the service if TLS is not enabled or there are no replicas.
+        if len(self._peer_members) == 0 or self.patroni_manager.get_standby_leader():
+            self.workload.stop_service(service)
+            return True
+
+        # Don't start the service if the service hasn't started yet in the primary.
+        if not self.is_primary and not self._is_primary_pgbackrest_service_running:
+            return False
+
+        # Start the service.
+        if self.state.substrate == Substrates.K8S:
+            if self.workload.service_is_running(service):
+                logger.debug("Sending SIGHUP to pgBackRest TLS server to reload configuration")
+                self.workload.reload_service(service)
+            else:
+                logger.debug("Starting pgBackRest TLS server service")
+                self.workload.restart_service(service)
+        else:
+            self.workload.restart_service(service)
+        return True
