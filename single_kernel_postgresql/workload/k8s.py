@@ -4,6 +4,7 @@
 """Kubernetes Workload."""
 
 import logging
+import pathlib
 import shlex
 import signal
 import uuid
@@ -13,14 +14,29 @@ from pathlib import Path
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
+from lightkube import Client
+from lightkube.resources.core_v1 import Endpoints
 from ops import Container, ModelError
-from ops.pebble import ExecError, Plan, ServiceStatus
+from ops.pebble import ExecError, FileInfo, FileType, Plan, ServiceStatus
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     DIR_PERMISSIONS_READONLY,
+    K8S_ARCHIVE_PATH,
+    K8S_DATA_PATH,
+    K8S_DEBIAN_DATA_SYMLINK,
+    K8S_LOGS_STORAGE_PATH,
+    K8S_PATRONI_LOGS_PATH,
+    K8S_PATRONI_LOGS_SYMLINK_PATH,
+    K8S_PG_LOGS_PATH,
     K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+    K8S_PGBACKREST_LOGS_PATH,
+    K8S_PGBACKREST_LOGS_SYMLINK_PATH,
+    K8S_POSTGRESQL_LOGS_SYMLINK_PATH,
     K8S_POSTGRESQL_SERVICE_NAME,
+    K8S_TEMP_STORAGE_PATH,
+    K8S_TEMP_TABLESPACE_DIR,
+    K8S_WAL_DIR,
 )
 from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
@@ -184,6 +200,228 @@ class K8sWorkload(BaseWorkload):
         if len(services) == 0:
             return False
         return services[0].current == ServiceStatus.ACTIVE
+
+    def empty_data_files(self) -> bool:
+        """Empty the PostgreSQL data directory in preparation of backup restore."""
+        # Clear all storage directories, not just data. The logs directory must be cleared
+        # so that when new replicas join after restore, pg_basebackup can use the --waldir
+        # option (which requires an empty directory).
+        for path in [
+            self.root / K8S_ARCHIVE_PATH,
+            self.paths.data,
+            self.root / K8S_LOGS_STORAGE_PATH,
+            self.root / K8S_TEMP_STORAGE_PATH,
+        ]:
+            try:
+                self.container.exec(["find", str(path), "-mindepth", "1", "-delete"]).wait_output()
+            except ExecError as e:
+                # If previous PITR restore was unsuccessful, there may be no such directory.
+                if "No such file or directory" not in str(e.stderr):
+                    logger.exception(
+                        f"Failed to empty {path} in prep for backup restore", exc_info=e
+                    )
+                    raise
+        return True
+
+    def remove_cluster_info(
+        self, cluster_name: str, namespace: str | None = None
+    ) -> CommandResult:
+        """Delete the K8s endpoints that track the cluster information, including its id.
+
+        This is the same as "patronictl remove patroni-<name>", but the latter doesn't
+        work after the database service is stopped on Pebble.
+
+        Args:
+            cluster_name: the Patroni cluster name ("patroni-<app>" on K8s).
+            namespace: the K8s namespace of the patroni Endpoints.
+        """
+        if namespace is None:
+            raise ValueError("the K8s cluster-info removal requires a namespace")
+        client = Client()
+        client.delete(Endpoints, name=cluster_name, namespace=namespace)
+        client.delete(Endpoints, name=f"{cluster_name}-config", namespace=namespace)
+        return CommandResult(return_code=0)
+
+    def init_storage(self) -> None:
+        """Create the PostgreSQL data directories, clearing stale data if needed.
+
+        Port of the K8s charm's _create_pgdata/_ensure_pgdata_dirs_and_symlinks
+        helpers. The stale-data clearing branch of the pebble-ready helper (replica
+        joins on an initialized cluster) does not apply here: the restore action only
+        runs on the leader unit.
+        """
+        logs_storage = self.root / K8S_LOGS_STORAGE_PATH
+        waldir_path = logs_storage / self.paths.versioned_path / K8S_WAL_DIR
+        temp_tablespace_path = (
+            self.root / K8S_TEMP_STORAGE_PATH / self.paths.versioned_path / K8S_TEMP_TABLESPACE_DIR
+        )
+        archive_path = self.root / K8S_ARCHIVE_PATH / self.paths.versioned_path
+        pgdata_path = self.paths.data
+
+        # Create the pgdata directory on the storage mount (e.g., /var/lib/pg/data/16/main)
+        if not self.container.exists(str(pgdata_path)):
+            self.container.make_dir(
+                str(pgdata_path),
+                permissions=0o700,
+                user=self.user,
+                group=self.group,
+                make_parents=True,
+            )
+        # Create the WAL directory (e.g., /var/lib/pg/logs/16/main/pg_wal)
+        if not self.container.exists(str(waldir_path)):
+            self.container.make_dir(
+                str(waldir_path),
+                permissions=0o700,
+                user=self.user,
+                group=self.group,
+                make_parents=True,
+            )
+        for path in [
+            logs_storage / K8S_PG_LOGS_PATH,
+            logs_storage / K8S_PATRONI_LOGS_PATH,
+            logs_storage / K8S_PGBACKREST_LOGS_PATH,
+        ]:
+            if not self.container.exists(str(path)):
+                self.container.make_dir(
+                    str(path),
+                    permissions=0o755,
+                    user=self.user,
+                    group=self.group,
+                    make_parents=True,
+                )
+            self.container.exec(["chmod", "755", str(path)]).wait()
+            self.container.exec(["chown", f"{self.user}:{self.group}", str(path)]).wait()
+        # Create the temp tablespace directory (e.g., /var/lib/pg/temp/16/main/pgsql_tmp)
+        if not self.container.exists(str(temp_tablespace_path)):
+            self.container.make_dir(
+                str(temp_tablespace_path),
+                permissions=0o700,
+                user=self.user,
+                group=self.group,
+                make_parents=True,
+            )
+        # Create the archive directory (e.g., /var/lib/pg/archive/16/main)
+        if not self.container.exists(str(archive_path)):
+            self.container.make_dir(
+                str(archive_path),
+                permissions=0o700,
+                user=self.user,
+                group=self.group,
+                make_parents=True,
+            )
+        # Create a debian-style symlink at the version level:
+        # /var/lib/postgresql/16 -> /var/lib/pg/data/16
+        # This keeps /var/lib/postgresql/16/main as a valid alias for the real pgdata
+        # directory for any tools that rely on the traditional Debian path layout.
+        # Note: This symlink is on ephemeral storage and may not persist across container
+        # restarts. It gets recreated on each pebble-ready event.
+        # /var/lib/postgresql is created by the postgresql Debian package and exists in
+        # the container image, so no make_dir is needed before creating the symlink.
+        self.container.exec([
+            "ln",
+            "-sfn",
+            str(self.root / K8S_DATA_PATH / "16"),
+            str(self.root / K8S_DEBIAN_DATA_SYMLINK),
+        ]).wait()
+        self.container.exec([
+            "chown",
+            "-h",
+            f"{self.user}:{self.group}",
+            str(self.root / K8S_DEBIAN_DATA_SYMLINK),
+        ]).wait()
+        self._ensure_log_symlink(K8S_PG_LOGS_PATH, self.root / K8S_POSTGRESQL_LOGS_SYMLINK_PATH)
+        self._ensure_log_symlink(K8S_PATRONI_LOGS_PATH, self.root / K8S_PATRONI_LOGS_SYMLINK_PATH)
+        self._ensure_log_symlink(
+            K8S_PGBACKREST_LOGS_PATH, self.root / K8S_PGBACKREST_LOGS_SYMLINK_PATH
+        )
+        # Also, fix the permissions from the parent directory.
+        for path in [
+            self.root / K8S_ARCHIVE_PATH,
+            self.root / K8S_DATA_PATH,
+            logs_storage,
+            self.root / K8S_TEMP_STORAGE_PATH,
+        ]:
+            self.container.exec(["chown", f"{self.user}:{self.group}", str(path)]).wait()
+
+    def _ensure_log_symlink(self, target_name: str, symlink_path: PathProtocol) -> None:
+        """Ensure symlink_path points to target in the logs storage."""
+        path_info = self._get_container_path_info(str(symlink_path))
+        if path_info is not None:
+            if path_info.type == FileType.DIRECTORY:
+                self._remove_empty_log_directory(str(symlink_path))
+            elif path_info.type != FileType.SYMLINK:
+                logger.error(
+                    "error: %s exists but is neither a symlink nor a directory and cannot"
+                    " be replaced with a symlink to the logs storage - remove it manually"
+                    " and run 'juju resolve' on each unit to recover.",
+                    symlink_path,
+                )
+                raise RuntimeError from None
+
+        logs_storage = self.root / K8S_LOGS_STORAGE_PATH
+        self.container.exec([
+            "ln",
+            "-sfn",
+            str(logs_storage / self.paths.versioned_path / target_name),
+            str(symlink_path),
+        ]).wait()
+        self.container.exec([
+            "chown",
+            "-h",
+            f"{self.user}:{self.group}",
+            str(symlink_path),
+        ]).wait()
+
+    def _get_container_path_info(self, path: str) -> FileInfo | None:
+        """Return file info for a specific container path without dereferencing symlinks."""
+        path_obj = pathlib.PurePosixPath(path)
+        path_infos = self.container.list_files(str(path_obj.parent), pattern=path_obj.name)
+        if not path_infos:
+            return None
+        return path_infos[0]
+
+    def _remove_empty_log_directory(self, symlink_path: str) -> None:
+        """Remove a log directory at symlink_path only when it is empty."""
+        if self.container.list_files(symlink_path):
+            logger.error(
+                "error: %s is a non-empty directory and cannot be replaced with a"
+                " symlink to the logs storage - move or remove its contents manually"
+                " and run 'juju resolve' on each unit to recover.",
+                symlink_path,
+            )
+            raise RuntimeError from None
+
+        self.container.remove_path(symlink_path)
+
+    def pitr_bootstrap_failure_logs(self) -> tuple[str, bool]:
+        """Fetch the postgresql pebble service logs for PITR bootstrap-failure scanning.
+
+        Falls back to concatenating the patroni log files when the pebble logs client
+        is unavailable (Juju 2).
+        """
+        try:
+            log_exec = self.container.pebble.exec(
+                ["pebble", "logs", K8S_POSTGRESQL_SERVICE_NAME, "-n", "all"],
+                combine_stderr=True,
+            )
+            return log_exec.wait_output()[0], False
+        except ExecError:  # For Juju 2.
+            patroni_logs_dir = self.root / K8S_LOGS_STORAGE_PATH / K8S_PATRONI_LOGS_PATH
+            current = self.container.exec([
+                "cat",
+                str(patroni_logs_dir / "patroni.log"),
+            ]).wait_output()[0]
+            older = self.container.exec([
+                "find",
+                str(patroni_logs_dir) + "/",
+                "-name",
+                "patroni.log.*",
+                "-exec",
+                "cat",
+                "{}",
+                "+",
+            ]).wait_output()[0]
+            return f"{current}\n{older}", True
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
