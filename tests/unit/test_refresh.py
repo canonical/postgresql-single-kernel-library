@@ -17,6 +17,7 @@ from single_kernel_postgresql.managers.refresh import (
     PostgreSQLRefreshK8s,
     RefreshManager,
 )
+from tenacity import RetryError
 
 CHARM_VERSION = "16/1.0.0"
 
@@ -336,3 +337,100 @@ def test_reconcile_refresh_status_ignores_unrelated_status(refresh_manager, char
 
     assert charm.unit.status == BlockedStatus("unrelated")
     refresh_manager.refresh.unit_status_lower_priority.assert_not_called()
+
+
+def test_reconcile_updates_layers_and_allows_next_unit(refresh_manager, charm):
+    charm.patroni_manager.member_started = True
+    charm.unit.is_leader.return_value = False
+    charm.unit.name = "postgresql/0"
+    charm.patroni_manager.cluster_members = {"postgresql-0"}
+    charm.patroni_manager.is_replication_healthy.return_value = True
+
+    refresh_manager.reconcile()
+
+    charm.ensure_pgdata_dirs_and_symlinks.assert_called_once()
+    charm.update_pebble_layers.assert_called_once()
+    assert refresh_manager.refresh.next_unit_allowed_to_refresh is True
+    assert charm.unit.status == ActiveStatus()
+
+
+def test_reconcile_exits_early_when_patroni_has_not_started(refresh_manager, charm):
+    charm.patroni_manager.member_started = False
+
+    refresh_manager.reconcile()
+
+    charm.ensure_pgdata_dirs_and_symlinks.assert_called_once()
+    charm.update_pebble_layers.assert_called_once()
+    charm.patroni_manager.is_replication_healthy.assert_not_called()
+
+
+def test_reconcile_exits_early_when_primary_endpoint_not_ready(refresh_manager, charm):
+    charm.patroni_manager.member_started = True
+    charm.unit.is_leader.return_value = True
+    charm.patroni_manager.primary_endpoint_ready = False
+
+    refresh_manager.reconcile()
+
+    assert charm.unit.status == MaintenanceStatus("starting services")
+
+
+def test_reconcile_blocks_when_retries_exhausted(refresh_manager, charm):
+    charm.patroni_manager.member_started = True
+    charm.unit.is_leader.return_value = False
+    charm.unit.name = "postgresql/0"
+    charm.patroni_manager.cluster_members = set()
+    refresh_manager.refresh.next_unit_allowed_to_refresh = False
+
+    with patch(
+        "single_kernel_postgresql.managers.refresh.Retrying",
+        side_effect=RetryError("last attempt"),
+    ):
+        refresh_manager.reconcile()
+
+    assert charm.unit.status == BlockedStatus(
+        "upgrade failed. Check logs for rollback instruction"
+    )
+    assert refresh_manager.refresh.next_unit_allowed_to_refresh is False
+
+
+def test_on_init_reconciles_when_in_progress(refresh_manager):
+    refresh_manager.refresh.in_progress = True
+    refresh_manager.refresh.workload_allowed_to_start = True
+    refresh_manager.refresh.next_unit_allowed_to_refresh = False
+
+    with patch.object(refresh_manager, "reconcile") as reconcile:
+        refresh_manager.on_init()
+
+    reconcile.assert_called_once()
+
+
+def test_on_init_marks_next_unit_allowed_when_not_in_progress(refresh_manager):
+    refresh_manager.refresh.in_progress = False
+    refresh_manager.refresh.workload_allowed_to_start = True
+    refresh_manager.refresh.next_unit_allowed_to_refresh = False
+
+    with patch.object(refresh_manager, "reconcile") as reconcile:
+        refresh_manager.on_init()
+
+    reconcile.assert_not_called()
+    assert refresh_manager.refresh.next_unit_allowed_to_refresh is True
+
+
+def test_on_init_noop_without_refresh_object(refresh_manager):
+    refresh_manager.refresh = None
+
+    with patch.object(refresh_manager, "reconcile") as reconcile:
+        refresh_manager.on_init()
+
+    reconcile.assert_not_called()
+
+
+def test_pebble_ready_defers_while_refresh_in_progress(harness):
+    charm = harness.charm
+    charm.refresh_manager.refresh.in_progress = True
+    charm.refresh_manager.refresh.workload_allowed_to_start = False
+    event = MagicMock()
+
+    charm.postgresql_events_handler._on_postgresql_pebble_ready(event)
+
+    event.defer.assert_called_once()

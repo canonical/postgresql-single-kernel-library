@@ -98,6 +98,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.refresh_manager,
         )
 
         # Status Handler
@@ -107,6 +108,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.refresh_manager,
         )
 
     # Postgresql Client
@@ -177,7 +179,9 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         pass
 
     @abstractmethod
-    def update_config(self) -> bool:
+    def update_config(
+        self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
+    ) -> bool:
         """Re-render the Patroni configuration and apply it."""
         pass
 
@@ -194,4 +198,23 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         Owned by the async-replication module until that phase migrates; the refresh
         pre-refresh checks need it to decide whether a switchover crosses clusters.
         """
+        pass
+
+    @abstractmethod
+    def update_relation_endpoints(self) -> None:
+        """Refresh the client and async relation endpoints after a switchover.
+
+        Owned by the client-relation and async-replication modules until those
+        phases migrate; the VM pre-refresh checks call it after switching primary.
+        """
+        pass
+
+    @abstractmethod
+    def update_pebble_layers(self) -> None:
+        """Reconcile the workload's Pebble layers (K8s)."""
+        pass
+
+    @abstractmethod
+    def ensure_pgdata_dirs_and_symlinks(self) -> None:
+        """Create the storage directories and symlinks for the PostgreSQL data paths (K8s)."""
         pass
