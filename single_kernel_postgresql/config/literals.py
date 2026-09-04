@@ -142,6 +142,11 @@ ALL_CLIENT_RELATIONS = [DATABASE]
 REPLICATION_CONSUMER_RELATION = "replication"
 REPLICATION_OFFER_RELATION = "replication-offer"
 
+# Logical replication relations
+LOGICAL_REPLICATION_OFFER_RELATION = "logical-replication-offer"
+LOGICAL_REPLICATION_RELATION = "logical-replication"
+LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS = "Logical replication setup is invalid. Check logs"
+SECRET_LABEL = "logical-replication-relation"  # noqa: S105
 # Async replication peer-data key holding the id of the labelless shared cluster-credentials
 # secret the owner persists: referenced by id everywhere, never by label (DPE-10203).
 ASYNC_SHARED_SECRET_ID_KEY = "async-replication-secret-id"  # noqa: S105 — a databag key name, not a credential
