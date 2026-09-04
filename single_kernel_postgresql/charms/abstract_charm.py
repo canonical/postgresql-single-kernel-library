@@ -10,6 +10,7 @@ from ops.charm import CharmBase
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
+from single_kernel_postgresql.events.logical_replication import PostgreSQLLogicalReplication
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
@@ -62,6 +63,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
         )
 
+        # Logical replication handler owns the two logical-replication relations; the
+        # config manager reads its published slots for the Patroni render and API sync.
+        self.logical_replication = PostgreSQLLogicalReplication(self, self.state)
+
         self.config_manager = ConfigManager(
             state=self.state,
             workload=self.workload,
@@ -71,6 +76,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             resource_provider=self.get_resource_provider,
             request_restart=self.request_restart,
             restart_services=self.restart_services,
+            logical_replication_slots=self.logical_replication.replication_slots,
         )
 
         # Events Handler
