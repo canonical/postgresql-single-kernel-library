@@ -40,9 +40,9 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 
 if TYPE_CHECKING:
     # Import-time only: the VM workload pulls the snap charm lib, which K8s does not ship.
+    from single_kernel_postgresql.events.watcher import WatcherEventsHandler
     from single_kernel_postgresql.managers.database import DatabaseManager
     from single_kernel_postgresql.workload.vm import VMWorkload
-
 logger = logging.getLogger(__name__)
 
 
@@ -62,11 +62,13 @@ class ConfigManager(BaseManager):
         resource_provider: Callable[[], ResourceProvider],
         request_restart: Callable[[], None],
         restart_services: Callable[[], None],
+        watcher_handler: "WatcherEventsHandler | None" = None,
     ):
         super().__init__(state, workload, "config_manager")
         self.tls_manager = tls_manager
         self.patroni_manager = patroni_manager
         self.database_manager = database_manager
+        self.watcher_handler = watcher_handler
         # Resolved on use, not at construction: the K8s manager that provides it is built
         # after this manager in the charm's __init__.
         self.resource_provider = resource_provider
@@ -475,8 +477,6 @@ class ConfigManager(BaseManager):
         async_primary_cluster_endpoint: str | None = None,
         async_partner_addresses: list[str] | None = None,
         async_standby_endpoints: list[str] | None = None,
-        # TODO add rel handler
-        watcher_raft_address: str | None = None,
         no_peers: bool = False,
         *,
         refresh: charm_refresh.Machines | None = None,
@@ -524,7 +524,6 @@ class ConfigManager(BaseManager):
             async_primary_cluster_endpoint=async_primary_cluster_endpoint,
             async_partner_addresses=async_partner_addresses,
             async_standby_endpoints=async_standby_endpoints,
-            watcher_raft_address=watcher_raft_address,
             no_peers=no_peers,
         )
         if no_peers:
@@ -616,8 +615,6 @@ class ConfigManager(BaseManager):
         async_primary_cluster_endpoint: str | None = None,
         async_partner_addresses: list[str] | None = None,
         async_standby_endpoints: list[str] | None = None,
-        # VM watcher rel
-        watcher_raft_address: str | None = None,
     ) -> None:
         """Render the Patroni configuration file.
 
@@ -643,7 +640,6 @@ class ConfigManager(BaseManager):
             async_primary_cluster_endpoint: Primary async cluster endpoint.
             async_standby_endpoints: Primary async cluster endpoint.
             async_partner_addresses: Primary async cluster endpoint.
-            watcher_raft_address: IP address of a related Raft watcher.
         """
         slots = slots or {}
         ldap_parameters = ldap_parameters or {}
@@ -709,7 +705,9 @@ class ConfigManager(BaseManager):
                 "self_ip": self.state.unit_ip,
                 "listen_ips": self.state.listen_ips,
                 "raft_password": self.state.application.raft_password,
-                "watcher": watcher_raft_address,
+                "watcher": self.watcher_handler.watcher_raft_address
+                if self.watcher_handler.is_active
+                else None,
             })
             perms = 0o600
         else:

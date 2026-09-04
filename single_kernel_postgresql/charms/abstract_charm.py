@@ -12,6 +12,7 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
+from single_kernel_postgresql.events.watcher import WatcherEventsHandler
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseProvides,
 )
@@ -62,12 +63,23 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
         )
 
+        # Watcher relation handler owns the stereo-mode watcher-offer relation. Built
+        # before the config manager so it can constructor-inject it, mirroring the
+        # LDAP handler. VM-only: on K8s there is no watcher relation and the handler
+        # is inert without the metadata entry.
+        self.watcher = (
+            WatcherEventsHandler(self, self.state, self.workload, self.tls_manager)
+            if self.substrate == Substrates.VM
+            else None
+        )
+
         self.config_manager = ConfigManager(
             state=self.state,
             workload=self.workload,
             tls_manager=self.tls_manager,
             patroni_manager=self.patroni_manager,
             database_manager=self.database_manager,
+            watcher_handler=self.watcher,
             resource_provider=self.get_resource_provider,
             request_restart=self.request_restart,
             restart_services=self.restart_services,
@@ -116,7 +128,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
 
     # Charm-side bridges the lib calls back into. request_restart/restart_services are
     # substrate-tangled and stay until their own migration phases; update_config still
-    # supplies the ldap/async/watcher values those phases own; primary_endpoint is the
+    # supplies the ldap/async values those phases own; primary_endpoint is the
     # VM's Patroni-derived primary lookup. set_unit_status routes status writes through
     # the charm_refresh priority gate and stays until the refresh logic itself migrates
     # into the library, at which point the managers own their status writes.
