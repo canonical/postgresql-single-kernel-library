@@ -218,6 +218,14 @@ class VMWorkload(BaseWorkload):
         """
         self.restart_service(service)
 
+    def service_exists(self, service: str) -> bool:
+        """Whether the snap declares the named service."""
+        try:
+            services = snap.SnapCache()["charmed-postgresql"].services
+        except snap.SnapError:
+            return False
+        return service in services
+
     def service_is_running(self, service: str) -> bool:
         """Check whether a named snap service is running.
 

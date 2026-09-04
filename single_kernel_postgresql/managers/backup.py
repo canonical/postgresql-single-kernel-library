@@ -304,6 +304,22 @@ class BackupManager(BaseManager):
             user=None,
             group=None,
         )
+        if self.state.substrate == Substrates.K8S:
+            # The Pebble layer declares the rotate-logs service around this
+            # script; push it where the layer's command expects it and start
+            # the service when the layer already declared it.
+            rotate_logs_script = (
+                importlib.resources
+                .files("single_kernel_postgresql.scripts")
+                .joinpath("rotate_logs.py")
+                .read_text()
+            )
+            self.workload.write_text(
+                rotate_logs_script,
+                self.workload.root / "home/postgres/rotate_logs.py",
+            )
+            if self.workload.service_exists(K8S_ROTATE_LOGS_SERVICE_NAME):
+                self.workload.start_service(K8S_ROTATE_LOGS_SERVICE_NAME)
         return True
 
     # -- Stanza lifecycle -------------------------------------------------------
