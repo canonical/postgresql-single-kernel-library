@@ -21,7 +21,6 @@ from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.config.literals import VM_PGBACKREST_SERVICE_NAME
 from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
-from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.vm import VMPaths
 
 logger = logging.getLogger(__name__)
@@ -126,6 +125,7 @@ class VMWorkload(BaseWorkload):
         """Return the VM pgBackRest invocation settings."""
         return BackupConfig(
             executable="charmed-postgresql.pgbackrest",
+            conf_path=str(self.paths.pgbackrest_conf),
             # Matches the VM charm: the versioned PostgreSQL binaries live under the
             # snap's /snap mount point, not the writable /var/snap tree.
             bin_path="/snap/charmed-postgresql/current/usr/lib/postgresql",
@@ -278,7 +278,7 @@ class VMWorkload(BaseWorkload):
         return "_daemon_"
 
     @property
-    def paths(self) -> BasePaths:
+    def paths(self) -> VMPaths:
         """Return Workload's paths."""
         return VMPaths(self.root, self.get_postgresql_version().split(".")[0])
 

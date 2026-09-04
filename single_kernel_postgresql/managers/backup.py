@@ -22,7 +22,11 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.utils.backup import S3_BLOCK_MESSAGES
-from single_kernel_postgresql.workload.base import BaseWorkload, CommandResult
+from single_kernel_postgresql.workload.base import (
+    BaseWorkload,
+    CommandResult,
+    ResourceProvider,
+)
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.managers.s3_client import S3Client
@@ -54,13 +58,17 @@ class BackupManager(BaseManager):
         s3_client: "S3Client",
         patroni_manager: PatroniManager,
         update_config: UpdateConfigFunction,
+        resource_provider: ResourceProvider,
         is_standby_cluster: IsStandbyClusterFunction | None = None,
+        set_unit_status: Callable[..., None] | None = None,
     ):
         """Manager of PostgreSQL backups."""
         super().__init__(state, workload, "backup")
         self.s3_client = s3_client
         self.patroni_manager = patroni_manager
         self.update_config = update_config
+        self.resource_provider = resource_provider
+        self.set_unit_status = set_unit_status
         self._is_standby_cluster_bridge = is_standby_cluster
 
     @property
@@ -139,7 +147,11 @@ class BackupManager(BaseManager):
                 primary = self.patroni_manager.get_primary() or (
                     self.patroni_manager.get_standby_leader()
                 )
-                return self.patroni_manager.get_member_ip(primary) if primary else None
+                member_ip = self.patroni_manager.get_member_ip(primary) if primary else None
+                if member_ip is not None and member_ip not in self.state.peer_members_ips:
+                    logger.debug("Early exit primary_endpoint: Primary IP not in cached peer list")
+                    return None
+                return member_ip
             primary = self.patroni_manager.get_primary()
         except (RetryError, ConnectionError) as e:
             logger.error(f"failed to get primary with error {e!s}")
