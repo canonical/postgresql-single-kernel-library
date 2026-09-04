@@ -75,6 +75,11 @@ class BackupConfig:
     @property
     def configuration_file(self) -> str:
         """Full path of the pgBackRest configuration file."""
+        # K8s renders to the pgBackRest default location (its pgbackrest reads
+        # /etc/pgbackrest.conf; no --config flag is passed); a None conf_path
+        # must not leak into the path.
+        if self.conf_path is None:
+            return "/etc/pgbackrest.conf"
         return f"{self.conf_path}/pgbackrest.conf"
 
     def pg_controldata(self, major_version: str) -> str:
