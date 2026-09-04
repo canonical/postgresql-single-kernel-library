@@ -27,7 +27,8 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         assert isinstance(self.workload, K8sWorkload), (  # noqa: S101
             "Workload must be an instance of K8sWorkload"
         )
-        self.k8s_manager = K8sManager(self.state, self.workload)
+
+        # The abstract charm builds self.k8s_manager and the async-replication handler.
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -72,6 +73,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     # config re-render), so they are minimal here.
     def get_resource_provider(self) -> K8sManager:
         """Return the substrate's (cpu_cores, memory_bytes) introspector."""
+        assert self.k8s_manager is not None  # noqa: S101
         return self.k8s_manager
 
     def request_restart(self) -> None:
@@ -87,6 +89,20 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def update_config(self) -> bool:
         """Re-render the Patroni configuration and apply it."""
         return self.config_manager.update_config(self.postgresql)
+
+    def set_app_status(self, status: StatusBase) -> None:
+        """Set the application status; the production charm gates this on its own state."""
+        self.app.status = status
+
+    def set_primary_status_message(self) -> None:
+        """Recompute the unit's primary/standby status message."""
+
+    def fix_leader_annotation(self) -> bool:
+        """Fix the leader annotation; the production charm owns the real implementation."""
+        return False
+
+    def create_pgdata(self) -> None:
+        """Create the PostgreSQL data directories; the production charm owns the real body."""
 
     @property
     def primary_endpoint(self) -> str | None:
