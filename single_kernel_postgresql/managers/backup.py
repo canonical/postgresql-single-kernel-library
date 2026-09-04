@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import jinja2
-from ops import JujuVersion
+from ops import ActiveStatus, JujuVersion, MaintenanceStatus
 from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
@@ -50,10 +50,6 @@ from single_kernel_postgresql.workload.base import (
     CommandResult,
     ResourceProvider,
 )
-
-if TYPE_CHECKING:
-    from single_kernel_postgresql.managers.s3_client import S3Client
-
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.managers.s3_client import S3Client
@@ -554,7 +550,7 @@ class BackupManager(BaseManager):
         if not self.patroni_manager.member_started:
             return False, "Unit cannot perform backups as it's not in running state"
 
-        if not self.state.cluster_stanza:
+        if not self.state.application.stanza:
             return False, "Stanza was not initialised"
 
         return self._are_backup_settings_ok()
@@ -734,13 +730,22 @@ Juju Version: {JujuVersion.from_environ()!s}
             logger.error(f"Backup failed: {error_message}")
             return False, error_message
 
+        # Set flag due to missing in progress backups on JSON output
+        # (reference: https://github.com/pgbackrest/pgbackrest/issues/2007)
+        self.update_config(is_creating_backup=True)
+
         if not self.is_primary:
             # Create a rule to mark the cluster as in a creating backup state and update
             # the Patroni configuration.
             self._change_connectivity_to_database(connectivity=False)
 
+        if self.set_unit_status:
+            self.set_unit_status(MaintenanceStatus("creating backup"))
+
+        self.update_config(is_creating_backup=True)
+
         try:
-            return self._run_backup(s3_parameters, datetime_backup_requested, backup_type)
+            ok, message = self._run_backup(s3_parameters, datetime_backup_requested, backup_type)
         finally:
             if not self.is_primary:
                 # Remove the rule that marks the cluster as in a creating backup state
@@ -749,6 +754,10 @@ Juju Version: {JujuVersion.from_environ()!s}
             # Set flag due to missing in progress backups on JSON output
             # (reference: https://github.com/pgbackrest/pgbackrest/issues/2007)
             self.update_config(is_creating_backup=False)
+
+        if self.set_unit_status:
+            self.set_unit_status(ActiveStatus())
+        return ok, message
 
     def _run_backup(
         self,
