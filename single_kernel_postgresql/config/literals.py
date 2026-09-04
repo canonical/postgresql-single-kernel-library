@@ -48,6 +48,7 @@ POSTGRESQL_CONF_FILE = "postgresql.conf"
 ## Pgbackreest Paths
 PGBACKREST_CONF_PATH = "etc/pgbackrest"
 PGBACKREST_CONF_FILE = "pgbackrest.conf"
+S3_RELATION_NAME = "s3-parameters"
 
 ## TLS Paths
 TLS_CA_BUNDLE_FILE = "peer_ca_bundle.pem"
