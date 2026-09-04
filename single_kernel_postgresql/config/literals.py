@@ -110,6 +110,7 @@ CONTAINER_NAME = "postgresql"
 
 API_REQUEST_TIMEOUT = 5
 
+JUJU_EXECUTABLE = "/usr/bin/juju-exec"
 
 # --- Shared constants migrated from the charms ---
 
