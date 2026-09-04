@@ -92,6 +92,13 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
     def set_app_status(self) -> None:
         """Set the application status from the async-replication state."""
 
+    def post_refresh_side_effects(self) -> None:
+        """Set up the exporters, pgBackRest service, and watcher unit address."""
+
+    def has_async_replication_relation(self) -> bool:
+        """Whether this unit is related to an async replication partner."""
+        return False
+
     def update_config(
         self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
     ) -> bool:
