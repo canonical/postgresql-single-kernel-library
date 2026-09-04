@@ -13,8 +13,9 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from ops import ActiveStatus, MaintenanceStatus, Object
+from ops import Object
 from ops.charm import ActionEvent
+from ops.pebble import ExecError
 from tenacity import RetryError
 
 from single_kernel_postgresql.config.exceptions import ListBackupsError
@@ -64,7 +65,13 @@ class BackupEventsHandler(Object):
 
     def _on_s3_credential_changed(self, event) -> None:
         """Call the stanza initialization when the credentials or the connection info change."""
-        if not self.backup_manager._credential_changed_checks():
+        proceed, defer = self.backup_manager._credential_changed_checks()
+        if not proceed:
+            # The charms defer on every branch that deferred there: credentials
+            # arriving too early, mid-PITR, mid-restore, or on a unit that
+            # cannot initialise yet must be retried later, not dropped.
+            if defer:
+                event.defer()
             return
 
         # Start the pgBackRest service for the check_stanza to be successful. It's
@@ -93,15 +100,15 @@ class BackupEventsHandler(Object):
     def _on_create_backup_action(self, event: ActionEvent) -> None:
         """Request that pgBackRest creates a backup."""
         backup_type = event.params.get("type", "full")
-        logger.info(f"A {backup_type} backup has been requested on unit")
-        self.charm.set_unit_status(MaintenanceStatus("creating backup"))
+        # The manager owns the creating-backup status bracket: the charms set
+        # Maintenance only after validation and the metadata upload, and reset
+        # Active only once the run started — never on a gate failure.
         ok, message = self.backup_manager.create_backup(backup_type)
         if not ok:
             logger.error(f"Backup failed: {message}")
             event.fail(message)
         else:
             event.set_results({"backup-status": "backup created"})
-        self.charm.set_unit_status(ActiveStatus())
 
     def _on_list_backups_action(self, event: ActionEvent) -> None:
         """List the previously created backups."""
@@ -119,7 +126,9 @@ class BackupEventsHandler(Object):
         try:
             formatted_list = self.backup_manager._generate_backup_list_output()
             event.set_results({"backups": formatted_list})
-        except ListBackupsError as e:
+        except (ListBackupsError, ExecError) as e:
+            # The K8s charm catches ExecError here (pgbackrest failures raise
+            # instead of returning a code); the message matches both charms.
             logger.exception(e)
             event.fail(f"Failed to list PostgreSQL backups with error: {e!s}")
 
