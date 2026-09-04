@@ -235,6 +235,26 @@ class CharmState(Object):
             addresses.remove(current_unit_ip)
         return addresses
 
+    @property
+    def units_ips(self) -> set[str]:
+        """Fetch current list of unit IPs from the fresh peer relation unit data.
+
+        Unlike ``peer_members_ips`` (which reads the possibly stale app peer data),
+        this reads directly from unit relation data, so it stays current after
+        network disruptions.
+
+        Returns:
+            A set of unit IP addresses, including this unit's own.
+        """
+        addresses = set()
+        if unit_ip := self.unit_ip:
+            addresses.add(unit_ip)
+        if peer_relation := self.peer_relation:
+            for unit in peer_relation.units:
+                if ip := peer_relation.data[unit].get("ip"):
+                    addresses.add(ip)
+        return addresses
+
     def unit_database_address(self, unit: Unit, relation_name: str = DATABASE) -> str | None:
         """The client-facing address a peer unit published for the given relation."""
         if not (peer_relation := self.peer_relation):
