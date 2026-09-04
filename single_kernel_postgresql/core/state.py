@@ -235,6 +235,11 @@ class CharmState(Object):
         """Current model name."""
         return self.model.name
 
+    @property
+    def cluster_name(self) -> str:
+        """Patroni cluster name, substrate-conditional (delegates to the app peer state)."""
+        return self.application.cluster_name
+
     @cached_property
     def patroni_url(self) -> str:
         """Patroni REST API URL."""

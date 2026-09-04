@@ -19,9 +19,10 @@ from ops.pebble import ExecError, Plan, ServiceStatus
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     DIR_PERMISSIONS_READONLY,
+    K8S_PGBACK_REST_SERVER_SERVICE_NAME,
     K8S_POSTGRESQL_SERVICE_NAME,
 )
-from single_kernel_postgresql.workload.base import BaseWorkload, CommandResult
+from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.k8s import K8sPaths
 
@@ -119,6 +120,25 @@ class K8sWorkload(BaseWorkload):
                 stderr=e.stderr or "",
             )
         return CommandResult(return_code=0, stdout=stdout, stderr=stderr)
+
+    @property
+    def backup_config(self) -> BackupConfig:
+        """Return the K8s pgBackRest invocation settings.
+
+        pgBackRest reads /etc/pgbackrest.conf by default, so no --config flag
+        is passed (conf_path None) and the config directory holds only the
+        default-location file the charm pushes.
+        """
+        return BackupConfig(
+            executable="pgbackrest",
+            conf_path=None,
+            logs_path=str(self.paths.pgbackrest_logs),
+            bin_path="/usr/lib/postgresql",
+            service=K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+            storage_path=str(self.paths.tls),
+            tls_ca_chain_path=f"{self.paths.tls}/pgbackrest-tls-ca-chain.crt",
+            extra_args=(),
+        )
 
     def is_failed(self) -> bool:
         """Check if snap service failed."""
