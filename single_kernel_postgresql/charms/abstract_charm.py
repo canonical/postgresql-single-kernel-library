@@ -3,18 +3,21 @@
 """Skeleton for the abstract charm."""
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, cast
 
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
 from ops.charm import CharmBase
 
 from single_kernel_postgresql.core.state import CharmState
+from single_kernel_postgresql.events.async_replication import PostgreSQLAsyncReplication
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseProvides,
 )
+from single_kernel_postgresql.managers.async_replication import AsyncReplicationManager
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
@@ -25,6 +28,9 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 from ..config.enums import Substrates
 from ..config.literals import DATABASE
 from ..utils.postgresql import PostgreSQL
+
+if TYPE_CHECKING:
+    from single_kernel_postgresql.workload.k8s import K8sWorkload
 
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
@@ -49,6 +55,36 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         )
         self.patroni_manager = PatroniManager(state=self.state, workload=self.workload)
         self.cluster_manager = ClusterManager(state=self.state, workload=self.workload)
+
+        # Substrate-only K8s API seam, injected into the handlers that need it; built
+        # here so the async-replication handler (below) can consume it.
+        if self.substrate == Substrates.K8S:
+            from single_kernel_postgresql.managers.k8s import K8sManager
+
+            # The K8s substrate asserts a K8sWorkload in PostgreSQLK8sCharm.
+            self.k8s_manager: K8sManager | None = K8sManager(
+                self.state,
+                cast("K8sWorkload", self.workload),
+            )
+        else:
+            self.k8s_manager = None
+
+        # Async-replication subsystem: the manager owns the data plane (counters,
+        # endpoints, secrets); the handler owns the observers and the standby lifecycle.
+        self.async_replication_manager = AsyncReplicationManager(
+            state=self.state,
+            workload=self.workload,
+            patroni_manager=self.patroni_manager,
+            update_config=self.update_config,
+        )
+        self.async_replication = PostgreSQLAsyncReplication(
+            self,
+            self.state,
+            self.async_replication_manager,
+            self.patroni_manager,
+            self.workload,
+            k8s_manager=self.k8s_manager,
+        )
 
         # Client-relation subsystem: the charm is the composition root, as with the
         # other managers; the handler owns only the observers and guard/defer decisions.
@@ -133,6 +169,16 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     @abstractmethod
     def restart_services(self) -> None:
         """Restart the monitoring and LDAP-sync sidecar services."""
+        pass
+
+    @abstractmethod
+    def set_app_status(self, status: StatusBase) -> None:
+        """Set the application status through the charm's own status gates."""
+        pass
+
+    @abstractmethod
+    def set_primary_status_message(self) -> None:
+        """Recompute the unit's primary/standby status message."""
         pass
 
     @abstractmethod
