@@ -730,10 +730,6 @@ Juju Version: {JujuVersion.from_environ()!s}
             logger.error(f"Backup failed: {error_message}")
             return False, error_message
 
-        # Set flag due to missing in progress backups on JSON output
-        # (reference: https://github.com/pgbackrest/pgbackrest/issues/2007)
-        self.update_config(is_creating_backup=True)
-
         if not self.is_primary:
             # Create a rule to mark the cluster as in a creating backup state and update
             # the Patroni configuration.
