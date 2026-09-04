@@ -20,10 +20,12 @@ from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
+from single_kernel_postgresql.observers.authorisation_rules import AuthorisationRulesObserver
+from single_kernel_postgresql.observers.cluster_topology import ClusterTopologyObserver
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
 from ..config.enums import Substrates
-from ..config.literals import DATABASE
+from ..config.literals import DATABASE, JUJU_EXECUTABLE
 from ..utils.postgresql import PostgreSQL
 
 
@@ -83,6 +85,17 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.config_manager,
             self.patroni_manager,
         )
+
+        # Observers spawn the out-of-hook watcher processes that re-dispatch charm
+        # events; each substrate ships exactly one of them.
+        if self.substrate == Substrates.VM:
+            self.cluster_topology_observer = ClusterTopologyObserver(
+                self, self.state, JUJU_EXECUTABLE
+            )
+        else:
+            self.authorisation_rules_observer = AuthorisationRulesObserver(
+                self, self.state, JUJU_EXECUTABLE
+            )
 
         # Status Handler
         self.status_handler = StatusHandler(
