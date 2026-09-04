@@ -152,7 +152,8 @@ class PostgreSQLEventsHandler(Object):
             self.tls_manager.configure_internal_peer_cert()
 
         # Start the database service
-        charm.k8s_manager.update_pebble_layers()
+        if charm.k8s_manager is not None:
+            charm.k8s_manager.update_pebble_layers()
 
         # Assert the member is up and running before marking it as initialised.
         if not self.patroni_manager.member_started:
