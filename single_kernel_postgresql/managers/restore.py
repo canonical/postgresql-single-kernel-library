@@ -358,7 +358,13 @@ class RestoreManager(BaseManager):
         # prevent wrong status indicated and logs reading race condition (as logs
         # cleared / moved with service restarts).
         if not self._override_patroni_restart_condition(RESTORE_REPEAT_CAUSE):
-            error_message = "Failed to override Patroni restart condition"
+            # The K8s charm words this after the Pebble on-failure condition it
+            # overrides; the VM charm after the systemd restart condition.
+            error_message = (
+                "Failed to override Patroni on-failure condition"
+                if self.state.substrate == Substrates.K8S
+                else "Failed to override Patroni restart condition"
+            )
             logger.error(f"Restore failed: {error_message}")
             self._restart_database()
             return False, error_message
