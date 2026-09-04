@@ -252,6 +252,20 @@ class PostgreSQLPeer(RelationState):
         self.relation.data[self.unit]["stanza"] = value
 
     @property
+    def s3_initialization_start(self) -> str | None:
+        """Get the s3-initialization-start timestamp from the unit peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get("s3-initialization-start")
+
+    @s3_initialization_start.setter
+    def s3_initialization_start(self, value: str) -> None:
+        """Set the s3-initialization-start timestamp in the unit peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["s3-initialization-start"] = value
+
+    @property
     def s3_initialization_done(self) -> str | None:
         """Get the s3-initialization-done marker from the unit peer relation data."""
         if not self.relation:

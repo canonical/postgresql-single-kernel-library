@@ -9,7 +9,7 @@ K8s charms). Event orchestration (defer/fail/status writes) stays in the events
 layer; this manager raises or returns values only.
 """
 
-import importlib
+import importlib.resources
 import json
 import logging
 import re
@@ -40,6 +40,7 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.utils.backup import (
+    CANNOT_RESTORE_PITR,
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     BACKUP_LABEL_STDOUT_PATTERN,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
@@ -260,7 +261,7 @@ class BackupManager(BaseManager):
             .joinpath(self.state.substrate.name.lower(), "pgbackrest.conf.j2")
             .read_text()
         )
-        cpu_count, _ = self.workload.get_available_resources()
+        cpu_count, _ = self.resource_provider.get_available_resources()
         rendered = template.render(
             enable_tls=len(self._peer_members) > 0,
             peer_endpoints=self._peer_members,
@@ -644,7 +645,7 @@ class BackupManager(BaseManager):
         if system_identifier_from_instance is None:
             raise Exception("Database system identifier not found in pg_controldata output")
         system_identifier_from_instance = system_identifier_from_instance.split(" ")[-1]
-        stanza_dbs = stanza.get("db")
+        stanza_dbs = stanza.get("db") or []
         system_identifier_from_stanza = (
             str(stanza_dbs[0]["system-id"]) if len(stanza_dbs) else None
         )
@@ -845,7 +846,7 @@ Stderr:
         stderr: str,
         s3_parameters: dict,
         backup_type: str,
-        error: str,
+        error: str = "",
     ) -> tuple[bool, str]:
         """Uploads the failed backup logs and reports the failure message."""
         logger.error(stderr)
@@ -1039,13 +1040,14 @@ Stderr:
 
     # -- Credential-changed / S3 initialization flow ---------------------------------
 
-    def _credential_changed_checks(self) -> bool:
+    def _credential_changed_checks(self) -> tuple[bool, bool]:
         """Run the pre-initialization checks when S3 credentials change.
 
-        The events layer defers when this returns False.
-
         Returns:
-            whether the S3 initialization flow should proceed.
+            a (proceed, defer) tuple. The charm defers the event — retrying it
+            later — on every branch that returned (False, True); the render
+            failure and the K8s empty-connection-info early exit returned
+            without deferring and map to (False, False).
         """
         if self.state.substrate == Substrates.VM:
             # VM requires the internal peer certificate to exist before rendering
@@ -1057,41 +1059,41 @@ Stderr:
                 logger.debug(
                     "Cannot set pgBackRest configurations, PostgreSQL has not yet started."
                 )
-                return False
+                return False, True
         else:
             # K8s checks the connection info first (no connection info, no render).
             if not self.state.s3_connection_info.retrieve_s3_parameters()[0]:
                 logger.debug("_on_s3_credential_changed early exit: no connection info")
-                return False
+                return False, False
             if not self.state.application.is_cluster_initialised:
                 logger.debug(
                     "Cannot set pgBackRest configurations, PostgreSQL has not yet started."
                 )
-                return False
+                return False, True
 
         # Prevents config change in bad state, so DB peer relations change event will not cause patroni related errors.
-        # State-derived replacement of the charms' unit-status-message read of
-        # CANNOT_RESTORE_PITR: a PITR restore-to-time target in the app
-        # databag marks the same bad state without reading the unit status.
-        if self.state.application.restore_to_time:
+        # The charms gate on the unit status message carrying the CANNOT_RESTORE_PITR
+        # marker (transient: refreshed on every status pass); the live-fetch state
+        # read keeps that exact semantics.
+        if self.state.peer.status_message == CANNOT_RESTORE_PITR:
             logger.info("Cannot change S3 configuration in bad PITR restore status")
-            return False
+            return False, True
 
         # Prevents S3 change in the middle of restoring backup and patroni / pgbackrest errors caused by that.
         if self.state.application.is_cluster_restoring_backup or (
             self.state.application.is_cluster_restoring_to_time
         ):
             logger.info("Cannot change S3 configuration during restore")
-            return False
+            return False, True
 
         if not self._render_pgbackrest_conf_file():
             logger.debug("Cannot set pgBackRest configurations, missing configurations.")
-            return False
+            return False, False
 
         if not self._can_initialise_stanza():
             logger.debug("Cannot initialise stanza yet.")
-            return False
-        return True
+            return False, True
+        return True, False
 
     def initialise_s3_repository(self) -> bool:
         """Initialize the S3 repository after a credentials change (primary path).
