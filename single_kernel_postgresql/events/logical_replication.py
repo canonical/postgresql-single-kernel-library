@@ -511,34 +511,29 @@ class PostgreSQLLogicalReplication(Object):
             )
 
         for database, tables in subscriptions_request.items():
+            # Check for circular replication on publisher side
+            circular_tables = self._check_publisher_circular_replication(
+                relation, database, tables
+            )
+            if circular_tables:
+                error = (
+                    f"circular replication detected for tables {', '.join(circular_tables)} "
+                    f"in database {database}"
+                )
+                errors.append(error)
+                logger.error(
+                    f"Cannot create/update publication for "
+                    f"{LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}: {error}"
+                )
+                continue
+
             if database not in publications:
-                if validation_error := self._validate_new_publication(database, tables):
-                    errors.append(validation_error)
-                    logger.error(
-                        f"Cannot create new publication for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}: {validation_error}"
-                    )
-                    continue
-                publication_name = self._publication_name(relation.id, database)
-                if self.charm.postgresql.publication_exists(database, publication_name):
-                    error = f"conflicting publication {publication_name} in database {database}"
-                    errors.append(error)
-                    logger.error(
-                        f"Cannot create new publication for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}: {error}"
-                    )
-                    continue
-                logger.info(
-                    f"Granting replication privileges on database {database} for user {user} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
+                publication_error = self._create_new_publication(
+                    relation, user, database, tables, publications
                 )
-                self.charm.postgresql.grant_replication_privileges(user, database, tables)
-                logger.info(
-                    f"Creating new publication {publication_name} for tables {', '.join(tables)} in database {database} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
-                )
-                self.charm.postgresql.create_publication(database, publication_name, tables)
-                publications[database] = {
-                    "publication-name": publication_name,
-                    "replication-slot-name": self._replication_slot_name(relation.id, database),
-                    "tables": tables,
-                }
+                if publication_error:
+                    errors.append(publication_error)
+                    continue
             elif sorted(publication_tables := publications[database]["tables"]) != sorted(tables):
                 publication_name = publications[database]["publication-name"]
                 if validation_error := self._validate_new_publication(
@@ -568,6 +563,9 @@ class PostgreSQLLogicalReplication(Object):
                 )
                 self.charm.postgresql.alter_publication(database, publication_name, tables)
                 publications[database]["tables"] = tables
+                publications[database]["replication-chains"] = self._build_replication_chains(
+                    database, tables
+                )
             self._save_published_resources_info(str(relation.id), secret.id, publications)
             relation.data[self.model.app]["publications"] = json.dumps(publications)
 
@@ -581,6 +579,43 @@ class PostgreSQLLogicalReplication(Object):
         logger.debug(
             f"Successfully processed offer for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
         )
+
+    def _create_new_publication(
+        self,
+        relation: Relation,
+        user: str,
+        database: str,
+        tables: list[str],
+        publications: dict[str, dict],
+    ) -> str | None:
+        """Create a new publication for the requester; return the error message, if any."""
+        if validation_error := self._validate_new_publication(database, tables):
+            logger.error(
+                f"Cannot create new publication for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}: {validation_error}"
+            )
+            return validation_error
+        publication_name = self._publication_name(relation.id, database)
+        if self.charm.postgresql.publication_exists(database, publication_name):
+            error = f"conflicting publication {publication_name} in database {database}"
+            logger.error(
+                f"Cannot create new publication for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}: {error}"
+            )
+            return error
+        logger.info(
+            f"Granting replication privileges on database {database} for user {user} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
+        )
+        self.charm.postgresql.grant_replication_privileges(user, database, tables)
+        logger.info(
+            f"Creating new publication {publication_name} for tables {', '.join(tables)} in database {database} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
+        )
+        self.charm.postgresql.create_publication(database, publication_name, tables)
+        publications[database] = {
+            "publication-name": publication_name,
+            "replication-slot-name": self._replication_slot_name(relation.id, database),
+            "tables": tables,
+            "replication-chains": self._build_replication_chains(database, tables),
+        }
+        return None
 
     def _validate_new_publication(
         self,
@@ -597,6 +632,236 @@ class PostgreSQLLogicalReplication(Object):
             if not self.charm.postgresql.table_exists(database, schema, table):
                 return f"table {schematable} in database {database} doesn't exist"
         return None
+
+    def _would_create_circular_replication(
+        self, relation: Relation | None, database: str, table: str
+    ) -> bool:
+        """Check if subscribing to a table would create circular replication.
+
+        This checks the replication chain in the remote publication to see if our app
+        is already in the chain, which would mean the data originated from us.
+
+        Args:
+            relation: The logical-replication relation we're subscribing on
+            database: The database name
+            table: The table name (schema.table format)
+
+        Returns:
+            True if subscribing would create a circle, False otherwise
+        """
+        if not relation:
+            return False
+
+        # Get the publications from the remote app
+        remote_publications = json.loads(relation.data[relation.app].get("publications", "{}"))
+
+        if database not in remote_publications:
+            return False
+
+        # Get the replication chains for this database
+        replication_chains = remote_publications[database].get("replication-chains", {})
+
+        if table not in replication_chains:
+            return False
+
+        # Check if our app name is in the chain
+        chain = replication_chains[table]
+        if self.model.app.name in chain:
+            logger.warning(
+                f"Circular replication detected: table {table} in database {database} "
+                f"has replication chain {chain} which includes this app ({self.model.app.name})"
+            )
+            return True
+
+        return False
+
+    def _check_subscriber_circular_replication(
+        self, relation: Relation, database: str, table: str
+    ) -> bool:
+        """Check if we're already publishing this table to the remote app.
+
+        This prevents circular replication where:
+        - App A is publishing table X to App B (via offer relation)
+        - App A tries to subscribe to table X from App B (via subscription relation)
+
+        This check runs on the subscriber side during validation, before the
+        subscription request is even sent to the publisher.
+
+        Args:
+            relation: The subscription relation we're trying to create
+            database: The database name
+            table: The table name (schema.table format)
+
+        Returns:
+            True if we're already publishing this table to the remote app
+        """
+        # Get our offer relation (limit: 1, so only one relation possible)
+        offer_relation = self.model.get_relation(LOGICAL_REPLICATION_OFFER_RELATION)
+
+        if not offer_relation:
+            # No offer relation, so we're not publishing anything
+            return False
+
+        # Check if the offer relation is to the same app we want to subscribe from
+        if offer_relation.app.name != relation.app.name:
+            return False
+
+        # We have an offer relation to the same app! Check if we're publishing this table
+        publications = json.loads(offer_relation.data[self.model.app].get("publications", "{}"))
+
+        if database not in publications:
+            return False
+
+        # Check if the table is in our publications
+        published_tables = publications[database].get("tables", [])
+        if table in published_tables:
+            logger.warning(
+                f"Circular replication detected: we are publishing {table} in {database} "
+                f"to {offer_relation.app.name}, and trying to subscribe to the same table from them"
+            )
+            return True
+
+        return False
+
+    def _check_publisher_circular_replication(
+        self, offer_relation: Relation, database: str, tables: list[str]
+    ) -> list[str]:
+        """Check if we (publisher) are subscribed to the requester.
+
+        This prevents circular replication where:
+        - Direct circular: App A is subscribed to App B for table X, and App B tries to
+          subscribe to App A for the same table X
+        - Multi-hop circular: App A -> B -> C -> A, where the chain eventually loops back
+
+        The check works by examining:
+        1. If we have an active subscription to the same app (direct circular)
+        2. If we're subscribed to any table and the requester's app is in its replication
+           chain (multi-hop circular)
+
+        Args:
+            offer_relation: The offer relation being processed
+            database: The database being requested
+            tables: List of tables being requested
+
+        Returns:
+            List of tables that would create circular replication (empty if none)
+        """
+        circular_tables = []
+
+        # Get our subscription relation (limit: 1)
+        subscription_relation = self.model.get_relation(LOGICAL_REPLICATION_RELATION)
+
+        if not subscription_relation:
+            # No subscription relation, can't have circular replication
+            return circular_tables
+
+        # Get the publications to see what tables we're actually subscribed to
+        publications = json.loads(
+            subscription_relation.data[subscription_relation.app].get("publications", "{}")
+        )
+
+        # Check for direct circular replication (we're subscribed to the same app)
+        if subscription_relation.app.name == offer_relation.app.name:
+            # We're subscribed to the same app that's trying to subscribe to us!
+            # Check if we have active subscriptions to this database
+            subscriptions = self._subscriptions_info()
+
+            if database not in subscriptions:
+                # We're subscribed to the same app but not this database, so no circular replication
+                return circular_tables
+
+            if database not in publications:
+                # Subscription exists but publications not yet set up
+                return circular_tables
+
+            # Check for overlap in tables
+            subscribed_tables = publications[database].get("tables", [])
+            overlap = set(tables) & set(subscribed_tables)
+
+            if overlap:
+                circular_tables.extend(sorted(overlap))
+                logger.warning(
+                    f"Direct circular replication detected: subscribed to {subscription_relation.app.name} "
+                    f"for tables {subscribed_tables}, and they are trying to subscribe to us "
+                    f"for tables {tables}. Overlapping tables: {circular_tables}"
+                )
+
+            return circular_tables
+
+        # Check for multi-hop circular replication
+        # If we're subscribed to any table in this database, check if the requester's
+        # app is in the replication chain for that table
+        if database not in publications:
+            # Not subscribed to this database, can't have multi-hop circular replication
+            return circular_tables
+
+        # Get replication chains from our subscription
+        replication_chains = publications[database].get("replication-chains", {})
+
+        for table in tables:
+            if table not in replication_chains:
+                # We're not subscribed to this table, so no circular replication for it
+                continue
+
+            # Check if the requester's app is in the replication chain
+            chain = replication_chains[table]
+            if offer_relation.app.name in chain:
+                circular_tables.append(table)
+                logger.warning(
+                    f"Multi-hop circular replication detected: subscribed to {table} "
+                    f"in {database} with chain {chain}, and {offer_relation.app.name} "
+                    f"(which is in the chain) is trying to subscribe to us for the same table"
+                )
+
+        return sorted(circular_tables)
+
+    def _build_replication_chains(self, database: str, tables: list[str]) -> dict[str, list[str]]:
+        """Build replication chains for tables being published.
+
+        This checks if we're subscribed to any of these tables. If so, we extend
+        their replication chain. Otherwise, we're the origin.
+
+        Args:
+            database: The database name
+            tables: List of tables being published
+
+        Returns:
+            Dictionary mapping table names to their replication chains
+        """
+        chains: dict[str, list[str]] = {}
+
+        # Get our subscription relation (limit: 1, so only one relation possible)
+        subscription_relation = self.model.get_relation(LOGICAL_REPLICATION_RELATION)
+
+        if not subscription_relation:
+            # No subscription, we're the origin for all tables
+            for table in tables:
+                chains[table] = [self.model.app.name]
+            return chains
+
+        # Get the remote publications we're subscribed to
+        remote_publications = json.loads(
+            subscription_relation.data[subscription_relation.app].get("publications", "{}")
+        )
+
+        if database not in remote_publications:
+            # Not subscribed to this database, we're the origin
+            for table in tables:
+                chains[table] = [self.model.app.name]
+            return chains
+
+        # Get the replication chains from our subscription
+        remote_chains = remote_publications[database].get("replication-chains", {})
+
+        for table in tables:
+            if table in remote_chains:
+                # Extend the chain - we're republishing data we subscribed to
+                chains[table] = remote_chains[table] + [self.model.app.name]
+            else:
+                # We're the origin for this table
+                chains[table] = [self.model.app.name]
+
+        return chains
 
     # endregion
 
