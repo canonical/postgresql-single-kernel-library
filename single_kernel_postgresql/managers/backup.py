@@ -394,10 +394,12 @@ class BackupManager(BaseManager):
             raise e
         except Exception:
             # If the check command doesn't succeed, remove the stanza name
-            # and rollback the configuration.
+            # and rollback the configuration. Only the VM charm rolls the
+            # configuration back here; the K8s charm logs and blocks.
             logger.exception("Failed to check stanza:")
             self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
-            self.update_config()
+            if self.state.substrate == Substrates.VM:
+                self.update_config()
             return False
 
         if self.state.peer.is_app_leader:
@@ -485,6 +487,10 @@ class BackupManager(BaseManager):
 
         # Start the service.
         if self.state.substrate == Substrates.K8S:
+            if not self.workload.service_exists(service):
+                # A layer revision predating the service declaration: the charm
+                # returned False here instead of erroring the hook.
+                return False
             if self.workload.service_is_running(service):
                 logger.debug("Sending SIGHUP to pgBackRest TLS server to reload configuration")
                 self.workload.reload_service(service)
