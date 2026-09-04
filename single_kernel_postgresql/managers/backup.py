@@ -169,9 +169,9 @@ class BackupManager(BaseManager):
         the blocked status message comes from the s3-initialization-block-message
         peer field (see the charms' _set_primary_status_message).
         """
-        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES or (
-            self.state.peer.s3_initialization_block_message in S3_BLOCK_MESSAGES
-        )
+        # The charms' status builder reads only the app-databag field; the unit
+        # field exists for the replica-primary flow but is never read back.
+        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES
 
     def _s3_initialization_set_failure(self, block_message: str) -> None:
         """Record a failed s3 initialization with the corresponding block message.
