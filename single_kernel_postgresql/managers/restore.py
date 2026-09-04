@@ -18,10 +18,16 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from lightkube.core.exceptions import ApiError
+from ops.pebble import ChangeError, ExecError
+
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
+    K8S_POSTGRESQL_SERVICE_NAME,
+    ORIGINAL_PATRONI_ON_FAILURE_CONDITION,
     REPLICATION_CONSUMER_RELATION,
     REPLICATION_OFFER_RELATION,
+    RESTORE_REPEAT_CAUSE,
 )
 from single_kernel_postgresql.managers.backup import (
     IsStandbyClusterFunction,
@@ -33,6 +39,7 @@ from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     CANNOT_RESTORE_PITR,
     STANDBY_CLUSTER_RESTORE_ERROR_MESSAGE,
+    extract_error_message,
     fetch_backup_from_id,
     get_nearest_timeline,
     is_psql_timestamp,
@@ -299,7 +306,7 @@ class RestoreManager(BaseManager):
         # _get_nearest_timeline re-runs _list_backups | _list_timelines internally).
         # restore_to_time is always non-None here (the no-target case is rejected in
         # _pre_restore_checks); use `or ""` to satisfy the type checker.
-        restore_stanza_timeline = get_nearest_timeline(backups | timelines, restore_to_time or "")
+        restore_stanza_timeline = get_nearest_timeline(restore_to_time or "", backups | timelines)
         if not restore_stanza_timeline:
             return (
                 None,
@@ -317,3 +324,309 @@ class RestoreManager(BaseManager):
         return fetch_backup_from_id(
             backup_id, self.backup_manager._list_backups(show_failed=False, parse=False).keys()
         )
+
+    # -- Restore orchestration -------------------------------------------------------
+
+    def restore(
+        self,
+        restore_stanza_timeline: tuple[str, str],
+        backup_id: str | None,
+        restore_to_time: str | None,
+        is_backup_id_real: bool,
+    ) -> tuple[bool, str]:
+        """Restore a pgBackRest backup (optionally to a point in time).
+
+        The target must already be resolved and validated with
+        _pre_restore_checks and _resolve_restore_target (the events layer calls
+        them to fail the action before any service disruption).
+
+        Returns:
+            (success, message) tuple; message is "restore started" on success or
+            the failure reason otherwise. The restore proceeds asynchronously as
+            Patroni bootstraps the restored cluster.
+        """
+        logger.info("Stopping database service")
+        error_message = self._stop_database()
+        if error_message:
+            logger.error(f"Restore failed: {error_message}")
+            return False, error_message
+
+        # Temporarily disabling patroni service auto-restart. This is required as
+        # point-in-time-recovery can fail on restore, therefore during cluster
+        # bootstrapping process. In this case, we need be able to check patroni
+        # service status and logs. Disabling auto-restart feature is essential to
+        # prevent wrong status indicated and logs reading race condition (as logs
+        # cleared / moved with service restarts).
+        if not self._override_patroni_restart_condition(RESTORE_REPEAT_CAUSE):
+            error_message = "Failed to override Patroni restart condition"
+            logger.error(f"Restore failed: {error_message}")
+            self._restart_database()
+            return False, error_message
+
+        error_message = self._remove_cluster_info_before_wiping()
+        if error_message:
+            logger.error(f"Restore failed: {error_message}")
+            self._restart_database()
+            return False, error_message
+
+        error_message = self._empty_data_files()
+        if error_message:
+            logger.error(f"Restore failed: {error_message}")
+            self._restart_database()
+            return False, error_message
+
+        if self.state.substrate == Substrates.K8S:
+            logger.info("Creating PostgreSQL data directory")
+            self.workload.init_storage()
+
+        # Mark the cluster as in a restoring backup state and update the Patroni
+        # configuration.
+        logger.info("Configuring Patroni to restore the backup")
+        application = self.state.application
+        application.restoring_backup = (
+            (self._fetch_backup_from_id(backup_id or "") or "") if is_backup_id_real else ""
+        )
+        application.restore_stanza = restore_stanza_timeline[0]
+        application.restore_timeline = restore_stanza_timeline[1] if restore_to_time else ""
+        application.restore_to_time = restore_to_time or ""
+        application.s3_initialization_block_message = ""
+        self.update_config()
+
+        # Start the database to start the restore process.
+        logger.info("Starting the database to start the restore process")
+        self._start_database()
+
+        error_message = self._remove_cluster_info_after_start()
+        if error_message:
+            logger.error(f"Restore failed: {error_message}")
+            return False, error_message
+
+        return True, "restore started"
+
+    def _remove_cluster_info_before_wiping(self) -> str | None:
+        """Remove previous cluster information before emptying the data directory (K8s).
+
+        The K8s endpoints that track the cluster information, including its id, are
+        deleted through the workload seam: this is the same as "patronictl remove
+        patroni-<name>", but the latter doesn't work after the database service is
+        stopped on Pebble.
+        """
+        if self.state.substrate != Substrates.K8S:
+            return None
+        logger.info("Removing previous cluster information")
+        try:
+            self.workload.remove_cluster_info(self.state.cluster_name, self.state.model_name)
+        except ApiError as e:
+            # If previous PITR restore was unsuccessful, there are no such endpoints.
+            if not self.state.application.is_cluster_restoring_to_time:
+                return f"Failed to remove previous cluster information with error: {e!s}"
+        return None
+
+    def _empty_data_files(self) -> str | None:
+        """Remove the contents of the data directory.
+
+        Returns:
+            an error message on failure, None on success.
+        """
+        try:
+            if not self.workload.empty_data_files():
+                return "Failed to remove contents of the data directory"
+        except ExecError as e:
+            return f"Failed to remove contents of the data directory with error: {e!s}"
+        return None
+
+    def _remove_cluster_info_after_start(self) -> str | None:
+        """Remove previous cluster information after the start (VM).
+
+        The VM charm runs patronictl while the cluster is up, so this happens after
+        the start (the K8s charm removes the patroni Endpoints before emptying the
+        data directories, see _remove_cluster_info_before_wiping).
+
+        Returns:
+            an error message on failure, None on success.
+        """
+        if self.state.substrate != Substrates.VM:
+            return None
+        logger.info("Removing previous cluster information")
+        result = self.workload.remove_cluster_info(self.state.cluster_name)
+        if not result.ok:
+            extracted_error = extract_error_message(
+                result.stderr, str(self.workload.backup_config.logs_path)
+            )
+            return f"Failed to remove previous cluster information with error: {extracted_error}"
+        return None
+
+    # -- Service control ------------------------------------------------------------
+
+    def _stop_database(self) -> str | None:
+        """Stop the database service before performing the restore.
+
+        VM stops the patroni snap service; K8s stops the postgresql pebble service
+        by name.
+
+        Returns:
+            an error message on failure, None on success.
+        """
+        if self.state.substrate == Substrates.VM:
+            if not self.patroni_manager.stop_patroni():
+                return "Failed to stop database service"
+            return None
+        try:
+            self.workload.stop_service(K8S_POSTGRESQL_SERVICE_NAME)
+        except ChangeError as e:
+            return f"Failed to stop database service with error: {e!s}"
+        return None
+
+    def _start_database(self) -> None:
+        """Start the database to begin the restore process."""
+        if self.state.substrate == Substrates.VM:
+            self.patroni_manager.start_patroni()
+            return
+        self.workload.start_service(K8S_POSTGRESQL_SERVICE_NAME)
+
+    def _restart_database(self) -> None:
+        """Remove the restoring backup flag and restart the database (recovery path)."""
+        self.state.application.restoring_backup = ""
+        self.state.application.restore_to_time = ""
+        self.update_config()
+        self._start_database()
+
+    # -- Patroni restart-condition override ---------------------------------------------
+
+    def _override_patroni_restart_condition(self, repeat_cause: str | None) -> bool:
+        """Temporarily disable Patroni auto-restart for the restore.
+
+        VM overrides the systemd Restart= condition to "no" through PatroniManager;
+        K8s overrides the postgresql pebble service on-failure action to "ignore"
+        and refreshes the pebble layer through the injected bridge.
+        """
+        if self.state.substrate == Substrates.VM:
+            return self._override_patroni_systemd_restart_condition("no", repeat_cause)
+        return self._override_patroni_on_failure_condition("ignore", repeat_cause)
+
+    def _override_patroni_systemd_restart_condition(
+        self, new_condition: str, repeat_cause: str | None
+    ) -> bool:
+        """Temporary override Patroni systemd service restart condition (VM)."""
+        current_condition = self.patroni_manager.get_patroni_restart_condition()
+        if "overridden-patroni-restart-condition" in self.state.peer.data:
+            original_condition = self.state.peer.data["overridden-patroni-restart-condition"]
+            if repeat_cause is None:
+                logger.error(
+                    f"failure trying to override patroni restart condition to {new_condition}"
+                    f"as it already overridden from {original_condition} to {current_condition}"
+                )
+                return False
+            previous_repeat_cause = self.state.peer.data.get(
+                "overridden-patroni-restart-condition-repeat-cause", None
+            )
+            if previous_repeat_cause != repeat_cause:
+                logger.error(
+                    f"failure trying to override patroni restart condition to {new_condition}"
+                    f"as it already overridden from {original_condition} to {current_condition}"
+                    f"and repeat cause is not equal: {previous_repeat_cause} != {repeat_cause}"
+                )
+                return False
+            # There repeat cause is equal
+            self.patroni_manager.update_patroni_restart_condition(new_condition)
+            logger.debug(
+                f"Patroni restart condition re-overridden to {new_condition} within repeat"
+                f" cause {repeat_cause}"
+                f"(original restart condition reference is untouched and is {original_condition})"
+            )
+            return True
+        self.patroni_manager.update_patroni_restart_condition(new_condition)
+        self.state.peer.data["overridden-patroni-restart-condition"] = current_condition
+        if repeat_cause is not None:
+            self.state.peer.data["overridden-patroni-restart-condition-repeat-cause"] = (
+                repeat_cause
+            )
+        logger.debug(
+            f"Patroni restart condition overridden from {current_condition} to {new_condition}"
+            f"{' with repeat cause ' + repeat_cause if repeat_cause is not None else ''}"
+        )
+        return True
+
+    def _override_patroni_on_failure_condition(
+        self, new_condition: str, repeat_cause: str | None
+    ) -> bool:
+        """Temporary override Patroni pebble service on-failure condition (K8s)."""
+        if "patroni-on-failure-condition-override" in self.state.peer.data:
+            current_condition = self.state.peer.data["patroni-on-failure-condition-override"]
+            if repeat_cause is None:
+                logger.error(
+                    f"failure trying to override patroni on-failure condition to {new_condition}"
+                    f"as it already overridden from {ORIGINAL_PATRONI_ON_FAILURE_CONDITION}"
+                    f" to {current_condition}"
+                )
+                return False
+            previous_repeat_cause = self.state.peer.data.get(
+                "overridden-patroni-on-failure-condition-repeat-cause", None
+            )
+            if previous_repeat_cause != repeat_cause:
+                logger.error(
+                    f"failure trying to override patroni on-failure condition to {new_condition}"
+                    f"as it already overridden from {ORIGINAL_PATRONI_ON_FAILURE_CONDITION}"
+                    f" to {current_condition}"
+                    f"and repeat cause is not equal: {previous_repeat_cause} != {repeat_cause}"
+                )
+                return False
+            self.state.peer.data["patroni-on-failure-condition-override"] = new_condition
+            self._update_pebble_layers()
+            logger.debug(
+                f"Patroni on-failure condition re-overridden to {new_condition} within repeat"
+                f" cause {repeat_cause}"
+                f"(original on-failure condition reference is untouched and is"
+                f" {ORIGINAL_PATRONI_ON_FAILURE_CONDITION})"
+            )
+            return True
+
+        self.state.peer.data["patroni-on-failure-condition-override"] = new_condition
+        if repeat_cause:
+            self.state.peer.data["overridden-patroni-on-failure-condition-repeat-cause"] = (
+                repeat_cause
+            )
+        self._update_pebble_layers()
+        logger.debug(
+            f"Patroni on-failure condition overridden from"
+            f" {ORIGINAL_PATRONI_ON_FAILURE_CONDITION} to {new_condition}"
+            f"{' with repeat cause ' + repeat_cause if repeat_cause is not None else ''}"
+        )
+        return True
+
+    def _update_pebble_layers(self) -> bool:
+        """Refresh the pebble layers through the injected K8s bridge."""
+        if self._update_pebble_layers_bridge is None:
+            logger.error("the pebble-layer refresh bridge is not injected")
+            return False
+        self._update_pebble_layers_bridge()
+        return True
+
+    def restore_patroni_restart_condition(self) -> None:
+        """Restore the Patroni service restart/on-failure condition that was before overriding.
+
+        Will do nothing if not overridden. Executes only on current unit.
+        """
+        if self.state.substrate == Substrates.VM:
+            if "overridden-patroni-restart-condition" in self.state.peer.data:
+                original_condition = self.state.peer.data["overridden-patroni-restart-condition"]
+                self.patroni_manager.update_patroni_restart_condition(original_condition)
+                self.state.peer.data.update({
+                    "overridden-patroni-restart-condition": "",
+                    "overridden-patroni-restart-condition-repeat-cause": "",
+                })
+                logger.debug(f"restored Patroni restart condition to {original_condition}")
+            else:
+                logger.warning("not restoring patroni restart condition as it's not overridden")
+            return
+        if "patroni-on-failure-condition-override" in self.state.peer.data:
+            self.state.peer.data.update({
+                "patroni-on-failure-condition-override": "",
+                "overridden-patroni-on-failure-condition-repeat-cause": "",
+            })
+            self._update_pebble_layers()
+            logger.debug(
+                f"restored Patroni on-failure condition to {ORIGINAL_PATRONI_ON_FAILURE_CONDITION}"
+            )
+        else:
+            logger.warning("not restoring patroni on-failure condition as it's not overridden")
