@@ -37,6 +37,8 @@ VM_TEMP_PATH = "data/temp"
 
 ## K8s Paths
 K8S_DATA_PATH = "var/lib/pg/data"
+K8S_ARCHIVE_PATH = "var/lib/pg/archive"
+K8S_TEMP_STORAGE_PATH = "var/lib/pg/temp"
 
 ## Shared Paths
 # NOTE: The paths don't have leading slahes since pathops
@@ -125,6 +127,10 @@ ALL_CLIENT_RELATIONS = [DATABASE]
 REPLICATION_CONSUMER_RELATION = "replication"
 REPLICATION_OFFER_RELATION = "replication-offer"
 
+# Async replication peer-data key holding the id of the labelless shared cluster-credentials
+# secret the owner persists: referenced by id everywhere, never by label (DPE-10203).
+ASYNC_SHARED_SECRET_ID_KEY = "async-replication-secret-id"  # noqa: S105 — a databag key name, not a credential
+
 # TLS files
 TLS_KEY_FILE = "key.pem"
 TLS_CA_FILE = "ca.pem"
@@ -134,7 +140,6 @@ TLS_CERT_FILE = "cert.pem"
 METRICS_PORT = "9187"
 PGBACKREST_METRICS_PORT = "9854"
 
-# Secret/database mapping labels
 USERNAME_MAPPING_LABEL = "custom-usernames"
 DATABASE_MAPPING_LABEL = "prefix-databases"
 
