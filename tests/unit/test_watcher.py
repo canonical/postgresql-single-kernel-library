@@ -6,6 +6,7 @@ Ported from the VM charm's test_watcher_relation.py. The watcher relation is
 VM-only, so every test skips on the k8s substrate.
 """
 
+import json
 from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
@@ -123,25 +124,32 @@ def test_on_watcher_relation_joined_not_leader(harness, update_config, postgresq
         mock_secret.assert_not_called()
 
 
-def test_on_watcher_relation_joined_leader_creates_secret(harness, update_config, postgresql):
+def test_on_watcher_relation_joined_leader_shares_cluster_information(
+    harness, update_config, postgresql
+):
+    _initialise(harness)
+    _set_leader(harness)
+    rel_id = _add_watcher_relation(harness)
+    secret_id = _add_watcher_secret(harness)
+
+    with patch.object(harness.charm.watcher, "_update_relation_data") as update_relation_data:
+        harness.charm.watcher._on_watcher_relation_joined(
+            MagicMock(relation=harness.model.get_relation(WATCHER_OFFER_RELATION))
+        )
+
+    update_relation_data.assert_called_once()
+    # The secret exists, so the joined flow grants it to the watcher relation.
+    assert harness.get_secret_grants(secret_id, rel_id)
+
+
+def test_on_watcher_relation_joined_no_secret_defers(harness, update_config, postgresql):
     _initialise(harness)
     _set_leader(harness)
     _add_watcher_relation(harness)
 
-    with patch.object(
-        harness.charm.watcher, "_get_or_create_watcher_secret", return_value=None
-    ) as mock_secret:
-        harness.charm.watcher._on_watcher_relation_joined(
-            MagicMock(relation=harness.model.get_relation(WATCHER_OFFER_RELATION))
-        )
-        mock_secret.assert_called_once()
-
-
-def test_on_watcher_relation_changed_defers_without_initialised_cluster(harness, update_config):
-    _add_watcher_relation(harness)
-
     event = MagicMock()
-    harness.charm.watcher._on_watcher_relation_changed(event)
+    with patch.object(harness.charm.watcher, "_get_or_create_watcher_secret", return_value=None):
+        harness.charm.watcher._on_watcher_relation_joined(event)
 
     event.defer.assert_called_once()
     update_config.assert_not_called()
@@ -179,9 +187,12 @@ def test_update_relation_data_leader(harness, update_config, postgresql):
 
     app_data = harness.get_relation_data(rel_id, harness.charm.app.name)
     assert app_data["cluster-name"] == "postgresql"
+    assert app_data["raft-secret-id"].startswith("secret:")
+    assert json.loads(app_data["raft-partner-addrs"]) == sorted(harness.charm.state.units_ips)
     assert app_data["raft-port"] == "2222"
     assert app_data["patroni-cas"] == "ca-bundle"
     assert app_data["tls-enabled"] == "false"
+    assert app_data["standby-clusters"] == "[]"
 
 
 def test_update_unit_address_updates_az(harness):
