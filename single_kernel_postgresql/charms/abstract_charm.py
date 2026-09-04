@@ -150,3 +150,12 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def primary_endpoint(self) -> str | None:
         """Address of the cluster primary, or None when there is not one."""
         pass
+
+    @abstractmethod
+    def get_async_primary_cluster_endpoint(self) -> str | None:
+        """Endpoint of the primary cluster of the async replication partner, if any.
+
+        Owned by the async-replication module until that phase migrates; the refresh
+        pre-refresh checks need it to decide whether a switchover crosses clusters.
+        """
+        pass
