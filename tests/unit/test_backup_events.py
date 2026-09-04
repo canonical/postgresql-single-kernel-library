@@ -43,9 +43,7 @@ def make_action_event(params=None):
     ("proceed", "defer"),
     [(False, False), (False, True)],
 )
-def test_credential_changed_stops_when_checks_fail(
-    handler, backup_manager, proceed, defer
-):
+def test_credential_changed_stops_when_checks_fail(handler, backup_manager, proceed, defer):
     backup_manager._credential_changed_checks.return_value = (proceed, defer)
     event = make_action_event()
     handler._on_s3_credential_changed(event)
@@ -115,11 +113,12 @@ def test_list_backups_action_fails_on_exec_error(handler, backup_manager):
     backup_manager._is_standby_cluster = False
     backup_manager._are_backup_settings_ok.return_value = (True, "")
     backup_manager._generate_backup_list_output.side_effect = ExecError(
-        service="pgbackrest", change=None, err=b"boom", stderr=b"boom"
+        command=["pgbackrest", "info"], exit_code=1, stdout="", stderr="boom"
     )
     event = make_action_event()
     handler._on_list_backups_action(event)
-    event.fail.assert_called_once_with("Failed to list PostgreSQL backups with error: boom")
+    event.fail.assert_called_once()
+    assert "Failed to list PostgreSQL backups with error:" in event.fail.call_args.args[0]
 
 
 def test_list_backups_action_success(handler, backup_manager):

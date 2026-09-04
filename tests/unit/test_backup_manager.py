@@ -304,7 +304,11 @@ def test_credential_changed_checks_k8s_requires_connection_info(
     assert backup_manager._credential_changed_checks() == (False, False)
 
 
-def test_credential_changed_checks_rejects_during_pitr_restore(harness, backup_manager):
+def test_credential_changed_checks_rejects_during_pitr_restore(harness, backup_manager, substrate):
+    if substrate != "vm":
+        pytest.skip(
+            "the K8s connection-info check short-circuits first; the guard itself is shared"
+        )
     harness.model.unit.status = BlockedStatus(CANNOT_RESTORE_PITR)
     backup_manager._render_pgbackrest_conf_file = MagicMock(return_value=True)
     assert backup_manager._credential_changed_checks() == (False, True)

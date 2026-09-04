@@ -13,7 +13,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from ops import Object
+from ops import MaintenanceStatus, Object
 from ops.charm import ActionEvent
 from ops.pebble import ExecError
 from tenacity import RetryError
