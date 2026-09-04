@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING, cast
 
 import charm_refresh
 from charm_refresh import CharmVersion, PrecheckFailed
-from ops import ActiveStatus, MaintenanceStatus, StatusBase
-from tenacity import Retrying, stop_after_attempt, wait_fixed
+from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, StatusBase, WaitingStatus
+from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import SwitchoverFailedError
@@ -337,6 +337,59 @@ class RefreshManager(BaseManager):
             self._charm.unit.status = refresh_status
             new_refresh_unit_status = refresh_status.message
         path.write_text(json.dumps(new_refresh_unit_status))
+
+    # -- Kubernetes substrate: reconcile the unit state after a container refresh
+
+    def on_init(self) -> None:
+        """Resume or prepare the refresh after the charm has been initialized."""
+        refresh = self.refresh
+        if refresh is None:
+            return
+        if refresh.workload_allowed_to_start and not refresh.next_unit_allowed_to_refresh:
+            if refresh.in_progress:
+                self.reconcile()
+            else:
+                refresh.next_unit_allowed_to_refresh = True
+
+    def reconcile(self) -> None:
+        """Reconcile the unit state on refresh."""
+        self.set_unit_status(MaintenanceStatus("starting services"))
+        self._charm.ensure_pgdata_dirs_and_symlinks()
+        self._charm.update_pebble_layers()
+
+        if not self._charm.patroni_manager.member_started:
+            logger.debug("Early exit reconcile: Patroni has not started yet")
+            return
+
+        if self._charm.unit.is_leader() and not self._charm.patroni_manager.primary_endpoint_ready:
+            logger.debug(
+                "Early exit reconcile: current unit is leader but primary endpoint is not ready yet"
+            )
+            return
+
+        self.set_unit_status(WaitingStatus("waiting for database initialisation"))
+        try:
+            for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(10)):
+                with attempt:
+                    if not (
+                        self._charm.unit.name.replace("/", "-")
+                        in self._charm.patroni_manager.cluster_members
+                        and self._charm.patroni_manager.is_replication_healthy()
+                    ):
+                        logger.error(
+                            "Instance not yet back in the cluster or not healthy."
+                            f" Retry {attempt.retry_state.attempt_number}/6"
+                        )
+                        raise Exception
+        except RetryError:
+            logger.debug("Upgraded unit is not part of the cluster or not healthy")
+            self.set_unit_status(
+                BlockedStatus("upgrade failed. Check logs for rollback instruction")
+            )
+        else:
+            if self.refresh is not None:
+                self.refresh.next_unit_allowed_to_refresh = True
+                self.set_unit_status(ActiveStatus())
 
 
 __all__ = [

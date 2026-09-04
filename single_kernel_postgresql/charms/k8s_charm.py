@@ -89,7 +89,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         status: StatusBase,
         /,
         *,
-        refresh: "charm_refresh.Kubernetes | None" = None,
+        refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None,
     ) -> None:
         """Set the unit status without overriding a higher-priority refresh status."""
         self.refresh_manager.set_unit_status(status, refresh=refresh)
@@ -101,7 +101,9 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def set_app_status(self) -> None:
         """Set the application status from the async-replication state."""
 
-    def update_config(self, *, refresh: "charm_refresh.Kubernetes | None" = None) -> bool:
+    def update_config(
+        self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
+    ) -> bool:
         """Re-render the Patroni configuration and apply it."""
         return self.config_manager.update_config(self.postgresql)
 
@@ -113,3 +115,13 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def get_async_primary_cluster_endpoint(self) -> str | None:
         """Endpoint of the primary cluster of the async replication partner, if any."""
         return None
+
+    def update_relation_endpoints(self) -> None:
+        """Refresh the client and async relation endpoints after a switchover."""
+
+    def update_pebble_layers(self) -> None:
+        """Reconcile the workload's Pebble layers."""
+        self.k8s_manager.update_pebble_layers(replan=True)
+
+    def ensure_pgdata_dirs_and_symlinks(self) -> None:
+        """Create the storage directories and symlinks for the PostgreSQL data paths."""
