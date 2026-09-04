@@ -78,6 +78,7 @@ class ConfigManager(BaseManager):
         resource_provider: Callable[[], ResourceProvider],
         request_restart: Callable[[], None],
         restart_services: Callable[[], None],
+        logical_replication_slots: Callable[[], dict[str, str]] | None = None,
     ):
         super().__init__(state, workload, "config_manager")
         self.tls_manager = tls_manager
@@ -91,6 +92,9 @@ class ConfigManager(BaseManager):
         # service restarts stay in the charm until their own migration phases.
         self.request_restart = request_restart
         self.restart_services = restart_services
+        # Publishes the managed logical replication slots for the Patroni render and API
+        # sync; None until the logical replication module lands in a follow-up PR.
+        self.logical_replication_slots = logical_replication_slots or (lambda: {})
 
     @staticmethod
     def _dict_to_hba_string(_dict: dict[str, Any]) -> str:
@@ -512,8 +516,7 @@ class ConfigManager(BaseManager):
             postgresql_client, cpu_cores, available_memory
         )
 
-        # replication_slots = self.logical_replication.replication_slots()
-        replication_slots = {}
+        replication_slots = self.logical_replication_slots()
 
         # TODO add rel handler
         relations_user_databases_map = relations_user_databases_map or {}
