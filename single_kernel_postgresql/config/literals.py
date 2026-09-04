@@ -183,3 +183,21 @@ RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 VM_PATRONI_SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
 VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"
 VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
+
+## K8s restore storage paths (must match the metadata.yaml storage locations)
+K8S_LOGS_STORAGE_PATH = "var/lib/pg/logs"
+K8S_ARCHIVE_PATH = "var/lib/pg/archive"
+K8S_TEMP_STORAGE_PATH = "var/lib/pg/temp"
+K8S_WAL_DIR = "pg_wal"
+K8S_TEMP_TABLESPACE_DIR = "pgsql_tmp"
+K8S_PG_LOGS_PATH = "16/main/pg_logs"
+K8S_PATRONI_LOGS_PATH = "16/main/patroni_logs"
+K8S_DEBIAN_DATA_SYMLINK = "var/lib/postgresql/16"
+K8S_POSTGRESQL_LOGS_SYMLINK_PATH = "var/log/postgresql"
+K8S_PATRONI_LOGS_SYMLINK_PATH = "var/log/patroni"
+K8S_PGBACKREST_LOGS_SYMLINK_PATH = "var/log/pgbackrest"
+
+## Restore
+VM_PATRONICTL_EXECUTABLE = "charmed-postgresql.patronictl"
+PATRONICTL_REMOVE_CONFIRMATION = "Yes I am aware"
+RESTORE_REPEAT_CAUSE = "restore-backup"
