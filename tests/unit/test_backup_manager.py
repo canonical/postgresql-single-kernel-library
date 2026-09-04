@@ -22,6 +22,7 @@ from single_kernel_postgresql.config.literals import S3_RELATION_NAME
 from single_kernel_postgresql.managers.backup import BackupManager
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
+    CANNOT_RESTORE_PITR,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
     STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE,
 )
@@ -271,15 +272,15 @@ def test_credential_changed_checks_k8s_requires_connection_info(
     backup_manager.workload.write_text = MagicMock()
     backup_manager._render_pgbackrest_conf_file = MagicMock(return_value=True)
     backup_manager._can_initialise_stanza = MagicMock(return_value=True)
-    # No S3 relation data yet -> no connection info -> reject before any render.
-    assert backup_manager._credential_changed_checks() is False
+    # No S3 relation data yet -> no connection info -> reject before any render,
+    # without deferring (the K8s charm returns without defer here too).
+    assert backup_manager._credential_changed_checks() == (False, False)
 
 
 def test_credential_changed_checks_rejects_during_pitr_restore(harness, backup_manager):
-    rel_id = harness.model.get_relation("database-peers").id
-    harness.update_relation_data(rel_id, harness.charm.app.name, {"restore-to-time": "latest"})
+    harness.model.unit.status = BlockedStatus(CANNOT_RESTORE_PITR)
     backup_manager._render_pgbackrest_conf_file = MagicMock(return_value=True)
-    assert backup_manager._credential_changed_checks() is False
+    assert backup_manager._credential_changed_checks() == (False, True)
 
     with harness.hooks_disabled():
         harness.set_leader()
