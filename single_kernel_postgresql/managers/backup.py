@@ -16,10 +16,11 @@ import re
 import shlex
 import subprocess
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import jinja2
+from botocore.exceptions import ClientError, ParamValidationError, SSLError
 from ops import ActiveStatus, JujuVersion, MaintenanceStatus
 from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
@@ -27,8 +28,10 @@ from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import ListBackupsError
 from single_kernel_postgresql.config.literals import (
+    BACKUP_ID_FORMAT,
     BACKUP_TYPE_OVERRIDES,
     BACKUP_USER,
+    K8S_ROTATE_LOGS_SERVICE_NAME,
     PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE,
     PGBACKREST_LOG_LEVEL_STDERR,
     PGBACKREST_LOGROTATE_FILE,
@@ -39,11 +42,16 @@ from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     BACKUP_LABEL_STDOUT_PATTERN,
+    FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
     FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
     S3_BLOCK_MESSAGES,
     STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE,
     extract_error_message,
+    fetch_backup_from_id,
+    format_backup_list,
     generate_fake_backup_id,
+    get_nearest_timeline,
+    parse_backup_id,
 )
 from single_kernel_postgresql.workload.base import (
     BaseWorkload,
@@ -730,10 +738,6 @@ Juju Version: {JujuVersion.from_environ()!s}
             logger.error(f"Backup failed: {error_message}")
             return False, error_message
 
-        # Set flag due to missing in progress backups on JSON output
-        # (reference: https://github.com/pgbackrest/pgbackrest/issues/2007)
-        self.update_config(is_creating_backup=True)
-
         if not self.is_primary:
             # Create a rule to mark the cluster as in a creating backup state and update
             # the Patroni configuration.
@@ -878,3 +882,269 @@ Stderr:
             error_message = f"Failed to backup PostgreSQL with error: {error}"
         logger.error(f"Backup failed: {error_message}")
         return False, error_message
+
+    # -- Backup listing -------------------------------------------------------------
+
+    def _generate_backup_list_output(self) -> str:
+        """Generates a list of backups in a formatted table.
+
+        List contains successful and failed backups in order of ascending time.
+        """
+        backup_list = []
+        result = self._execute_pgbackrest(["info", "--output=json"])
+        if self.state.substrate == Substrates.VM and result.return_code != 0:
+            extracted_error = extract_error_message(
+                result.stderr, str(self.workload.backup_config.logs_path)
+            )
+            raise ListBackupsError(f"Failed to list backups with error: {extracted_error}")
+
+        backups = json.loads(result.stdout)[0]["backup"]
+        for backup in backups:
+            backup_id, backup_type = parse_backup_id(backup["label"])
+            backup_action = f"{backup_type} backup"
+            backup_reference = "None"
+            if backup["reference"]:
+                backup_reference, _ = parse_backup_id(backup["reference"][-1])
+            lsn_start_stop = f"{backup['lsn']['start']} / {backup['lsn']['stop']}"
+            time_start, time_stop = (
+                datetime.strftime(datetime.fromtimestamp(stamp, UTC), "%Y-%m-%dT%H:%M:%SZ")
+                for stamp in backup["timestamp"].values()
+            )
+            backup_timeline = (
+                backup["archive"]["start"][:8].lstrip("0")
+                if backup["archive"] and backup["archive"]["start"]
+                else ""
+            )
+            backup_path = f"/{self.stanza_name}/{backup['label']}"
+            error = backup["error"]
+            backup_status = "finished"
+            if error:
+                backup_status = f"failed: {error}"
+            backup_list.append((
+                backup_id,
+                backup_action,
+                backup_status,
+                backup_reference,
+                lsn_start_stop,
+                time_start,
+                time_stop,
+                backup_timeline,
+                backup_path,
+            ))
+
+        for timeline, (_, timeline_id) in self._list_timelines().items():
+            backup_list.append((
+                timeline,
+                "restore",
+                "finished",
+                "None",
+                "n/a",
+                timeline,
+                "n/a",
+                timeline_id,
+                "n/a",
+            ))
+
+        backup_list.sort(key=lambda x: x[0])
+
+        s3_parameters, _ = self.state.s3_connection_info.retrieve_s3_parameters()
+        return format_backup_list(backup_list, s3_parameters)
+
+    def _list_backups(self, show_failed: bool, parse=True) -> dict[str, tuple[str, str]]:
+        """Retrieve the list of backups.
+
+        Args:
+            show_failed: whether to also return the failed backups.
+            parse: whether to convert backup labels to their IDs or not.
+
+        Returns:
+            a dict of previously created backups: id => (stanza, timeline) or an empty dict if there is no backups in
+                the S3 bucket.
+        """
+        result = self._execute_pgbackrest(["info", "--output=json"])
+        if self.state.substrate == Substrates.VM and result.return_code != 0:
+            extracted_error = extract_error_message(
+                result.stderr, str(self.workload.backup_config.logs_path)
+            )
+            raise ListBackupsError(f"Failed to list backups with error: {extracted_error}")
+
+        repository_info = next(iter(json.loads(result.stdout)), None) if result.stdout else None
+
+        # If there are no backups, returns an empty dict.
+        if repository_info is None:
+            return dict[str, tuple[str, str]]()
+
+        backups = repository_info["backup"]
+        stanza_name = repository_info["name"]
+        return dict[str, tuple[str, str]]({
+            parse_backup_id(backup["label"])[0] if parse else backup["label"]: (
+                stanza_name,
+                backup["archive"]["start"][:8].lstrip("0")
+                if backup["archive"] and backup["archive"]["start"]
+                else "",
+            )
+            for backup in backups
+            if show_failed or not backup["error"]
+        })
+
+    def _list_timelines(self) -> dict[str, tuple[str, str]]:
+        """Lists the timelines from the pgBackRest stanza.
+
+        Returns:
+            a dict of timelines: id => (stanza, timeline) or an empty dict if there is no timelines in the S3 bucket.
+        """
+        result = self._execute_pgbackrest([
+            "repo-ls",
+            "archive",
+            "--recurse",
+            "--filter",
+            "\\.history$",
+            "--output=json",
+        ])
+        if self.state.substrate == Substrates.VM and result.return_code != 0:
+            extracted_error = extract_error_message(
+                result.stderr, str(self.workload.backup_config.logs_path)
+            )
+            raise ListBackupsError(f"Failed to list repository with error: {extracted_error}")
+
+        repository = json.loads(result.stdout).items() if result.stdout else None
+        timelines = dict[str, tuple[str, str]]()
+        if repository:
+            for timeline, timeline_object in repository:
+                if not timeline.endswith("backup.history"):
+                    # 0 is the stanza -1 is the timeline file
+                    path = timeline.split("/")
+                    timelines[
+                        datetime.strftime(
+                            datetime.fromtimestamp(timeline_object["time"], UTC),
+                            BACKUP_ID_FORMAT,
+                        )
+                    ] = (path[0], path[-1].split(".")[0].lstrip("0"))
+        return timelines
+
+    def _get_nearest_timeline(self, timestamp: str) -> tuple[str, str] | None:
+        """Finds the nearest timeline or backup prior to the specified timeline.
+
+        Returns:
+            (stanza, timeline) of the nearest timeline or backup. None, if there are no matches.
+        """
+        timelines = self._list_backups(show_failed=False) | self._list_timelines()
+        return get_nearest_timeline(timestamp, timelines)
+
+    def _fetch_backup_from_id(self, backup_id: str) -> str | None:
+        """Fetches backup's pgbackrest label from backup id."""
+        return fetch_backup_from_id(
+            backup_id, self._list_backups(show_failed=False, parse=False).keys()
+        )
+
+    # -- Credential-changed / S3 initialization flow ---------------------------------
+
+    def _credential_changed_checks(self) -> bool:
+        """Run the pre-initialization checks when S3 credentials change.
+
+        The events layer defers when this returns False.
+
+        Returns:
+            whether the S3 initialization flow should proceed.
+        """
+        if self.state.substrate == Substrates.VM:
+            # VM requires the internal peer certificate to exist before rendering
+            # the pgBackRest TLS configuration.
+            if (
+                not self.state.application.is_cluster_initialised
+                or not self.state.peer.internal_cert
+            ):
+                logger.debug(
+                    "Cannot set pgBackRest configurations, PostgreSQL has not yet started."
+                )
+                return False
+        else:
+            # K8s checks the connection info first (no connection info, no render).
+            if not self.state.s3_connection_info.retrieve_s3_parameters()[0]:
+                logger.debug("_on_s3_credential_changed early exit: no connection info")
+                return False
+            if not self.state.application.is_cluster_initialised:
+                logger.debug(
+                    "Cannot set pgBackRest configurations, PostgreSQL has not yet started."
+                )
+                return False
+
+        # Prevents config change in bad state, so DB peer relations change event will not cause patroni related errors.
+        # State-derived replacement of the charms' unit-status-message read of
+        # CANNOT_RESTORE_PITR: a PITR restore-to-time target in the app
+        # databag marks the same bad state without reading the unit status.
+        if self.state.application.restore_to_time:
+            logger.info("Cannot change S3 configuration in bad PITR restore status")
+            return False
+
+        # Prevents S3 change in the middle of restoring backup and patroni / pgbackrest errors caused by that.
+        if self.state.application.is_cluster_restoring_backup or (
+            self.state.application.is_cluster_restoring_to_time
+        ):
+            logger.info("Cannot change S3 configuration during restore")
+            return False
+
+        if not self._render_pgbackrest_conf_file():
+            logger.debug("Cannot set pgBackRest configurations, missing configurations.")
+            return False
+
+        if not self._can_initialise_stanza():
+            logger.debug("Cannot initialise stanza yet.")
+            return False
+        return True
+
+    def initialise_s3_repository(self) -> bool:
+        """Initialize the S3 repository after a credentials change (primary path).
+
+        Renamed port of the charms' _on_s3_credential_changed_primary: no event
+        semantics, returns success. The stanza must be cleared before calling.
+        """
+        self.update_config()
+
+        try:
+            s3_parameters, _ = self.state.s3_connection_info.retrieve_s3_parameters()
+            self.s3_client.create_bucket_if_not_exists(s3_parameters)
+        except (ClientError, ValueError, ParamValidationError, SSLError):
+            # Reconciled to the VM charm's broader exception set; the extra
+            # botocore errors only ever come from the shared S3Client.
+            self._s3_initialization_set_failure(FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE)
+            return False
+
+        can_use_s3_repository, validation_message = self.can_use_s3_repository()
+        if not can_use_s3_repository:
+            self._s3_initialization_set_failure(validation_message)
+            return False
+
+        if not self._initialise_stanza():
+            return False
+
+        if not self.check_stanza():
+            return False
+
+        s3_parameters, _ = self.state.s3_connection_info.retrieve_s3_parameters()
+        self.s3_client.upload_content(
+            self.state.model.uuid,
+            "model-uuid.txt",
+            s3_parameters,
+        )
+
+        return True
+
+    def clear_s3_state(self) -> None:
+        """Clear the stanza and S3 initialization markers when credentials are gone.
+
+        Renamed port of the charms' _on_s3_credential_gone: no event semantics.
+        The K8s charm also stops the rotate-logs service, kept here as workload
+        I/O. Status refreshes stay with the events layer.
+        """
+        if self.state.substrate == Substrates.K8S:
+            self.workload.stop_service(K8S_ROTATE_LOGS_SERVICE_NAME)
+        if self.state.peer.is_app_leader:
+            self.state.application.stanza = ""
+            self.state.application.s3_initialization_start = ""
+            self.state.application.s3_initialization_done = ""
+            self.state.application.s3_initialization_block_message = ""
+        self.state.peer.stanza = ""
+        self.state.peer.s3_initialization_start = ""
+        self.state.peer.s3_initialization_done = ""
+        self.state.peer.s3_initialization_block_message = ""
