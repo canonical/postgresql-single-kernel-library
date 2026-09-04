@@ -1533,7 +1533,7 @@ requires-dist = [
     { name = "charmlibs-interfaces-tls-certificates", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=1.8.3" },
     { name = "charmlibs-pathops", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=1.0.1" },
     { name = "charmlibs-rollingops", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=1.1.1" },
-    { name = "charmlibs-snap", marker = "python_full_version >= '3.12' and extra == 'vm'", specifier = ">=1.0.1" },
+    { name = "charmlibs-snap", marker = "python_full_version >= '3.12' and extra == 'vm'", specifier = ">=1.0.1,<2" },
     { name = "charmlibs-systemd", marker = "python_full_version >= '3.12' and extra == 'vm'", specifier = ">=1.0.0.post0" },
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "data-platform-helpers", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=0.1.7" },
