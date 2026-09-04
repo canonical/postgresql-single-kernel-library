@@ -13,6 +13,7 @@ bracketing, and the S3 initialization flow — no tautological asserts.
 """
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -119,6 +120,32 @@ def test_execute_pgbackrest_uses_config_flag_only_on_vm(backup_manager, substrat
         assert "--config" not in command
     assert "--log-level-stderr=warn" in command
     assert "stanza-create" in command
+
+
+def test_k8s_render_writes_default_configuration_file(backup_manager, substrate):
+    """The K8s render targets /etc/pgbackrest.conf; a None conf_path must not leak."""
+    if substrate != "k8s":
+        pytest.skip("K8s renders to the default location")
+    backup_manager.workload.root = Path("/")
+    backup_manager.workload.write_text = MagicMock()
+    backup_manager.state.s3_connection_info.retrieve_s3_parameters = MagicMock(
+        return_value=(
+            {
+                "bucket": "b",
+                "access-key": "k",
+                "secret-key": "s",
+                "endpoint": "https://s3.amazonaws.com",
+                "s3-uri-style": "host",
+                "path": "",
+                "delete-older-than-days": "9999999",
+            },
+            [],
+        )
+    )
+    backup_manager._tls_ca_chain_filename = ""
+    assert backup_manager._render_pgbackrest_conf_file() is True
+    written = [c.args[1] for c in backup_manager.workload.write_text.call_args_list]
+    assert Path("/etc/pgbackrest.conf") in written
 
 
 def test_execute_pgbackrest_server_ping_runs_without_config(backup_manager, substrate):
