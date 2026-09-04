@@ -9,6 +9,10 @@ from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
 from ops.charm import CharmBase
 
+if TYPE_CHECKING:
+    import charm_refresh
+
+
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.ldap import LDAP
@@ -29,9 +33,6 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 from ..config.enums import Substrates
 from ..config.literals import DATABASE, S3_RELATION_NAME
 from ..utils.postgresql import PostgreSQL
-
-if TYPE_CHECKING:
-    import charm_refresh
 
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
@@ -108,6 +109,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.refresh_manager,
         )
 
         # Resume or prepare the refresh (the charms' post-construction resume block).
@@ -120,6 +122,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.refresh_manager,
         )
 
     # Postgresql Client
@@ -236,4 +239,14 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         Owned by the async-replication module until that phase migrates; the refresh
         pre-refresh checks need it to decide whether a switchover crosses clusters.
         """
+        pass
+
+    @abstractmethod
+    def update_pebble_layers(self) -> None:
+        """Reconcile the workload's Pebble layers (K8s)."""
+        pass
+
+    @abstractmethod
+    def ensure_pgdata_dirs_and_symlinks(self) -> None:
+        """Create the storage directories and symlinks for the PostgreSQL data paths (K8s)."""
         pass

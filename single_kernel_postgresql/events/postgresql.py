@@ -29,6 +29,7 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
+from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
@@ -52,6 +53,7 @@ class PostgreSQLEventsHandler(Object):
         tls_manager: TLSManager,
         config_manager: ConfigManager,
         patroni_manager: PatroniManager,
+        refresh_manager: RefreshManager,
     ) -> None:
         super().__init__(charm, key="postgresql_events")
         self.charm = charm
@@ -61,6 +63,7 @@ class PostgreSQLEventsHandler(Object):
         self.config_manager = config_manager
         self.tls_manager = tls_manager
         self.patroni_manager = patroni_manager
+        self.refresh_manager = refresh_manager
 
         # Charm events
         self.framework.observe(self.charm.on.install, self._on_install)
@@ -125,7 +128,17 @@ class PostgreSQLEventsHandler(Object):
     def _on_postgresql_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event handler for PostgreSQL container on PebbleReadyEvent."""
         charm = cast("PostgreSQLK8sCharm", self.charm)
-        # TODO: Safeguard against refresh
+        # Safeguard against starting while refreshing.
+        if self.refresh_manager.refresh is None:
+            logger.warning("Warning on_postgresql_pebble_ready: Refresh could be in progress")
+        elif (
+            self.refresh_manager.refresh.in_progress
+            and not self.refresh_manager.refresh.workload_allowed_to_start
+        ):
+            logger.debug("Defer on_postgresql_pebble_ready: Refresh in progress")
+            event.defer()
+            return
+
         if self.state.endpoint in self.state.endpoints:
             # TODO: Fix pod by adding services
             pass
