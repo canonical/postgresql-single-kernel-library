@@ -14,6 +14,7 @@ from single_kernel_postgresql.config.literals import (
     SNAP,
     SNAP_COMMON,
     SNAP_DATA,
+    VM_ARCHIVE_PATH,
     VM_DATA_LOGS_PATH,
     VM_DATA_PATH,
     VM_LOGS_PATH,
@@ -103,6 +104,16 @@ class VMPaths(Paths):
     def temp(self) -> PathProtocol:
         """Path to the temporary directory."""
         return self.snap_common / VM_TEMP_PATH / self.versioned_path
+
+    @property
+    def archive(self) -> PathProtocol:
+        """Path to the archive folder of PostgreSQL."""
+        return self.snap_common / VM_ARCHIVE_PATH / self.versioned_path
+
+    @property
+    def temp_storage(self) -> PathProtocol:
+        """Path to the temp storage root."""
+        return self.snap_common / VM_TEMP_PATH
 
     @property
     def pgbackrest_conf(self) -> PathProtocol:

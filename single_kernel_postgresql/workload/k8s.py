@@ -7,18 +7,21 @@ import logging
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from ops import Container, ModelError
-from ops.pebble import Plan, ServiceStatus
+from ops.pebble import ChangeError, Plan, ServiceStatus
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     DIR_PERMISSIONS_READONLY,
     K8S_POSTGRESQL_SERVICE_NAME,
+    K8S_WORKLOAD_OS_GROUP,
+    K8S_WORKLOAD_OS_USER,
 )
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
@@ -102,12 +105,59 @@ class K8sWorkload(BaseWorkload):
         raise NotImplementedError
 
     def stop(self) -> None:
-        """Stop the PostgreSQL service."""
-        ...
+        """Stop the PostgreSQL pebble service."""
+        self.container.stop(K8S_POSTGRESQL_SERVICE_NAME)
 
     def start_service(self):
-        """Start the PostgreSQL service."""
-        ...
+        """Start the PostgreSQL pebble service."""
+        self.container.start(K8S_POSTGRESQL_SERVICE_NAME)
+
+    def postgresql_service_registered(self) -> bool:
+        """Whether the container is connected and the postgresql service exists."""
+        if not self.container.can_connect():
+            return False
+        services = self.container.pebble.get_services(names=[K8S_POSTGRESQL_SERVICE_NAME])
+        return len(services) > 0
+
+    def get_system_identifier(self) -> tuple[str | None, str | None]:
+        """Returns the PostgreSQL system identifier from this instance."""
+        major_version = self.get_postgresql_version().split(".")[0]
+        try:
+            system_identifier, error = self.container.exec(
+                [
+                    f"/usr/lib/postgresql/{major_version}/bin/pg_controldata",
+                    str(self.paths.data),
+                ],
+                user=K8S_WORKLOAD_OS_USER,
+                group=K8S_WORKLOAD_OS_GROUP,
+            ).wait_output()
+        except ChangeError as e:
+            return None, str(e)
+        if error != "":
+            return None, error
+        system_identifier = next(
+            line for line in system_identifier.splitlines() if "Database system identifier" in line
+        ).split(" ")[-1]
+        return system_identifier, None
+
+    def create_data_backup_tarball(self) -> str:
+        """Store the current pgdata folder in a tar.gz file and return its name."""
+        filename = (
+            f"{self.paths.data}-{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.gz"
+        )
+        self.container.exec(f"tar -zcf {filename} {self.paths.data}".split()).wait_output()
+        return filename
+
+    def clear_data_directories(self) -> None:
+        """Remove the contents of the data directories to enable replication."""
+        for path in [
+            self.paths.archive,
+            self.paths.data,
+            self.paths.logs,
+            self.paths.temp_storage,
+        ]:
+            logger.info(f"Removing contents from {path}")
+            self.container.exec(["find", str(path), "-mindepth", "1", "-delete"]).wait_output()
 
     def get_workload_version(self) -> str:
         """Get the workload version."""

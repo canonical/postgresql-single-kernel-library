@@ -8,13 +8,14 @@ This managers is responsible for handling operations related to Kubernetes,
 such as interacting with the Kubernetes API and also configuring Pebble to work with Kubernetes.
 """
 
+import itertools
 import logging
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from lightkube import Client
 from lightkube.core.exceptions import ApiError
-from lightkube.resources.core_v1 import Node, Pod
+from lightkube.resources.core_v1 import Endpoints, Node, Pod, Service
 from ops.pebble import CheckDict, Layer, LayerDict, ServiceDict
 
 from single_kernel_postgresql.config.exceptions import DeployedWithoutTrustError
@@ -66,6 +67,27 @@ class K8sManager(BaseManager):
         if pod.spec and pod.spec.nodeName:
             return pod.spec.nodeName
         raise RuntimeError("Pod doesn't exist")
+
+    def delete_patroni_cluster_resources(self) -> None:
+        """Delete the Patroni Endpoints and Services left by a previous cluster."""
+        client = Client()
+        name = f"patroni-{self.state.model.app.name}"
+        for values in itertools.product(
+            [Endpoints, Service],
+            [name, f"{name}-config", f"{name}-sync"],
+        ):
+            try:
+                client.delete(
+                    values[0],
+                    name=values[1],
+                    namespace=self.state.model_name,
+                )
+                logger.debug(f"Deleted {values[0]} {values[1]}")
+            except ApiError as e:
+                # Ignore the error only when the resource doesn't exist.
+                if e.status.code != 404:
+                    raise e
+                logger.debug(f"{values[0]} {values[1]} not found")
 
     def get_resources_limits(self, container_name: str) -> dict:
         """Return resources limits for a given container.

@@ -269,6 +269,21 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
+    def get_system_identifier(self) -> tuple[str | None, str | None]:
+        """Return the PostgreSQL system identifier of this instance, or an error."""
+        pass
+
+    @abstractmethod
+    def create_data_backup_tarball(self) -> str:
+        """Store the current data folder in a tar.gz file and return its name."""
+        pass
+
+    @abstractmethod
+    def clear_data_directories(self) -> None:
+        """Empty the data, archive, logs and temp directories."""
+        pass
+
+    @abstractmethod
     def get_workload_version(self) -> str:
         """Get the workload version."""
         raise NotImplementedError

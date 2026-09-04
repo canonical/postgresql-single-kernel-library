@@ -5,7 +5,9 @@
 from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.config.literals import (
+    K8S_ARCHIVE_PATH,
     K8S_DATA_PATH,
+    K8S_TEMP_STORAGE_PATH,
     PATRONI_LOGS_PATH,
     PGBACKREST_CONF_PATH,
     POSTGRESQL_CONF_FILE,
@@ -52,6 +54,16 @@ class K8sPaths(Paths):
     def temp(self) -> PathProtocol:
         """Path to the temporary directory."""
         return self.root / "tmp"
+
+    @property
+    def archive(self) -> PathProtocol:
+        """Path to the archive storage root."""
+        return self.root / K8S_ARCHIVE_PATH
+
+    @property
+    def temp_storage(self) -> PathProtocol:
+        """Path to the temp storage root."""
+        return self.root / K8S_TEMP_STORAGE_PATH
 
     @property
     def postgresql_conf(self) -> PathProtocol:
