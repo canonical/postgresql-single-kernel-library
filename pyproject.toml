@@ -70,9 +70,9 @@ lint = [
 ]
 unit = [
     "coverage[toml]==7.15.4",
-    "pytest==9.1.1"
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
 ]
-
 
 [tool.uv.dependency-groups]
 unit = {requires-python = ">=3.12"}
@@ -89,6 +89,7 @@ show_missing = true
 [tool.pytest.ini_options]
 minversion = "6.0"
 log_cli_level = "INFO"
+asyncio_mode = "auto"
 
 # Linting tools configuration
 [tool.ruff]
