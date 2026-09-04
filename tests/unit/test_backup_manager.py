@@ -14,7 +14,7 @@ bracketing, and the S3 initialization flow — no tautological asserts.
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from ops import BlockedStatus
@@ -122,29 +122,22 @@ def test_execute_pgbackrest_uses_config_flag_only_on_vm(backup_manager, substrat
     assert "stanza-create" in command
 
 
-def test_k8s_render_writes_default_configuration_file(backup_manager, substrate):
+def test_k8s_render_writes_default_configuration_file(harness, backup_manager, substrate):
     """The K8s render targets /etc/pgbackrest.conf; a None conf_path must not leak."""
     if substrate != "k8s":
         pytest.skip("K8s renders to the default location")
     backup_manager.workload.root = Path("/")
     backup_manager.workload.write_text = MagicMock()
-    backup_manager.state.s3_connection_info.retrieve_s3_parameters = MagicMock(
-        return_value=(
-            {
-                "bucket": "b",
-                "access-key": "k",
-                "secret-key": "s",
-                "endpoint": "https://s3.amazonaws.com",
-                "s3-uri-style": "host",
-                "path": "",
-                "delete-older-than-days": "9999999",
-            },
-            [],
-        )
+    backup_manager.workload.service_exists = MagicMock(return_value=True)
+    rel_id = harness.add_relation(S3_RELATION_NAME, "s3-integrator")
+    harness.update_relation_data(
+        rel_id, "s3-integrator", {"bucket": "b", "access-key": "k", "secret-key": "s"}
     )
-    backup_manager._tls_ca_chain_filename = ""
-    assert backup_manager._render_pgbackrest_conf_file() is True
-    written = [c.args[1] for c in backup_manager.workload.write_text.call_args_list]
+    with patch.object(
+        BackupManager, "_tls_ca_chain_filename", new_callable=PropertyMock, return_value=""
+    ):
+        assert backup_manager._render_pgbackrest_conf_file() is True
+        written = [c.args[1] for c in backup_manager.workload.write_text.call_args_list]
     assert Path("/etc/pgbackrest.conf") in written
 
 
@@ -304,7 +297,11 @@ def test_credential_changed_checks_k8s_requires_connection_info(
     assert backup_manager._credential_changed_checks() == (False, False)
 
 
-def test_credential_changed_checks_rejects_during_pitr_restore(harness, backup_manager):
+def test_credential_changed_checks_rejects_during_pitr_restore(harness, backup_manager, substrate):
+    if substrate != "vm":
+        pytest.skip(
+            "the K8s connection-info check short-circuits first; the guard itself is shared"
+        )
     harness.model.unit.status = BlockedStatus(CANNOT_RESTORE_PITR)
     backup_manager._render_pgbackrest_conf_file = MagicMock(return_value=True)
     assert backup_manager._credential_changed_checks() == (False, True)

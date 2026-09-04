@@ -9,7 +9,7 @@ import json
 from collections.abc import MutableMapping
 from functools import cached_property
 
-from ops import Application, BlockedStatus, Relation, Unit
+from ops import ActiveStatus, Application, BlockedStatus, Relation, Unit
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
@@ -66,6 +66,26 @@ class PostgreSQLPeer(RelationState):
     def is_app_leader(self) -> bool:
         """Check if the current unit is the leader of the application."""
         return self.unit.is_leader()
+
+    @property
+    def is_active(self) -> bool:
+        """Returns whether the unit is in an active state."""
+        return isinstance(self.unit.status, ActiveStatus)
+
+    @property
+    def rotate_logs_pid(self) -> int | None:
+        """Get the rotate-logs process PID from the unit peer relation data."""
+        if not self.relation:
+            return None
+        stored = self.relation.data[self.unit].get("rotate-logs-pid")
+        return int(stored) if stored else None
+
+    @rotate_logs_pid.setter
+    def rotate_logs_pid(self, value: int | None) -> None:
+        """Set or clear the rotate-logs process PID in the unit peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["rotate-logs-pid"] = str(value) if value else ""
 
     @property
     def is_blocked(self) -> bool:

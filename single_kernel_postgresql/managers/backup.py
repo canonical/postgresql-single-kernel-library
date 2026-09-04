@@ -12,8 +12,10 @@ layer; this manager raises or returns values only.
 import importlib.resources
 import json
 import logging
+import os
 import re
 import shlex
+import signal
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -35,14 +37,15 @@ from single_kernel_postgresql.config.literals import (
     PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE,
     PGBACKREST_LOG_LEVEL_STDERR,
     PGBACKREST_LOGROTATE_FILE,
+    VM_ROTATE_LOGS_LOG_FILE,
 )
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.utils.backup import (
-    CANNOT_RESTORE_PITR,
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     BACKUP_LABEL_STDOUT_PATTERN,
+    CANNOT_RESTORE_PITR,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
     FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
     S3_BLOCK_MESSAGES,
@@ -1166,3 +1169,58 @@ Stderr:
         self.state.peer.s3_initialization_start = ""
         self.state.peer.s3_initialization_done = ""
         self.state.peer.s3_initialization_block_message = ""
+
+    # -- Rotate-logs lifecycle (VM) ----------------------------------------------
+
+    def start_log_rotation(self) -> None:
+        """Spawn the rotate-logs loop for the pgBackRest logs.
+
+        Only the machine charm runs this: on Kubernetes rotation is the
+        rotate-logs Pebble service the layer declares, started by the render.
+        The guards mirror the charm's RotateLogs object: only an active unit
+        with a joined peer relation and a rendered logrotate configuration
+        spawns the loop, and a still-running previous loop is reused.
+        """
+        if self.state.substrate != Substrates.VM:
+            return
+        if not self.state.peer.is_active or self.state.peer_relation is None:
+            return
+        if not self.workload.exists(self.workload.root / PGBACKREST_LOGROTATE_FILE.lstrip("/")):
+            return
+        if self.state.peer.rotate_logs_pid:
+            # Double check that the PID exists.
+            try:
+                os.kill(self.state.peer.rotate_logs_pid, 0)
+                return
+            except OSError:
+                pass
+
+        logger.info("Starting rotate logs process")
+        script = importlib.resources.as_file(
+            importlib.resources.files("single_kernel_postgresql.scripts").joinpath(
+                "rotate_logs.py"
+            )
+        )
+        with (
+            script as script_path,
+            open(VM_ROTATE_LOGS_LOG_FILE, "a") as output,
+        ):
+            process = subprocess.Popen(  # noqa: S603
+                ["/usr/bin/python3", str(script_path)],
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
+        self.state.peer.rotate_logs_pid = process.pid
+        logger.info(f"Started rotate logs process with PID {process.pid}")
+
+    def stop_log_rotation(self) -> None:
+        """Stop the running rotate-logs loop, if this unit spawned one."""
+        if self.state.substrate != Substrates.VM:
+            return
+        if stored := self.state.peer.rotate_logs_pid:
+            try:
+                os.kill(stored, signal.SIGINT)
+                logger.info(f"Stopped rotate logs process with PID {stored}")
+                self.state.peer.rotate_logs_pid = None
+            except OSError:
+                pass

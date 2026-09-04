@@ -183,6 +183,7 @@ RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 VM_PATRONI_SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
 VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"
 VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
+VM_ROTATE_LOGS_LOG_FILE = "/var/log/rotate_logs.log"
 
 ## K8s restore storage paths (must match the metadata.yaml storage locations)
 K8S_LOGS_STORAGE_PATH = "var/lib/pg/logs"
