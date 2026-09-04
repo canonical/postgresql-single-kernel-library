@@ -24,6 +24,9 @@ from functools import cached_property
 from ops import (
     Object,
     Relation,
+    RelationBrokenEvent,
+    RelationChangedEvent,
+    RelationJoinedEvent,
     Secret,
     SecretNotFoundError,
 )
@@ -69,6 +72,19 @@ class WatcherEventsHandler(Object):
         self.state = state
         self.workload = workload
         self.tls_manager = tls_manager
+
+        self.framework.observe(
+            self.charm.on[WATCHER_OFFER_RELATION].relation_joined,
+            self._on_watcher_relation_joined,
+        )
+        self.framework.observe(
+            self.charm.on[WATCHER_OFFER_RELATION].relation_changed,
+            self._on_watcher_relation_changed,
+        )
+        self.framework.observe(
+            self.charm.on[WATCHER_OFFER_RELATION].relation_broken,
+            self._on_watcher_relation_broken,
+        )
 
     @cached_property
     def _relation(self) -> Relation | None:
@@ -147,6 +163,97 @@ class WatcherEventsHandler(Object):
         if unit_address and port is not None:
             return f"{unit_address}:{port}"
         return None
+
+    def _on_watcher_relation_joined(self, event: RelationJoinedEvent) -> None:
+        """Handle a new watcher joining the relation.
+
+        Shares cluster information including Raft password and PostgreSQL endpoints
+        with the watcher charm.
+
+        Args:
+            event: The relation joined event.
+        """
+        # Every unit should publish its own per-unit data.
+        self.update_unit_address(event.relation)
+
+        if not self.charm.unit.is_leader():
+            return
+
+        logger.info("Watcher relation joined, sharing cluster information")
+
+        # Ensure watcher user exists before creating the secret,
+        # so both raft-password and watcher-password are included from the start
+        watcher_pw = self._ensure_watcher_user()
+
+        # Create or get the watcher secret containing Raft password and watcher password
+        secret = self._get_or_create_watcher_secret(watcher_password=watcher_pw)
+        if secret is None:
+            logger.warning("Failed to create watcher secret, deferring event")
+            event.defer()
+            return
+
+        # Grant the secret to the watcher application
+        try:
+            secret.grant(event.relation)
+        except Exception as e:
+            logger.warning(f"Failed to grant secret to watcher: {e}")
+
+        # Update relation data with cluster information
+        self._update_relation_data(event.relation)
+
+    def _on_watcher_relation_changed(self, event: RelationChangedEvent) -> None:
+        """Handle watcher relation data changes.
+
+        Updates Patroni configuration to include the watcher in the Raft cluster.
+
+        Args:
+            event: The relation changed event.
+        """
+        # Keep this unit's relation data current on every relation-changed hook.
+        self.update_unit_address(event.relation)
+
+        if not self.state.application.is_cluster_initialised:
+            logger.debug("Cluster not initialized, deferring watcher relation changed")
+            event.defer()
+            return
+
+        watcher_address = None
+        for unit in event.relation.units:
+            if unit_address := event.relation.data[unit].get("unit-address"):
+                watcher_address = unit_address
+                break
+
+        if watcher_address:
+            logger.info(f"Watcher address updated: {watcher_address}")
+            # Only the leader handles Raft membership changes and user management
+            # to avoid race conditions between multiple PostgreSQL units
+            if self.charm.unit.is_leader():
+                self.charm.cleanup_raft_cluster()
+                self._ensure_watcher_user()
+            # Update Patroni configuration to include watcher in Raft
+            self.charm.update_config()
+
+        # Update relation data for the watcher
+        if self.charm.unit.is_leader():
+            self._update_relation_data(event.relation)
+
+    def _on_watcher_relation_broken(self, event: RelationBrokenEvent) -> None:
+        """Handle watcher relation being broken.
+
+         Updates Patroni configuration to remove the watcher from the Raft cluster.
+
+        Args:
+            event: The relation broken event.
+        """
+        if not self.state.application.is_cluster_initialised:
+            return
+
+        logger.info("Watcher relation broken, updating Patroni configuration")
+        self.watcher_raft_address = None
+        if self.charm.unit.is_leader():
+            self.charm.cleanup_raft_cluster()
+        # Update Patroni configuration without the watcher
+        self.charm.update_config()
 
     def _ensure_watcher_user(self) -> str | None:
         """Ensure the watcher PostgreSQL user exists for health checks.

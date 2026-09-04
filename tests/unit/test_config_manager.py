@@ -1,5 +1,6 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
+import inspect
 from unittest.mock import ANY, MagicMock, Mock, PropertyMock, patch, sentinel
 
 import pytest
@@ -28,6 +29,7 @@ def config(substrate):
             resource_provider=Mock(),
             request_restart=Mock(),
             database_manager=Mock(),
+            watcher_handler=Mock(),
             restart_services=Mock(),
         )
     yield config
@@ -141,6 +143,9 @@ def test_render_patroni_yml_file(substrate, config):
         )
         _config.return_value.instance_password_encryption = sentinel.instance_password_encryption
         _template.return_value.render.return_value = sentinel.template_output
+        if substrate == Substrates.K8S:
+            # The VM-only watcher branch never runs on K8s: even a None handler is safe.
+            config.watcher_handler = None
 
         config.render_patroni_yml_file()
 
@@ -234,7 +239,7 @@ def test_render_patroni_yml_file(substrate, config):
                 self_ip=sentinel.unit_ip,
                 listen_ips=sentinel.listen_ips,
                 raft_password=sentinel.raft_pass,
-                watcher=None,
+                watcher=config.watcher_handler.watcher_raft_address,
             )
             _render_file.assert_called_once_with(
                 substrate,
@@ -797,6 +802,18 @@ def test_update_config_threads_tls_flag_into_render(orchestrate, postgresql_clie
     orchestrate._is_tls.return_value = False
     orchestrate.update_config(postgresql_client, no_peers=True)
     assert orchestrate.render_patroni_yml_file.call_args.kwargs["enable_tls"] is False
+
+
+def test_update_config_render_call_matches_render_signature(orchestrate, postgresql_client):
+    """Regression: update_config once forwarded the dropped watcher_raft_address kwarg.
+
+    The orchestrator fixture's plain Mock swallows unknown kwargs, so validate the
+    forwarded kwargs against render_patroni_yml_file's real signature instead.
+    """
+    orchestrate.update_config(postgresql_client, no_peers=True)
+    render_params = inspect.signature(ConfigManager.render_patroni_yml_file).parameters
+    unknown = set(orchestrate.render_patroni_yml_file.call_args.kwargs) - set(render_params)
+    assert not unknown
 
 
 def test_update_config_workload_not_running_persists_tls_and_refreshes(
