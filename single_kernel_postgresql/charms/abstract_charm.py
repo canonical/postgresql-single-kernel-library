@@ -100,6 +100,9 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.patroni_manager,
         )
 
+        # Resume or prepare the refresh (the charms' post-construction resume block).
+        self.refresh_manager.on_init()
+
         # Status Handler
         self.status_handler = StatusHandler(
             self,
@@ -177,8 +180,35 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         pass
 
     @abstractmethod
-    def update_config(self) -> bool:
+    def update_config(self, *, refresh: "charm_refresh.Machines | None" = None) -> bool:
         """Re-render the Patroni configuration and apply it."""
+        pass
+
+    @abstractmethod
+    def post_refresh_side_effects(self) -> None:
+        """Run the post-snap-refresh side effects owned by not-yet-migrated modules.
+
+        The VM charm sets up the exporter and pgBackRest exporter, starts/stops the
+        pgBackRest service and updates the watcher unit address here.
+        """
+        pass
+
+    @abstractmethod
+    def has_async_replication_relation(self) -> bool:
+        """Whether this unit is related to an async replication partner.
+
+        Owned by the async-replication module until that phase migrates; the temp
+        tablespace migration skips units inside an async cluster.
+        """
+        pass
+
+    @abstractmethod
+    def update_relation_endpoints(self) -> None:
+        """Refresh the client and async relation endpoints after a switchover.
+
+        Owned by the client-relation and async-replication modules until those
+        phases migrate; the VM pre-refresh checks call it after switching primary.
+        """
         pass
 
     @property

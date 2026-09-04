@@ -479,7 +479,7 @@ class ConfigManager(BaseManager):
         watcher_raft_address: str | None = None,
         no_peers: bool = False,
         *,
-        refresh: charm_refresh.Machines | None = None,
+        refresh: charm_refresh.Machines | charm_refresh.Kubernetes | None = None,
     ) -> bool:
         """Updates Patroni config file based on the existence of the TLS files.
 
@@ -578,7 +578,7 @@ class ConfigManager(BaseManager):
             self.state.substrate == Substrates.VM
             and refresh is not None
             and cast("VMWorkload", self.workload).get_snap_revision()
-            != refresh.pinned_snap_revision
+            != cast("charm_refresh.Machines", refresh).pinned_snap_revision
         ):
             logger.debug("Early exit: snap was not refreshed to the right version yet")
             return True
