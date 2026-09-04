@@ -218,3 +218,9 @@ RESTORE_REPEAT_CAUSE = "restore-backup"
 # Watcher relation
 RAFT_PORT = 2222
 RAFT_PARTNER_PREFIX = "partner_node_status_server_"
+# Refresh (charm_refresh integration)
+WORKLOAD_NAME = "PostgreSQL"
+VM_CHARM_NAME = "postgresql"
+K8S_CHARM_NAME = "postgresql-k8s"
+K8S_OCI_RESOURCE_NAME = "postgresql-image"
+LAST_REFRESH_UNIT_STATUS_FILE = ".last_refresh_unit_status.json"
