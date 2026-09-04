@@ -125,3 +125,10 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
 
     def update_relation_endpoints(self) -> None:
         """Refresh the client and async relation endpoints after a switchover."""
+
+    def update_pebble_layers(self) -> None:
+        """Reconcile the workload's Pebble layers."""
+        self.k8s_manager.update_pebble_layers(replan=True)
+
+    def ensure_pgdata_dirs_and_symlinks(self) -> None:
+        """Create the storage directories and symlinks for the PostgreSQL data paths."""
