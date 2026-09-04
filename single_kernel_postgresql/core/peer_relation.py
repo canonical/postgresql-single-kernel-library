@@ -73,6 +73,11 @@ class PostgreSQLPeer(RelationState):
         return isinstance(self.unit.status, BlockedStatus)
 
     @property
+    def status_message(self) -> str:
+        """Returns the current unit status message, if any."""
+        return self.unit.status.message
+
+    @property
     def internal_cert(self) -> str | None:
         """Get internal certificate.
 
