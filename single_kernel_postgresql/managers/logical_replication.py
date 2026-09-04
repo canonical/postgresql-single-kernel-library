@@ -155,8 +155,8 @@ class LogicalReplicationManager(BaseManager):
         self.postgresql().create_user(user, password, replication=True)
         return user, password
 
-    def clean_up_published_resources(self, relation_id: int) -> None:
-        """Drop the publications, users, secrets and slots of broken offer relations."""
+    def clean_up_published_resources(self) -> None:
+        """Drop the publications, users and secrets of relations that no longer exist."""
         published_resources = json.loads(
             self.state.application.data.get("logical-replication-published-resources", "{}")
         )
@@ -190,18 +190,17 @@ class LogicalReplicationManager(BaseManager):
             if stale_relation_id in active_relation_ids:
                 continue
             logger.info(
-                f"Cleaning up published logical replication resources for the redundant {LOGICAL_REPLICATION_OFFER_RELATION} #{stale_relation_id}"
+                f"Cleaning up published logical replication resources for the redundant {LOGICAL_REPLICATION_OFFER_RELATION} #{relation_id}"
             )
             try:
                 secret = self.state.model.get_secret(id=relation_resources["secret-id"])
-                postgresql.delete_user(secret.peek_content()["username"])
+                self.postgresql().delete_user(secret.peek_content()["username"])
                 secret.remove_all_revisions()
             except SecretNotFoundError:
                 pass
             for database, publication in relation_resources["publications"].items():
-                postgresql.drop_publication(database, publication["publication-name"])
-                postgresql.drop_replication_slot(publication["replication-slot-name"], database)
-            del published_resources[stale_relation_id]
+                self.postgresql().drop_publication(database, publication["publication-name"])
+            del published_resources[relation_id]
             self.state.application.data["logical-replication-published-resources"] = json.dumps(
                 published_resources
             )
