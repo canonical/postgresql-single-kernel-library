@@ -107,7 +107,7 @@ log:
   file_size: 600
 restapi:
   connect_address: '{{ endpoint }}:8008'
-  listen: 0.0.0.0:8008
+  listen: '*:8008'
   {%- if patroni_password %}
   authentication:
     username: patroni
@@ -125,7 +125,7 @@ postgresql:
   connect_address: '{{ endpoint }}:5432'
   data_dir: {{ pgdata_path }}
   bin_dir: /usr/lib/postgresql/{{ version }}/bin
-  listen: 0.0.0.0:5432
+  listen: '*:5432'
   parameters:
     shared_preload_libraries: 'timescaledb,pgaudit,set_user,pg_stat_statements'
     session_preload_libraries: 'login_hook'

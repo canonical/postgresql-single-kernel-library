@@ -232,6 +232,19 @@ def test_vm_self_rule_uses_the_ipv6_prefix_length():
     )
 
 
+def test_k8s_listen_binds_all_interfaces():
+    """K8s pods must accept connections on every address family.
+
+    A dual-stack or IPv6-only pod network is served by the same listener;
+    binding 0.0.0.0 would leave IPv6 clients unserved (and an IPv6-only
+    pod network completely unreachable).
+    """
+    context = _base_context()
+    rendered = yaml.safe_load(_MERGED_TEMPLATE.render(substrate="k8s", **context))
+    assert rendered["restapi"]["listen"] == "*:8008"
+    assert rendered["postgresql"]["listen"] == "*:5432"
+
+
 def test_template_loads_via_importlib_resources():
     """The merged template must resolve as package data, independent of the CWD."""
     source = _merged_template_source()

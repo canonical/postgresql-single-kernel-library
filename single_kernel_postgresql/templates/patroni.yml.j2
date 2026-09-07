@@ -31,7 +31,7 @@ log:
   file_size: 600
 
 restapi:
-  listen: '{{ self_ip if is_vm else '0.0.0.0' }}:8008'
+  listen: '{{ self_ip if is_vm else "*" }}:8008'
   connect_address: '{{ node_addr }}:8008'
   {%- if patroni_password %}
   authentication:
@@ -179,7 +179,7 @@ pod_ip: '{{ endpoint }}'
 {%- endif %}
 
 postgresql:
-  listen: {{ listen_ips | join(',') if is_vm else '0.0.0.0' }}:5432
+  listen: {{ (listen_ips | join(',') ~ ':5432') if is_vm else "'*:5432'" }}
   basebackup:
     - waldir: {{ wal_path }}
   connect_address: '{{ node_addr }}:5432'
