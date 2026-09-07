@@ -10,6 +10,7 @@ from ops.charm import CharmBase
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
+from single_kernel_postgresql.events.ldap import LDAP
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
@@ -40,6 +41,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         # TLS manager so the manager can constructor-inject them for its live-fetch getters.
         self.tls = TLS(self, self.state)
 
+        # LDAP events handler owns the ldap requirer relation and the auth parameters
+        # the config manager renders into the Patroni hba section.
+        self.ldap = LDAP(self, self.state)
+
         # Managers
         self.tls_manager = TLSManager(
             state=self.state,
@@ -68,6 +73,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             tls_manager=self.tls_manager,
             patroni_manager=self.patroni_manager,
             database_manager=self.database_manager,
+            ldap_handler=self.ldap,
             resource_provider=self.get_resource_provider,
             request_restart=self.request_restart,
             restart_services=self.restart_services,
@@ -116,7 +122,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
 
     # Charm-side bridges the lib calls back into. request_restart/restart_services are
     # substrate-tangled and stay until their own migration phases; update_config still
-    # supplies the ldap/async/watcher values those phases own; primary_endpoint is the
+    # supplies the async/watcher values those phases own; primary_endpoint is the
     # VM's Patroni-derived primary lookup. set_unit_status routes status writes through
     # the charm_refresh priority gate and stays until the refresh logic itself migrates
     # into the library, at which point the managers own their status writes.

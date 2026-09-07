@@ -56,6 +56,9 @@ TLS_CA_BUNDLE_FILE = "peer_ca_bundle.pem"
 TLS_CLIENT_RELATION = "client-certificates"
 TLS_PEER_RELATION = "peer-certificates"
 
+# LDAP relation names
+LDAP_RELATION = "ldap"
+
 # Scopes
 SCOPES = Literal["app", "unit"]
 APP_SCOPE = "app"

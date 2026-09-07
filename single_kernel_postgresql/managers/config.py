@@ -40,6 +40,7 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 
 if TYPE_CHECKING:
     # Import-time only: the VM workload pulls the snap charm lib, which K8s does not ship.
+    from single_kernel_postgresql.events.ldap import LDAP
     from single_kernel_postgresql.managers.database import DatabaseManager
     from single_kernel_postgresql.workload.vm import VMWorkload
 
@@ -59,6 +60,7 @@ class ConfigManager(BaseManager):
         tls_manager: TLSManager,
         patroni_manager: PatroniManager,
         database_manager: "DatabaseManager",
+        ldap_handler: "LDAP",
         resource_provider: Callable[[], ResourceProvider],
         request_restart: Callable[[], None],
         restart_services: Callable[[], None],
@@ -66,6 +68,7 @@ class ConfigManager(BaseManager):
         super().__init__(state, workload, "config_manager")
         self.tls_manager = tls_manager
         self.patroni_manager = patroni_manager
+        self.ldap_handler = ldap_handler
         self.database_manager = database_manager
         # Resolved on use, not at construction: the K8s manager that provides it is built
         # after this manager in the charm's __init__.
@@ -470,8 +473,6 @@ class ConfigManager(BaseManager):
         # TODO add rel handler
         relations_user_databases_map: dict[str, Any] | None = None,
         # TODO add rel handler
-        ldap_parameters: dict[str, Any] | None = None,
-        # TODO add rel handler
         async_primary_cluster_endpoint: str | None = None,
         async_partner_addresses: list[str] | None = None,
         async_standby_endpoints: list[str] | None = None,
@@ -520,7 +521,7 @@ class ConfigManager(BaseManager):
             parameters=pg_parameters,
             user_databases_map=relations_user_databases_map,
             slots=replication_slots,
-            ldap_parameters=ldap_parameters,
+            ldap_parameters=self.ldap_handler.get_ldap_parameters(),
             async_primary_cluster_endpoint=async_primary_cluster_endpoint,
             async_partner_addresses=async_partner_addresses,
             async_standby_endpoints=async_standby_endpoints,
