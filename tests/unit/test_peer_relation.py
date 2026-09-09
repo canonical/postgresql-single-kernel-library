@@ -139,9 +139,10 @@ def test_planned_units_falls_back_to_known_units_on_goal_state_failure(harness):
         assert harness.charm.state.application.planned_units == expected
 
 
-def test_planned_units_guard_applies_on_every_access(harness):
-    # The state object is reconstructed per access (CharmState.application is a
-    # plain property), so the guard must hold on each read, not just the first.
+def test_planned_units_guard_serves_fallback_repeatedly(harness):
+    # The guard's fallback is cached with the state object: repeated reads within
+    # the same hook reuse it without re-raising, and a fresh charm object (next
+    # hook invocation) re-arms the guard on a new goal-state read.
     with patch.object(
         harness.charm.app,
         "planned_units",
