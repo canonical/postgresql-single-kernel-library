@@ -424,8 +424,10 @@ class PostgreSQLApplication(RelationState):
         try:
             return self.app.planned_units()
         except ModelError:
+            # Relation.units holds only the remote peers; the local unit is planned
+            # too, so it counts toward the fallback as well.
             units = {unit.name for unit in self.relation.units} if self.relation else set()
-            return len(units)
+            return len(units) + 1
 
     @property
     def members_ips(self) -> set[str]:
