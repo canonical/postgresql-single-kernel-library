@@ -108,6 +108,21 @@ def label2name(label: str) -> str:
     return "/".join(label.rsplit("-", 1))
 
 
+def bracket_ipv6_host(host: str | None) -> str | None:
+    """Quote an IPv6 literal so it is valid in a URL authority (RFC 3986).
+
+    An IPv6 literal in a URL must be bracketed, otherwise the client parses
+    the address at the first colon. Other hosts (and None) pass through.
+
+    Args:
+        host: a bare host name or address, or None.
+
+    Returns:
+        The host, bracketed when it is an IPv6 literal.
+    """
+    return f"[{host}]" if host and ":" in host else host
+
+
 def render_file(
     substrate: Substrates, path: str, content: str, mode: int, change_owner: bool = True
 ) -> None:
@@ -188,7 +203,9 @@ async def _async_get_request(
     uri: str, endpoints: list[str], cafile: str, auth: BasicAuth | None, verify: bool = True
 ) -> dict[str, Any] | None:
     tasks = [
-        create_task(_httpx_get_request(f"https://{ip}:8008{uri}", cafile, auth, verify))
+        create_task(
+            _httpx_get_request(f"https://{bracket_ipv6_host(ip)}:8008{uri}", cafile, auth, verify)
+        )
         for ip in endpoints
     ]
     for task in as_completed(tasks):

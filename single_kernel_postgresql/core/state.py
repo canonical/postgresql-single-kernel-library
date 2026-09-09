@@ -40,7 +40,7 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerData,
     DataPeerUnitData,
 )
-from single_kernel_postgresql.utils import unit_name_to_pod_name
+from single_kernel_postgresql.utils import bracket_ipv6_host, unit_name_to_pod_name
 from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
 from single_kernel_postgresql.utils.status import format_status
 
@@ -219,7 +219,7 @@ class CharmState(Object):
     @cached_property
     def patroni_url(self) -> str:
         """Patroni REST API URL."""
-        return f"https://{self.endpoint}:8008"
+        return f"https://{bracket_ipv6_host(self.endpoint)}:8008"
 
     @property
     def peer_members_ips(self) -> set[str]:

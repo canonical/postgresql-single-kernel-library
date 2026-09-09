@@ -60,7 +60,12 @@ from single_kernel_postgresql.config.literals import (
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
-from single_kernel_postgresql.utils import _change_owner, label2name, parallel_patroni_get_request
+from single_kernel_postgresql.utils import (
+    _change_owner,
+    bracket_ipv6_host,
+    label2name,
+    parallel_patroni_get_request,
+)
 from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -850,7 +855,7 @@ class PatroniManager(BaseManager):
             for attempt in Retrying(stop=stop_after_delay(10), wait=wait_fixed(1)):
                 with attempt:
                     r = requests.get(
-                        f"https://{self.state.primary_endpoint}:8008/health",
+                        f"https://{bracket_ipv6_host(self.state.primary_endpoint)}:8008/health",
                         verify=self.verify,
                         auth=self._patroni_auth,
                         timeout=API_REQUEST_TIMEOUT,
