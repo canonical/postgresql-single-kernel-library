@@ -49,14 +49,14 @@ Trust boundaries (from the Charmed PostgreSQL threat model — see the model's d
 
 **B. Cryptographic technology used by the product.** The only authentication mechanism the watcher itself exercises is the **Raft shared-password check** (membership authentication in Patroni's Raft implementation — see the Patroni/PySyncObj documentation for the primitive). No algorithms or key material are generated, negotiated, or stored by watcher code. `[CONFIRM: characterisation of the PySyncObj password check — link the upstream reference.]`
 
-**C. Cryptographic technology exposed to users.** None. The watcher exposes no TLS endpoints, no certificate operations, and no user-facing crypto configuration. TLS for PostgreSQL client connections is a Charmed PostgreSQL feature (see [Enable TLS](enable-tls) and [Cryptography](cryptography)) and is unaffected by adding a watcher.
+**C. Cryptographic technology exposed to users.** None. The watcher exposes no TLS endpoints, no certificate operations, and no user-facing crypto configuration. TLS for PostgreSQL client connections is a Charmed PostgreSQL feature (see [Enable TLS](enable-tls) and {doc}`Cryptography <cryptography>`) and is unaffected by adding a watcher.
 
 **D. Packages providing cryptographic functionality.** All cryptographic functionality is inherited from: the Ubuntu archive (Python 3.12 runtime, OpenSSL inside the `charmed-postgresql` snap), the `charmed-postgresql` snap itself (Canonical-built, from canonical/charmed-postgresql-snap), and Python libraries from PyPI pinned in `poetry.lock` — notably `cryptography` (a library dependency of the platform libraries, not invoked by watcher code) and `pysyncobj`. Third-party packages come from PyPI; pinned versions are visible in the repository's `poetry.lock`.
 
 **E. Encryption of data in transit and at rest.**
 
 - *In transit*: Raft consensus traffic is **not TLS-encrypted**; it is protected by the shared membership password and by running on the cluster-internal network. If your security posture requires encryption for this traffic, do not deploy the watcher; a 3-unit PostgreSQL cluster is the alternative that removes the need for it. `[CONFIRM with security engineering: is this the correct guidance?]` The watcher's health-check connection to PostgreSQL uses TLS verified against the cluster CA `[CONFIRM]`. Passwords never traverse relation data in plaintext — they travel as Juju secrets.
-- *At rest*: the Raft configuration file (containing the Raft password in plaintext) and any CA bundle are written with `0600` permissions under `/var/snap/charmed-postgresql/common/watcher-raft/`, readable only by root. No other sensitive data is persisted. Full-disk encryption of the host is the user-side control if the deployment's threat model requires it (see [Hardening guidelines](#hardening-guidelines) below).
+- *At rest*: the Raft configuration file (containing the Raft password in plaintext) and any CA bundle are written with `0600` permissions under `/var/snap/charmed-postgresql/common/watcher-raft/`, readable only by root. No other sensitive data is persisted. Full-disk encryption of the host is the user-side control if the deployment's threat model requires it (see Hardening guidelines below).
 
 ## Configuring and operating the product securely
 
