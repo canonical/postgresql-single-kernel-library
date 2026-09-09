@@ -61,7 +61,7 @@ Instructions for performing an in-place application refresh:
 ```{toctree}
 :titlesonly:
 
-Refresh (upgrade) <refresh>
+Refresh (upgrade) <refresh/index>
 ```
 
 ### Observability (COS)
