@@ -499,10 +499,8 @@ class CharmState(Object):
                 return present_status
         return None
 
-    @cached_property
-    def synchronous_node_count(self) -> int:
-        """Number of expected sync standbys."""
-        planned_units = self.application.planned_units
+    def synchronous_node_count_for(self, planned_units: int) -> int:
+        """Number of expected sync standbys for a known planned unit count."""
         if self.config.synchronous_node_count == "all":
             return planned_units - 1
         elif self.config.synchronous_node_count == "majority":
@@ -513,6 +511,11 @@ class CharmState(Object):
             if self.config.synchronous_node_count < planned_units - 1
             else planned_units - 1
         )
+
+    @cached_property
+    def synchronous_node_count(self) -> int:
+        """Number of expected sync standbys."""
+        return self.synchronous_node_count_for(self.application.planned_units)
 
     @cached_property
     def synchronous_configuration(self) -> dict[str, Any]:

@@ -480,6 +480,7 @@ class ConfigManager(BaseManager):
         watcher_raft_address: str | None = None,
         no_peers: bool = False,
         *,
+        planned_units: int | None = None,
         refresh: charm_refresh.Machines | None = None,
     ) -> bool:
         """Updates Patroni config file based on the existence of the TLS files.
@@ -527,6 +528,7 @@ class ConfigManager(BaseManager):
             async_standby_endpoints=async_standby_endpoints,
             watcher_raft_address=watcher_raft_address,
             no_peers=no_peers,
+            planned_units=planned_units,
         )
         if no_peers:
             return True
@@ -619,6 +621,8 @@ class ConfigManager(BaseManager):
         async_standby_endpoints: list[str] | None = None,
         # VM watcher rel
         watcher_raft_address: str | None = None,
+        *,
+        planned_units: int | None = None,
     ) -> None:
         """Render the Patroni configuration file.
 
@@ -645,6 +649,10 @@ class ConfigManager(BaseManager):
             async_standby_endpoints: Primary async cluster endpoint.
             async_partner_addresses: Primary async cluster endpoint.
             watcher_raft_address: IP address of a related Raft watcher.
+            planned_units: number of planned units already read by the caller, when
+                known. When provided, the render skips its own ``goal-state`` read
+                for the synchronous block; when ``None``, the state object reads it
+                as before.
         """
         slots = slots or {}
         ldap_parameters = ldap_parameters or {}
@@ -685,7 +693,11 @@ class ConfigManager(BaseManager):
             "restore_to_latest": restore_to_latest,
             "is_creating_backup": is_creating_backup,
             "version": self.workload.get_postgresql_version().split(".")[0],
-            "synchronous_node_count": self.state.synchronous_node_count,
+            "synchronous_node_count": (
+                self.state.synchronous_node_count
+                if planned_units is None
+                else self.state.synchronous_node_count_for(planned_units)
+            ),
             "maximum_lag_on_failover": self.state.config.durability_maximum_lag_on_failover,
             "pg_parameters": parameters,
             "primary_cluster_endpoint": async_primary_cluster_endpoint,
