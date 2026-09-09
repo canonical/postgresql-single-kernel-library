@@ -44,6 +44,8 @@ Once integrated, the watcher:
 The watcher participates in **leader election only**. It stores no table data and never becomes a PostgreSQL primary or replica.
 ```
 
+For the watcher's security posture — trust boundaries, hardening, inherent risks, and decommissioning — see [Watcher security](security-hardening-watcher).
+
 ## When the watcher votes (and when it doesn't)
 
 The watcher runs and votes only when the `postgresql` units would otherwise form an even voter count. When they already make a safe odd count on their own, the watcher stops its Raft service and leaves the quorum:
