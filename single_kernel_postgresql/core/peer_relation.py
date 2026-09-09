@@ -9,7 +9,7 @@ import json
 from collections.abc import MutableMapping
 from functools import cached_property
 
-from ops import Application, BlockedStatus, Relation, Unit
+from ops import Application, BlockedStatus, ModelError, Relation, Unit
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
@@ -410,8 +410,22 @@ class PostgreSQLApplication(RelationState):
 
     @cached_property
     def planned_units(self) -> int:
-        """Get the number of planned units for the application."""
-        return self.app.planned_units()
+        """Number of planned units, resilient to a transient goal-state failure.
+
+        ops implements ``Application.planned_units()`` via ``goal-state``, which fails
+        ("saas application ... not found") while a cross-model SAAS force-removed during a
+        dead-DC teardown still lingers in goal-state. Fall back to the count of currently
+        known units so hooks reconcile instead of crashing (DPE-10203).
+
+        The value is cached for the lifetime of the state object: on VM substrates the
+        charm object lives for exactly one hook invocation, so the count cannot go stale
+        across events or scale changes.
+        """
+        try:
+            return self.app.planned_units()
+        except ModelError:
+            units = {unit.name for unit in self.relation.units} if self.relation else set()
+            return len(units)
 
     @property
     def members_ips(self) -> set[str]:
