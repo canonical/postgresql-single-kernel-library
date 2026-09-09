@@ -1,10 +1,10 @@
 ---
 myst:
   html_meta:
-    description: "Refresh and upgrade Charmed PostgreSQL to a new revision using juju refresh, with rollback guidance and recommended upgrade paths."
+    description: "Refresh and upgrade Charmed PostgreSQL VM to a new revision using juju refresh, with rollback guidance and recommended upgrade paths."
 ---
 
-(refresh)=
+(refresh-vm)=
 # Refresh (upgrade)
 {{vm}}
 
@@ -23,8 +23,6 @@ Then, consider {ref}`rolling back <roll-back>`.
 ````
 
 Charmed PostgreSQL supports minor version in-place refresh via the [`juju refresh`](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/refresh/#details) command.
-
-**This guide is currently only available for the VM charm. Refresh instructions for K8s are in coming soon.**
 
 ## Determine which version to refresh to
 

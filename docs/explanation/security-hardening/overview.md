@@ -107,8 +107,8 @@ Charmed PostgreSQL and Charmed PgBouncer run on top of Ubuntu 22.04. Deploy a [L
 
 New versions (revisions) of the charmed operators can be released to update the operator's code, workloads, or both. It is important to refresh the charms regularly to make sure the workloads are as secure as possible.
 
-For more information on upgrading Charmed PostgreSQL, see:
-* {ref}`How to upgrade PostgreSQL <refresh>`
+For more information on upgrading Charmed PostgreSQL VM, see:
+* {ref}`How to upgrade PostgreSQL <refresh-vm>`
 * [How to upgrade PgBouncer](https://charmhub.io/pgbouncer/docs/h-upgrade)
 * {ref}`PostgreSQL release notes <release-notes>`
 * [PgBouncer release notes](https://charmhub.io/pgbouncer/docs/r-releases)
@@ -174,7 +174,7 @@ New versions (revisions) of the charmed operators can be released to update the 
 
 For more information on upgrading Charmed PostgreSQL K8s, see:
 
-* {ref}`How to upgrade PostgreSQL <refresh>`
+* {ref}`How to upgrade PostgreSQL <refresh-k8s>`
 * [How to upgrade PgBouncer](https://charmhub.io/pgbouncer-k8s/docs/h-upgrade)
 * {ref}`PostgreSQL release notes <release-notes>`
 * [PgBouncer release notes](https://charmhub.io/pgbouncer/docs-k8s/r-releases)
