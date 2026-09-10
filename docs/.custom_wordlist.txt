@@ -84,7 +84,6 @@ lastmod
 LaTeX
 latexmk
 LDAP
-libpq
 libs
 lifecycle
 LLMs?
