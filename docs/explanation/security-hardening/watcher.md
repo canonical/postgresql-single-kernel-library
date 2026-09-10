@@ -30,7 +30,7 @@ Trust boundaries (from the Charmed PostgreSQL threat model — see the model's d
 
 | Boundary | What crosses it | Protection |
 |---|---|---|
-| Watcher ↔ PostgreSQL Raft (TCP, port 2223+ on the watcher; 2222 on PostgreSQL units) | Raft consensus messages | Shared Raft password, distributed out-of-band via Juju secrets; cluster-internal network only |
+| Watcher ↔ PostgreSQL Raft (TCP, port 2222 on both; 2223+ only for a second simultaneous relation) | Raft consensus messages | Shared Raft password, distributed out-of-band via Juju secrets; cluster-internal network only |
 | Watcher ↔ PostgreSQL health endpoint | Patroni REST status polls; PostgreSQL health connection by the `watcher` user | Cluster-internal network; TLS against the cluster CA `[CONFIRM exact TLS usage for the psycopg2 connection]` |
 | Juju → watcher charm | Relation data, config, secrets, events | Juju model access control; secrets exposed only through Juju's secrets API |
 | Watcher relation (PostgreSQL charm → watcher charm) | Raft partner addresses, cluster name, CA bundle, secret ID, status/address updates | Juju relation data is readable only by applications in the relation; the Raft password itself is NOT in relation data — only its secret ID |
@@ -83,7 +83,7 @@ Trust boundaries (from the Charmed PostgreSQL threat model — see the model's d
 These risks cannot be mitigated by Canonical without removing the watcher's function; they are recorded in the Charmed PostgreSQL threat model (26.10 refresh) and must be accepted or controlled by the operator:
 
 1. **Raft traffic is password-authenticated, not encrypted.** An attacker positioned on the cluster-internal network who captures Raft traffic learns cluster membership topology. Control: network segmentation (Juju spaces / security groups), and accepting that the Raft password does not protect confidentiality of consensus traffic.
-2. **The watcher is a consensus participant.** A compromised watcher host can participate in — but not outvote — the Raft cluster (2 PostgreSQL votes vs 1 watcher vote); it can attempt disruption of quorum. Controls: host hardening, model access discipline, minimal exposure of port 2223.
+2. **The watcher is a consensus participant.** A compromised watcher host can participate in — but not outvote — the Raft cluster (2 PostgreSQL votes vs 1 watcher vote); it can attempt disruption of quorum. Controls: host hardening, model access discipline, minimal exposure of port 2222.
 3. **Losing the watcher returns the cluster to 2-member partition behaviour.** This is availability-equivalent to not having a watcher — it degrades the guarantee the watcher exists to provide, it does not endanger data. Controls: self-healing (service auto-restart), availability-zone separation, monitoring the unit status.
 4. **Relation data poisoning** — a charm-side attacker able to write the PostgreSQL application's relation data could point the watcher at attacker-chosen endpoints. Juju application-scoped writes make this equivalent to compromising the PostgreSQL charm; no additional watcher-side control applies.
 
