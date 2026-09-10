@@ -84,6 +84,7 @@ lastmod
 LaTeX
 latexmk
 LDAP
+libpq
 libs
 lifecycle
 LLMs?
@@ -121,7 +122,6 @@ Pgbouncer*
 pgdata
 pgsql
 PITR
-libpq
 plaintext
 plantuml
 PNG
