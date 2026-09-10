@@ -31,7 +31,7 @@ Trust boundaries, with the protection each crossing relies on:
 | Boundary | What crosses it | Protection |
 |---|---|---|
 | Watcher ↔ PostgreSQL Raft (TCP, port 2222 on both) | Raft consensus messages | Shared Raft password, distributed out-of-band via Juju secrets; cluster-internal network only |
-| Watcher ↔ PostgreSQL health endpoint | Patroni REST status polls; PostgreSQL health connection by the `watcher` user | Cluster-internal network; opportunistic TLS (libpq default `sslmode=prefer`): encrypted, but not verified against the cluster CA |
+| Watcher ↔ PostgreSQL health endpoint | PostgreSQL health connection by the `watcher` user | Cluster-internal network; opportunistic TLS (libpq default `sslmode=prefer`): encrypted, but not verified against the cluster CA |
 | Juju → watcher charm | Relation data, config, secrets, events | Juju model access control; secrets exposed only through Juju's secrets API |
 | Watcher relation (PostgreSQL charm → watcher charm) | Raft partner addresses, cluster name, CA bundle, secret ID, status/address updates | Juju relation data is readable only by applications in the relation; the Raft password itself is NOT in relation data — only its secret ID |
 
@@ -39,7 +39,7 @@ Trust boundaries, with the protection each crossing relies on:
 
 - **Least privilege**: the watcher holds no user data and no superuser credential. Its PostgreSQL identity is a dedicated `watcher` user whose password arrives via Juju secret; its Raft identity is a membership password. It runs one systemd service and writes only under the snap's common data path and `/etc/systemd`.
 - **Attack-surface minimisation**: no exposed client ports beyond the Raft listener; no actions that mutate the database; optional relation (the charm idles harmlessly unrelated). Adding the watcher to an odd-sized cluster triggers a warning and the watcher disables its own vote, because an even Raft membership degrades partition tolerance.
-- **Fail-safe defaults**: the charm waits (Blocked/Waiting) until a relation exists; Raft membership is only configured after the password and partner addresses are present; the `production` profile blocks deployment when the watcher shares an availability zone with a PostgreSQL unit (correlated-failure protection).
+- **Fail-safe defaults**: the charm waits (Blocked/Waiting) until a relation exists; Raft membership is only configured after the password and partner addresses are present; the `production` profile leaves the watcher Blocked when it shares an availability zone with a PostgreSQL unit (correlated-failure protection).
 - **Supply-chain control**: the snap is installed at a revision pinned in the charm release and **held** against auto-refresh; refreshes go through a coordinated rolling process with pre-refresh checks (`pre-refresh-check` action) rather than in-place auto-update. The charm repository uses branch protection and automated dependency management (Renovate, including vulnerability alerts).
 - **No security by obscurity**: the design is documented here and in the public charm source; nothing relies on secrecy of the implementation.
 
@@ -56,7 +56,7 @@ Trust boundaries, with the protection each crossing relies on:
 **Encryption of data in transit and at rest.**
 
 - *In transit*: Raft consensus traffic is **not TLS-encrypted**; it is protected by the shared membership password and by running on the cluster-internal network. If your security posture requires encryption for this traffic, do not deploy the watcher; a 3-unit PostgreSQL cluster is the alternative that removes the need for it. The watcher's health-check connection to PostgreSQL uses opportunistic TLS: libpq's default `sslmode=prefer` encrypts the connection but does not verify it against the cluster CA, so the CA bundle the watcher receives over the relation is not used for this connection. Passwords never traverse relation data in plaintext — they travel as Juju secrets.
-- *At rest*: the Raft configuration file (containing the Raft password in plaintext) and any CA bundle are written with `0600` permissions under `/var/snap/charmed-postgresql/common/watcher-raft/`, readable only by root. No other sensitive data is persisted. Full-disk encryption of the host is the user-side control if the deployment's threat model requires it (see Hardening guidelines below).
+- *At rest*: the Raft configuration file (containing the Raft password in plaintext) and any CA bundle are written with `0600` permissions under `/var/snap/charmed-postgresql/common/watcher-raft/`, readable only by the snap daemon user and root. No other sensitive data is persisted. Full-disk encryption of the host is the user-side control if the deployment's threat model requires it (see Hardening guidelines below).
 
 ## Configuring and operating the product securely
 
@@ -67,7 +67,7 @@ The watcher ships with conservative defaults; the sections below cover what it d
 - The snap is pinned to a revision and held; it does not auto-update.
 - The charm refuses to run more than one unit.
 - The charm does not join any Raft cluster until the relation provides password and partner addresses; it never generates or guesses credentials.
-- In the default `production` profile, deployment is blocked when the watcher shares an availability zone with a PostgreSQL unit.
+- In the default `production` profile, the watcher goes Blocked when it shares an availability zone with a PostgreSQL unit.
 - Credential rotation: rotating the Raft password is performed by the Charmed PostgreSQL side of the relation (new secret revision → `secret-changed` → watcher reconfigures). Juju secret access is scoped to the model.
 
 ### Hardening guidelines
@@ -95,8 +95,8 @@ The watcher is not certified against FIPS 140-3, CIS, or any other hardening ben
 
 ### Logging and monitoring
 
-- The Raft controller service logs to the systemd journal (`StandardOutput=journal`); charm and hook logs go to the Juju agent log. View with `juju debug-log` and `journalctl -u watcher-raft@<relation-id>`.
-- Unit status is the primary health signal: `Active` with a message of the form `Raft connected, monitoring N PostgreSQL endpoints`; Waiting/Blocked states report the reason (no relation, Raft not connected, AZ co-location in production, odd-member warning).
+- The Raft controller service logs to the systemd journal (`StandardOutput=journal`); charm and hook logs go to the Juju agent log. View with `juju debug-log` and `journalctl -u watcher-raft@rel<relation-id>`.
+- Unit status is the primary health signal: `Active` with a message of the form `Raft connected, monitoring N PostgreSQL endpoints`; Waiting/Blocked states report the reason (no relation, Raft not connected, AZ co-location in production).
 - There is no separate audit trail; administrative actions on the watcher are Juju operations and appear in the Juju controller audit log if enabled.
 - No PII or secrets are written to logs. COS integration for alerting follows the Charmed PostgreSQL monitoring setup; the watcher itself exports no metrics endpoint.
 
@@ -104,7 +104,7 @@ The watcher is not certified against FIPS 140-3, CIS, or any other hardening ben
 
 1. **Removing the relation** (`juju remove-relation`): the watcher automatically removes its Raft membership from the cluster, stops and disables the per-relation systemd service, and releases the allocated port. No manual cleanup is required for the cluster side.
 2. **Removing the application** (`juju remove-application postgresql-watcher`): removes the unit and charm code. The `charmed-postgresql` snap remains installed; remove it explicitly if no other charm on the host uses it: `snap remove charmed-postgresql`.
-3. **Data deletion**: removing the relation/application deletes the Raft data directories and port-allocation state under `/var/snap/charmed-postgresql/common/watcher-raft/` ; the systemd unit file `/etc/systemd/system/watcher-raft@.service` is disabled by the charm but never deleted by it — remove it manually (`sudo rm /etc/systemd/system/watcher-raft@.service`) if the host is being repurposed. There is no scheduled/automatic deletion beyond the above — verify the tree is gone if the host is being repurposed.
+3. **Data deletion**: removing the relation/application deletes the Raft data directories under `/var/snap/charmed-postgresql/common/watcher-raft/`; the per-relation port allocation lives in the charm's peer-relation data and is released with it. The systemd unit file `/etc/systemd/system/watcher-raft@.service` is disabled by the charm but never deleted by it — remove it manually (`sudo rm /etc/systemd/system/watcher-raft@.service`) if the host is being repurposed. There is no scheduled/automatic deletion beyond the above — verify the tree is gone if the host is being repurposed.
 4. **User data export**: not applicable — the watcher stores no user data, ever.
 5. **Credential disposal**: the Raft and watcher passwords are Juju secrets owned by the Charmed PostgreSQL application; removing the relation/application triggers secret revision removal. On the PostgreSQL side, drop the `watcher` user if the cluster remains.
 6. **Notification of end-of-support**: the watcher follows the [Charmed PostgreSQL release and support lifecycle](charm-versions); end-of-support is announced through the Charmed PostgreSQL release notes.
