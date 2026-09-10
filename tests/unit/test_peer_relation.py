@@ -133,9 +133,7 @@ def test_planned_units_falls_back_to_known_units_on_goal_state_failure(harness):
         "planned_units",
         side_effect=ModelError('ERROR saas application "db1" not found'),
     ):
-        expected = (
-            len({u.name for u in harness.model.get_relation("database-peers").units}) + 1
-        )
+        expected = len({u.name for u in harness.model.get_relation("database-peers").units}) + 1
         assert harness.charm.state.application.planned_units == expected
 
 
@@ -150,9 +148,6 @@ def test_planned_units_guard_serves_fallback_repeatedly(harness):
     ):
         for _ in range(3):
             expected = (
-                len(
-                    {u.name for u in harness.model.get_relation("database-peers").units}
-                )
-                + 1
+                len({u.name for u in harness.model.get_relation("database-peers").units}) + 1
             )
             assert harness.charm.state.application.planned_units == expected
