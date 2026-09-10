@@ -3,7 +3,6 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest import mock
 from unittest.mock import patch
 
 from ops.model import ModelError
