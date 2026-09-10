@@ -123,9 +123,15 @@ class CharmState(Object):
             for unit in self.all_application_units
         ]
 
-    @property
+    @cached_property
     def application(self) -> PostgreSQLApplication:
-        """Get the PostgreSQL application state."""
+        """Get the PostgreSQL application state.
+
+        The instance is cached for the lifetime of this state object (one hook
+        invocation on VM charms), so accessors with their own caches on it —
+        notably ``planned_units`` — are computed once per hook instead of once
+        per access.
+        """
         return PostgreSQLApplication(
             relation=self.peer_relation,
             data_interface=self.peer_app_interface,
