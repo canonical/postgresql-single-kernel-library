@@ -18,20 +18,20 @@ The watcher is available for Charmed PostgreSQL 16 (VM substrate) only.
 
 ## Product architecture
 
-The watcher provides a **third Raft vote for 2-node Charmed PostgreSQL clusters** (stereo mode). A two-member cluster cannot tolerate partition by itself; the watcher runs Patroni's own `patroni_raft_controller` as a third, data-less voting member so quorum decisions survive the loss of one PostgreSQL unit.
+The watcher provides a **third Raft vote for 2-node Charmed PostgreSQL clusters** (stereo mode). A two-member cluster cannot tolerate partition by itself; the watcher runs Patroni's own `patroni-raft-controller` as a third, data-less voting member so quorum decisions survive the loss of one PostgreSQL unit.
 
 Deployment shape:
 
-- The watcher installs the same pinned `charmed-postgresql` snap used by Charmed PostgreSQL, but runs **only** `patroni_raft_controller` from it — no PostgreSQL process, no data directory with user data, no client listener.
+- The watcher installs the same pinned `charmed-postgresql` snap used by Charmed PostgreSQL, but runs **only** `patroni-raft-controller` from it — no PostgreSQL process, no data directory with user data, no client listener.
 - One watcher unit is permitted; the charm blocks itself if a second unit is added.
 - For each relation to a Charmed PostgreSQL application, the watcher instantiates a separate Raft controller (own port, own data directory, own systemd service instance).
 
-Trust boundaries (from the Charmed PostgreSQL threat model — see the model's data-flow diagram for the full picture):
+Trust boundaries (mirrored from the project's internal threat model):
 
 | Boundary | What crosses it | Protection |
 |---|---|---|
 | Watcher ↔ PostgreSQL Raft (TCP, port 2222 on both; 2223+ only for a second simultaneous relation) | Raft consensus messages | Shared Raft password, distributed out-of-band via Juju secrets; cluster-internal network only |
-| Watcher ↔ PostgreSQL health endpoint | Patroni REST status polls; PostgreSQL health connection by the `watcher` user | Cluster-internal network; TLS against the cluster CA `[CONFIRM exact TLS usage for the psycopg2 connection]` |
+| Watcher ↔ PostgreSQL health endpoint | Patroni REST status polls; PostgreSQL health connection by the `watcher` user | Cluster-internal network; TLS against the cluster CA <!-- TODO(SEC0030 review): confirm exact TLS usage for the psycopg2 connection --> |
 | Juju → watcher charm | Relation data, config, secrets, events | Juju model access control; secrets exposed only through Juju's secrets API |
 | Watcher relation (PostgreSQL charm → watcher charm) | Raft partner addresses, cluster name, CA bundle, secret ID, status/address updates | Juju relation data is readable only by applications in the relation; the Raft password itself is NOT in relation data — only its secret ID |
 
@@ -47,18 +47,20 @@ Trust boundaries (from the Charmed PostgreSQL threat model — see the model's d
 
 **A. Overall use.** The watcher performs no cryptographic operations itself. Cryptography in a deployment containing a watcher comes from three places: Juju (secret storage and transport of the Raft and watcher passwords), the `charmed-postgresql` snap (OpenSSL/PostgreSQL for any TLS-protected connections), and the Raft membership password check.
 
-**B. Cryptographic technology used by the product.** The only authentication mechanism the watcher itself exercises is the **Raft shared-password check** (membership authentication in Patroni's Raft implementation — see the Patroni/PySyncObj documentation for the primitive). No algorithms or key material are generated, negotiated, or stored by watcher code. `[CONFIRM: characterisation of the PySyncObj password check — link the upstream reference.]`
+**B. Cryptographic technology used by the product.** The only authentication mechanism the watcher itself exercises is the **Raft shared-password check** (membership authentication in Patroni's Raft implementation — see the Patroni/PySyncObj documentation for the primitive). No algorithms or key material are generated, negotiated, or stored by watcher code. <!-- TODO(SEC0030 review): characterise the PySyncObj password check and link the upstream reference -->
 
-**C. Cryptographic technology exposed to users.** None. The watcher exposes no TLS endpoints, no certificate operations, and no user-facing crypto configuration. TLS for PostgreSQL client connections is a Charmed PostgreSQL feature (see [Enable TLS](enable-tls) and {doc}`Cryptography <cryptography>`) and is unaffected by adding a watcher.
+**C. Cryptographic technology exposed to users.** None. The watcher exposes no TLS endpoints, no certificate operations, and no user-facing cryptographic configuration. TLS for PostgreSQL client connections is a Charmed PostgreSQL feature (see [Enable TLS](enable-tls) and {ref}`Cryptography <cryptography>`) and is unaffected by adding a watcher.
 
 **D. Packages providing cryptographic functionality.** All cryptographic functionality is inherited from: the Ubuntu archive (Python 3.12 runtime, OpenSSL inside the `charmed-postgresql` snap), the `charmed-postgresql` snap itself (Canonical-built, from canonical/charmed-postgresql-snap), and Python libraries from PyPI pinned in `poetry.lock` — notably `cryptography` (a library dependency of the platform libraries, not invoked by watcher code) and `pysyncobj`. Third-party packages come from PyPI; pinned versions are visible in the repository's `poetry.lock`.
 
 **E. Encryption of data in transit and at rest.**
 
-- *In transit*: Raft consensus traffic is **not TLS-encrypted**; it is protected by the shared membership password and by running on the cluster-internal network. If your security posture requires encryption for this traffic, do not deploy the watcher; a 3-unit PostgreSQL cluster is the alternative that removes the need for it. `[CONFIRM with security engineering: is this the correct guidance?]` The watcher's health-check connection to PostgreSQL uses TLS verified against the cluster CA `[CONFIRM]`. Passwords never traverse relation data in plaintext — they travel as Juju secrets.
+- *In transit*: Raft consensus traffic is **not TLS-encrypted**; it is protected by the shared membership password and by running on the cluster-internal network. If your security posture requires encryption for this traffic, do not deploy the watcher; a 3-unit PostgreSQL cluster is the alternative that removes the need for it. <!-- TODO(SEC0030 review): confirm with security engineering that this is the correct guidance --> The watcher's health-check connection to PostgreSQL uses TLS verified against the cluster CA <!-- TODO(SEC0030 review): confirm the CA bundle is used for the health-check TLS connection -->. Passwords never traverse relation data in plaintext — they travel as Juju secrets.
 - *At rest*: the Raft configuration file (containing the Raft password in plaintext) and any CA bundle are written with `0600` permissions under `/var/snap/charmed-postgresql/common/watcher-raft/`, readable only by root. No other sensitive data is persisted. Full-disk encryption of the host is the user-side control if the deployment's threat model requires it (see Hardening guidelines below).
 
 ## Configuring and operating the product securely
+
+The watcher ships with conservative defaults; the sections below cover what it does out of the box, which settings to review, and which risks the operator owns.
 
 ### Security by default
 
@@ -66,7 +68,7 @@ Trust boundaries (from the Charmed PostgreSQL threat model — see the model's d
 - The charm refuses to run more than one unit.
 - The charm does not join any Raft cluster until the relation provides password and partner addresses; it never generates or guesses credentials.
 - In the default `production` profile, deployment is blocked when the watcher shares an availability zone with a PostgreSQL unit.
-- Credential rotation: rotating the Raft password is performed by the Charmed PostgreSQL side of the relation (new secret revision → `secret-changed` → watcher reconfigures) `[CONFIRM rotation flow]`. Juju secret access is scoped to the model.
+- Credential rotation: rotating the Raft password is performed by the Charmed PostgreSQL side of the relation (new secret revision → `secret-changed` → watcher reconfigures) <!-- TODO(SEC0030 review): confirm the credential-rotation flow -->. Juju secret access is scoped to the model.
 
 ### Hardening guidelines
 
@@ -80,7 +82,7 @@ Trust boundaries (from the Charmed PostgreSQL threat model — see the model's d
 
 ### Risks inherent to product functions and recommended controls
 
-These risks cannot be mitigated by Canonical without removing the watcher's function; they are recorded in the Charmed PostgreSQL threat model (26.10 refresh) and must be accepted or controlled by the operator:
+These risks cannot be mitigated by Canonical without removing the watcher's function; they must be accepted or controlled by the operator:
 
 1. **Raft traffic is password-authenticated, not encrypted.** An attacker positioned on the cluster-internal network who captures Raft traffic learns cluster membership topology. Control: network segmentation (Juju spaces / security groups), and accepting that the Raft password does not protect confidentiality of consensus traffic.
 2. **The watcher is a consensus participant.** A compromised watcher host can participate in — but not outvote — the Raft cluster (2 PostgreSQL votes vs 1 watcher vote); it can attempt disruption of quorum. Controls: host hardening, model access discipline, minimal exposure of port 2222.
@@ -96,13 +98,13 @@ The watcher is not certified against FIPS 140-3, CIS, or any other hardening ben
 - The Raft controller service logs to the systemd journal (`StandardOutput=journal`); charm and hook logs go to the Juju agent log. View with `juju debug-log` and `journalctl -u watcher-raft@<relation-id>`.
 - Unit status is the primary health signal: `Active` with a message of the form `Raft connected, monitoring N PostgreSQL endpoints`; Waiting/Blocked states report the reason (no relation, Raft not connected, AZ co-location in production, odd-member warning).
 - There is no separate audit trail; administrative actions on the watcher are Juju operations and appear in the Juju controller audit log if enabled.
-- No PII or secrets are written to logs `[CONFIRM: no password in logged config]`. COS integration for alerting follows the Charmed PostgreSQL monitoring setup; the watcher itself exports no metrics endpoint.
+- No PII or secrets are written to logs <!-- TODO(SEC0030 review): confirm no password is written to logged config -->. COS integration for alerting follows the Charmed PostgreSQL monitoring setup; the watcher itself exports no metrics endpoint.
 
 ## Decommissioning the product securely
 
 1. **Removing the relation** (`juju remove-relation`): the watcher automatically removes its Raft membership from the cluster, stops and disables the per-relation systemd service, and releases the allocated port. No manual cleanup is required for the cluster side.
 2. **Removing the application** (`juju remove-application postgresql-watcher`): removes the unit and charm code. The `charmed-postgresql` snap remains installed; remove it explicitly if no other charm on the host uses it: `snap remove charmed-postgresql`.
-3. **Data deletion**: removing the relation/application deletes the Raft data directories and port-allocation state under `/var/snap/charmed-postgresql/common/watcher-raft/` `[CONFIRM: relation-broken handler removes dirs?]`; the systemd unit file `/etc/systemd/system/watcher-raft@.service` is disabled by the charm but only deleted on snap removal. There is no scheduled/automatic deletion beyond the above — verify the tree is gone if the host is being repurposed.
+3. **Data deletion**: removing the relation/application deletes the Raft data directories and port-allocation state under `/var/snap/charmed-postgresql/common/watcher-raft/` <!-- TODO(SEC0030 review): confirm the relation-broken handler removes the data directories -->; the systemd unit file `/etc/systemd/system/watcher-raft@.service` is disabled by the charm but only deleted on snap removal. There is no scheduled/automatic deletion beyond the above — verify the tree is gone if the host is being repurposed.
 4. **User data export**: not applicable — the watcher stores no user data, ever.
 5. **Credential disposal**: the Raft and watcher passwords are Juju secrets owned by the Charmed PostgreSQL application; removing the relation/application triggers secret revision removal. On the PostgreSQL side, drop the `watcher` user if the cluster remains.
 6. **Notification of end-of-support**: the watcher follows the [Charmed PostgreSQL release and support lifecycle](charm-versions); end-of-support is announced through the Charmed PostgreSQL release notes.
@@ -112,7 +114,7 @@ The watcher is not certified against FIPS 140-3, CIS, or any other hardening ben
 
 ## Security lifecycle
 
-- **Versions and support window**: the watcher tracks Charmed PostgreSQL 16; its `16/stable` and `16/edge` channels align with the Charmed PostgreSQL 16 lifecycle. Security-maintained channel: `16/stable`. `[CONFIRM: watcher EOL commitment statement]`
+- **Versions and support window**: the watcher tracks Charmed PostgreSQL 16; its `16/stable` and `16/edge` channels align with the Charmed PostgreSQL 16 lifecycle. Security-maintained channel: `16/stable`. <!-- TODO(SEC0030 review): confirm the watcher EOL commitment statement -->
 - **How updates are delivered**: charm upgrades via `juju refresh`, which drives a coordinated rolling refresh (snap revision pinned per charm release; `pre-refresh-check` action validates readiness; `pause-after-unit-refresh` config gates progression; `force-refresh-start` / `resume-refresh` actions manage exceptions). Dependency updates land continuously on `16/edge` through automated dependency management and ride the next charm release.
 - **Delaying updates**: deferring a `juju refresh` that carries security fixes leaves the known vulnerabilities in place for the delay period; High/Critical fixes are expected to be applied in the current or next immediate release (Canonical's vulnerability response standard).
 - **Verifying an update**: after refresh, `juju status` shows the charm revision the unit is running; `snap list charmed-postgresql` shows the snap revision; the release notes for each charm revision list the dependency changes it carries.
@@ -123,3 +125,10 @@ The watcher is not certified against FIPS 140-3, CIS, or any other hardening ben
 - Canonical's disclosure and embargo policy: [Ubuntu Security disclosure and embargo policy](https://ubuntu.com/security/disclosure-policy).
 - Known vulnerabilities affecting published releases are recorded in the repository's GitHub security advisories and in the release notes of each charm revision.
 - Non-security bugs: [repository issue tracker](https://github.com/canonical/postgresql-watcher-operator/issues).
+
+## See also
+
+* {ref}`explanation-stereo-mode` — how the watcher participates in a cluster, and how to deploy and integrate it.
+* {ref}`security-hardening-overview` — environment-level hardening that applies equally to watcher hosts.
+* {ref}`cryptography` — the cryptography mechanisms used by Charmed PostgreSQL.
+

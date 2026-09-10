@@ -120,6 +120,7 @@ pgbouncer
 Pgbouncer*
 pgdata
 pgsql
+plaintext
 PITR
 plantuml
 PNG
