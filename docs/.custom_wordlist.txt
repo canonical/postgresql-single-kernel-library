@@ -120,8 +120,9 @@ pgbouncer
 Pgbouncer*
 pgdata
 pgsql
-plaintext
 PITR
+libpq
+plaintext
 plantuml
 PNG
 pooler
