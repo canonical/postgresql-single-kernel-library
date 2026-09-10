@@ -1,7 +1,7 @@
 ---
 myst:
   html_meta:
-    description: "Security hardening guide for Charmed PostgreSQL covering cloud environments, Juju security, OS hardening, encryption, authentication, monitoring, and cryptography."
+    description: "Security hardening guide for Charmed PostgreSQL covering cloud environments, Juju security, OS hardening, encryption, authentication, monitoring, cryptography, and the PostgreSQL watcher."
 ---
 
 (security-hardening)=
@@ -18,4 +18,10 @@ Dive deeper into the cryptography mechanisms used by Charmed PostgreSQL, includi
 
 ```{toctree}
 Cryptography <cryptography>
+```
+
+Learn about the security posture of the PostgreSQL watcher — the charm that adds a third Raft vote in [stereo mode](explanation-stereo-mode):
+
+```{toctree}
+Watcher <watcher>
 ```

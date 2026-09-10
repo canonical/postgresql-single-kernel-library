@@ -121,6 +121,7 @@ Pgbouncer*
 pgdata
 pgsql
 PITR
+plaintext
 plantuml
 PNG
 pooler
