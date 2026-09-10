@@ -38,7 +38,7 @@ Trust boundaries, with the protection each crossing relies on:
 
 - **Least privilege**: the watcher holds no user data and no superuser credential. Its PostgreSQL identity is a dedicated `watcher` user whose password arrives via Juju secret; its Raft identity is a membership password. It runs one systemd service and writes only under the snap's common data path and `/etc/systemd`.
 - **Attack-surface minimisation**: no exposed client ports beyond the Raft listener; no actions that mutate the database; optional relation (the charm idles harmlessly unrelated). Adding the watcher to an odd-sized cluster triggers a warning and the watcher disables its own vote, because an even Raft membership degrades partition tolerance.
-- **Fail-safe defaults**: the charm waits (Blocked/Waiting) until a relation exists; Raft membership is only configured after the password and partner addresses are present; the `production` profile leaves the watcher Blocked when it shares an availability zone with a PostgreSQL unit (correlated-failure protection).
+- **Fail-safe defaults**: the charm waits (Waiting) until a relation exists; Raft membership is only configured after the password and partner addresses are present; the `production` profile leaves the watcher Blocked when it shares an availability zone with a PostgreSQL unit (correlated-failure protection).
 - **Supply-chain control**: the snap is installed at a revision pinned in the charm release and **held** against auto-refresh; refreshes go through a coordinated rolling process with pre-refresh checks (`pre-refresh-check` action) rather than in-place auto-update. The charm repository uses branch protection and automated dependency management (Renovate, including vulnerability alerts).
 - **No security by obscurity**: the design is documented here and in the public charm source; nothing relies on secrecy of the implementation.
 
@@ -76,7 +76,7 @@ The watcher ships with conservative defaults; the sections below cover what it d
 | Availability-zone separation (default in `profile=production`) | Deploy the watcher in a distinct AZ from all PostgreSQL units it watches | Prevents one AZ failure from removing the watcher vote and a PostgreSQL unit simultaneously |
 | Model access | Grant Juju model access only to operators who need it; relation data and secrets are model-scoped | Limits who can read topology or add a rogue relation |
 | Host access | Restrict SSH/root access to the watcher host as for any Juju-managed machine (see the [Security hardening overview](security-hardening-overview)) | The Raft password is readable on the host by root (0600 file); host compromise defeats it |
-| Profile | Keep `profile=production` for production deployments | Enables the AZ blocking and production resource tuning |
+| Profile | Keep `profile=production` for production deployments | Enables blocking (Blocked status) when the watcher shares an availability zone with a PostgreSQL unit |
 | File permissions | Do not relax permissions on `/var/snap/charmed-postgresql/common/watcher-raft/` | The Raft password sits in plaintext in that tree (0600) |
 
 ### Risks inherent to product functions and recommended controls
@@ -87,10 +87,6 @@ These are the risks inherent to the watcher's function — they cannot be mitiga
 2. **The watcher is a consensus participant.** A compromised watcher host can participate in — but not outvote — the Raft cluster (2 PostgreSQL votes vs 1 watcher vote); it can attempt disruption of quorum. Controls: host hardening, model access discipline, minimal exposure of port 2222.
 3. **Losing the watcher returns the cluster to 2-member partition behaviour.** This is availability-equivalent to not having a watcher — it degrades the guarantee the watcher exists to provide; it does not endanger data. Controls: self-healing (service auto-restart), availability-zone separation, monitoring the unit status.
 4. **Relation data poisoning** — a charm-side attacker able to write the PostgreSQL application's relation data could point the watcher at attacker-chosen endpoints. Juju application-scoped writes make this equivalent to compromising the PostgreSQL charm; no additional watcher-side control applies.
-
-### Hardening benchmarks
-
-The watcher is not certified against FIPS 140-3, CIS, or any other hardening benchmark. (Ubuntu Pro FIPS modules apply to the archive, not to this charm's packaging; do not claim FIPS compliance for a deployment because it contains a watcher.)
 
 ### Logging and monitoring
 
