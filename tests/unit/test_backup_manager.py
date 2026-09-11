@@ -14,7 +14,7 @@ bracketing, and the S3 initialization flow — no tautological asserts.
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from ops import BlockedStatus
@@ -128,23 +128,30 @@ def test_k8s_render_writes_default_configuration_file(backup_manager, substrate)
         pytest.skip("K8s renders to the default location")
     backup_manager.workload.root = Path("/")
     backup_manager.workload.write_text = MagicMock()
-    backup_manager.state.s3_connection_info.retrieve_s3_parameters = MagicMock(
-        return_value=(
-            {
-                "bucket": "b",
-                "access-key": "k",
-                "secret-key": "s",
-                "endpoint": "https://s3.amazonaws.com",
-                "s3-uri-style": "host",
-                "path": "",
-                "delete-older-than-days": "9999999",
-            },
-            [],
-        )
+    backup_manager.workload.service_exists = MagicMock(return_value=True)
+    s3_params = (
+        {
+            "bucket": "b",
+            "access-key": "k",
+            "secret-key": "s",
+            "endpoint": "https://s3.amazonaws.com",
+            "s3-uri-style": "host",
+            "path": "",
+            "delete-older-than-days": "9999999",
+        },
+        [],
     )
-    backup_manager._tls_ca_chain_filename = ""
-    assert backup_manager._render_pgbackrest_conf_file() is True
-    written = [c.args[1] for c in backup_manager.workload.write_text.call_args_list]
+    with (
+        patch.object(
+            BackupManager, "_tls_ca_chain_filename", new_callable=PropertyMock, return_value=""
+        ),
+        patch(
+            "single_kernel_postgresql.core.s3.S3ConnectionInfo.retrieve_s3_parameters",
+            return_value=s3_params,
+        ),
+    ):
+        assert backup_manager._render_pgbackrest_conf_file() is True
+        written = [c.args[1] for c in backup_manager.workload.write_text.call_args_list]
     assert Path("/etc/pgbackrest.conf") in written
 
 
@@ -184,7 +191,7 @@ def test_check_stanza_writes_done_marker_on_non_leader(harness, backup_manager):
 def test_can_unit_perform_backup_rejects_standby_cluster(backup_manager, substrate):
     if substrate != "vm":
         pytest.skip("is_standby_cluster bridge is VM-only")
-    backup_manager.is_standby_cluster_bridge = MagicMock(return_value=True)
+    backup_manager._is_standby_cluster_bridge = MagicMock(return_value=True)
     ok, message = backup_manager._can_unit_perform_backup()
     assert ok is False
     assert message == STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE

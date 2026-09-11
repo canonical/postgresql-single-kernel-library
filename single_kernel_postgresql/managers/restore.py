@@ -180,7 +180,7 @@ class RestoreManager(BaseManager):
             a (can_restore, message) tuple; message is the rejection reason when
             the restore cannot start, and empty when it can.
         """
-        if self.is_standby_cluster:
+        if self._is_standby_cluster:
             logger.error(f"Restore failed: {STANDBY_CLUSTER_RESTORE_ERROR_MESSAGE}")
             return False, STANDBY_CLUSTER_RESTORE_ERROR_MESSAGE
 
@@ -391,7 +391,7 @@ class RestoreManager(BaseManager):
         logger.info("Configuring Patroni to restore the backup")
         application = self.state.application
         application.restoring_backup = (
-            (self.fetch_backup_from_id(backup_id or "") or "") if is_backup_id_real else ""
+            (self._fetch_backup_from_id(backup_id or "") or "") if is_backup_id_real else ""
         )
         application.restore_stanza = restore_stanza_timeline[0]
         application.restore_timeline = restore_stanza_timeline[1] if restore_to_time else ""

@@ -110,7 +110,7 @@ def test_create_backup_action_failure(handler, backup_manager):
 
 def test_list_backups_action_fails_on_exec_error(handler, backup_manager):
     """The K8s charm fails the action on a pgbackrest failure instead of erroring the hook."""
-    backup_manager._is_standby_cluster_bridge = MagicMock(return_value=False)
+    backup_manager.is_standby_cluster = False
     backup_manager.are_backup_settings_ok.return_value = (True, "")
     backup_manager.generate_backup_list_output.side_effect = ExecError(
         command=["pgbackrest", "info"], exit_code=1, stdout="", stderr="boom"
@@ -122,7 +122,7 @@ def test_list_backups_action_fails_on_exec_error(handler, backup_manager):
 
 
 def test_list_backups_action_success(handler, backup_manager):
-    backup_manager._is_standby_cluster_bridge = MagicMock(return_value=False)
+    backup_manager.is_standby_cluster = False
     backup_manager.are_backup_settings_ok.return_value = (True, "")
     backup_manager.generate_backup_list_output.return_value = "table"
     event = make_action_event()
@@ -133,14 +133,14 @@ def test_list_backups_action_success(handler, backup_manager):
 def test_list_backups_action_rejects_standby_cluster(handler, backup_manager, substrate):
     if substrate != "vm":
         pytest.skip("standby cluster is a VM-only concept")
-    backup_manager._is_standby_cluster_bridge = MagicMock(return_value=True)
+    backup_manager.is_standby_cluster = True
     event = make_action_event()
     handler._on_list_backups_action(event)
     event.fail.assert_called_once()
 
 
 def test_list_backups_action_rejects_bad_settings(handler, backup_manager):
-    backup_manager._is_standby_cluster_bridge = MagicMock(return_value=False)
+    backup_manager.is_standby_cluster = False
     backup_manager.are_backup_settings_ok.return_value = (False, "no relation")
     event = make_action_event()
     handler._on_list_backups_action(event)
@@ -150,7 +150,7 @@ def test_list_backups_action_rejects_bad_settings(handler, backup_manager):
 def test_list_backups_action_maps_listing_error(handler, backup_manager):
     from single_kernel_postgresql.config.exceptions import ListBackupsError
 
-    backup_manager._is_standby_cluster_bridge = MagicMock(return_value=False)
+    backup_manager.is_standby_cluster = False
     backup_manager.are_backup_settings_ok.return_value = (True, "")
     backup_manager.generate_backup_list_output.side_effect = ListBackupsError("boom")
     event = make_action_event()
