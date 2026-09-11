@@ -155,7 +155,7 @@ class BackupManager(BaseManager):
         )
 
     @property
-    def _is_standby_cluster(self) -> bool:
+    def is_standby_cluster(self) -> bool:
         """Whether this cluster is a standby (read-only) cluster.
 
         The charm-side async-replication check is injected as a callable; when
@@ -502,7 +502,7 @@ class BackupManager(BaseManager):
             a boolean indicating whether the operation succeeded.
         """
         # Ignore this operation if backups settings aren't ok.
-        are_backup_settings_ok, _ = self._are_backup_settings_ok()
+        are_backup_settings_ok, _ = self.are_backup_settings_ok()
         if not are_backup_settings_ok:
             return True
 
@@ -542,7 +542,7 @@ class BackupManager(BaseManager):
 
     # -- Backup settings and permissions -----------------------------------------
 
-    def _are_backup_settings_ok(self) -> tuple[bool, str]:
+    def are_backup_settings_ok(self) -> tuple[bool, str]:
         """Validates whether backup settings are OK."""
         if self.state.s3_relation is None:
             return (
@@ -558,7 +558,7 @@ class BackupManager(BaseManager):
 
     def _can_unit_perform_backup(self) -> tuple[bool, str | None]:
         """Validates whether this unit can perform a backup."""
-        if self._is_standby_cluster:
+        if self.is_standby_cluster:
             return False, STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE
 
         if self.state.peer.is_blocked:
@@ -581,7 +581,7 @@ class BackupManager(BaseManager):
         if not self.state.application.stanza:
             return False, "Stanza was not initialised"
 
-        return self._are_backup_settings_ok()
+        return self.are_backup_settings_ok()
 
     def _can_initialise_stanza(self) -> bool:
         """Validates whether this unit can initialise a stanza."""
@@ -724,7 +724,7 @@ class BackupManager(BaseManager):
 
         if (
             backup_type in ["differential", "incremental"]
-            and len(self._list_backups(show_failed=False)) == 0
+            and len(self.get_backups(show_failed=False)) == 0
         ):
             error_message = (
                 f"Invalid backup type: {backup_type}. No previous full backup to reference."
@@ -819,7 +819,7 @@ Juju Version: {JujuVersion.from_environ()!s}
                 # where an ExecError from the info command takes the failure
                 # branch too.
                 result = self._execute_pgbackrest(command)
-                backup_id = list(self._list_backups(show_failed=True).keys())[-1]
+                backup_id = list(self.get_backups(show_failed=True).keys())[-1]
                 stdout, stderr, return_code = result.stdout, result.stderr, 0
             except ExecError as e:
                 return self._handle_failed_backup(
@@ -834,7 +834,7 @@ Juju Version: {JujuVersion.from_environ()!s}
 
         if backup_id is None:
             try:
-                backup_id = list(self._list_backups(show_failed=True).keys())[-1]
+                backup_id = list(self.get_backups(show_failed=True).keys())[-1]
             except ListBackupsError:
                 error_message = "Failed to retrieve backup id"
                 logger.exception(error_message)
@@ -878,7 +878,7 @@ Stderr:
             # Generate a backup id from the current date and time if the backup failed before
             # generating the backup label (our backup id).
             backup_id = generate_fake_backup_id(
-                backup_type, self._list_backups(show_failed=False, parse=False).keys()
+                backup_type, self.get_backups(show_failed=False, parse=False).keys()
             )
 
         # Upload the logs to S3.
@@ -905,7 +905,7 @@ Stderr:
 
     # -- Backup listing -------------------------------------------------------------
 
-    def _generate_backup_list_output(self) -> str:
+    def generate_backup_list_output(self) -> str:
         """Generates a list of backups in a formatted table.
 
         List contains successful and failed backups in order of ascending time.
@@ -952,7 +952,7 @@ Stderr:
                 backup_path,
             ))
 
-        for timeline, (_, timeline_id) in self._list_timelines().items():
+        for timeline, (_, timeline_id) in self.get_timelines().items():
             backup_list.append((
                 timeline,
                 "restore",
@@ -970,7 +970,7 @@ Stderr:
         s3_parameters, _ = self.state.s3_connection_info.retrieve_s3_parameters()
         return format_backup_list(backup_list, s3_parameters)
 
-    def _list_backups(self, show_failed: bool, parse=True) -> dict[str, tuple[str, str]]:
+    def get_backups(self, show_failed: bool, parse=True) -> dict[str, tuple[str, str]]:
         """Retrieve the list of backups.
 
         Args:
@@ -1007,7 +1007,7 @@ Stderr:
             if show_failed or not backup["error"]
         })
 
-    def _list_timelines(self) -> dict[str, tuple[str, str]]:
+    def get_timelines(self) -> dict[str, tuple[str, str]]:
         """Lists the timelines from the pgBackRest stanza.
 
         Returns:
@@ -1042,24 +1042,24 @@ Stderr:
                     ] = (path[0], path[-1].split(".")[0].lstrip("0"))
         return timelines
 
-    def _get_nearest_timeline(self, timestamp: str) -> tuple[str, str] | None:
+    def get_nearest_timeline(self, timestamp: str) -> tuple[str, str] | None:
         """Finds the nearest timeline or backup prior to the specified timeline.
 
         Returns:
             (stanza, timeline) of the nearest timeline or backup. None, if there are no matches.
         """
-        timelines = self._list_backups(show_failed=False) | self._list_timelines()
+        timelines = self.get_backups(show_failed=False) | self.get_timelines()
         return get_nearest_timeline(timestamp, timelines)
 
-    def _fetch_backup_from_id(self, backup_id: str) -> str | None:
+    def fetch_backup_from_id(self, backup_id: str) -> str | None:
         """Fetches backup's pgbackrest label from backup id."""
         return fetch_backup_from_id(
-            backup_id, self._list_backups(show_failed=False, parse=False).keys()
+            backup_id, self.get_backups(show_failed=False, parse=False).keys()
         )
 
     # -- Credential-changed / S3 initialization flow ---------------------------------
 
-    def _credential_changed_checks(self) -> tuple[bool, bool]:
+    def credential_changed_checks(self) -> tuple[bool, bool]:
         """Run the pre-initialization checks when S3 credentials change.
 
         Returns:

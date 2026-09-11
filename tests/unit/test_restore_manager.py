@@ -83,7 +83,7 @@ def restore_manager(harness, substrate, workload, backup_manager, monkeypatch):
 def test_pre_restore_checks_rejects_standby_cluster(restore_manager, substrate):
     if substrate != "vm":
         pytest.skip("standby cluster is a VM-only concept")
-    restore_manager.is_standby_cluster_bridge.return_value = True
+    restore_manager._is_standby_cluster_bridge.return_value = True
     ok, message = restore_manager._pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == STANDBY_CLUSTER_RESTORE_ERROR_MESSAGE

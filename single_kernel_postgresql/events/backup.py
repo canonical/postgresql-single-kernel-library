@@ -65,7 +65,7 @@ class BackupEventsHandler(Object):
 
     def _on_s3_credential_changed(self, event) -> None:
         """Call the stanza initialization when the credentials or the connection info change."""
-        proceed, defer = self.backup_manager._credential_changed_checks()
+        proceed, defer = self.backup_manager.credential_changed_checks()
         if not proceed:
             # The charms defer on every branch that deferred there: credentials
             # arriving too early, mid-PITR, mid-restore, or on a unit that
@@ -112,19 +112,19 @@ class BackupEventsHandler(Object):
 
     def _on_list_backups_action(self, event: ActionEvent) -> None:
         """List the previously created backups."""
-        if self.backup_manager._is_standby_cluster:
+        if self.backup_manager.is_standby_cluster:
             logger.warning(STANDBY_CLUSTER_LIST_BACKUPS_ERROR_MESSAGE)
             event.fail(STANDBY_CLUSTER_LIST_BACKUPS_ERROR_MESSAGE)
             return
 
-        are_backup_settings_ok, validation_message = self.backup_manager._are_backup_settings_ok()
+        are_backup_settings_ok, validation_message = self.backup_manager.are_backup_settings_ok()
         if not are_backup_settings_ok:
             logger.warning(validation_message)
             event.fail(validation_message)
             return
 
         try:
-            formatted_list = self.backup_manager._generate_backup_list_output()
+            formatted_list = self.backup_manager.generate_backup_list_output()
             event.set_results({"backups": formatted_list})
         except (ListBackupsError, ExecError) as e:
             # The K8s charm catches ExecError here (pgbackrest failures raise
