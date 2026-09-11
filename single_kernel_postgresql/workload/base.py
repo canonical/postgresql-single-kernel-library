@@ -8,8 +8,8 @@ import pathlib
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Protocol
 
 import tomli
@@ -21,6 +21,26 @@ from ops.pebble import Error as PebbleError
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import DIR_PERMISSIONS_READONLY
 from single_kernel_postgresql.workload.paths.base import Paths
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    """Normalized result of a workload command execution."""
+
+    return_code: int
+    stdout: str = ""
+    stderr: str = ""
+
+    @property
+    def ok(self) -> bool:
+        """Whether the command succeeded (return code 0)."""
+        return self.return_code == 0
+
+    def __repr__(self) -> str:
+        """Return a compact representation, truncating long streams."""
+        stdout = repr(self.stdout[:50]) if len(self.stdout) > 50 else repr(self.stdout)
+        stderr = repr(self.stderr[:50]) if len(self.stderr) > 50 else repr(self.stderr)
+        return f"CommandResult(return_code={self.return_code}, stdout={stdout}, stderr={stderr})"
 
 
 class ResourceProvider(Protocol):
@@ -249,8 +269,21 @@ class BaseWorkload(ABC):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
-    ) -> SimpleNamespace:
-        """Run Command in CLI."""
+        timeout: float | None = None,
+    ) -> CommandResult:
+        """Run a command on the workload.
+
+        Args:
+            command: the command to run.
+            args: optional space-separated arguments for the command.
+            use_errors_replace: return a result instead of raising when the
+                command fails (non-zero exit code or unrecoverable error).
+            stdin: optional input to feed the command's standard input.
+            timeout: optional timeout in seconds.
+
+        Returns:
+            A CommandResult carrying return_code, stdout, and stderr.
+        """
         pass
 
     @abstractmethod
@@ -264,8 +297,34 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
-    def start_service(self):
-        """Start the PostgreSQL service."""
+    def start_service(self, service: str) -> None:
+        """Start a named service on the workload."""
+        pass
+
+    @abstractmethod
+    def stop_service(self, service: str) -> None:
+        """Stop a named service on the workload."""
+        pass
+
+    @abstractmethod
+    def restart_service(self, service: str) -> None:
+        """Restart a named service on the workload."""
+        pass
+
+    @abstractmethod
+    def reload_service(self, service: str) -> None:
+        """Reload a named service on the workload.
+
+        Sends SIGHUP where the substrate supports it; restarts otherwise.
+        """
+        pass
+
+    @abstractmethod
+    def service_is_running(self, service: str) -> bool:
+        """Check whether a named service is running on the workload.
+
+        Missing services read as not running; this never raises.
+        """
         pass
 
     @abstractmethod
