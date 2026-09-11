@@ -49,9 +49,9 @@ def backup_manager():
         key = BACKUP_LABEL if not parse else BACKUP_ID
         return {key: ("model.cluster", "1")}
 
-    manager._list_backups.side_effect = list_backups
-    manager._list_timelines.return_value = {TIMELINE_ID: ("model.cluster", "2")}
-    manager._are_backup_settings_ok.return_value = (True, "")
+    manager.get_backups.side_effect = list_backups
+    manager.get_timelines.return_value = {TIMELINE_ID: ("model.cluster", "2")}
+    manager.are_backup_settings_ok.return_value = (True, "")
     return manager
 
 
@@ -83,7 +83,7 @@ def restore_manager(harness, substrate, workload, backup_manager, monkeypatch):
 def test_pre_restore_checks_rejects_standby_cluster(restore_manager, substrate):
     if substrate != "vm":
         pytest.skip("standby cluster is a VM-only concept")
-    restore_manager._is_standby_cluster_bridge.return_value = True
+    restore_manager.is_standby_cluster_bridge.return_value = True
     ok, message = restore_manager._pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == STANDBY_CLUSTER_RESTORE_ERROR_MESSAGE
@@ -184,8 +184,8 @@ def test_resolve_restore_target_latest_requires_base_backup(restore_manager):
 
 
 def test_resolve_restore_target_resolves_nearest_timeline(restore_manager):
-    restore_manager.backup_manager._list_backups.side_effect = None
-    restore_manager.backup_manager._list_backups.return_value = {}
+    restore_manager.backup_manager.get_backups.side_effect = None
+    restore_manager.backup_manager.get_backups.return_value = {}
     target, _is_real, message = restore_manager._resolve_restore_target(
         None, "2024-01-03 00:00:00"
     )
@@ -195,9 +195,9 @@ def test_resolve_restore_target_resolves_nearest_timeline(restore_manager):
 
 
 def test_resolve_restore_target_rejects_missing_timeline(restore_manager):
-    restore_manager.backup_manager._list_backups.side_effect = None
-    restore_manager.backup_manager._list_backups.return_value = {}
-    restore_manager.backup_manager._list_timelines.return_value = {}
+    restore_manager.backup_manager.get_backups.side_effect = None
+    restore_manager.backup_manager.get_backups.return_value = {}
+    restore_manager.backup_manager.get_timelines.return_value = {}
     target, _is_real, message = restore_manager._resolve_restore_target(
         None, "2024-01-03 00:00:00"
     )

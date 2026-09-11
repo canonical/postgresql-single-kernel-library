@@ -44,7 +44,7 @@ def make_action_event(params=None):
     [(False, False), (False, True)],
 )
 def test_credential_changed_stops_when_checks_fail(handler, backup_manager, proceed, defer):
-    backup_manager._credential_changed_checks.return_value = (proceed, defer)
+    backup_manager.credential_changed_checks.return_value = (proceed, defer)
     event = make_action_event()
     handler._on_s3_credential_changed(event)
     backup_manager.start_stop_pgbackrest_service.assert_not_called()
@@ -52,7 +52,7 @@ def test_credential_changed_stops_when_checks_fail(handler, backup_manager, proc
 
 
 def test_credential_changed_defers_on_service_start_retry(handler, backup_manager):
-    backup_manager._credential_changed_checks.return_value = (True, False)
+    backup_manager.credential_changed_checks.return_value = (True, False)
     backup_manager.start_stop_pgbackrest_service.side_effect = RetryError(MagicMock())
     event = make_action_event()
     handler._on_s3_credential_changed(event)
@@ -63,7 +63,7 @@ def test_credential_changed_defers_on_service_start_retry(handler, backup_manage
 def test_credential_changed_initialises_on_primary(harness, handler, backup_manager):
     with harness.hooks_disabled():
         harness.set_leader()
-    backup_manager._credential_changed_checks.return_value = (True, False)
+    backup_manager.credential_changed_checks.return_value = (True, False)
     backup_manager.is_primary = True
     handler._on_s3_credential_changed(make_action_event())
     application = handler.state.application
@@ -76,7 +76,7 @@ def test_credential_changed_initialises_on_primary(harness, handler, backup_mana
 def test_credential_changed_skips_initialization_without_done_marker(
     harness, handler, backup_manager
 ):
-    backup_manager._credential_changed_checks.return_value = (True, False)
+    backup_manager.credential_changed_checks.return_value = (True, False)
     backup_manager.is_primary = False
     handler._on_s3_credential_changed(make_action_event())
 
@@ -110,9 +110,9 @@ def test_create_backup_action_failure(handler, backup_manager):
 
 def test_list_backups_action_fails_on_exec_error(handler, backup_manager):
     """The K8s charm fails the action on a pgbackrest failure instead of erroring the hook."""
-    backup_manager._is_standby_cluster = False
-    backup_manager._are_backup_settings_ok.return_value = (True, "")
-    backup_manager._generate_backup_list_output.side_effect = ExecError(
+    backup_manager.is_standby_cluster = False
+    backup_manager.are_backup_settings_ok.return_value = (True, "")
+    backup_manager.generate_backup_list_output.side_effect = ExecError(
         command=["pgbackrest", "info"], exit_code=1, stdout="", stderr="boom"
     )
     event = make_action_event()
@@ -122,9 +122,9 @@ def test_list_backups_action_fails_on_exec_error(handler, backup_manager):
 
 
 def test_list_backups_action_success(handler, backup_manager):
-    backup_manager._is_standby_cluster = False
-    backup_manager._are_backup_settings_ok.return_value = (True, "")
-    backup_manager._generate_backup_list_output.return_value = "table"
+    backup_manager.is_standby_cluster = False
+    backup_manager.are_backup_settings_ok.return_value = (True, "")
+    backup_manager.generate_backup_list_output.return_value = "table"
     event = make_action_event()
     handler._on_list_backups_action(event)
     event.set_results.assert_called_once_with({"backups": "table"})
@@ -133,15 +133,15 @@ def test_list_backups_action_success(handler, backup_manager):
 def test_list_backups_action_rejects_standby_cluster(handler, backup_manager, substrate):
     if substrate != "vm":
         pytest.skip("standby cluster is a VM-only concept")
-    backup_manager._is_standby_cluster = True
+    backup_manager.is_standby_cluster = True
     event = make_action_event()
     handler._on_list_backups_action(event)
     event.fail.assert_called_once()
 
 
 def test_list_backups_action_rejects_bad_settings(handler, backup_manager):
-    backup_manager._is_standby_cluster = False
-    backup_manager._are_backup_settings_ok.return_value = (False, "no relation")
+    backup_manager.is_standby_cluster = False
+    backup_manager.are_backup_settings_ok.return_value = (False, "no relation")
     event = make_action_event()
     handler._on_list_backups_action(event)
     event.fail.assert_called_once_with("no relation")
@@ -150,9 +150,9 @@ def test_list_backups_action_rejects_bad_settings(handler, backup_manager):
 def test_list_backups_action_maps_listing_error(handler, backup_manager):
     from single_kernel_postgresql.config.exceptions import ListBackupsError
 
-    backup_manager._is_standby_cluster = False
-    backup_manager._are_backup_settings_ok.return_value = (True, "")
-    backup_manager._generate_backup_list_output.side_effect = ListBackupsError("boom")
+    backup_manager.is_standby_cluster = False
+    backup_manager.are_backup_settings_ok.return_value = (True, "")
+    backup_manager.generate_backup_list_output.side_effect = ListBackupsError("boom")
     event = make_action_event()
     handler._on_list_backups_action(event)
     assert "Failed to list PostgreSQL backups" in event.fail.call_args[0][0]
