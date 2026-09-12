@@ -122,33 +122,19 @@ def test_execute_pgbackrest_uses_config_flag_only_on_vm(backup_manager, substrat
     assert "stanza-create" in command
 
 
-def test_k8s_render_writes_default_configuration_file(backup_manager, substrate):
+def test_k8s_render_writes_default_configuration_file(harness, backup_manager, substrate):
     """The K8s render targets /etc/pgbackrest.conf; a None conf_path must not leak."""
     if substrate != "k8s":
         pytest.skip("K8s renders to the default location")
     backup_manager.workload.root = Path("/")
     backup_manager.workload.write_text = MagicMock()
     backup_manager.workload.service_exists = MagicMock(return_value=True)
-    s3_params = (
-        {
-            "bucket": "b",
-            "access-key": "k",
-            "secret-key": "s",
-            "endpoint": "https://s3.amazonaws.com",
-            "s3-uri-style": "host",
-            "path": "",
-            "delete-older-than-days": "9999999",
-        },
-        [],
+    rel_id = harness.add_relation(S3_RELATION_NAME, "s3-integrator")
+    harness.update_relation_data(
+        rel_id, "s3-integrator", {"bucket": "b", "access-key": "k", "secret-key": "s"}
     )
-    with (
-        patch.object(
-            BackupManager, "_tls_ca_chain_filename", new_callable=PropertyMock, return_value=""
-        ),
-        patch(
-            "single_kernel_postgresql.core.s3.S3ConnectionInfo.retrieve_s3_parameters",
-            return_value=s3_params,
-        ),
+    with patch.object(
+        BackupManager, "_tls_ca_chain_filename", new_callable=PropertyMock, return_value=""
     ):
         assert backup_manager._render_pgbackrest_conf_file() is True
         written = [c.args[1] for c in backup_manager.workload.write_text.call_args_list]
@@ -267,14 +253,14 @@ def _fake_info_payload():
     ])
 
 
-def test_list_backups_parses_backup_ids(backup_manager):
+def testget_backups_parses_backup_ids(backup_manager):
     _mock_run_cmd(backup_manager, stdout=_fake_info_payload())
     backups = backup_manager.get_backups(show_failed=False)
     assert list(backups) == ["2024-01-01T10:10:10Z"]
     assert backups["2024-01-01T10:10:10Z"][1] == "1"
 
 
-def test_list_backups_raises_list_backups_error_on_vm_failure(backup_manager, substrate):
+def testget_backups_raisesget_backups_error_on_vm_failure(backup_manager, substrate):
     if substrate != "vm":
         pytest.skip("ListBackupsError branch is VM-only")
     _mock_run_cmd(backup_manager, return_code=1, stderr="ERROR: boom")
@@ -282,7 +268,7 @@ def test_list_backups_raises_list_backups_error_on_vm_failure(backup_manager, su
         backup_manager.get_backups(show_failed=False)
 
 
-def test_generate_backup_list_output_includes_header_and_row(harness, backup_manager):
+def testgenerate_backup_list_output_includes_header_and_row(harness, backup_manager):
     _mock_run_cmd(backup_manager, stdout=_fake_info_payload())
     backup_manager.get_timelines = MagicMock(return_value={})
     rel_id = harness.add_relation(S3_RELATION_NAME, "s3-integrator")
