@@ -7,6 +7,7 @@ import logging
 import os
 import tempfile
 from io import BytesIO
+from typing import TYPE_CHECKING
 
 from boto3.session import Session
 from botocore.client import Config
@@ -14,20 +15,26 @@ from botocore.exceptions import ClientError, ConnectTimeoutError, SSLError
 from botocore.loaders import create_loader
 from botocore.regions import EndpointResolver
 
+if TYPE_CHECKING:
+    from single_kernel_postgresql.workload.base import BaseWorkload
+
 logger = logging.getLogger(__name__)
 
 
 class S3Client:
     """Client for uploading to and downloading from an S3 bucket.
 
-    The only construction-time input is the TLS CA-chain path used to verify the
-    S3 endpoint; the rest is passed per call as an ``s3_parameters`` dict, as
-    produced by ``core.s3.S3ConnectionInfo.retrieve_s3_parameters``.
+    Everything is passed per call as an ``s3_parameters`` dict, as produced by
+    ``core.s3.S3ConnectionInfo.retrieve_s3_parameters``. When a CA chain is
+    present in the relation data, the session verifies against the chain file
+    the workload's backup configuration names; with no chain configured the
+    session falls back to the system trust store (``verify=None``) — re-derived
+    per call so a relation flipping between TLS and non-TLS S3 keeps working.
     """
 
-    def __init__(self, tls_ca_chain_filename: str | None = None):
-        """Initialize the S3 client with the TLS CA-chain path, or None for the system trust store."""
-        self._tls_ca_chain_filename = tls_ca_chain_filename
+    def __init__(self, workload: "BaseWorkload"):
+        """Initialize the S3 client with the workload providing the CA chain location."""
+        self.workload = workload
 
     def _construct_endpoint(self, s3_parameters: dict) -> str:
         """Construct the S3 endpoint using the region, needed for AWS endpoints without one."""
@@ -55,7 +62,11 @@ class S3Client:
         return session.resource(
             "s3",
             endpoint_url=self._construct_endpoint(s3_parameters),
-            verify=(self._tls_ca_chain_filename or None),
+            verify=(
+                self.workload.backup_config.tls_ca_chain_path
+                if s3_parameters.get("tls-ca-chain") is not None
+                else None
+            ),
             config=Config(
                 # https://github.com/boto/boto3/issues/4400#issuecomment-2600742103
                 request_checksum_calculation="when_required",
