@@ -1,0 +1,10 @@
+/var/snap/charmed-postgresql/common/var/log/pgbackrest/*.log {
+    rotate 10
+    missingok
+    notifempty
+    nocompress
+    daily
+    create 0600 _daemon_ _daemon_
+    dateext
+    dateformat -%Y%m%d_%H%M
+}
