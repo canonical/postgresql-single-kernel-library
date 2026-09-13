@@ -276,7 +276,10 @@ def test_restore_k8s_overrides_on_failure_condition(restore_manager, substrate):
     unit_data = restore_manager.state.peer.data
     assert unit_data["patroni-on-failure-condition-override"] == "ignore"
     assert unit_data["overridden-patroni-on-failure-condition-repeat-cause"] == "restore-backup"
-    restore_manager._update_pebble_layers_bridge.assert_called()
+    # The layer refresh during restore must NOT replan: replanning with the
+    # changed on-failure layer restarts the (stopped) postgresql service and
+    # races the pgbackrest restore, leaving the unit stuck in "restoring backup".
+    restore_manager._update_pebble_layers_bridge.assert_called_once_with(replan=False)
 
 
 def test_restore_k8s_removes_cluster_info_before_wipe(restore_manager, substrate):
