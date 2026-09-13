@@ -43,6 +43,50 @@ class CommandResult:
         return f"CommandResult(return_code={self.return_code}, stdout={stdout}, stderr={stderr})"
 
 
+@dataclass(frozen=True)
+class BackupConfig:
+    """Substrate-specific pgBackRest invocation and service settings.
+
+    The backup manager is substrate-neutral; everything that differs between
+    the machine charm and the Kubernetes charm when invoking pgBackRest lives
+    here and is built by the concrete workload.
+
+    Args:
+        executable: pgBackRest entrypoint (snap alias on VM, bare binary on K8s).
+        conf_path: directory holding pgbackrest.conf, passed as --config; None
+            means pgBackRest reads its default location (K8s: /etc/pgbackrest.conf).
+        logs_path: path to the pgBackRest logs, used for error extraction hints.
+        bin_path: root of the versioned PostgreSQL binaries (pg_controldata).
+        service: name of the pgBackRest TLS server service.
+        storage_path: workload storage root where TLS material lives.
+        tls_ca_chain_path: where the S3 TLS CA chain file is written.
+        extra_args: substrate-specific arguments always passed to pgBackRest.
+    """
+
+    executable: str
+    conf_path: str | None
+    logs_path: str
+    bin_path: str
+    service: str
+    storage_path: str
+    tls_ca_chain_path: str
+    extra_args: tuple[str, ...] = ()
+
+    @property
+    def configuration_file(self) -> str:
+        """Full path of the pgBackRest configuration file."""
+        # K8s renders to the pgBackRest default location (its pgbackrest reads
+        # /etc/pgbackrest.conf; no --config flag is passed); a None conf_path
+        # must not leak into the path.
+        if self.conf_path is None:
+            return "/etc/pgbackrest.conf"
+        return f"{self.conf_path}/pgbackrest.conf"
+
+    def pg_controldata(self, major_version: str) -> str:
+        """Path of the pg_controldata binary for the given major version."""
+        return f"{self.bin_path}/{major_version}/bin/pg_controldata"
+
+
 class ResourceProvider(Protocol):
     """Reports the unit's available (cpu_cores, memory_bytes)."""
 
@@ -100,6 +144,12 @@ class BaseWorkload(ABC):
     @abstractmethod
     def paths(self) -> Paths:
         """Return the Workload's paths."""
+        pass
+
+    @property
+    @abstractmethod
+    def backup_config(self) -> BackupConfig:
+        """Return the substrate pgBackRest invocation settings."""
         pass
 
     @property
