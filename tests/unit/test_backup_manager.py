@@ -152,7 +152,7 @@ def test_k8s_render_writes_default_configuration_file(backup_manager, substrate)
     ):
         assert backup_manager._render_pgbackrest_conf_file() is True
         written = [c.args[1] for c in backup_manager.workload.write_text.call_args_list]
-        assert Path("/etc/pgbackrest.conf") in written
+    assert Path("/etc/pgbackrest.conf") in written
 
 
 def test_execute_pgbackrest_server_ping_runs_without_config(backup_manager, substrate):
@@ -200,7 +200,7 @@ def test_can_unit_perform_backup_rejects_standby_cluster(backup_manager, substra
 def test_can_unit_perform_backup_k8s_is_never_standby(backup_manager, substrate):
     if substrate != "k8s":
         pytest.skip("K8s has no standby-cluster bridge")
-    assert backup_manager._is_standby_cluster is False
+    assert backup_manager.is_standby_cluster is False
 
 
 def test_can_unit_perform_backup_rejects_missing_stanza(backup_manager):
@@ -218,14 +218,14 @@ def test_create_backup_rejects_invalid_type(backup_manager):
 
 
 def test_create_backup_rejects_differential_without_full_backup(backup_manager):
-    backup_manager._list_backups = MagicMock(return_value={})
+    backup_manager.get_backups = MagicMock(return_value={})
     ok, message = backup_manager.create_backup("differential")
     assert ok is False
     assert "No previous full backup to reference" in message
 
 
 def test_create_backup_brackets_with_connectivity_off_on_replica(backup_manager):
-    backup_manager._list_backups = MagicMock(return_value={})
+    backup_manager.get_backups = MagicMock(return_value={})
     backup_manager.s3_client.upload_content.return_value = True
     backup_manager.patroni_manager.get_primary.return_value = None
     backup_manager._can_unit_perform_backup = MagicMock(return_value=(True, ""))
@@ -269,7 +269,7 @@ def _fake_info_payload():
 
 def test_list_backups_parses_backup_ids(backup_manager):
     _mock_run_cmd(backup_manager, stdout=_fake_info_payload())
-    backups = backup_manager._list_backups(show_failed=False)
+    backups = backup_manager.get_backups(show_failed=False)
     assert list(backups) == ["2024-01-01T10:10:10Z"]
     assert backups["2024-01-01T10:10:10Z"][1] == "1"
 
@@ -279,17 +279,17 @@ def test_list_backups_raises_list_backups_error_on_vm_failure(backup_manager, su
         pytest.skip("ListBackupsError branch is VM-only")
     _mock_run_cmd(backup_manager, return_code=1, stderr="ERROR: boom")
     with pytest.raises(ListBackupsError):
-        backup_manager._list_backups(show_failed=False)
+        backup_manager.get_backups(show_failed=False)
 
 
 def test_generate_backup_list_output_includes_header_and_row(harness, backup_manager):
     _mock_run_cmd(backup_manager, stdout=_fake_info_payload())
-    backup_manager._list_timelines = MagicMock(return_value={})
+    backup_manager.get_timelines = MagicMock(return_value={})
     rel_id = harness.add_relation(S3_RELATION_NAME, "s3-integrator")
     harness.update_relation_data(
         rel_id, "s3-integrator", {"bucket": "bucket", "access-key": "k", "secret-key": "s"}
     )
-    output = backup_manager._generate_backup_list_output()
+    output = backup_manager.generate_backup_list_output()
     assert "Storage bucket name: bucket" in output
     assert "2024-01-01T10:10:10Z" in output
     assert "full backup" in output
@@ -308,7 +308,7 @@ def test_credential_changed_checks_k8s_requires_connection_info(
     backup_manager._can_initialise_stanza = MagicMock(return_value=True)
     # No S3 relation data yet -> no connection info -> reject before any render,
     # without deferring (the K8s charm returns without defer here too).
-    assert backup_manager._credential_changed_checks() == (False, False)
+    assert backup_manager.credential_changed_checks() == (False, False)
 
 
 def test_credential_changed_checks_rejects_during_pitr_restore(harness, backup_manager, substrate):
@@ -318,7 +318,7 @@ def test_credential_changed_checks_rejects_during_pitr_restore(harness, backup_m
         )
     harness.model.unit.status = BlockedStatus(CANNOT_RESTORE_PITR)
     backup_manager._render_pgbackrest_conf_file = MagicMock(return_value=True)
-    assert backup_manager._credential_changed_checks() == (False, True)
+    assert backup_manager.credential_changed_checks() == (False, True)
 
     with harness.hooks_disabled():
         harness.set_leader()
