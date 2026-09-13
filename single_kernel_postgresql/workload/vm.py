@@ -19,8 +19,8 @@ import tomli
 from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
-from single_kernel_postgresql.workload.base import BaseWorkload, CommandResult
-from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
+from single_kernel_postgresql.config.literals import VM_PGBACKREST_SERVICE_NAME
+from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
 from single_kernel_postgresql.workload.paths.vm import VMPaths
 
 logger = logging.getLogger(__name__)
@@ -119,6 +119,22 @@ class VMWorkload(BaseWorkload):
         except snap.SnapError as e:
             logger.debug(f"Failed to check Patroni service: {e}")
             return False
+
+    @property
+    def backup_config(self) -> BackupConfig:
+        """Return the VM pgBackRest invocation settings."""
+        return BackupConfig(
+            executable="charmed-postgresql.pgbackrest",
+            conf_path=str(self.paths.pgbackrest_conf),
+            # Matches the VM charm: the versioned PostgreSQL binaries live under the
+            # snap's /snap mount point, not the writable /var/snap tree.
+            bin_path="/snap/charmed-postgresql/current/usr/lib/postgresql",
+            logs_path=str(self.paths.pgbackrest_logs),
+            service=VM_PGBACKREST_SERVICE_NAME,
+            storage_path=str(self.paths.snap_common),
+            tls_ca_chain_path=str(self.paths.pgbackrest_conf / "pgbackrest-tls-ca-chain.crt"),
+            extra_args=(),
+        )
 
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service is running.
@@ -262,7 +278,7 @@ class VMWorkload(BaseWorkload):
         return "_daemon_"
 
     @property
-    def paths(self) -> BasePaths:
+    def paths(self) -> VMPaths:
         """Return Workload's paths."""
         return VMPaths(self.root, self.get_postgresql_version().split(".")[0])
 
