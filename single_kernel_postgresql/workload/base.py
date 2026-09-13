@@ -370,6 +370,11 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
+    def service_exists(self, service: str) -> bool:
+        """Whether the workload layer declares the named service at all."""
+        pass
+
+    @abstractmethod
     def service_is_running(self, service: str) -> bool:
         """Check whether a named service is running on the workload.
 
