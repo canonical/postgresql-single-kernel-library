@@ -79,5 +79,21 @@ class DeployedWithoutTrustError(Exception):
     """Raised when the K8s API denies access because the app wasn't deployed with --trust."""
 
 
+class StanzaOperationError(PostgreSQLBaseError):
+    """Raised when a pgBackRest stanza-create/check/info operation fails."""
+
+
+class BackupRunError(PostgreSQLBaseError):
+    """Raised when a pgBackRest backup run fails and the logs were uploaded."""
+
+
+class StanzaOperationError(PostgreSQLBaseError):
+    """Raised when a pgBackRest stanza-create/check/info operation fails."""
+
+
+class BackupRunError(PostgreSQLBaseError):
+    """Raised when a pgBackRest backup run fails and the logs were uploaded."""
+
+
 class ListBackupsError(PostgreSQLBaseError):
     """Raised when pgBackRest fails to list backups."""
