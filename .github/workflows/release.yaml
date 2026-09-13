@@ -18,7 +18,6 @@ jobs:
     uses: $/.github/workflows/ci.yaml
     permissions:
       contents: read
-    cache-mode: none
 
   build:
     name: "Build package"
@@ -52,7 +51,6 @@ jobs:
           name: distfiles
           path: dist/
     permissions: {}
-    cache-mode: none
 
   upload-github:
     name: "Publish to GitHub"
@@ -79,7 +77,6 @@ jobs:
           VAR_VERSION: ${{ needs.build.outputs.VERSION }}
     permissions:
       contents: write  # Needed to create GitHub release
-    cache-mode: none
 
   upload-pypi:
     name: "Publish to PyPI"
@@ -95,4 +92,3 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
     permissions:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
-    cache-mode: none

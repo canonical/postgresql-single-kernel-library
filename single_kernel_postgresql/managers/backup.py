@@ -2,7 +2,12 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Manager of PostgreSQL backups via pgBackRest."""
+"""Manager of PostgreSQL backups via pgBackRest.
+
+Ported from the 16/edge charm backup modules (``src/backups.py`` on the VM and
+K8s charms). Event orchestration (defer/fail/status writes) stays in the events
+layer; this manager raises or returns values only.
+"""
 
 import importlib.resources
 import json
@@ -43,16 +48,11 @@ from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     BACKUP_LABEL_STDOUT_PATTERN,
-    BLOCKED_STATE_CREATE_BACKUP_ERROR_MESSAGE,
     CANNOT_RESTORE_PITR,
-    CLUSTER_PRIMARY_CREATE_BACKUP_ERROR_MESSAGE,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
     FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
-    NOT_RUNNING_CREATE_BACKUP_ERROR_MESSAGE,
-    OFFLINE_DATABASE_CREATE_BACKUP_ERROR_MESSAGE,
     S3_BLOCK_MESSAGES,
     STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE,
-    STANZA_NOT_INITIALISED_CREATE_BACKUP_ERROR_MESSAGE,
     extract_error_message,
     fetch_backup_from_id,
     format_backup_list,
@@ -67,7 +67,7 @@ from single_kernel_postgresql.workload.base import (
 )
 
 if TYPE_CHECKING:
-    from single_kernel_postgresql.utils.s3 import S3Client
+    from single_kernel_postgresql.managers.s3_client import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ class BackupManager(BaseManager):
     def __init__(
         self,
         state: CharmState,
-        workload: BaseWorkload,
+        workload: "BaseWorkload",
         s3_client: "S3Client",
         patroni_manager: PatroniManager,
         update_config: UpdateConfigFunction,
@@ -342,7 +342,7 @@ class BackupManager(BaseManager):
         """
         # Enable stanza initialisation if the backup settings were fixed after being invalid
         # or pointing to a repository where there are backups from another cluster.
-        if self.state.peer.is_blocked_status and not self._has_s3_block_message:
+        if self.state.peer.is_blocked and not self._has_s3_block_message:
             logger.warning("couldn't initialize stanza due to a blocked status")
             return False
 
@@ -529,10 +529,6 @@ class BackupManager(BaseManager):
 
         # Start the service.
         if self.state.substrate == Substrates.K8S:
-            if not self.workload.service_exists(service):
-                # A layer revision predating the service declaration: the charm
-                # returned False here instead of erroring the hook.
-                return False
             if self.workload.service_is_running(service):
                 logger.debug("Sending SIGHUP to pgBackRest TLS server to reload configuration")
                 self.workload.reload_service(service)
@@ -564,25 +560,25 @@ class BackupManager(BaseManager):
         if self.is_standby_cluster:
             return False, STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE
 
-        if self.state.peer.is_blocked_status:
-            return False, BLOCKED_STATE_CREATE_BACKUP_ERROR_MESSAGE
+        if self.state.peer.is_blocked:
+            return False, "Unit is in a blocking state"
 
         # Check if this unit is the primary (if it was not possible to retrieve that information,
         # then show that the unit cannot perform a backup, because possibly the database is offline).
         try:
             is_primary = self.is_primary
         except RetryError:
-            return False, OFFLINE_DATABASE_CREATE_BACKUP_ERROR_MESSAGE
+            return False, "Unit cannot perform backups as the database seems to be offline"
 
         # Only enable backups on primary if there are replicas but TLS is not enabled.
         if is_primary and self.state.application.planned_units > 1:
-            return False, CLUSTER_PRIMARY_CREATE_BACKUP_ERROR_MESSAGE
+            return False, "Unit cannot perform backups as it is the cluster primary"
 
         if not self.patroni_manager.member_started:
-            return False, NOT_RUNNING_CREATE_BACKUP_ERROR_MESSAGE
+            return False, "Unit cannot perform backups as it's not in running state"
 
         if not self.state.application.stanza:
-            return False, STANZA_NOT_INITIALISED_CREATE_BACKUP_ERROR_MESSAGE
+            return False, "Stanza was not initialised"
 
         return self.are_backup_settings_ok()
 
@@ -591,7 +587,9 @@ class BackupManager(BaseManager):
         # Don't allow stanza initialisation if this unit hasn't started the database
         # yet and either hasn't joined the peer relation yet or hasn't configured TLS
         # yet while other unit already has TLS enabled.
-        return self.patroni_manager.member_started or len(self.state.application_peers) != 1
+        return not (
+            not self.patroni_manager.member_started and (len(self.state.application_peers) == 1)
+        )
 
     def can_use_s3_repository(self) -> tuple[bool, str]:
         """Returns whether the charm was configured to use another cluster repository."""
@@ -1116,7 +1114,11 @@ Stderr:
         return True, False
 
     def initialise_s3_repository(self) -> bool:
-        """Initialize the S3 repository after a credentials change (primary path)."""
+        """Initialize the S3 repository after a credentials change (primary path).
+
+        Renamed port of the charms' _on_s3_credential_changed_primary: no event
+        semantics, returns success. The stanza must be cleared before calling.
+        """
         self.update_config()
 
         try:
@@ -1149,7 +1151,12 @@ Stderr:
         return True
 
     def clear_s3_state(self) -> None:
-        """Clear the stanza and S3 initialization markers when credentials are gone."""
+        """Clear the stanza and S3 initialization markers when credentials are gone.
+
+        Renamed port of the charms' _on_s3_credential_gone: no event semantics.
+        The K8s charm also stops the rotate-logs service, kept here as workload
+        I/O. Status refreshes stay with the events layer.
+        """
         if self.state.substrate == Substrates.K8S:
             self.workload.stop_service(K8S_ROTATE_LOGS_SERVICE_NAME)
         if self.state.peer.is_app_leader:
@@ -1175,7 +1182,7 @@ Stderr:
         """
         if self.state.substrate != Substrates.VM:
             return
-        if not self.state.peer.is_active_status or self.state.peer_relation is None:
+        if not self.state.peer.is_active or self.state.peer_relation is None:
             return
         if not self.workload.exists(self.workload.root / PGBACKREST_LOGROTATE_FILE.lstrip("/")):
             return
@@ -1188,6 +1195,8 @@ Stderr:
                 pass
 
         logger.info("Starting rotate logs process")
+        # as_file yields a real path for directory installs (all we ship); the
+        # spawned rotate-logs process outlives the context manager on purpose.
         script = importlib.resources.as_file(
             importlib.resources.files("single_kernel_postgresql.scripts").joinpath(
                 "rotate_logs.py"

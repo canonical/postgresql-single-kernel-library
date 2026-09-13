@@ -1,7 +1,16 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Pure helpers for the pgBackRest backup implementation."""
+"""Pure helpers for the pgBackRest backup implementation.
+
+Ported from the 16/edge charm backup modules (``src/backups.py`` on the VM and
+K8s charms); function behavior is byte-equivalent where the charms agree.
+
+The S3 block / standby-cluster message constants live here rather than in
+``config/literals.py`` because this slice does not own that module; the events
+layer (backups-9) imports them from here to map manager results onto unit
+statuses and action failures.
+"""
 
 import logging
 import re
@@ -15,6 +24,7 @@ from single_kernel_postgresql.config.literals import (
 
 logger = logging.getLogger(__name__)
 
+# S3 initialization block messages, verbatim from the charms. The events layer
 # matches the stored block message against these to tell an S3-caused blocked
 # state apart from any other blocking condition.
 ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE = "the S3 repository has backups from another cluster"
@@ -45,19 +55,6 @@ STANDBY_CLUSTER_RESTORE_ERROR_MESSAGE = (
     "Restoring backups is not supported on a standby cluster. "
     "Run restore on the primary cluster instead."
 )
-
-# Create-backup gate messages (BackupManager._can_unit_perform_backup).
-BLOCKED_STATE_CREATE_BACKUP_ERROR_MESSAGE = "Unit is in a blocking state"
-CLUSTER_PRIMARY_CREATE_BACKUP_ERROR_MESSAGE = (
-    "Unit cannot perform backups as it is the cluster primary"
-)
-NOT_RUNNING_CREATE_BACKUP_ERROR_MESSAGE = (
-    "Unit cannot perform backups as it's not in running state"
-)
-OFFLINE_DATABASE_CREATE_BACKUP_ERROR_MESSAGE = (
-    "Unit cannot perform backups as the database seems to be offline"
-)
-STANZA_NOT_INITIALISED_CREATE_BACKUP_ERROR_MESSAGE = "Stanza was not initialised"
 
 # Backup id recovered from a failed backup's stdout ("new backup label = ").
 BACKUP_LABEL_STDOUT_PATTERN = r"(new backup label = )([0-9]{8}[-][0-9]{6}[F])$"
