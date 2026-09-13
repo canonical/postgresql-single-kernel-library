@@ -17,7 +17,6 @@ from single_kernel_postgresql.config.literals import (
     VM_DATA_LOGS_PATH,
     VM_DATA_PATH,
     VM_LOGS_PATH,
-    VM_PGBACKREST_LOGS_PATH,
     VM_TEMP_PATH,
 )
 from single_kernel_postgresql.workload.paths.base import Paths
@@ -84,11 +83,6 @@ class VMPaths(Paths):
     def patroni_logs(self) -> PathProtocol:
         """Path to the patroni logs."""
         return self.snap_common / PATRONI_LOGS_PATH
-
-    @property
-    def pgbackrest_logs(self) -> PathProtocol:
-        """Path to the pgbackrest logs."""
-        return self.snap_common / VM_PGBACKREST_LOGS_PATH
 
     @property
     def data(self) -> PathProtocol:

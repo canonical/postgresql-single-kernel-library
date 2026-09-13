@@ -13,7 +13,6 @@ POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 # Relations
 PEER_RELATION = "database-peers"
 STATUS_PEERS_RELATION = "status-peers"
-S3_RELATION_NAME = "s3-parameters"
 
 # Users.
 BACKUP_USER = "backup"
@@ -35,11 +34,9 @@ VM_DATA_PATH = "var/lib/postgresql"
 VM_ARCHIVE_PATH = "data/archive"
 VM_DATA_LOGS_PATH = "data/logs"
 VM_TEMP_PATH = "data/temp"
-VM_PGBACKREST_LOGS_PATH = "var/log/pgbackrest"
 
 ## K8s Paths
 K8S_DATA_PATH = "var/lib/pg/data"
-K8S_PGBACKREST_LOGS_PATH = "16/main/pgbackrest_logs"
 
 ## Shared Paths
 # NOTE: The paths don't have leading slahes since pathops
@@ -59,9 +56,6 @@ TLS_CA_BUNDLE_FILE = "peer_ca_bundle.pem"
 # TLS relation names
 TLS_CLIENT_RELATION = "client-certificates"
 TLS_PEER_RELATION = "peer-certificates"
-
-# LDAP relation names
-LDAP_RELATION = "ldap"
 
 # Scopes
 SCOPES = Literal["app", "unit"]
@@ -185,4 +179,3 @@ RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 # VM services
 VM_PATRONI_SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
 VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"
-VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
