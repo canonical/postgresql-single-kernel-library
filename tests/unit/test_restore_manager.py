@@ -83,7 +83,7 @@ def restore_manager(harness, substrate, workload, backup_manager, monkeypatch):
 def test_pre_restore_checks_rejects_standby_cluster(restore_manager, substrate):
     if substrate != "vm":
         pytest.skip("standby cluster is a VM-only concept")
-    restore_manager._is_standby_cluster_bridge = MagicMock(return_value=True)
+    restore_manager._is_standby_cluster_bridge.return_value = True
     ok, message = restore_manager._pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == STANDBY_CLUSTER_RESTORE_ERROR_MESSAGE
@@ -276,7 +276,10 @@ def test_restore_k8s_overrides_on_failure_condition(restore_manager, substrate):
     unit_data = restore_manager.state.peer.data
     assert unit_data["patroni-on-failure-condition-override"] == "ignore"
     assert unit_data["overridden-patroni-on-failure-condition-repeat-cause"] == "restore-backup"
-    restore_manager._update_pebble_layers_bridge.assert_called()
+    # The layer refresh during restore must NOT replan: replanning with the
+    # changed on-failure layer restarts the (stopped) postgresql service and
+    # races the pgbackrest restore, leaving the unit stuck in "restoring backup".
+    restore_manager._update_pebble_layers_bridge.assert_called_once_with(replan=False)
 
 
 def test_restore_k8s_removes_cluster_info_before_wipe(restore_manager, substrate):
