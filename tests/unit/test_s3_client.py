@@ -29,6 +29,14 @@ def session():
         yield session
 
 
+@pytest.fixture
+def workload():
+    """A mock workload whose backup config names a CA chain file."""
+    workload = MagicMock()
+    workload.backup_config.tls_ca_chain_path = "/etc/pgbackrest/pgbackrest-tls-ca-chain.crt"
+    return workload
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected"),
     [
@@ -42,23 +50,24 @@ def session():
 )
 def test_construct_endpoint(overrides, expected):
     # AWS endpoints are rewritten to the region host; other endpoints are kept.
-    assert S3Client()._construct_endpoint({**BASE_PARAMETERS, **overrides}) == expected
+    assert S3Client(workload)._construct_endpoint({**BASE_PARAMETERS, **overrides}) == expected
 
 
 @pytest.mark.parametrize(
-    ("ca_chain", "verify"),
+    ("tls_ca_chain", "verify"),
     [
         (None, None),
-        (
-            "/etc/pgbackrest/pgbackrest-tls-ca-chain.crt",
-            "/etc/pgbackrest/pgbackrest-tls-ca-chain.crt",
-        ),
+        ("chain", "/etc/pgbackrest/pgbackrest-tls-ca-chain.crt"),
     ],
 )
-def test_session_resource(session, ca_chain, verify):
-    client = S3Client(tls_ca_chain_filename=ca_chain)
+def test_session_resource(session, workload, tls_ca_chain, verify):
+    client = S3Client(workload)
 
-    client._get_s3_session_resource({**BASE_PARAMETERS, "region": "us-east-2"})
+    client._get_s3_session_resource({
+        **BASE_PARAMETERS,
+        "region": "us-east-2",
+        "tls-ca-chain": tls_ca_chain,
+    })
 
     session.assert_called_once_with(
         aws_access_key_id="key", aws_secret_access_key="secret", region_name="us-east-2"
@@ -79,7 +88,7 @@ def test_upload_content(session):
         content=open(name).read(),  # noqa: SIM115
     )
 
-    assert S3Client().upload_content("contents", "backup.conf", BASE_PARAMETERS) is True
+    assert S3Client(workload).upload_content("contents", "backup.conf", BASE_PARAMETERS) is True
 
     assert uploaded == {"path": "sub/backup.conf", "content": "contents"}
 
@@ -89,19 +98,19 @@ def test_upload_content_failure_returns_false(session):
         OSError("disk full")
     )
 
-    assert S3Client().upload_content("contents", "backup.conf", BASE_PARAMETERS) is False
+    assert S3Client(workload).upload_content("contents", "backup.conf", BASE_PARAMETERS) is False
 
 
 def test_read_content(session):
     bucket = session.return_value.resource.return_value.Bucket.return_value
     bucket.download_fileobj.side_effect = lambda _, buf: buf.write(b"contents")
 
-    assert S3Client().read_content("backup.conf", BASE_PARAMETERS) == "contents"
+    assert S3Client(workload).read_content("backup.conf", BASE_PARAMETERS) == "contents"
 
 
 def test_read_content_without_bucket_returns_none(session):
     # VM-charm guard kept here: no bucket means no read attempt.
-    assert S3Client().read_content("backup.conf", {"path": "/"}) is None
+    assert S3Client(workload).read_content("backup.conf", {"path": "/"}) is None
     session.assert_not_called()
 
 
@@ -110,19 +119,19 @@ def test_read_content_error_returns_none(session, code):
     bucket = session.return_value.resource.return_value.Bucket.return_value
     bucket.download_fileobj.side_effect = _client_error(code)
 
-    assert S3Client().read_content("backup.conf", BASE_PARAMETERS) is None
+    assert S3Client(workload).read_content("backup.conf", BASE_PARAMETERS) is None
 
 
 def test_create_bucket_missing_parameters_is_noop(session):
     """Missing required parameters degrade to a no-op, as in the charms."""
-    S3Client().create_bucket_if_not_exists({"path": "/bucket"})
+    S3Client(workload).create_bucket_if_not_exists({"path": "/bucket"})
     session.return_value.resource.assert_not_called()
 
 
 def test_create_bucket_keeps_existing_bucket(session):
     bucket = session.return_value.resource.return_value.Bucket.return_value
 
-    S3Client().create_bucket_if_not_exists(BASE_PARAMETERS)
+    S3Client(workload).create_bucket_if_not_exists(BASE_PARAMETERS)
 
     bucket.meta.client.head_bucket.assert_called_once_with(Bucket="backups")
     bucket.create.assert_not_called()
@@ -141,7 +150,7 @@ def test_create_bucket_reraises_connection_errors(session, error):
     bucket.meta.client.head_bucket.side_effect = error
 
     with pytest.raises(type(error)):
-        S3Client().create_bucket_if_not_exists(BASE_PARAMETERS)
+        S3Client(workload).create_bucket_if_not_exists(BASE_PARAMETERS)
     bucket.create.assert_not_called()
 
 
@@ -161,7 +170,7 @@ def test_create_bucket(session, create_side_effects, expected_create_kwargs):
     bucket.meta.client.head_bucket.side_effect = _client_error("NoSuchBucket")
     bucket.create.side_effect = create_side_effects
 
-    S3Client().create_bucket_if_not_exists({**BASE_PARAMETERS, "region": "us-east-2"})
+    S3Client(workload).create_bucket_if_not_exists({**BASE_PARAMETERS, "region": "us-east-2"})
 
     assert [call.kwargs for call in bucket.create.call_args_list] == expected_create_kwargs
     bucket.wait_until_exists.assert_called()
@@ -173,4 +182,4 @@ def test_create_bucket_reraises_other_client_errors(session):
     bucket.create.side_effect = _client_error("AccessDenied")
 
     with pytest.raises(ClientError):
-        S3Client().create_bucket_if_not_exists(BASE_PARAMETERS)
+        S3Client(workload).create_bucket_if_not_exists(BASE_PARAMETERS)
