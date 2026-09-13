@@ -28,7 +28,10 @@ from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.exceptions import ListBackupsError
+from single_kernel_postgresql.config.exceptions import (
+    ListBackupsError,
+    StanzaOperationError,
+)
 from single_kernel_postgresql.config.literals import (
     BACKUP_ID_FORMAT,
     BACKUP_TYPE_OVERRIDES,
@@ -204,9 +207,9 @@ class BackupManager(BaseManager):
         the blocked status message comes from the s3-initialization-block-message
         peer field (see the charms' _set_primary_status_message).
         """
-        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES or (
-            self.state.peer.s3_initialization_block_message in S3_BLOCK_MESSAGES
-        )
+        # The charms' status builder reads only the app-databag field; the unit
+        # field exists for the replica-primary flow but is never read back.
+        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES
 
     def _s3_initialization_set_failure(self, block_message: str) -> None:
         """Record a failed s3 initialization with the corresponding block message.
@@ -365,7 +368,7 @@ class BackupManager(BaseManager):
                             )
                             raise TimeoutError
                         if result.return_code != 0:
-                            raise Exception(result.stderr)
+                            raise StanzaOperationError(result.stderr)
         except TimeoutError as e:
             raise e
         except ExecError:
@@ -421,7 +424,7 @@ class BackupManager(BaseManager):
                             )
                             raise TimeoutError
                         if result.return_code != 0:
-                            raise Exception(result.stderr)
+                            raise StanzaOperationError(result.stderr)
         except TimeoutError as e:
             if self.state.substrate == Substrates.K8S:
                 # The K8s charm folds every failure (including timeouts) into the
@@ -526,10 +529,6 @@ class BackupManager(BaseManager):
 
         # Start the service.
         if self.state.substrate == Substrates.K8S:
-            if not self.workload.service_exists(service):
-                # A layer revision predating the service declaration: the charm
-                # returned False here instead of erroring the hook.
-                return False
             if self.workload.service_is_running(service):
                 logger.debug("Sending SIGHUP to pgBackRest TLS server to reload configuration")
                 self.workload.reload_service(service)
@@ -1196,6 +1195,8 @@ Stderr:
                 pass
 
         logger.info("Starting rotate logs process")
+        # as_file yields a real path for directory installs (all we ship); the
+        # spawned rotate-logs process outlives the context manager on purpose.
         script = importlib.resources.as_file(
             importlib.resources.files("single_kernel_postgresql.scripts").joinpath(
                 "rotate_logs.py"
