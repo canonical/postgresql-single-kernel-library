@@ -77,8 +77,10 @@ class S3Client:
                 temp_file.write(content.encode("utf-8"))
                 temp_file.flush()
                 bucket.upload_file(temp_file.name, processed_s3_path)
-        except Exception as e:
-            logger.exception(f"Failed to upload content to S3 {location}", )
+        except Exception:
+            logger.exception(
+                f"Failed to upload content to S3 {location}",
+            )
             return False
 
         return True
@@ -101,9 +103,13 @@ class S3Client:
             if e.response["Error"]["Code"] == "404":
                 logger.info(f"No such object to read from S3 {location}")
             else:
-                logger.exception(f"Failed to read content from S3 {location}", )
-        except Exception as e:
-            logger.exception(f"Failed to read content from S3 {location}", )
+                logger.exception(
+                    f"Failed to read content from S3 {location}",
+                )
+        except Exception:
+            logger.exception(
+                f"Failed to read content from S3 {location}",
+            )
 
         return None
 
