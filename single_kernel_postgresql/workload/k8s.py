@@ -4,23 +4,24 @@
 """Kubernetes Workload."""
 
 import logging
+import shlex
+import signal
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
 from ops import Container, ModelError
-from ops.pebble import Plan, ServiceStatus
+from ops.pebble import ExecError, Plan, ServiceStatus
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     DIR_PERMISSIONS_READONLY,
     K8S_POSTGRESQL_SERVICE_NAME,
 )
-from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.base import BaseWorkload, CommandResult
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.k8s import K8sPaths
 
@@ -93,9 +94,31 @@ class K8sWorkload(BaseWorkload):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
-    ) -> SimpleNamespace:
-        """Run Command in CLI."""
-        raise NotImplementedError
+        timeout: float | None = None,
+    ) -> CommandResult:
+        """Run a command in the workload container as the workload user and group."""
+        command_list = shlex.split(command)
+        if args:
+            command_list += shlex.split(args)
+        logger.debug("Running command %s", " ".join(command_list))
+        process = self.container.exec(
+            command_list,
+            user=self.user,
+            group=self.group,
+            timeout=timeout,
+            stdin=stdin,
+        )
+        try:
+            stdout, stderr = process.wait_output()
+        except ExecError as e:
+            if not use_errors_replace:
+                raise
+            return CommandResult(
+                return_code=e.exit_code,
+                stdout=e.stdout or "",
+                stderr=e.stderr or "",
+            )
+        return CommandResult(return_code=0, stdout=stdout, stderr=stderr)
 
     def is_failed(self) -> bool:
         """Check if snap service failed."""
@@ -105,9 +128,42 @@ class K8sWorkload(BaseWorkload):
         """Stop the PostgreSQL service."""
         ...
 
-    def start_service(self):
-        """Start the PostgreSQL service."""
-        ...
+    def start_service(self, service: str) -> None:
+        """Start a named Pebble service."""
+        self.container.start(service)
+
+    def stop_service(self, service: str) -> None:
+        """Stop a named Pebble service."""
+        self.container.stop(service)
+
+    def restart_service(self, service: str) -> None:
+        """Restart a named Pebble service."""
+        self.container.restart(service)
+
+    def reload_service(self, service: str) -> None:
+        """Reload a named Pebble service.
+
+        Sends SIGHUP to the service when it is running; restarts it otherwise.
+        """
+        if self.service_is_running(service):
+            logger.debug("Sending SIGHUP to %s to reload configuration", service)
+            self.container.send_signal(signal.SIGHUP, service)
+        else:
+            self.container.restart(service)
+
+    def service_is_running(self, service: str) -> bool:
+        """Check whether a named Pebble service is running.
+
+        A layer revision predating the service omits it from the plan; and
+        Pebble cannot be asked before the container connects. Both read as
+        not running.
+        """
+        if not self.container.can_connect():
+            return False
+        services = self.container.pebble.get_services(names=[service])
+        if len(services) == 0:
+            return False
+        return services[0].current == ServiceStatus.ACTIVE
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
