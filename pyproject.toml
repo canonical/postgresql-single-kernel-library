@@ -4,7 +4,7 @@
 [project]
 name = "postgresql-charms-single-kernel"
 description = "Shared and reusable code for PostgreSQL-related charms"
-version = "16.3.7"
+version = "16.3.8"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -61,14 +61,14 @@ module-root = ""
 
 [dependency-groups]
 format = [
-    "ruff==0.16.3"
+    "ruff==0.16.6"
 ]
 lint = [
     "codespell==2.4.3",
-    "ty==0.0.72"
+    "ty==0.0.78"
 ]
 unit = [
-    "coverage[toml]==7.15.4",
+    "coverage[toml]==7.16.0",
     "pytest==9.1.1"
 ]
 
