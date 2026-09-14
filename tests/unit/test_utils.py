@@ -4,6 +4,8 @@
 import re
 from unittest.mock import mock_open, patch
 
+from httpx import BasicAuth
+
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.utils import (
     any_cpu_to_cores,
@@ -11,6 +13,7 @@ from single_kernel_postgresql.utils import (
     create_directory,
     label2name,
     new_password,
+    parallel_patroni_get_request,
     render_file,
 )
 
@@ -105,3 +108,36 @@ def test_create_directory():
         _chmod.assert_called_once_with("test", 0o640)
         _chown.assert_called_once_with("test", uid=35, gid=35)
         _pwnam.assert_called_with("postgres")
+
+
+def test_parallel_patroni_get_request_empty_ca_bundle_does_not_crash(tmp_path):
+    # An empty (or corrupt) CA bundle file must not crash the request:
+    # load_verify_locations raises ssl.SSLError (NO_CERTIFICATE_OR_CRL_FOUND)
+    # for an existing-but-certless file, which the old suppress(FileNotFoundError)
+    # did not catch — propagating up and failing the storage-detaching hook.
+    # With the fix it degrades to an unreachable endpoint and returns None.
+    empty_ca = tmp_path / "ca.pem"
+    empty_ca.write_text("")
+    auth = BasicAuth("patroni", password="unused")
+
+    assert (
+        parallel_patroni_get_request(
+            "/cluster", ["127.0.0.1"], str(empty_ca), auth, verify=True
+        )
+        is None
+    )
+
+
+def test_parallel_patroni_get_request_missing_ca_bundle_does_not_crash():
+    # A missing CA bundle is already swallowed (FileNotFoundError); this guards
+    # against a regression that narrows the suppression back to FileNotFoundError only.
+    assert (
+        parallel_patroni_get_request(
+            "/cluster",
+            ["127.0.0.1"],
+            "/tmp/does-not-exist-ca-bundle.pem",
+            BasicAuth("patroni", password="unused"),
+            verify=True,
+        )
+        is None
+    )
