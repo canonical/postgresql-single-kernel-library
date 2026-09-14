@@ -17,6 +17,7 @@ from single_kernel_postgresql.config.literals import (
     VM_DATA_LOGS_PATH,
     VM_DATA_PATH,
     VM_LOGS_PATH,
+    VM_PGBACKREST_LOGS_PATH,
     VM_TEMP_PATH,
 )
 from single_kernel_postgresql.workload.paths.base import Paths
@@ -108,3 +109,11 @@ class VMPaths(Paths):
     def pgbackrest_conf(self) -> PathProtocol:
         """Path to the pgbackrest configuration."""
         return self.snap_current / PGBACKREST_CONF_PATH
+
+    @property
+    def pgbackrest_logs(self) -> PathProtocol:
+        """Path to the pgBackRest logs.
+
+        The snap writes them next to the other workload logs, unversioned.
+        """
+        return self.snap_common / VM_PGBACKREST_LOGS_PATH

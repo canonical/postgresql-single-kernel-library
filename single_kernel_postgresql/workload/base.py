@@ -71,6 +71,12 @@ class BaseWorkload(ABC):
         """
         return 0o600
 
+    @property
+    @abstractmethod
+    def pgbackrest_executable(self) -> str:
+        """Name of the pgBackRest binary to invoke on this substrate."""
+        pass
+
     @abstractmethod
     def install(self) -> None:
         """Install the workload."""
@@ -264,8 +270,28 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
-    def start_service(self):
-        """Start the PostgreSQL service."""
+    def start_service(self, service_name: str) -> None:
+        """Start a workload service by name (snap service on VM, Pebble service on K8s)."""
+        pass
+
+    @abstractmethod
+    def stop_service(self, service_name: str) -> None:
+        """Stop a workload service by name."""
+        pass
+
+    @abstractmethod
+    def restart_service(self, service_name: str) -> None:
+        """Restart a workload service by name."""
+        pass
+
+    @abstractmethod
+    def reload_service(self, service_name: str) -> None:
+        """Make a running workload service re-read its configuration."""
+        pass
+
+    @abstractmethod
+    def is_service_running(self, service_name: str) -> bool:
+        """Whether the named workload service is currently active."""
         pass
 
     @abstractmethod

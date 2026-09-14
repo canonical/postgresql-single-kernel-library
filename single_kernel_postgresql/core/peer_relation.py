@@ -62,6 +62,18 @@ class PostgreSQLPeer(RelationState):
             return
         self.data_interface.delete_relation_data(self.relation.id, [key])
 
+    def _get_unit_field(self, key: str) -> str | None:
+        """Get a plain (non-secret) field from this unit's databag."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.unit].get(key)
+
+    def _set_unit_field(self, key: str, value: str) -> None:
+        """Set a plain (non-secret) field in this unit's databag."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit][key] = value
+
     @property
     def is_app_leader(self) -> bool:
         """Check if the current unit is the leader of the application."""
@@ -224,6 +236,60 @@ class PostgreSQLPeer(RelationState):
         if not self.relation:
             return True
         return self.relation.data[self.unit].get("connectivity", "on") == "on"
+
+    @property
+    def stanza(self) -> str | None:
+        """Get the pgBackRest stanza name set by this unit when it is the primary.
+
+        The leader publishes the stanza on the application databag; a primary that
+        is not the leader publishes it here until the leader copies it across.
+        """
+        return self._get_unit_field("stanza")
+
+    @stanza.setter
+    def stanza(self, value: str) -> None:
+        """Set the pgBackRest stanza name in the peer relation data."""
+        self._set_unit_field("stanza", value)
+
+    @property
+    def s3_initialization_done(self) -> str | None:
+        """Get the flag marking this unit as done with the S3 initialization sequence."""
+        return self._get_unit_field("s3-initialization-done")
+
+    @s3_initialization_done.setter
+    def s3_initialization_done(self, value: str) -> None:
+        """Set the S3 initialization completion flag in the peer relation data."""
+        self._set_unit_field("s3-initialization-done", value)
+
+    @property
+    def s3_initialization_block_message(self) -> str | None:
+        """Get the block message the S3 initialization sequence failed with on this unit."""
+        return self._get_unit_field("s3-initialization-block-message")
+
+    @s3_initialization_block_message.setter
+    def s3_initialization_block_message(self, value: str) -> None:
+        """Set the S3 initialization block message in the peer relation data."""
+        self._set_unit_field("s3-initialization-block-message", value)
+
+    @property
+    def last_pitr_fail_id(self) -> str | None:
+        """Get the last Patroni PITR failure seen, used to detect a repeated failure."""
+        return self._get_unit_field("last_pitr_fail_id")
+
+    @last_pitr_fail_id.setter
+    def last_pitr_fail_id(self, value: str) -> None:
+        """Set the last Patroni PITR failure in the peer relation data."""
+        self._set_unit_field("last_pitr_fail_id", value)
+
+    @property
+    def rotate_logs_pid(self) -> str | None:
+        """Get the PID of the log-rotation process this unit spawned (machines only)."""
+        return self._get_unit_field("rotate-logs-pid")
+
+    @rotate_logs_pid.setter
+    def rotate_logs_pid(self, value: str) -> None:
+        """Set the PID of the log-rotation process in the peer relation data."""
+        self._set_unit_field("rotate-logs-pid", value)
 
     @property
     def config_hash(self) -> str | None:
@@ -437,16 +503,12 @@ class PostgreSQLApplication(RelationState):
     @property
     def is_cluster_restoring_backup(self) -> bool:
         """Returns whether the cluster is restoring a backup."""
-        if not self.relation:
-            return False
-        return "restoring-backup" in self.relation.data[self.app]
+        return self.restoring_backup is not None
 
     @property
     def is_cluster_restoring_to_time(self) -> bool:
         """Returns whether the cluster is restoring a backup to a specific time."""
-        if not self.relation:
-            return False
-        return "restore-to-time" in self.relation.data[self.app]
+        return self.restore_to_time is not None
 
     @property
     def is_ldap_charm_related(self) -> bool:
@@ -473,6 +535,102 @@ class PostgreSQLApplication(RelationState):
         if not self.relation:
             return
         self.relation.data[self.app]["user_hash"] = value
+
+    @property
+    def stanza(self) -> str | None:
+        """Get the pgBackRest stanza name published by the leader."""
+        return self._get_app_field("stanza")
+
+    @stanza.setter
+    def stanza(self, value: str) -> None:
+        """Set the pgBackRest stanza name in the peer relation data."""
+        self._set_app_field("stanza", value)
+
+    @property
+    def restore_stanza(self) -> str | None:
+        """Get the stanza a restore reads the backup from.
+
+        A restore may point at a stanza belonging to a different cluster, so this
+        is tracked separately from the stanza the cluster archives to.
+        """
+        return self._get_app_field("restore-stanza")
+
+    @restore_stanza.setter
+    def restore_stanza(self, value: str) -> None:
+        """Set the stanza a restore reads the backup from."""
+        self._set_app_field("restore-stanza", value)
+
+    @property
+    def restoring_backup(self) -> str | None:
+        """Get the pgBackRest label of the backup being restored."""
+        return self._get_app_field("restoring-backup")
+
+    @restoring_backup.setter
+    def restoring_backup(self, value: str) -> None:
+        """Set the pgBackRest label of the backup being restored."""
+        self._set_app_field("restoring-backup", value)
+
+    @property
+    def restore_to_time(self) -> str | None:
+        """Get the point-in-time-recovery target, or ``latest`` to replay every WAL."""
+        return self._get_app_field("restore-to-time")
+
+    @restore_to_time.setter
+    def restore_to_time(self, value: str) -> None:
+        """Set the point-in-time-recovery target."""
+        self._set_app_field("restore-to-time", value)
+
+    @property
+    def restore_timeline(self) -> str | None:
+        """Get the timeline a point-in-time restore recovers along."""
+        return self._get_app_field("restore-timeline")
+
+    @restore_timeline.setter
+    def restore_timeline(self, value: str) -> None:
+        """Set the timeline a point-in-time restore recovers along."""
+        self._set_app_field("restore-timeline", value)
+
+    @property
+    def s3_initialization_start(self) -> str | None:
+        """Get the timestamp at which the leader started the S3 initialization sequence."""
+        return self._get_app_field("s3-initialization-start")
+
+    @s3_initialization_start.setter
+    def s3_initialization_start(self, value: str) -> None:
+        """Set the timestamp at which the leader started the S3 initialization sequence."""
+        self._set_app_field("s3-initialization-start", value)
+
+    @property
+    def s3_initialization_done(self) -> str | None:
+        """Get the flag the leader raises once it has adopted the primary's stanza fields."""
+        return self._get_app_field("s3-initialization-done")
+
+    @s3_initialization_done.setter
+    def s3_initialization_done(self, value: str) -> None:
+        """Set the S3 initialization completion flag in the peer relation data."""
+        self._set_app_field("s3-initialization-done", value)
+
+    @property
+    def s3_initialization_block_message(self) -> str | None:
+        """Get the block message the S3 initialization sequence failed with."""
+        return self._get_app_field("s3-initialization-block-message")
+
+    @s3_initialization_block_message.setter
+    def s3_initialization_block_message(self, value: str) -> None:
+        """Set the S3 initialization block message in the peer relation data."""
+        self._set_app_field("s3-initialization-block-message", value)
+
+    def _get_app_field(self, key: str) -> str | None:
+        """Get a plain (non-secret) field from the application databag."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get(key)
+
+    def _set_app_field(self, key: str, value: str) -> None:
+        """Set a plain (non-secret) field in the application databag."""
+        if not self.relation:
+            return
+        self.relation.data[self.app][key] = value
 
     def get_secret(self, key: str) -> str | None:
         """Get the secret value for 'key' from the peer relation data."""

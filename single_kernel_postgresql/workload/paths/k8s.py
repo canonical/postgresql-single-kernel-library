@@ -6,6 +6,7 @@ from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.config.literals import (
     K8S_DATA_PATH,
+    K8S_PGBACKREST_LOGS_DIR,
     PATRONI_LOGS_PATH,
     PGBACKREST_CONF_PATH,
     POSTGRESQL_CONF_FILE,
@@ -87,3 +88,12 @@ class K8sPaths(Paths):
     def pgbackrest_conf(self) -> PathProtocol:
         """Path to the pgbackrest config."""
         return self.conf / PGBACKREST_CONF_PATH
+
+    @property
+    def pgbackrest_logs(self) -> PathProtocol:
+        """Path to the pgBackRest logs.
+
+        These sit on the mounted logs storage under the version-scoped subtree, so
+        that a workload upgrade does not mix log generations.
+        """
+        return self.logs / self.versioned_path / K8S_PGBACKREST_LOGS_DIR

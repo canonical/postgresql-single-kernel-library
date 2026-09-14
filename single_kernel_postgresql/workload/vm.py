@@ -19,6 +19,7 @@ import tomli
 from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
+from single_kernel_postgresql.config.literals import VM_PGBACKREST_EXECUTABLE
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.vm import VMPaths
@@ -149,9 +150,42 @@ class VMWorkload(BaseWorkload):
         """Stop the PostgreSQL service."""
         ...
 
-    def start_service(self):
-        """Start the PostgreSQL service."""
-        ...
+    def start_service(self, service_name: str) -> None:
+        """Start a snap service."""
+        self._snap.start(services=[service_name])
+
+    def stop_service(self, service_name: str) -> None:
+        """Stop a snap service."""
+        self._snap.stop(services=[service_name])
+
+    def restart_service(self, service_name: str) -> None:
+        """Restart a snap service."""
+        self._snap.restart(services=[service_name])
+
+    def reload_service(self, service_name: str) -> None:
+        """Restart a snap service so it re-reads its configuration.
+
+        The snap layer offers no way to signal a service, so a restart is the only
+        available reload.
+        """
+        self.restart_service(service_name)
+
+    def is_service_running(self, service_name: str) -> bool:
+        """Whether the named snap service is active.
+
+        A service the installed snap revision does not declare is absent from the
+        services mapping, so it reads as not running rather than raising.
+        """
+        try:
+            return self._snap.services[service_name]["active"]
+        except (snap.SnapError, KeyError) as e:
+            logger.debug(f"Failed to check {service_name} service: {e}")
+            return False
+
+    @property
+    def _snap(self) -> snap.Snap:
+        """The charmed-postgresql snap package."""
+        return snap.SnapCache()["charmed-postgresql"]
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
@@ -195,6 +229,11 @@ class VMWorkload(BaseWorkload):
                     file_path.unlink()
                 except OSError as e:
                     raise e
+
+    @property
+    def pgbackrest_executable(self) -> str:
+        """The pgBackRest binary, reachable on VM only through the snap alias."""
+        return VM_PGBACKREST_EXECUTABLE
 
     @property
     def user(self) -> str:
