@@ -307,8 +307,15 @@ class DatabaseManager(BaseManager):
         self, postgresql_client: PostgreSQLClient, user: str, request: DatabaseRequest
     ) -> tuple[str, list[str]] | None:
         """Resolve the requested database(s), or block and return None."""
-        database = request["database"] or ""
-        if database and database[-1] == "*":
+        # A request deferred while the cluster was not ready may replay after its
+        # relation died (e.g. a CMR removed during a Patroni outage); the request
+        # name then reads back as absent. Returning without deferring lets ops
+        # drop the stale notice.
+        database = request["database"]
+        if not database:
+            logger.warning("Database name is not set in the relation data, skipping.")
+            return None
+        if database[-1] == "*":
             if len(database) < MINIMUM_PREFIX_REQUEST_LENGTH:
                 self.set_unit_status(BlockedStatus(PREFIX_TOO_SHORT_MSG))
                 return None
