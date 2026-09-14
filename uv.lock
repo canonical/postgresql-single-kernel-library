@@ -1184,6 +1184,7 @@ postgresql = [
     { name = "httpx", marker = "python_full_version >= '3.12'" },
     { name = "jinja2", marker = "python_full_version >= '3.12'" },
     { name = "pydantic", marker = "python_full_version >= '3.12'" },
+    { name = "pyyaml", marker = "python_full_version >= '3.12'" },
     { name = "requests", marker = "python_full_version >= '3.12'" },
     { name = "tomli", marker = "python_full_version >= '3.12'" },
 ]
@@ -1225,6 +1226,7 @@ requires-dist = [
     { name = "psycopg2", marker = "extra == 'db-driver'", specifier = ">=2.9.10" },
     { name = "pydantic", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=2.0" },
     { name = "pysyncobj", marker = "python_full_version >= '3.12' and extra == 'vm'", specifier = ">=0.3.15" },
+    { name = "pyyaml", marker = "python_full_version >= '3.12' and extra == 'postgresql'", specifier = ">=6.0.1" },
     { name = "requests", marker = "python_full_version >= '3.12' and extra == 'postgresql'" },
     { name = "tenacity", specifier = ">=9.0.0" },
     { name = "tomli", marker = "python_full_version >= '3.12' and extra == 'postgresql'" },
