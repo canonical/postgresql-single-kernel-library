@@ -61,6 +61,18 @@ class Paths(ABC):
 
     @property
     @abstractmethod
+    def archive(self) -> PathProtocol:
+        """Path to the archive folder of PostgreSQL."""
+        pass
+
+    @property
+    @abstractmethod
+    def temp_storage(self) -> PathProtocol:
+        """Path to the temp storage root."""
+        pass
+
+    @property
+    @abstractmethod
     def postgresql_conf(self) -> PathProtocol:
         """Path to the postgresql.conf file."""
         pass

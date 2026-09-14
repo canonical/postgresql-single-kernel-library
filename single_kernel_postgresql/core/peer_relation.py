@@ -9,7 +9,7 @@ import json
 from collections.abc import MutableMapping
 from functools import cached_property
 
-from ops import Application, BlockedStatus, Relation, Unit
+from ops import Application, BlockedStatus, ModelError, Relation, Unit
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
@@ -410,8 +410,17 @@ class PostgreSQLApplication(RelationState):
 
     @cached_property
     def planned_units(self) -> int:
-        """Get the number of planned units for the application."""
-        return self.app.planned_units()
+        """Get the number of planned units for the application.
+
+        ops implements ``Application.planned_units()`` via ``goal-state``, which fails
+        ("saas application ... not found") while a cross-model SAAS force-removed during a
+        dead-DC teardown still lingers in goal-state. Fall back to the count of currently
+        known units so the hook reconciles instead of crashing every caller (DPE-10203).
+        """
+        try:
+            return self.app.planned_units()
+        except ModelError:
+            return len(self.relation.units) + 1 if self.relation else 1
 
     @property
     def members_ips(self) -> set[str]:
