@@ -61,7 +61,7 @@ Trust boundaries, with the protection each crossing relies on:
 
 The watcher ships with conservative defaults; the sections below cover what it does out of the box, which settings to review, and which risks the operator owns.
 
-### Security by default
+### Default security measures
 
 - The snap is pinned to a revision and held; it does not auto-update.
 - The charm refuses to run more than one unit.
