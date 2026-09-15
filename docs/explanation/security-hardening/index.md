@@ -23,5 +23,5 @@ Cryptography <cryptography>
 Learn about the security posture of the PostgreSQL watcher — the charm that adds a third Raft vote in [stereo mode](explanation-stereo-mode):
 
 ```{toctree}
-Watcher <watcher>
+Watcher charm <watcher>
 ```
