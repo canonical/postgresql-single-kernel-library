@@ -8,7 +8,7 @@ myst:
 # Watcher security
 {{vm}}
 
-This page documents the security posture of the PostgreSQL watcher charm (`postgresql-watcher`) — how it is designed to be secure, how to operate it securely, which risks are inherent to its function, and how to report vulnerabilities. How the watcher participates in a cluster (deployment, integration, voting behaviour) is covered in [Stereo mode](explanation-stereo-mode); this page does not restate that.
+This page documents the security posture of the [PostgreSQL watcher charm](https://charmhub.io/postgresql-watcher) (`postgresql-watcher`) — how it is designed to be secure, how to operate it securely, which risks are inherent to its function, and how to report vulnerabilities. How the watcher participates in a cluster (deployment, integration, voting behaviour) is covered in [Stereo mode](explanation-stereo-mode); this page does not restate that.
 
 The watcher is packaging-layer software — a Juju charm operating a Raft voting service. It holds no user data and performs no cryptographic operations of its own; its security story is almost entirely *composition* — Juju, the {spellexception}`charmed-postgresql` snap, and the PostgreSQL cluster it votes in. Where a requirement is satisfied by an upstream component, this page says so and links out rather than duplicating. Environment-level hardening (clouds, Juju, credentials) applies to watcher hosts exactly as to PostgreSQL units and is covered in the [Security hardening overview](security-hardening-overview).
 
