@@ -269,6 +269,14 @@ class VMWorkload(BaseWorkload):
             return
         logger.warning(f"Unable to find {service} pid. Skipping reload")
 
+    def service_exists(self, service: str) -> bool:
+        """Whether the snap declares the named service."""
+        try:
+            services = snap.SnapCache()["charmed-postgresql"].services
+        except snap.SnapError:
+            return False
+        return service in services
+
     def service_is_running(self, service: str) -> bool:
         """Check whether a named snap service is running.
 
