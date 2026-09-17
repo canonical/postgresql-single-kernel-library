@@ -10,6 +10,8 @@ myst:
 
 This document provides an overview of security features and guidance for hardening the security of Charmed PostgreSQL deployments, including setting up and managing a secure environment.
 
+For the security posture of the PostgreSQL watcher charm — used in [stereo mode](explanation-stereo-mode) deployments — see [Watcher security](security-hardening-watcher).
+
 ## Environment
 
 The environment where Charmed PostgreSQL operates can be divided into two components:
