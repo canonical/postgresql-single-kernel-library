@@ -10,6 +10,9 @@ from typing import Literal
 # Permissions.
 POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 
+# Snap
+POSTGRESQL_SNAP_NAME = "charmed-postgresql"
+
 # Relations
 PEER_RELATION = "database-peers"
 STATUS_PEERS_RELATION = "status-peers"
@@ -26,10 +29,10 @@ SYSTEM_USERS = [BACKUP_USER, MONITORING_USER, REPLICATION_USER, REWIND_USER, USE
 
 # Paths
 ## VM Paths
-BASE_SNAP_DIR = "/var/snap/charmed-postgresql"
+BASE_SNAP_DIR = f"/var/snap/{POSTGRESQL_SNAP_NAME}"
 SNAP_DATA = "current"
 SNAP_COMMON = "common"
-SNAP = "/snap/charmed-postgresql/current"
+SNAP = f"/snap/{POSTGRESQL_SNAP_NAME}/current"
 VM_LOGS_PATH = "var/log/postgresql"
 VM_DATA_PATH = "var/lib/postgresql"
 VM_ARCHIVE_PATH = "data/archive"
@@ -182,6 +185,6 @@ RAFT_PORT = 2222
 RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 
 # VM services
-VM_PATRONI_SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
+VM_PATRONI_SERVICE_NAME = f"snap.{POSTGRESQL_SNAP_NAME}.patroni.service"
 VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"
 VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
