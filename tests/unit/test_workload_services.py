@@ -2,10 +2,12 @@
 # See LICENSE file for licensing details.
 """Tests for run_cmd, by-name service control, and pgbackrest logs paths."""
 
+import logging
 import signal
 from subprocess import TimeoutExpired
 from unittest.mock import Mock, patch
 
+import psutil
 import pytest
 from charmlibs import pathops, snap
 from ops.pebble import ExecError, ServiceStatus
@@ -169,12 +171,86 @@ def test_vm_service_control_uses_snap_by_name(substrate, workload):
         workload.start_service(PGBACKREST_SERVICE)
         workload.stop_service(PGBACKREST_SERVICE)
         workload.restart_service(PGBACKREST_SERVICE)
-        workload.reload_service(PGBACKREST_SERVICE)
     selected_snap = mock_cache.return_value.__getitem__.return_value
     selected_snap.start.assert_called_once_with(services=[PGBACKREST_SERVICE])
     selected_snap.stop.assert_called_once_with(services=[PGBACKREST_SERVICE])
-    # Snap has no signal channel: reload is a restart.
-    assert selected_snap.restart.call_count == 2
+    selected_snap.restart.assert_called_once_with(services=[PGBACKREST_SERVICE])
+
+
+def _patroni_cmdline():
+    return [
+        "python3",
+        "/snap/charmed-postgresql/416/usr/bin/patroni",
+        "/var/snap/charmed-postgresql/416/etc/patroni/patroni.yaml",
+    ]
+
+
+def _pgbackrest_cmdline():
+    return [
+        "/snap/charmed-postgresql/416/usr/bin/pgbackrest",
+        "server",
+        "--config=/var/snap/charmed-postgresql/416/etc/pgbackrest/pgbackrest.conf",
+    ]
+
+
+@patch("single_kernel_postgresql.workload.vm.os.kill")
+@patch("single_kernel_postgresql.workload.vm.psutil.process_iter")
+def test_vm_reload_patroni_sends_sighup_to_daemon(mock_iter, mock_kill, substrate, workload):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+        return
+    process = Mock(pid=4242, cmdline=Mock(return_value=_patroni_cmdline()))
+    mock_iter.return_value = [process]
+    with _mock_vm_snap(**{"patroni": {"active": True}}):
+        workload.reload_service("patroni")
+    mock_kill.assert_called_once_with(4242, signal.SIGHUP)
+
+
+@patch("single_kernel_postgresql.workload.vm.os.kill")
+@patch("single_kernel_postgresql.workload.vm.psutil.process_iter")
+def test_vm_reload_pgbackrest_sends_sighup_to_daemon(mock_iter, mock_kill, substrate, workload):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+        return
+    vanished = Mock(cmdline=Mock(side_effect=psutil.Error))
+    process = Mock(pid=4242, cmdline=Mock(return_value=_pgbackrest_cmdline()))
+    mock_iter.return_value = [vanished, process]
+    with _mock_vm_snap(**{PGBACKREST_SERVICE: {"active": True}}) as mock_cache:
+        workload.reload_service(PGBACKREST_SERVICE)
+    selected_snap = mock_cache.return_value.__getitem__.return_value
+    selected_snap.restart.assert_not_called()
+    mock_kill.assert_called_once_with(4242, signal.SIGHUP)
+
+
+@patch("single_kernel_postgresql.workload.vm.os.kill")
+@patch("single_kernel_postgresql.workload.vm.psutil.process_iter")
+def test_vm_reload_running_service_without_daemon_skips(
+    mock_iter, mock_kill, substrate, workload, caplog
+):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+        return
+    process = Mock(pid=4242, cmdline=Mock(return_value=["/usr/bin/sleep", "60"]))
+    mock_iter.return_value = [process]
+    with (
+        _mock_vm_snap(**{PGBACKREST_SERVICE: {"active": True}}) as mock_cache,
+        caplog.at_level(logging.WARNING),
+    ):
+        workload.reload_service(PGBACKREST_SERVICE)
+    selected_snap = mock_cache.return_value.__getitem__.return_value
+    selected_snap.restart.assert_not_called()
+    mock_kill.assert_not_called()
+    assert "Unable to find pgbackrest-service pid. Skipping reload" in caplog.text
+
+
+def test_vm_reload_stopped_service_restarts(substrate, workload):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+        return
+    with _mock_vm_snap(**{PGBACKREST_SERVICE: {"active": False}}) as mock_cache:
+        workload.reload_service(PGBACKREST_SERVICE)
+    selected_snap = mock_cache.return_value.__getitem__.return_value
+    selected_snap.restart.assert_called_once_with(services=[PGBACKREST_SERVICE])
 
 
 @pytest.mark.parametrize(
