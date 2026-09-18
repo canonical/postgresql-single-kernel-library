@@ -323,6 +323,37 @@ class PostgreSQL(PostgreSQLBase):
             if connection is not None:
                 connection.close()
 
+    def grant_internal_access_group_membership(self, user: str) -> None:
+        """Grant a single user membership to the internal access-group.
+
+        Creates the group role when missing (the real charm creates it in
+        _setup_users, which is not migrated yet).
+        """
+        connection = None
+        try:
+            with self._connect_to_database() as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    SQL("SELECT TRUE FROM pg_roles WHERE rolname={};").format(
+                        Literal(ACCESS_GROUP_INTERNAL)
+                    )
+                )
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        SQL("CREATE ROLE {} NOLOGIN;").format(Identifier(ACCESS_GROUP_INTERNAL))
+                    )
+                cursor.execute(
+                    SQL("GRANT {} TO {};").format(
+                        Identifier(ACCESS_GROUP_INTERNAL),
+                        Identifier(user),
+                    )
+                )
+        except psycopg2.Error as e:
+            logger.error(f"Failed to grant internal access group membership to {user}: {e}")
+            raise PostgreSQLAssignGroupError() from e
+        finally:
+            if connection is not None:
+                connection.close()
+
     def grant_relation_access_group_memberships(self) -> None:
         """Grant membership to the relation access-group to existing relation users."""
         rel_users = self.list_users_from_relation()
