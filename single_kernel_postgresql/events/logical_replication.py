@@ -245,6 +245,17 @@ class PostgreSQLLogicalReplication(Object):
                     f"Skipping subscription {subscription_name}: the current subscription request failed validation"
                 )
                 continue
+            # Re-validate at creation time: the validations that ran on
+            # config-changed predate the publisher's publication, and with both
+            # relations established first (canonical/postgresql-k8s-operator#1052
+            # exact order) a cycle can form in between. The guards read the
+            # CURRENT relation data, so a re-run sees the publications that now
+            # exist and blocks the subscribe.
+            if not self._validate_subscription_request():
+                logger.debug(
+                    f"Skipping subscription {subscription_name}: validation failed at creation time"
+                )
+                continue
             publication_name = publication["publication-name"]
             for attempt in Retrying(
                 stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True
