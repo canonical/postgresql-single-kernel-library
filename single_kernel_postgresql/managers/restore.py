@@ -23,6 +23,8 @@ from ops.pebble import ChangeError, ExecError
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
+    K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+    K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
     K8S_POSTGRESQL_SERVICE_NAME,
     ORIGINAL_PATRONI_ON_FAILURE_CONDITION,
     REPLICATION_CONSUMER_RELATION,
@@ -635,9 +637,43 @@ class RestoreManager(BaseManager):
                 "patroni-on-failure-condition-override": "",
                 "overridden-patroni-on-failure-condition-repeat-cause": "",
             })
-            self._update_pebble_layers()
+            self._update_pebble_layers_after_restore()
             logger.debug(
                 f"restored Patroni on-failure condition to {ORIGINAL_PATRONI_ON_FAILURE_CONDITION}"
             )
         else:
             logger.warning("not restoring patroni on-failure condition as it's not overridden")
+
+    def _update_pebble_layers_after_restore(self) -> None:
+        """Refresh the pebble layers after a restore, resilient to a failing service start.
+
+        A stale pgBackRest exporter from before the restore can still hold its
+        port (``bind: address already in use``); without this guard the
+        replan's ``ChangeError`` escapes through ``_was_restore_successful``
+        and the unit stays in ``restoring backup`` forever, because the
+        restoring-backup flags are only cleared after the replan. Free the
+        pgBackRest service ports and retry once; if it still fails, leave the
+        reconciliation to the next hook instead of crashing it.
+        """
+        try:
+            self._update_pebble_layers()
+        except ChangeError:
+            logger.warning(
+                "Post-restore pebble replan failed; stopping pgBackRest services and retrying"
+            )
+            for service in (
+                K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+                K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
+            ):
+                try:
+                    self.workload.stop_service(service)
+                # Best-effort port release; a stale service may not be pebble-managed.
+                except Exception as e:
+                    logger.debug(f"Failed to stop {service}: {e!s}")
+            try:
+                self._update_pebble_layers()
+            except ChangeError:
+                logger.exception(
+                    "Post-restore pebble replan failed again; deferring reconciliation"
+                    " to the next hook"
+                )

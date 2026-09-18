@@ -13,7 +13,12 @@ import pytest
 from lightkube.core.exceptions import ApiError
 from lightkube.models.meta_v1 import Status
 from ops import BlockedStatus
-from single_kernel_postgresql.config.literals import K8S_POSTGRESQL_SERVICE_NAME
+from ops.pebble import ChangeError
+from single_kernel_postgresql.config.literals import (
+    K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+    K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
+    K8S_POSTGRESQL_SERVICE_NAME,
+)
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication
 from single_kernel_postgresql.managers.restore import RestoreManager
 from single_kernel_postgresql.utils.backup import (
@@ -342,6 +347,45 @@ def test_restore_patroni_restart_condition_restores_override(restore_manager, su
     # setting the override fields to "" removes them from the databag
     assert "overridden-patroni-restart-condition" not in unit_data
     restore_manager.patroni_manager.update_patroni_restart_condition.assert_any_call("always")
+
+
+def test_restore_finalization_retries_replan_after_stopping_backup_services(
+    restore_manager, substrate
+):
+    """A stale pgBackRest exporter holding its port must not kill the finalization hook.
+
+    The post-restore replan's ChangeError used to escape through
+    ``_was_restore_successful`` and freeze the unit in 'restoring backup'
+    (observed on the k8s pitr_gcp CI job): the port conflict came from the
+    pre-restore pgBackRest services, so the retry stops them first.
+    """
+    if substrate != "k8s":
+        pytest.skip("pebble replan is a K8s-only path")
+    restore_manager.state.peer.data["patroni-on-failure-condition-override"] = "ignore"
+    restore_manager._update_pebble_layers_bridge.side_effect = [
+        ChangeError("start failed", MagicMock()),
+        None,
+    ]
+    restore_manager.restore_patroni_restart_condition()
+    stopped = [call.args[0] for call in restore_manager.workload.stop_service.call_args_list]
+    assert K8S_PGBACK_REST_SERVER_SERVICE_NAME in stopped
+    assert K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME in stopped
+    # setting the override fields to "" removes them from the databag
+    assert "patroni-on-failure-condition-override" not in restore_manager.state.peer.data
+
+
+def test_restore_finalization_swallows_second_replan_failure(restore_manager, substrate):
+    """Even a repeated replan failure must not crash the hook: the next hook retries."""
+    if substrate != "k8s":
+        pytest.skip("pebble replan is a K8s-only path")
+    restore_manager.state.peer.data["patroni-on-failure-condition-override"] = "ignore"
+    restore_manager._update_pebble_layers_bridge.side_effect = [
+        ChangeError("start failed", MagicMock()),
+        ChangeError("still failing", MagicMock()),
+    ]
+    restore_manager.restore_patroni_restart_condition()
+    assert restore_manager._update_pebble_layers_bridge.call_count == 2
+    assert "patroni-on-failure-condition-override" not in restore_manager.state.peer.data
 
 
 # -- PITR helpers ---------------------------------------------------------------------
