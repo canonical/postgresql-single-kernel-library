@@ -25,6 +25,7 @@ from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     CANNOT_RESTORE_PITR,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
+    FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
     STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE,
 )
 from single_kernel_postgresql.workload.base import BackupConfig
@@ -326,6 +327,34 @@ def test_initialise_s3_repository_rejects_foreign_repository(harness, backup_man
         harness.charm.state.application.s3_initialization_block_message
         == ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE
     )
+
+
+def test_s3_initialization_failure_refreshes_leader_status(harness, backup_manager):
+    """The leader's unit status must carry the block message in-hook.
+
+    The 16/edge charms refreshed the primary status inside
+    ``_s3_initialization_set_failure``; the library port dropped that, and a
+    blocked unit early-exits update-status and peer-relation-changed, so the
+    message never surfaced (test_backups_gcp CI regression).
+    """
+    with harness.hooks_disabled():
+        harness.set_leader()
+    backup_manager.set_unit_status = MagicMock()
+    backup_manager._s3_initialization_set_failure(FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE)
+    backup_manager.set_unit_status.assert_called_once_with(
+        BlockedStatus(FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE)
+    )
+    assert (
+        harness.charm.state.application.s3_initialization_block_message
+        == FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE
+    )
+
+
+def test_s3_initialization_failure_non_leader_writes_unit_databag_only(backup_manager):
+    """Non-leader units record the failure without touching the unit status."""
+    backup_manager.set_unit_status = MagicMock()
+    backup_manager._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
+    backup_manager.set_unit_status.assert_not_called()
 
 
 def test_clear_s3_state_clears_markers(backup_manager, substrate):

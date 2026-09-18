@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 import jinja2
 from botocore.exceptions import ClientError, ParamValidationError, SSLError
-from ops import ActiveStatus, JujuVersion, MaintenanceStatus
+from ops import ActiveStatus, BlockedStatus, JujuVersion, MaintenanceStatus
 from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
@@ -215,13 +215,18 @@ class BackupManager(BaseManager):
         """Record a failed s3 initialization with the corresponding block message.
 
         Written to the app databag on the leader (leader == primary, so no
-        cross-unit sync is needed) or to the unit databag otherwise. The events
-        layer refreshes the unit status.
+        cross-unit sync is needed) or to the unit databag otherwise. On the
+        leader the unit status is refreshed in-hook with the block message:
+        blocked units early-exit from update-status and peer-relation-changed,
+        so without this the message would never surface (parity with the
+        charms' ``_s3_initialization_set_failure(update_leader_status=True)``).
         """
         if self.state.peer.is_app_leader:
             self.state.application.s3_initialization_block_message = block_message
             self.state.application.s3_initialization_start = ""
             self.state.application.stanza = ""
+            if self.set_unit_status:
+                self.set_unit_status(BlockedStatus(block_message))
         else:
             self.state.peer.s3_initialization_block_message = block_message
             self.state.peer.s3_initialization_done = "True"
