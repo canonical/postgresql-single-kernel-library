@@ -174,6 +174,21 @@ def test_initialise_stanza_proceeds_when_blocked_with_s3_message(harness, backup
     assert backup_manager._initialise_stanza() is True
 
 
+def test_check_stanza_refreshes_primary_status_on_success(harness, backup_manager):
+    """After a successful stanza check the charm recomputes the unit status.
+
+    A unit blocked with a stale S3 failure message only unblocks when the
+    status is recomputed after the check succeeds (the charms call
+    _set_primary_status_message here); the blocked unit early-exits
+    update-status, so nothing else would clear the stale message.
+    """
+    harness.model.unit.status = BlockedStatus(ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE)
+    _mock_run_cmd(backup_manager)
+    backup_manager.refresh_primary_status = MagicMock()
+    assert backup_manager.check_stanza() is True
+    backup_manager.refresh_primary_status.assert_called_once_with()
+
+
 def test_check_stanza_writes_done_marker_on_non_leader(harness, backup_manager):
     _mock_run_cmd(backup_manager)
     backup_manager.update_config.return_value = True
