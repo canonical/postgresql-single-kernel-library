@@ -32,14 +32,15 @@ class VMWorkload(BaseWorkload):
     def __init__(self, charm_dir: Path):
         super().__init__(charm_dir)
 
-    def is_storage_attached(self) -> bool:
+    def is_storage_attached(self, path: str | None = None) -> bool:
         """Returns if storage is attached.
 
-        This is VM specific.
+        This is VM specific. Defaults to the workload's versioned data path; pass
+        the charm metadata storage location when checking the juju-managed mount.
         """
         try:
             # Storage path is constant
-            subprocess.check_call(["/usr/bin/mountpoint", "-q", self.paths.data])  # noqa: S603 #type: ignore
+            subprocess.check_call(["/usr/bin/mountpoint", "-q", path or self.paths.data])  # noqa: S603 #type: ignore
             return True
         except subprocess.CalledProcessError:
             return False

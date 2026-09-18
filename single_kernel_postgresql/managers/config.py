@@ -92,16 +92,18 @@ class ConfigManager(BaseManager):
 
     def configure_patroni_on_unit(self):
         """Configure Patroni (configuration files and service) on the unit."""
+        # Create the versioned data directory before taking ownership: the parent
+        # storage mount exists, but the versioned path itself is only created here.
+        self.workload.mkdir(
+            self.workload.paths.data,
+            mode=POSTGRESQL_STORAGE_PERMISSIONS,
+            parents=True,
+            exist_ok=True,
+        )
         _change_owner(self.state.substrate, str(self.workload.paths.data))
 
         # Create empty base config
         self.workload.write_text("", self.workload.paths.postgresql_conf)
-
-        # Expected permission
-        # Replicas refuse to start with the default permissions
-        self.workload.mkdir(
-            self.workload.paths.data, mode=POSTGRESQL_STORAGE_PERMISSIONS, exist_ok=True
-        )
 
     def _calculate_max_worker_processes(self, cpu_cores: int) -> str | None:
         """Calculate cpu_max_worker_processes configuration value."""
