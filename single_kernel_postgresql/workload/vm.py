@@ -7,23 +7,67 @@ import logging
 import os
 import pathlib
 import platform
+import re
+import shlex
 import subprocess
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
+from signal import SIGHUP
 
 import charm_refresh
+import psutil
 import tomli
 from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
-from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.config.literals import (
+    POSTGRESQL_SNAP_NAME,
+    VM_PGBACKREST_SERVICE_NAME,
+)
+from single_kernel_postgresql.workload.base import BaseWorkload, CommandResult
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.vm import VMPaths
 
 logger = logging.getLogger(__name__)
+
+# Snap services run through a wrapper script (e.g. start-patroni.sh), so the
+# systemd main process is the wrapper, not the daemon. The reload targets the
+# daemon process itself, discovered by command line, with the same patterns
+# the PostgreSQL VM charm uses for Patroni. $SNAP resolves to the revisioned
+# mount (e.g. /snap/charmed-postgresql/416), hence the x?[0-9]+ revision part.
+_PATRONI_BINARY_PATTERN = re.compile(rf"/snap/{POSTGRESQL_SNAP_NAME}/x?[0-9]+/usr/bin/patroni")
+_PATRONI_CONFIG_PATTERN = re.compile(
+    rf"/var/snap/{POSTGRESQL_SNAP_NAME}/x?[0-9]+/etc/patroni/patroni.yaml"
+)
+_PGBACKREST_SERVER_PATTERN = re.compile(
+    rf"/snap/{POSTGRESQL_SNAP_NAME}/x?[0-9]+/usr/bin/pgbackrest"
+)
+
+
+def _find_service_pid(service: str) -> int | None:
+    """Find the daemon process of a named snap service via its command line."""
+    for process in psutil.process_iter():
+        try:
+            cmdline = process.cmdline()
+        except psutil.Error:  # the process vanished mid-iteration
+            continue
+        if service == "patroni" and (
+            len(cmdline) == 3
+            and cmdline[0] == "python3"
+            and _PATRONI_BINARY_PATTERN.match(cmdline[1])
+            and _PATRONI_CONFIG_PATTERN.match(cmdline[2])
+        ):
+            return process.pid
+        if service == VM_PGBACKREST_SERVICE_NAME and (
+            cmdline
+            and _PGBACKREST_SERVER_PATTERN.match(cmdline[0])
+            and len(cmdline) > 1
+            and cmdline[1] == "server"
+        ):
+            return process.pid
+    return None
 
 
 class VMWorkload(BaseWorkload):
@@ -103,7 +147,7 @@ class VMWorkload(BaseWorkload):
         try:
             logger.debug("Starting Patroni...")
             cache = snap.SnapCache()
-            selected_snap = cache["charmed-postgresql"]
+            selected_snap = cache[POSTGRESQL_SNAP_NAME]
             selected_snap.start(services=["patroni"])
             return selected_snap.services["patroni"]["active"]
         except snap.SnapError as e:
@@ -115,7 +159,7 @@ class VMWorkload(BaseWorkload):
         """Check if the Patroni service is running."""
         try:
             cache = snap.SnapCache()
-            selected_snap = cache["charmed-postgresql"]
+            selected_snap = cache[POSTGRESQL_SNAP_NAME]
             return selected_snap.services["patroni"]["active"]
         except snap.SnapError as e:
             logger.debug(f"Failed to check Patroni service: {e}")
@@ -138,9 +182,37 @@ class VMWorkload(BaseWorkload):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
-    ) -> SimpleNamespace:
-        """Run Command in CLI."""
-        raise NotImplementedError
+        timeout: float | None = None,
+    ) -> CommandResult:
+        """Run a command on the machine via subprocess.
+
+        The charm runs as root on VM, so the command is not executed as a
+        specific user or group.
+        """
+        cmd = shlex.split(command)
+        if args:
+            cmd += shlex.split(args)
+        try:
+            process = subprocess.run(  # noqa: S603
+                cmd,
+                input=stdin.encode() if stdin else None,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            if not use_errors_replace:
+                raise
+            return CommandResult(
+                return_code=124,
+                stdout=(e.stdout or b"").decode(errors="replace"),
+                stderr=(e.stderr or b"").decode(errors="replace"),
+            )
+        decode_errors = "replace" if use_errors_replace else "strict"
+        return CommandResult(
+            return_code=process.returncode,
+            stdout=process.stdout.decode(errors=decode_errors),
+            stderr=process.stderr.decode(errors=decode_errors),
+        )
 
     def is_failed(self) -> bool:
         """Check if snap service failed."""
@@ -150,9 +222,47 @@ class VMWorkload(BaseWorkload):
         """Stop the PostgreSQL service."""
         ...
 
-    def start_service(self):
-        """Start the PostgreSQL service."""
-        ...
+    def start_service(self, service: str) -> None:
+        """Start a named snap service."""
+        snap.SnapCache()[POSTGRESQL_SNAP_NAME].start(services=[service])
+
+    def stop_service(self, service: str) -> None:
+        """Stop a named snap service."""
+        snap.SnapCache()[POSTGRESQL_SNAP_NAME].stop(services=[service])
+
+    def restart_service(self, service: str) -> None:
+        """Restart a named snap service."""
+        snap.SnapCache()[POSTGRESQL_SNAP_NAME].restart(services=[service])
+
+    def reload_service(self, service: str) -> None:
+        """Reload a named snap service.
+
+        Snap services run through a wrapper script, so the systemd main
+        process is the wrapper, not the daemon; the reload finds the
+        service's daemon process by its command line and sends SIGHUP to it
+        directly, like the PostgreSQL VM charm does for Patroni. A service
+        that is not running is restarted instead.
+        """
+        if not self.service_is_running(service):
+            self.restart_service(service)
+            return
+        if pid := _find_service_pid(service):
+            logger.debug(f"Sending SIGHUP to {service} (pid {pid}) to reload configuration")
+            os.kill(pid, SIGHUP)
+            return
+        logger.warning(f"Unable to find {service} pid. Skipping reload")
+
+    def service_is_running(self, service: str) -> bool:
+        """Check whether a named snap service is running.
+
+        A snap revision predating the service omits it from the services
+        mapping; that reads as not running.
+        """
+        try:
+            services = snap.SnapCache()[POSTGRESQL_SNAP_NAME].services
+        except (snap.SnapError, snap.SnapNotFoundError):
+            return False
+        return services.get(service, {}).get("active", False)
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
