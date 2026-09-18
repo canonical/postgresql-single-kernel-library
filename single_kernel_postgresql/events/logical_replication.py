@@ -223,6 +223,15 @@ class PostgreSQLLogicalReplication(Object):
         subscriptions = self._subscriptions_info()
         publications = json.loads(event.relation.data[event.app].get("publications", "{}"))
 
+        # The publisher may create publications for a request that failed our local
+        # validation (apply_changed_config pushes the request before validating).
+        # Creating a subscription here would bypass the empty-table guard and
+        # re-subscribe with copy_data=true, duplicating rows
+        # (canonical/postgresql-k8s-operator#982 comment 3019811325). Existing
+        # subscriptions keep refreshing; only NEW subscriptions are gated.
+        validation_error = (
+            self.state.application.data.get("logical-replication-validation") == "error"
+        )
         for database, publication in publications.items():
             subscription_name = self._subscription_name(event.relation.id, database)
             if database in subscriptions:
@@ -230,25 +239,30 @@ class PostgreSQLLogicalReplication(Object):
                 logger.info(
                     f"Refreshed subscription {subscription_name} in database {database} due to relation change"
                 )
-            else:
-                publication_name = publication["publication-name"]
-                for attempt in Retrying(
-                    stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True
-                ):
-                    with attempt:
-                        self.charm.postgresql.create_subscription(
-                            subscription_name,
-                            secret_content["primary"],
-                            database,
-                            secret_content["username"],
-                            secret_content["password"],
-                            publication_name,
-                            publication["replication-slot-name"],
-                        )
-                logger.info(
-                    f"Created new subscription {subscription_name} for publication {publication_name} in database {database}"
+                continue
+            if validation_error:
+                logger.debug(
+                    f"Skipping subscription {subscription_name}: the current subscription request failed validation"
                 )
-                subscriptions[database] = subscription_name
+                continue
+            publication_name = publication["publication-name"]
+            for attempt in Retrying(
+                stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True
+            ):
+                with attempt:
+                    self.charm.postgresql.create_subscription(
+                        subscription_name,
+                        secret_content["primary"],
+                        database,
+                        secret_content["username"],
+                        secret_content["password"],
+                        publication_name,
+                        publication["replication-slot-name"],
+                    )
+            logger.info(
+                f"Created new subscription {subscription_name} for publication {publication_name} in database {database}"
+            )
+            subscriptions[database] = subscription_name
 
         for database, subscription in subscriptions.copy().items():
             if database in publications:
@@ -545,7 +559,6 @@ class PostgreSQLLogicalReplication(Object):
         relation: Relation | None,
         database: str,
         schematable: str,
-        subscription_request_relation: dict[str, list[str]],
     ) -> bool:
         """Validate a single table for subscription.
 
@@ -553,7 +566,6 @@ class PostgreSQLLogicalReplication(Object):
             relation: The subscription relation
             database: The database name
             schematable: The table name in schema.table format
-            subscription_request_relation: Current subscription request from relation data
 
         Returns:
             True if validation passes, False otherwise
@@ -587,10 +599,16 @@ class PostgreSQLLogicalReplication(Object):
                 status_msg=f"Circular replication detected for table {schematable}",
             )
 
-        already_subscribed = (
-            database in subscription_request_relation
-            and schematable in subscription_request_relation[database]
-        )
+        # The empty-table check must be skipped only when this database is genuinely
+        # subscribed (its data was replicated by us). Deriving this from the relation
+        # request is unsafe: apply_changed_config pushes the NEW request into the
+        # relation data before validating, so a request-derived flag would bypass the
+        # check for a table that was never subscribed and re-subscribe with
+        # copy_data=true, duplicating its rows (canonical/postgresql-k8s-operator#982
+        # comment 3019811325). The created-subscriptions bookkeeping is the source of
+        # truth: relation-broken clears it, so a re-subscribe after a break re-enforces
+        # the check.
+        already_subscribed = bool(self._subscriptions_info().get(database))
         if not already_subscribed and not self.charm.postgresql.is_table_empty(
             database, schema, table
         ):
@@ -612,19 +630,11 @@ class PostgreSQLLogicalReplication(Object):
         if self._check_publisher_errors(relation, subscription_request_config):
             return False
 
-        subscription_request_relation = (
-            json.loads(relation.data[self.model.app].get("subscription-request", "{}"))
-            if relation
-            else {}
-        )
-
         for database, schematables in subscription_request_config.items():
             if not self.charm.postgresql.database_exists(database):
                 return self._fail_validation(f"database {database} doesn't exist")
             for schematable in schematables:
-                if not self._validate_table_for_subscription(
-                    relation, database, schematable, subscription_request_relation
-                ):
+                if not self._validate_table_for_subscription(relation, database, schematable):
                     return False
 
         self.state.application.data["logical-replication-validation"] = ""
@@ -1097,6 +1107,11 @@ class PostgreSQLLogicalReplication(Object):
             f"Creating new user {user} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation_id}"
         )
         self.charm.postgresql.create_user(user, password, replication=True)
+        # The real charm renders per-relation-user pg_hba rules from
+        # relations_user_databases_map (an un-ported TODO here); grant the internal
+        # access group so the subscriber's replication worker matches the
+        # `host all +internal_access` rule on the publisher.
+        self.charm.postgresql.grant_internal_access_group_membership(user)
         return user, password
 
     def _get_secret(self, relation_id: int) -> Secret:
