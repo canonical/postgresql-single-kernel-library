@@ -177,8 +177,12 @@ class PostgreSQLEventsHandler(Object):
 
         self.tls_manager.configure_internal_peer_ca()
 
-        # if self.charm.substrate == Substrates.VM:
-        #     self.config_manager.update_config()
+        # Render the Patroni configuration (the real charm renders on leader-elected;
+        # the ported flow left it commented with a TODO — required for bootstrap).
+        # Route through the charm bridge so the composition root can supply the
+        # per-user pg_hba map (relations_user_databases_map) the real charm passes.
+        if self.charm.substrate == Substrates.VM:
+            self.charm.update_config()
 
         # TODO: Add next steps of leader elected
 
@@ -211,6 +215,13 @@ class PostgreSQLEventsHandler(Object):
             )
             return
 
+        # The real charm sets this in _start_primary after _setup_users succeeds
+        # (charm.py: self.app_peer_data["cluster_initialised"] = "True"); the users
+        # setup flow is not migrated yet, but the flag gates every client-relation
+        # request, so set it right after the cluster bootstraps. Must be the peer
+        # APP databag: PostgreSQLPeer.update() writes the unit scope.
+        self.state.application.data["cluster_initialised"] = "True"
+
         # TODO: Assert the member is up and running before marking it as initialised.
 
         # TODO: Check primary endpoint
@@ -221,9 +232,13 @@ class PostgreSQLEventsHandler(Object):
         Workaround for lxd containers not getting storage attached on startups.
         """
         cached_status = self.charm.unit.status
+        # Check the juju-managed mount (the metadata storage location) rather than the
+        # workload's versioned data path, which is a child of the mount and is never a
+        # mountpoint itself.
+        storage_location = self.charm.meta.storages["data"].location
         for attempt in Retrying(stop=stop_after_attempt(10), wait=wait_fixed(1), reraise=True):
             with attempt:
-                if not workload.is_storage_attached():
+                if not workload.is_storage_attached(storage_location):
                     logger.error("Data directory not attached.")
                     self.charm.unit.status = WaitingStatus("Data directory not attached")
                     raise StorageUnavailableError()

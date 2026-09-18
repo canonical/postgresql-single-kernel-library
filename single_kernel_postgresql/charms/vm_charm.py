@@ -28,13 +28,16 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         """Return a PostgreSQL client."""
         return PostgreSQL(
             substrate=Substrates.VM,
-            primary_host="localhost",
-            current_host="localhost",
+            # Test-charm-only bridge: mirrors the real charm's construction — the
+            # unit-test hardcoded credentials ("localhost"/"test-password") cannot
+            # authenticate against a real cluster. The primary endpoint comes from
+            # Patroni and the operator password from the app secret, exactly as in
+            # the real VM charm.
+            primary_host=self.primary_endpoint,
+            current_host="/tmp/snap-private-tmp/snap.charmed-postgresql/tmp/",
             user=USER,
-            # The password is hardcoded because this is an abstract charm and
-            # it meant to be used only in unit tests.
-            password="test-password",  # noqa S106
-            database="test-database",
+            password=str(self.state.application.user_password or ""),
+            database="postgres",
             system_users=SYSTEM_USERS,
         )
 
@@ -77,7 +80,50 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
 
     def update_config(self) -> bool:
         """Re-render the Patroni configuration and apply it."""
-        return self.config_manager.update_config(self.postgresql)
+        # The real charm collects the per-user hba map in its composition root
+        # (charm.py relations_user_databases_map) and passes it on every render;
+        # the rel-handler wiring is an un-ported TODO in the library.
+        return self.config_manager.update_config(
+            self.postgresql,
+            relations_user_databases_map=self.relations_user_databases_map(),
+        )
+
+    def relations_user_databases_map(self) -> dict[str, str]:
+        """Build the user -> accessible-databases map for the pg_hba render.
+
+        Mirrors the real charm's charm.py relations_user_databases_map: non-system
+        users get a per-user hba rule for the databases they can access, and the
+        internal users fall back to "all" while the access groups are missing.
+        """
+        postgresql = self.postgresql
+        user_database_map: dict[str, str] = {}
+        skip = {
+            "backup",
+            "monitoring",
+            USER,
+            "postgres",
+            "replication",
+            "rewind",
+            "charmed_databases_owner",
+        }
+        try:
+            for user in postgresql.list_users(current_host=True):
+                if user in skip:
+                    continue
+                if databases := ",".join(
+                    sorted(postgresql.list_accessible_databases_for_user(user, current_host=True))
+                ):
+                    user_database_map[user] = databases
+            if postgresql.list_access_groups(current_host=True) != {
+                "identity_access",
+                "internal_access",
+                "relation_access",
+            }:
+                user_database_map.update({USER: "all", "replication": "all", "rewind": "all"})
+        except Exception as e:  # noqa: BLE001 - status hook must not crash the render
+            logger.debug(f"Failed to build the relations user databases map: {e}")
+            user_database_map.update({USER: "all", "replication": "all", "rewind": "all"})
+        return user_database_map
 
     @property
     def primary_endpoint(self) -> str | None:
