@@ -99,6 +99,7 @@ class BackupManager(BaseManager):
         resource_provider: ResourceProvider,
         is_standby_cluster: IsStandbyClusterFunction | None = None,
         set_unit_status: Callable[..., None] | None = None,
+        refresh_primary_status: Callable[[], None] | None = None,
     ):
         """Manager of PostgreSQL backups."""
         super().__init__(state, workload, "backup")
@@ -107,6 +108,7 @@ class BackupManager(BaseManager):
         self.update_config = update_config
         self.resource_provider = resource_provider
         self.set_unit_status = set_unit_status
+        self.refresh_primary_status = refresh_primary_status
         self._is_standby_cluster_bridge = is_standby_cluster
 
     @property
@@ -343,8 +345,25 @@ class BackupManager(BaseManager):
             logger.warning("couldn't initialize stanza due to a blocked status")
             return False
 
-        # Create the stanza.
+        if not self._create_stanza():
+            return False
+
+        self.start_stop_pgbackrest_service()
+
+        # Rest of the successful s3 initialization sequence such as s3-initialization-start and s3-initialization-done
+        # are left to the check_stanza func.
+        if self.state.peer.is_app_leader:
+            self.state.application.stanza = self.stanza_name
+        else:
+            self.state.peer.stanza = self.stanza_name
+
+        return True
+
+    def _create_stanza(self) -> bool:
+        """Run stanza-create with the charms' retry and failure semantics."""
         try:
+            if self.set_unit_status:
+                self.set_unit_status(MaintenanceStatus("initialising stanza"))
             # If the tls is enabled, it requires all the units in the cluster to run the pgBackRest service to
             # successfully complete validation, and upon receiving the same parent event other units should start it.
             # Therefore, the first retry may fail due to the delay of these other units to start this service. 60s given
@@ -380,15 +399,6 @@ class BackupManager(BaseManager):
             self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
             return False
 
-        self.start_stop_pgbackrest_service()
-
-        # Rest of the successful s3 initialization sequence such as s3-initialization-start and s3-initialization-done
-        # are left to the check_stanza func.
-        if self.state.peer.is_app_leader:
-            self.state.application.stanza = self.stanza_name
-        else:
-            self.state.peer.stanza = self.stanza_name
-
         return True
 
     def check_stanza(self) -> bool:
@@ -400,6 +410,18 @@ class BackupManager(BaseManager):
         # Update the configuration to use pgBackRest as the archiving mechanism.
         self.update_config()
 
+        if not self._check_stanza_command():
+            return False
+
+        if self.state.peer.is_app_leader:
+            self.state.application.s3_initialization_start = ""
+        else:
+            self.state.peer.s3_initialization_done = "True"
+
+        return True
+
+    def _check_stanza_command(self) -> bool:
+        """Run the pgbackrest stanza check with the charms' retry semantics."""
         try:
             # If the tls is enabled, it requires all the units in the cluster to run the pgBackRest service to
             # successfully complete validation, and upon receiving the same parent event other units should start it.
@@ -422,6 +444,11 @@ class BackupManager(BaseManager):
                             raise TimeoutError
                         if result.return_code != 0:
                             raise StanzaOperationError(result.stderr)
+            # Recompute the unit status on success: the unit may be blocked
+            # with a stale S3 failure message from before the settings were
+            # fixed (the charms call _set_primary_status_message here).
+            if self.refresh_primary_status:
+                self.refresh_primary_status()
         except TimeoutError as e:
             if self.state.substrate == Substrates.K8S:
                 # The K8s charm folds every failure (including timeouts) into the
@@ -440,12 +467,6 @@ class BackupManager(BaseManager):
             if self.state.substrate == Substrates.VM:
                 self.update_config()
             return False
-
-        if self.state.peer.is_app_leader:
-            self.state.application.s3_initialization_start = ""
-        else:
-            self.state.peer.s3_initialization_done = "True"
-
         return True
 
     def coordinate_stanza_fields(self) -> None:
