@@ -3,6 +3,7 @@
 
 """S3Client behaviour, mocked at the boto3 Session boundary."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -114,12 +115,21 @@ def test_read_content_without_bucket_returns_none(session):
     session.assert_not_called()
 
 
-@pytest.mark.parametrize("code", ["404", "AccessDenied"])
-def test_read_content_error_returns_none(session, code):
+@pytest.mark.parametrize("code", ["404", "NoSuchKey", "AccessDenied"])
+def test_read_content_error_returns_none(session, code, caplog):
     bucket = session.return_value.resource.return_value.Bucket.return_value
     bucket.download_fileobj.side_effect = _client_error(code)
 
-    assert S3Client(workload).read_content("backup.conf", BASE_PARAMETERS) is None
+    with caplog.at_level(logging.DEBUG):
+        assert S3Client(workload).read_content("backup.conf", BASE_PARAMETERS) is None
+
+    errors = [record for record in caplog.records if record.levelno == logging.ERROR]
+    if code == "AccessDenied":
+        assert errors
+    else:
+        # A missing key is the expected fresh-repository state and must not be
+        # logged as an error traceback (S3 GetObject reports it as NoSuchKey).
+        assert not errors
 
 
 def test_create_bucket_missing_parameters_is_noop(session):
