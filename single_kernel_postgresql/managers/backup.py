@@ -199,18 +199,6 @@ class BackupManager(BaseManager):
             return None
         return self.state._get_hostname_from_unit(primary)
 
-    @property
-    def _has_s3_block_message(self) -> bool:
-        """Whether the unit is blocked because of an S3 initialization failure.
-
-        State-derived replacement of the charms' unit-status-message reads:
-        the blocked status message comes from the s3-initialization-block-message
-        peer field (see the charms' _set_primary_status_message).
-        """
-        # The charms' status builder reads only the app-databag field; the unit
-        # field exists for the replica-primary flow but is never read back.
-        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES
-
     def _s3_initialization_set_failure(self, block_message: str) -> None:
         """Record a failed s3 initialization with the corresponding block message.
 
@@ -347,7 +335,11 @@ class BackupManager(BaseManager):
         """
         # Enable stanza initialisation if the backup settings were fixed after being invalid
         # or pointing to a repository where there are backups from another cluster.
-        if self.state.peer.is_blocked and not self._has_s3_block_message:
+        # Gate on the LIVE unit status message: the events layer clears the
+        # s3-initialization-block-message peer field before this point, so a
+        # state-derived read would classify the S3 block as a foreign block and
+        # refuse the recovery (the charms gate on self.unit.status.message).
+        if self.state.peer.is_blocked and self.state.peer.status_message not in S3_BLOCK_MESSAGES:
             logger.warning("couldn't initialize stanza due to a blocked status")
             return False
 

@@ -159,6 +159,21 @@ def test_initialise_stanza_refused_when_blocked_without_s3_message(harness, back
     assert "stanza" not in harness.get_relation_data(rel_id, harness.charm.unit.name)
 
 
+def test_initialise_stanza_proceeds_when_blocked_with_s3_message(harness, backup_manager):
+    """A unit blocked on an S3 message must still re-initialise the stanza.
+
+    The events layer clears the s3-initialization-block-message peer field
+    before calling _initialise_stanza, so the gate must consult the LIVE unit
+    status message (the charms gate on self.unit.status.message) — otherwise
+    the recovery after fixing the S3 settings deadlocks: the unit stays
+    blocked with the stale message forever (observed on
+    test_invalid_config_and_recovery_after_fixing_it CI runs).
+    """
+    harness.model.unit.status = BlockedStatus(FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE)
+    _mock_run_cmd(backup_manager)
+    assert backup_manager._initialise_stanza() is True
+
+
 def test_check_stanza_writes_done_marker_on_non_leader(harness, backup_manager):
     _mock_run_cmd(backup_manager)
     backup_manager.update_config.return_value = True
