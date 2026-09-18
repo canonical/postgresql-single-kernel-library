@@ -638,6 +638,7 @@ class PostgreSQLLogicalReplication(Object):
                     return False
 
         self.state.application.data["logical-replication-validation"] = ""
+        self.state.application.data["logical-replication-validation-status-message"] = ""
         return True
 
     def _fail_validation(self, message: str | None = None, status_msg: str | None = None) -> bool:
@@ -645,6 +646,12 @@ class PostgreSQLLogicalReplication(Object):
             logger.error(f"Logical replication validation: {message}")
         self.state.application.data["logical-replication-validation"] = "error"
         blocked_message = status_msg or LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS
+        # Persist the exact message: the composition root's status gate re-sets the
+        # unit status on update-status and must surface THIS text, not a generic one
+        # (canonical/postgresql-k8s-operator#1052 follow-up).
+        self.state.application.data["logical-replication-validation-status-message"] = (
+            blocked_message
+        )
         self.charm.set_unit_status(BlockedStatus(blocked_message))
         return False
 
