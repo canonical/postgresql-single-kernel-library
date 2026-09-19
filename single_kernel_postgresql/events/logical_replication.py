@@ -477,24 +477,45 @@ class PostgreSQLLogicalReplication(Object):
             if json.loads(relation.data[self.model.app].get("errors", "[]")):
                 self._process_offer(relation)
 
+    def _current_publisher_error(self) -> str | None:
+        """Return the publisher's first CURRENT error, or None.
+
+        Mirrors _check_publisher_errors() staleness semantics: errors only
+        count when the relation request matches the configured request and
+        the error is relevant to it. Otherwise the publisher simply hasn't
+        reprocessed the new request yet and its errors are stale.
+        """
+        relation = self.model.get_relation(LOGICAL_REPLICATION_RELATION)
+        if not relation:
+            return None
+        subscription_request = json.loads(
+            self.state.config.logical_replication_subscription_request or "{}"
+        )
+        current_relation_request = json.loads(
+            relation.data[self.model.app].get("subscription-request", "{}")
+        )
+        if current_relation_request != subscription_request:
+            return None
+        publisher_errors = json.loads(relation.data[relation.app].get("errors", "[]"))
+        relevant_errors = [
+            error
+            for error in publisher_errors
+            if self._is_error_relevant_to_request(error, subscription_request)
+        ]
+        return relevant_errors[0] if relevant_errors else None
+
     def has_remote_publisher_errors(self) -> bool:
-        """Check if remote publisher in logical-replication relation has any errors."""
-        return bool(
-            relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION)
-        ) and json.loads(relation.data[relation.app].get("errors", "[]"))
+        """Check if the remote publisher has any errors for the current request."""
+        return self._current_publisher_error() is not None
 
     def remote_publisher_error_message(self) -> str | None:
-        """Return the remote publisher's first error verbatim, if any.
+        """Return the remote publisher's first current error verbatim, if any.
 
         The composition-root status gate surfaces this so the user sees the
         publisher's exact complaint (e.g. "circular replication detected for
         tables public.users in database testdb") instead of a generic one.
         """
-        if relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION):
-            errors = json.loads(relation.data[relation.app].get("errors", "[]"))
-            if errors:
-                return errors[0]
-        return None
+        return self._current_publisher_error()
 
     def _apply_updated_subscription_request(self) -> None:
         if not (relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION)):
