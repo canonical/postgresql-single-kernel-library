@@ -25,6 +25,7 @@ from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     CANNOT_RESTORE_PITR,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
+    FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
     STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE,
 )
 from single_kernel_postgresql.workload.base import BackupConfig
@@ -122,33 +123,19 @@ def test_execute_pgbackrest_uses_config_flag_only_on_vm(backup_manager, substrat
     assert "stanza-create" in command
 
 
-def test_k8s_render_writes_default_configuration_file(backup_manager, substrate):
+def test_k8s_render_writes_default_configuration_file(harness, backup_manager, substrate):
     """The K8s render targets /etc/pgbackrest.conf; a None conf_path must not leak."""
     if substrate != "k8s":
         pytest.skip("K8s renders to the default location")
     backup_manager.workload.root = Path("/")
     backup_manager.workload.write_text = MagicMock()
     backup_manager.workload.service_exists = MagicMock(return_value=True)
-    s3_params = (
-        {
-            "bucket": "b",
-            "access-key": "k",
-            "secret-key": "s",
-            "endpoint": "https://s3.amazonaws.com",
-            "s3-uri-style": "host",
-            "path": "",
-            "delete-older-than-days": "9999999",
-        },
-        [],
+    rel_id = harness.add_relation(S3_RELATION_NAME, "s3-integrator")
+    harness.update_relation_data(
+        rel_id, "s3-integrator", {"bucket": "b", "access-key": "k", "secret-key": "s"}
     )
-    with (
-        patch.object(
-            BackupManager, "_tls_ca_chain_filename", new_callable=PropertyMock, return_value=""
-        ),
-        patch(
-            "single_kernel_postgresql.core.s3.S3ConnectionInfo.retrieve_s3_parameters",
-            return_value=s3_params,
-        ),
+    with patch.object(
+        BackupManager, "_tls_ca_chain_filename", new_callable=PropertyMock, return_value=""
     ):
         assert backup_manager._render_pgbackrest_conf_file() is True
         written = [c.args[1] for c in backup_manager.workload.write_text.call_args_list]
@@ -170,6 +157,36 @@ def test_initialise_stanza_refused_when_blocked_without_s3_message(harness, back
     harness.model.unit.status = BlockedStatus("blocked")
     assert backup_manager._initialise_stanza() is False
     assert "stanza" not in harness.get_relation_data(rel_id, harness.charm.unit.name)
+
+
+def test_initialise_stanza_proceeds_when_blocked_with_s3_message(harness, backup_manager):
+    """A unit blocked on an S3 message must still re-initialise the stanza.
+
+    The events layer clears the s3-initialization-block-message peer field
+    before calling _initialise_stanza, so the gate must consult the LIVE unit
+    status message (the charms gate on self.unit.status.message) — otherwise
+    the recovery after fixing the S3 settings deadlocks: the unit stays
+    blocked with the stale message forever (observed on
+    test_invalid_config_and_recovery_after_fixing_it CI runs).
+    """
+    harness.model.unit.status = BlockedStatus(FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE)
+    _mock_run_cmd(backup_manager)
+    assert backup_manager._initialise_stanza() is True
+
+
+def test_check_stanza_refreshes_primary_status_on_success(harness, backup_manager):
+    """After a successful stanza check the charm recomputes the unit status.
+
+    A unit blocked with a stale S3 failure message only unblocks when the
+    status is recomputed after the check succeeds (the charms call
+    _set_primary_status_message here); the blocked unit early-exits
+    update-status, so nothing else would clear the stale message.
+    """
+    harness.model.unit.status = BlockedStatus(ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE)
+    _mock_run_cmd(backup_manager)
+    backup_manager.refresh_primary_status = MagicMock()
+    assert backup_manager.check_stanza() is True
+    backup_manager.refresh_primary_status.assert_called_once_with()
 
 
 def test_check_stanza_writes_done_marker_on_non_leader(harness, backup_manager):
@@ -267,14 +284,14 @@ def _fake_info_payload():
     ])
 
 
-def test_list_backups_parses_backup_ids(backup_manager):
+def testget_backups_parses_backup_ids(backup_manager):
     _mock_run_cmd(backup_manager, stdout=_fake_info_payload())
     backups = backup_manager.get_backups(show_failed=False)
     assert list(backups) == ["2024-01-01T10:10:10Z"]
     assert backups["2024-01-01T10:10:10Z"][1] == "1"
 
 
-def test_list_backups_raises_list_backups_error_on_vm_failure(backup_manager, substrate):
+def testget_backups_raisesget_backups_error_on_vm_failure(backup_manager, substrate):
     if substrate != "vm":
         pytest.skip("ListBackupsError branch is VM-only")
     _mock_run_cmd(backup_manager, return_code=1, stderr="ERROR: boom")
@@ -282,7 +299,7 @@ def test_list_backups_raises_list_backups_error_on_vm_failure(backup_manager, su
         backup_manager.get_backups(show_failed=False)
 
 
-def test_generate_backup_list_output_includes_header_and_row(harness, backup_manager):
+def testgenerate_backup_list_output_includes_header_and_row(harness, backup_manager):
     _mock_run_cmd(backup_manager, stdout=_fake_info_payload())
     backup_manager.get_timelines = MagicMock(return_value={})
     rel_id = harness.add_relation(S3_RELATION_NAME, "s3-integrator")
@@ -340,6 +357,34 @@ def test_initialise_s3_repository_rejects_foreign_repository(harness, backup_man
         harness.charm.state.application.s3_initialization_block_message
         == ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE
     )
+
+
+def test_s3_initialization_failure_refreshes_leader_status(harness, backup_manager):
+    """The leader's unit status must carry the block message in-hook.
+
+    The 16/edge charms refreshed the primary status inside
+    ``_s3_initialization_set_failure``; the library port dropped that, and a
+    blocked unit early-exits update-status and peer-relation-changed, so the
+    message never surfaced (test_backups_gcp CI regression).
+    """
+    with harness.hooks_disabled():
+        harness.set_leader()
+    backup_manager.set_unit_status = MagicMock()
+    backup_manager._s3_initialization_set_failure(FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE)
+    backup_manager.set_unit_status.assert_called_once_with(
+        BlockedStatus(FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE)
+    )
+    assert (
+        harness.charm.state.application.s3_initialization_block_message
+        == FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE
+    )
+
+
+def test_s3_initialization_failure_non_leader_writes_unit_databag_only(backup_manager):
+    """Non-leader units record the failure without touching the unit status."""
+    backup_manager.set_unit_status = MagicMock()
+    backup_manager._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
+    backup_manager.set_unit_status.assert_not_called()
 
 
 def test_clear_s3_state_clears_markers(backup_manager, substrate):
