@@ -652,24 +652,18 @@ class RestoreManager(BaseManager):
         replan's ``ChangeError`` escapes through ``_was_restore_successful``
         and the unit stays in ``restoring backup`` forever, because the
         restoring-backup flags are only cleared after the replan. Free the
-        pgBackRest service ports and retry once; if it still fails, leave the
-        reconciliation to the next hook instead of crashing it.
+        pgBackRest service ports before the replan and retry once on failure;
+        if it still fails, leave the reconciliation to the next hook instead
+        of crashing it.
         """
+        self._stop_pgbackrest_services()
         try:
             self._update_pebble_layers()
         except ChangeError:
             logger.warning(
                 "Post-restore pebble replan failed; stopping pgBackRest services and retrying"
             )
-            for service in (
-                K8S_PGBACK_REST_SERVER_SERVICE_NAME,
-                K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
-            ):
-                try:
-                    self.workload.stop_service(service)
-                # Best-effort port release; a stale service may not be pebble-managed.
-                except Exception as e:
-                    logger.debug(f"Failed to stop {service}: {e!s}")
+            self._stop_pgbackrest_services()
             try:
                 self._update_pebble_layers()
             except ChangeError:
@@ -677,3 +671,15 @@ class RestoreManager(BaseManager):
                     "Post-restore pebble replan failed again; deferring reconciliation"
                     " to the next hook"
                 )
+
+    def _stop_pgbackrest_services(self) -> None:
+        """Best-effort stop of the pgBackRest services on the K8s substrate."""
+        for service in (
+            K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+            K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
+        ):
+            try:
+                self.workload.stop_service(service)
+            # Best-effort port release; a stale service may not be pebble-managed.
+            except Exception as e:
+                logger.debug(f"Failed to stop {service}: {e!s}")
