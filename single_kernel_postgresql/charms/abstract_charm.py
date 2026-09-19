@@ -10,6 +10,8 @@ from ops.charm import CharmBase
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
+from single_kernel_postgresql.events.ldap import LDAP
+from single_kernel_postgresql.events.logical_replication import PostgreSQLLogicalReplication
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
@@ -40,6 +42,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         # TLS manager so the manager can constructor-inject them for its live-fetch getters.
         self.tls = TLS(self, self.state)
 
+        # LDAP events handler owns the ldap requirer relation and the auth parameters
+        # the config manager renders into the Patroni hba section.
+        self.ldap = LDAP(self, self.state)
+
         # Managers
         self.tls_manager = TLSManager(
             state=self.state,
@@ -62,15 +68,21 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
         )
 
+        # Logical replication handler owns the two logical-replication relations; the
+        # config manager reads its published slots for the Patroni render and API sync.
+        self.logical_replication = PostgreSQLLogicalReplication(self, self.state)
+
         self.config_manager = ConfigManager(
             state=self.state,
             workload=self.workload,
             tls_manager=self.tls_manager,
             patroni_manager=self.patroni_manager,
             database_manager=self.database_manager,
+            ldap_handler=self.ldap,
             resource_provider=self.get_resource_provider,
             request_restart=self.request_restart,
             restart_services=self.restart_services,
+            logical_replication_slots=self.logical_replication.replication_slots,
         )
 
         # Events Handler
@@ -116,7 +128,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
 
     # Charm-side bridges the lib calls back into. request_restart/restart_services are
     # substrate-tangled and stay until their own migration phases; update_config still
-    # supplies the ldap/async/watcher values those phases own; primary_endpoint is the
+    # supplies the async/watcher values those phases own; primary_endpoint is the
     # VM's Patroni-derived primary lookup. set_unit_status routes status writes through
     # the charm_refresh priority gate and stays until the refresh logic itself migrates
     # into the library, at which point the managers own their status writes.
