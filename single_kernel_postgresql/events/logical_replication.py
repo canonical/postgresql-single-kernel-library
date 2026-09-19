@@ -467,6 +467,19 @@ class PostgreSQLLogicalReplication(Object):
             relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION)
         ) and json.loads(relation.data[relation.app].get("errors", "[]"))
 
+    def remote_publisher_error_message(self) -> str | None:
+        """Return the remote publisher's first error verbatim, if any.
+
+        The composition-root status gate surfaces this so the user sees the
+        publisher's exact complaint (e.g. "circular replication detected for
+        tables public.users in database testdb") instead of a generic one.
+        """
+        if relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION):
+            errors = json.loads(relation.data[relation.app].get("errors", "[]"))
+            if errors:
+                return errors[0]
+        return None
+
     def _apply_updated_subscription_request(self) -> None:
         if not (relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION)):
             return
