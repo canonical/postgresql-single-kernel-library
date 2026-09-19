@@ -424,20 +424,33 @@ class PostgreSQLLogicalReplication(Object):
         # This prevents retry_validations() from validating stale config
         self.state.application.data["logical-replication-validation"] = "ongoing"
 
-        # Capture the PREVIOUSLY APPLIED request before validating: the empty-table
+        # Capture the PREVIOUSLY APPLIED request from the peer data: the empty-table
         # check must fire for tables being NEWLY added to the subscription (their
         # local data is stale or absent), while tables already being replicated
         # keep skipping it (canonical/postgresql-k8s-operator#1052;
         # test_pg2_dynamic_error vs test_pg3_extend_subscription).
-        relation = self.model.get_relation(LOGICAL_REPLICATION_RELATION)
-        previous_request = (
-            json.loads(relation.data[self.model.app].get("subscription-request", "{}"))
-            if relation
-            else {}
+        previous_request = json.loads(
+            self.state.application.data.get("logical-replication-applied-request", "{}")
         )
 
-        if self._validate_subscription_request(previous_request):
+        # Push the request to the relation BEFORE validating: the publisher's
+        # replication-chain checks read this request, and the multi-hop circular
+        # detection only works after the round-trip (the chain data lives in the
+        # publisher's publications, which don't exist until it sees a request).
+        # A local validation failure below leaves the request pushed: the
+        # publisher may create publications, but the subscriber's validation gate
+        # and the creation-time check in _on_relation_changed keep the empty-table
+        # guard intact (canonical/postgresql-operator#1085 exact order).
+        if relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION):
+            relation.data[self.model.app]["subscription-request"] = (
+                self.state.config.logical_replication_subscription_request or "{}"
+            )
+
+        if self._validate_subscription_request(previous_request, empty_tables="auto"):
             self._apply_updated_subscription_request()
+            self.state.application.data["logical-replication-applied-request"] = (
+                self.state.config.logical_replication_subscription_request or "{}"
+            )
             # Clear any previous blocked status from validation errors
             self.charm.set_unit_status(ActiveStatus())
         return True
@@ -455,6 +468,9 @@ class PostgreSQLLogicalReplication(Object):
             and self._validate_subscription_request()
         ):
             self._apply_updated_subscription_request()
+            self.state.application.data["logical-replication-applied-request"] = (
+                self.state.config.logical_replication_subscription_request or "{}"
+            )
             # Clear any previous blocked status from validation errors
             self.charm.set_unit_status(ActiveStatus())
         for relation in self.model.relations.get(LOGICAL_REPLICATION_OFFER_RELATION, ()):
@@ -588,6 +604,7 @@ class PostgreSQLLogicalReplication(Object):
         database: str,
         schematable: str,
         previous_request: dict[str, list[str]],
+        empty_tables: str = "enforce",
     ) -> bool:
         """Validate a single table for subscription.
 
@@ -643,11 +660,26 @@ class PostgreSQLLogicalReplication(Object):
         if not already_subscribed and not self.charm.postgresql.is_table_empty(
             database, schema, table
         ):
-            return self._fail_validation(f"table {schematable} in database {database} isn't empty")
+            # "auto" (config-changed validation): the guard only fires for
+            # EXTENSIONS of an already-subscribed database -- the local block
+            # must not preempt the request round-trip the multi-hop circular
+            # detection needs (canonical/postgresql-operator#1085). For NEW
+            # databases the guard is enforced at subscription-creation time
+            # (_on_relation_changed), which still blocks the copy_data
+            # duplication. "enforce" (creation gate, retries, publisher-error
+            # re-validation) always guards.
+            if empty_tables == "enforce" or database in self._subscriptions_info():
+                return self._fail_validation(
+                    f"table {schematable} in database {database} isn't empty"
+                )
 
         return True
 
-    def _validate_subscription_request(self, previous_request: dict[str, list[str]] | None = None) -> bool:
+    def _validate_subscription_request(
+        self,
+        previous_request: dict[str, list[str]] | None = None,
+        empty_tables: str = "enforce",
+    ) -> bool:
         try:
             subscription_request_config = json.loads(
                 self.state.config.logical_replication_subscription_request or "{}"
@@ -661,13 +693,13 @@ class PostgreSQLLogicalReplication(Object):
         if self._check_publisher_errors(relation, subscription_request_config):
             return False
 
-        # The request currently in the relation data is the last APPLIED one
-        # (pushes happen only after a successful validation).
+        # The applied baseline lives in the peer data: the relation data holds the
+        # just-pushed request (pushes happen before validating so the publisher's
+        # chain checks can run), so deriving from it would mark every table as
+        # already subscribed and skip the empty-table guard.
         if previous_request is None:
-            previous_request = (
-                json.loads(relation.data[self.model.app].get("subscription-request", "{}"))
-                if relation
-                else {}
+            previous_request = json.loads(
+                self.state.application.data.get("logical-replication-applied-request", "{}")
             )
 
         for database, schematables in subscription_request_config.items():
@@ -675,7 +707,7 @@ class PostgreSQLLogicalReplication(Object):
                 return self._fail_validation(f"database {database} doesn't exist")
             for schematable in schematables:
                 if not self._validate_table_for_subscription(
-                    relation, database, schematable, previous_request
+                    relation, database, schematable, previous_request, empty_tables
                 ):
                     return False
 
