@@ -1225,7 +1225,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             with connection, connection.cursor() as cursor:
                 cursor.execute(
                     SQL("SELECT pg_create_logical_replication_slot({}, {});").format(
-                        Identifier(slot), Literal(plugin)
+                        Literal(slot), Literal(plugin)
                     )
                 )
         except psycopg2.errors.DuplicateObject:
@@ -1244,7 +1244,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             connection = self._connect_to_database(database=database)
             with connection, connection.cursor() as cursor:
                 cursor.execute(
-                    SQL("SELECT pg_drop_replication_slot({});").format(Identifier(slot))
+                    SQL("SELECT pg_drop_replication_slot({});").format(Literal(slot))
                 )
         except psycopg2.errors.UndefinedObject:
             logger.debug(f"Replication slot {slot} already absent")
