@@ -260,9 +260,7 @@ class PostgreSQLLogicalReplication(Object):
                 )
                 continue
             publication_name = publication["publication-name"]
-            for attempt in Retrying(
-                stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True
-            ):
+            for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True):
                 with attempt:
                     self.charm.postgresql.create_subscription(
                         subscription_name,
@@ -472,18 +470,17 @@ class PostgreSQLLogicalReplication(Object):
         """
         if not self.charm.unit.is_leader() or not self.charm.primary_endpoint:
             return
-        if (
-            self.state.application.data.get("logical-replication-validation") == "error"
-            and self._validate_subscription_request(
-                # Re-validate against the CURRENT config: the blocked request
-                # was already pushed (push-before-validate), so every
-                # configured table counts as in-flight and the empty-table
-                # guard must not re-fire on the retry -- otherwise a mid-flight
-                # blocked extend can never unblock once the local blocker is
-                # fixed (the refresh copies nothing for already-replicated
-                # tables, so no duplication either).
-                json.loads(self.state.config.logical_replication_subscription_request or "{}")
-            )
+        if self.state.application.data.get(
+            "logical-replication-validation"
+        ) == "error" and self._validate_subscription_request(
+            # Re-validate against the CURRENT config: the blocked request
+            # was already pushed (push-before-validate), so every
+            # configured table counts as in-flight and the empty-table
+            # guard must not re-fire on the retry -- otherwise a mid-flight
+            # blocked extend can never unblock once the local blocker is
+            # fixed (the refresh copies nothing for already-replicated
+            # tables, so no duplication either).
+            json.loads(self.state.config.logical_replication_subscription_request or "{}")
         ):
             self._apply_updated_subscription_request()
             # NOTE: no applied-request baseline update here. The retry
@@ -932,9 +929,7 @@ class PostgreSQLLogicalReplication(Object):
         # slot must exist on this publisher before it connects. Patroni only
         # creates the slots: block entries at startup, which the charm cannot
         # rely on mid-flow -- create it here (canonical/postgresql-operator#1085).
-        self.charm.postgresql.create_replication_slot(
-            slot_name, database, plugin="pgoutput"
-        )
+        self.charm.postgresql.create_replication_slot(slot_name, database, plugin="pgoutput")
         publications[database] = {
             "publication-name": publication_name,
             "replication-slot-name": slot_name,

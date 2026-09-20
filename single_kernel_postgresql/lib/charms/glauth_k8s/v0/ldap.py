@@ -123,9 +123,10 @@ LDAP related information in order to connect and authenticate to the LDAP server
 """
 
 import json
+from collections.abc import Callable
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal, Optional, Union
 
 import ops
 from ops.charm import (
@@ -178,7 +179,7 @@ if PYDANTIC_IS_V1:
 
     encoders_config = {}
 
-    def field_serializer(*fields: str, mode: Optional[str] = None) -> Callable:
+    def field_serializer(*fields: str, mode: str | None = None) -> Callable:
         def _field_serializer(f: Callable, *args: Any, **kwargs: Any) -> Callable:
             @wraps(f)
             def wrapper(self: object, *args: Any, **kwargs: Any) -> Any:
@@ -190,7 +191,7 @@ if PYDANTIC_IS_V1:
         return _field_serializer
 
     class ModelCompatibilityMeta(ModelMetaclass):
-        def __init__(self, name: str, bases: Tuple[object], attrs: Dict) -> None:
+        def __init__(self, name: str, bases: tuple[object], attrs: dict) -> None:
             if not hasattr(self, "_encoders"):
                 self._encoders = {}
 
@@ -204,7 +205,7 @@ if PYDANTIC_IS_V1:
             super().__init__(name, bases, attrs)
 
     class BaseModel(BaseModelV1, metaclass=ModelCompatibilityMeta):
-        def model_dump(self, *args: Any, **kwargs: Any) -> Dict:
+        def model_dump(self, *args: Any, **kwargs: Any) -> dict:
             d = self.dict(*args, **kwargs)
             for name, f in self._encoders.items():
                 d[name] = f(self, d[name])
@@ -223,7 +224,7 @@ def leader_unit(func: Callable) -> Callable:
     @wraps(func)
     def wrapper(
         obj: Union["LdapProvider", "LdapRequirer"], *args: Any, **kwargs: Any
-    ) -> Optional[Any]:
+    ) -> Any | None:
         if not obj.unit.is_leader():
             return None
 
@@ -282,14 +283,14 @@ class Secret:
 
 
 class LdapProviderBaseData(BaseModel):
-    urls: List[str] = Field(frozen=True)
-    ldaps_urls: List[str] = Field(frozen=True)
+    urls: list[str] = Field(frozen=True)
+    ldaps_urls: list[str] = Field(frozen=True)
     base_dn: str = Field(frozen=True)
     starttls: StrictBool = Field(frozen=True)
 
     @field_validator("urls", mode="before")
     @classmethod
-    def validate_ldap_urls(cls, vs: List[str] | str) -> List[str]:
+    def validate_ldap_urls(cls, vs: list[str] | str) -> list[str]:
         if isinstance(vs, str):
             vs = json.loads(vs)
             if isinstance(vs, str):
@@ -303,7 +304,7 @@ class LdapProviderBaseData(BaseModel):
 
     @field_validator("ldaps_urls", mode="before")
     @classmethod
-    def validate_ldaps_urls(cls, vs: List[str] | str) -> List[str]:
+    def validate_ldaps_urls(cls, vs: list[str] | str) -> list[str]:
         if isinstance(vs, str):
             vs = json.loads(vs)
             if isinstance(vs, str):
@@ -316,7 +317,7 @@ class LdapProviderBaseData(BaseModel):
         return vs
 
     @field_serializer("urls", "ldaps_urls")
-    def serialize_list(self, urls: List[str]) -> str:
+    def serialize_list(self, urls: list[str]) -> str:
         return str(json.dumps(urls))
 
     @field_validator("starttls", mode="before")
@@ -335,7 +336,7 @@ class LdapProviderBaseData(BaseModel):
 class LdapProviderData(LdapProviderBaseData):
     bind_dn: str = Field(frozen=True)
     bind_password: str = Field(exclude=True)
-    bind_password_secret: Optional[str] = None
+    bind_password_secret: str | None = None
     auth_method: Literal["simple"] = Field(frozen=True)
 
 
@@ -351,7 +352,7 @@ class LdapRequestedEvent(RelationEvent):
         super().__init__(handle, relation, relation.app)
 
     @property
-    def data(self) -> Optional[LdapRequirerData]:
+    def data(self) -> LdapRequirerData | None:
         relation_data = self.relation.data.get(self.relation.app)
         return LdapRequirerData(**relation_data) if relation_data else None
 
@@ -383,7 +384,7 @@ class _LdapInterface(Object):
         self._relation_name = relation_name
 
     @property
-    def relations(self) -> List[Relation]:
+    def relations(self) -> list[Relation]:
         """The list of Relation instances associated with this relation_name."""
         return [
             relation
@@ -435,7 +436,7 @@ class LdapProvider(_LdapInterface):
         if secret:
             secret.remove()
 
-    def get_bind_password(self, relation_id: int) -> Optional[str]:
+    def get_bind_password(self, relation_id: int) -> str | None:
         """Retrieve the bind account password for a given integration."""
         try:
             secret = self.charm.model.get_secret(
@@ -447,9 +448,9 @@ class LdapProvider(_LdapInterface):
 
     def update_relations_app_data(
         self,
-        data: Union[LdapProviderBaseData, LdapProviderData],
+        data: LdapProviderBaseData | LdapProviderData,
         /,
-        relation_id: Optional[int] = None,
+        relation_id: int | None = None,
     ) -> None:
         """An API for the provider charm to provide the LDAP related information."""
         if not (relations := self.charm.model.relations.get(self._relation_name)):
@@ -479,7 +480,7 @@ class LdapRequirer(_LdapInterface):
         charm: CharmBase,
         relation_name: str = DEFAULT_RELATION_NAME,
         *,
-        data: Optional[LdapRequirerData] = None,
+        data: LdapRequirerData | None = None,
     ) -> None:
         super().__init__(charm, relation_name)
 
@@ -519,7 +520,7 @@ class LdapRequirer(_LdapInterface):
         """Handle the event emitted when the LDAP integration is broken."""
         self.on.ldap_unavailable.emit(event.relation)
 
-    def _load_provider_data(self, provider_data: dict) -> Optional[LdapProviderData]:
+    def _load_provider_data(self, provider_data: dict) -> LdapProviderData | None:
         try:
             secret_id = provider_data.get("bind_password_secret")
             secret = self.charm.model.get_secret(id=secret_id)
@@ -531,9 +532,9 @@ class LdapRequirer(_LdapInterface):
     def consume_ldap_relation_data(
         self,
         /,
-        relation: Optional[Relation] = None,
-        relation_id: Optional[int] = None,
-    ) -> Optional[LdapProviderData]:
+        relation: Relation | None = None,
+        relation_id: int | None = None,
+    ) -> LdapProviderData | None:
         """An API for the requirer charm to consume the LDAP related information in the application databag."""
         if not relation:
             relation = self.charm.model.get_relation(self._relation_name, relation_id)
@@ -553,7 +554,7 @@ class LdapRequirer(_LdapInterface):
 
         return "urls" in relation.data[relation.app] and "bind_dn" in relation.data[relation.app]
 
-    def ready(self, relation_id: Optional[int] = None) -> bool:
+    def ready(self, relation_id: int | None = None) -> bool:
         """Check if the resource has been created.
 
         This function can be used to check if the Provider answered with data in the charm code

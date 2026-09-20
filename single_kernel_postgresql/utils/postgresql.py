@@ -1243,9 +1243,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
         try:
             connection = self._connect_to_database(database=database)
             with connection, connection.cursor() as cursor:
-                cursor.execute(
-                    SQL("SELECT pg_drop_replication_slot({});").format(Literal(slot))
-                )
+                cursor.execute(SQL("SELECT pg_drop_replication_slot({});").format(Literal(slot)))
         except psycopg2.errors.UndefinedObject:
             logger.debug(f"Replication slot {slot} already absent")
         except psycopg2.Error as e:
