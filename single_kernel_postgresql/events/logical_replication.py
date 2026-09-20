@@ -314,7 +314,7 @@ class PostgreSQLLogicalReplication(Object):
             logger.info(
                 f"Dropped subscription {subscription} from database {database} due to relation break"
             )
-        self.state.application.data["logical-replication-subscriptions"] = ""
+        self.state.application.data["logical-replication-subscriptions"] = "{}"
         # Clear the applied-request baseline too: nothing is being replicated
         # anymore, so the next validation must treat every configured table as
         # newly added -- the empty-table guard then blocks re-subscribing onto
@@ -789,7 +789,7 @@ class PostgreSQLLogicalReplication(Object):
 
     def _subscriptions_info(self) -> dict[str, str]:
         for subscriptions_info in json.loads(
-            self.state.application.data.get("logical-replication-subscriptions", "{}")
+            self.state.application.data.get("logical-replication-subscriptions") or "{}"
         ).values():
             return subscriptions_info
         return {}
