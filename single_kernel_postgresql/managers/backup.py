@@ -20,15 +20,14 @@ from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.exceptions import (
+    StanzaOperationError,
+)
 from single_kernel_postgresql.config.literals import (
     BACKUP_USER,
     PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE,
     PGBACKREST_LOG_LEVEL_STDERR,
     PGBACKREST_LOGROTATE_FILE,
-)
-from single_kernel_postgresql.config.exceptions import (
-    BackupRunError,
-    StanzaOperationError,
 )
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
