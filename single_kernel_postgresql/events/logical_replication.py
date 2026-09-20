@@ -457,9 +457,14 @@ class PostgreSQLLogicalReplication(Object):
 
         if self._validate_subscription_request(previous_request, empty_tables="auto"):
             self._apply_updated_subscription_request()
-            self.state.application.data["logical-replication-applied-request"] = (
-                self.state.config.logical_replication_subscription_request or "{}"
-            )
+            # NOTE: no applied-request baseline update here. The retry
+            # re-validates against the configured request (in flight), so
+            # persisting it would mark tables that were never replicated as
+            # already subscribed and silence the creation gate's empty-table
+            # guard on the next relation (the remove/re-integrate
+            # duplication). The baseline only advances in
+            # apply_changed_config, where the previously applied request was
+            # captured before the push.
             # Clear any previous blocked status from validation errors
             self.charm.set_unit_status(ActiveStatus())
         return True
