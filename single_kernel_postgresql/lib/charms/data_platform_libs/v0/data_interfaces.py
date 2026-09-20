@@ -905,19 +905,18 @@ class CachedSecret:
 
     def get_content(self) -> dict[str, str]:
         """Getting cached secret content."""
-        if not self._secret_content:
-            if self.meta:
-                try:
-                    self._secret_content = self.meta.get_content(refresh=True)
-                except (ValueError, ModelError) as err:
-                    # https://bugs.launchpad.net/juju/+bug/2042596
-                    # Only triggered when 'refresh' is set
-                    if isinstance(err, ModelError) and not any(
-                        msg in str(err) for msg in self.KNOWN_MODEL_ERRORS
-                    ):
-                        raise
-                    # Due to: ValueError: Secret owner cannot use refresh=True
-                    self._secret_content = self.meta.get_content()
+        if not self._secret_content and self.meta:
+            try:
+                self._secret_content = self.meta.get_content(refresh=True)
+            except (ValueError, ModelError) as err:
+                # https://bugs.launchpad.net/juju/+bug/2042596
+                # Only triggered when 'refresh' is set
+                if isinstance(err, ModelError) and not any(
+                    msg in str(err) for msg in self.KNOWN_MODEL_ERRORS
+                ):
+                    raise
+                # Due to: ValueError: Secret owner cannot use refresh=True
+                self._secret_content = self.meta.get_content()
         return self._secret_content
 
     def set_content(self, content: dict[str, str]) -> None:
@@ -1725,7 +1724,8 @@ class Data(ABC):
     ) -> str | None:
         """Get a single field from the relation data."""
         return (
-            self.fetch_relation_data([relation_id], [field], relation_name)
+            self
+            .fetch_relation_data([relation_id], [field], relation_name)
             .get(relation_id, {})
             .get(field)
         )
@@ -2120,12 +2120,10 @@ class RequirerData(Data):
             ["username", "password", "entity-name", "entity-password"],
         ).get(relation.id, {})
 
-        return any(
-            [
-                all(bool(data.get(field)) for field in ("username", "password")),
-                all(bool(data.get(field)) for field in ("entity-name",)),
-            ]
-        )
+        return any([
+            all(bool(data.get(field)) for field in ("username", "password")),
+            all(bool(data.get(field)) for field in ("entity-name",)),
+        ])
 
     def _validate_entity_type(self) -> None:
         """Validates the consistency of the provided entity-type and its extra roles."""
@@ -2263,22 +2261,18 @@ class RequirerEventHandlers(EventHandlers):
     def _main_credentials_shared(self, diff: Diff) -> bool:
         """Whether the relation data-bag contains username / password keys."""
         user_secret = self.relation_data._generate_secret_field_name(SECRET_GROUPS.USER)
-        return any(
-            [
-                user_secret in diff.added,
-                "username" in diff.added and "password" in diff.added,
-            ]
-        )
+        return any([
+            user_secret in diff.added,
+            "username" in diff.added and "password" in diff.added,
+        ])
 
     def _entity_credentials_shared(self, diff: Diff) -> bool:
         """Whether the relation data-bag contains rolename / password keys."""
         entity_secret = self.relation_data._generate_secret_field_name(SECRET_GROUPS.ENTITY)
-        return any(
-            [
-                entity_secret in diff.added,
-                "entity-name" in diff.added,
-            ]
-        )
+        return any([
+            entity_secret in diff.added,
+            "entity-name" in diff.added,
+        ])
 
     # Event handlers
 
@@ -3558,9 +3552,7 @@ class DatabaseProviderEventHandlers(ProviderEventHandlers):
         # Emit a database requested event if the setup key (database name)
         # was added to the relation databag, but the entity-type key was not.
         if "database" in diff.added and "entity-type" not in diff.added:
-            self.on.database_requested.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.database_requested.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -3568,9 +3560,7 @@ class DatabaseProviderEventHandlers(ProviderEventHandlers):
         # Emit an entity requested event if the setup key (database name)
         # was added to the relation databag, in addition to the entity-type key.
         if "database" in diff.added and "entity-type" in diff.added:
-            self.on.database_entity_requested.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.database_entity_requested.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -3903,9 +3893,7 @@ class DatabaseRequirerEventHandlers(RequirerEventHandlers):
         if self._main_credentials_shared(diff) and "entity-type" not in app_databag:
             # Emit the default event (the one without an alias).
             logger.info("database created at %s", datetime.now())
-            self.on.database_created.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.database_created.emit(event.relation, app=event.app, unit=event.unit)
 
             # Emit the aliased event (if any).
             self._emit_aliased_event(event, "database_created")
@@ -3917,9 +3905,7 @@ class DatabaseRequirerEventHandlers(RequirerEventHandlers):
         if self._entity_credentials_shared(diff) and "entity-type" in app_databag:
             # Emit the default event (the one without an alias).
             logger.info("entity created at %s", datetime.now())
-            self.on.database_entity_created.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.database_entity_created.emit(event.relation, app=event.app, unit=event.unit)
 
             # Emit the aliased event (if any).
             self._emit_aliased_event(event, "database_entity_created")
@@ -4221,9 +4207,7 @@ class KafkaProviderEventHandlers(ProviderEventHandlers):
         # Emit a topic requested event if the setup key (topic name)
         # was added to the relation databag, but the entity-type key was not.
         if "topic" in diff.added and "entity-type" not in diff.added:
-            self.on.topic_requested.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.topic_requested.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -4231,9 +4215,7 @@ class KafkaProviderEventHandlers(ProviderEventHandlers):
         # Emit an entity requested event if the setup key (topic name)
         # was added to the relation databag, in addition to the entity-type key.
         if "topic" in diff.added and "entity-type" in diff.added:
-            self.on.topic_entity_requested.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.topic_entity_requested.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -4426,9 +4408,7 @@ class KafkaRequirerEventHandlers(RequirerEventHandlers):
         if self._entity_credentials_shared(diff) and "entity-type" in app_databag:
             # Emit the default event (the one without an alias).
             logger.info("entity created at %s", datetime.now())
-            self.on.topic_entity_created.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.topic_entity_created.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -4626,9 +4606,7 @@ class KarapaceProviderEventHandlers(ProviderEventHandlers):
         # Emit a subject requested event if the setup key (subject name)
         # was added to the relation databag, but the entity-type key was not.
         if "subject" in diff.added and "entity-type" not in diff.added:
-            self.on.subject_requested.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.subject_requested.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -4636,9 +4614,7 @@ class KarapaceProviderEventHandlers(ProviderEventHandlers):
         # Emit an entity requested event if the setup key (subject name)
         # was added to the relation databag, in addition to the entity-type key.
         if "subject" in diff.added and "entity-type" in diff.added:
-            self.on.subject_entity_requested.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.subject_entity_requested.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -4769,9 +4745,7 @@ class KarapaceRequirerEventHandlers(RequirerEventHandlers):
         if self._main_credentials_shared(diff) and "entity-type" not in app_databag:
             # Emit the default event (the one without an alias).
             logger.info("subject ACL created at %s", datetime.now())
-            self.on.subject_allowed.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.subject_allowed.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -4779,9 +4753,7 @@ class KarapaceRequirerEventHandlers(RequirerEventHandlers):
         if self._entity_credentials_shared(diff) and "entity-type" in app_databag:
             # Emit the default event (the one without an alias).
             logger.info("entity created at %s", datetime.now())
-            self.on.subject_entity_created.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.subject_entity_created.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -4913,9 +4885,7 @@ class KafkaConnectProviderEventHandlers(EventHandlers):
         diff = self._diff(event)
 
         if "plugin-url" in diff.added:
-            self.on.integration_requested.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.integration_requested.emit(event.relation, app=event.app, unit=event.unit)
 
     def _on_secret_changed_event(self, event: SecretChangedEvent):
         """Event notifying about a new value of a secret."""
@@ -5004,9 +4974,7 @@ class KafkaConnectRequirerEventHandlers(RequirerEventHandlers):
 
         if self._main_credentials_shared(diff):
             logger.info("integration created at %s", datetime.now())
-            self.on.integration_created.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.integration_created.emit(event.relation, app=event.app, unit=event.unit)
             return
 
         # Emit an endpoints changed event if the provider added or
@@ -5182,9 +5150,7 @@ class OpenSearchProvidesEventHandlers(ProviderEventHandlers):
         # Emit an index requested event if the setup key (index name)
         # was added to the relation databag, but the entity-type key was not.
         if "index" in diff.added and "entity-type" not in diff.added:
-            self.on.index_requested.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.index_requested.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -5192,9 +5158,7 @@ class OpenSearchProvidesEventHandlers(ProviderEventHandlers):
         # Emit an entity requested event if the setup key (index name)
         # was added to the relation databag, in addition to the entity-type key.
         if "index" in diff.added and "entity-type" in diff.added:
-            self.on.index_entity_requested.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.index_entity_requested.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -5318,9 +5282,7 @@ class OpenSearchRequiresEventHandlers(RequirerEventHandlers):
                 remote_unit = unit
 
         logger.info("authentication updated")
-        self.on.authentication_updated.emit(
-            relation, app=relation.app, unit=remote_unit
-        )
+        self.on.authentication_updated.emit(relation, app=relation.app, unit=remote_unit)
 
     def _on_relation_changed_event(self, event: RelationChangedEvent) -> None:
         """Event emitted when the OpenSearch relation has changed.
@@ -5341,9 +5303,7 @@ class OpenSearchRequiresEventHandlers(RequirerEventHandlers):
         updates = {"username", "password", "tls", "tls-ca", secret_field_user, secret_field_tls}
         if len(set(diff._asdict().keys()) - updates) < len(diff):
             logger.info("authentication updated at: %s", datetime.now())
-            self.on.authentication_updated.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.authentication_updated.emit(event.relation, app=event.app, unit=event.unit)
 
         app_databag = get_encoded_dict(event.relation, event.app, "data")
         if app_databag is None:
@@ -5362,9 +5322,7 @@ class OpenSearchRequiresEventHandlers(RequirerEventHandlers):
         if self._entity_credentials_shared(diff) and "entity-type" in app_databag:
             # Emit the default event (the one without an alias).
             logger.info("entity created at: %s", datetime.now())
-            self.on.index_entity_created.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.index_entity_created.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -5374,9 +5332,7 @@ class OpenSearchRequiresEventHandlers(RequirerEventHandlers):
         if "endpoints" in diff.added or "endpoints" in diff.changed:
             # Emit the default event (the one without an alias).
             logger.info("endpoints changed on %s", datetime.now())
-            self.on.endpoints_changed.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.endpoints_changed.emit(event.relation, app=event.app, unit=event.unit)
 
             # To avoid unnecessary application restarts do not trigger other events.
             return
@@ -5693,9 +5649,7 @@ class EtcdRequirerEventHandlers(RequirerEventHandlers):
         if "endpoints" in diff.added or "endpoints" in diff.changed:
             # Emit the default event (the one without an alias).
             logger.info("endpoints changed on %s", datetime.now())
-            self.on.endpoints_changed.emit(
-                event.relation, app=event.app, unit=event.unit
-            )
+            self.on.endpoints_changed.emit(event.relation, app=event.app, unit=event.unit)
 
         if (
             secret_field_tls in diff.added
