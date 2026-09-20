@@ -23,10 +23,7 @@ from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.config.literals import (
-    PATRONICTL_REMOVE_CONFIRMATION,
     POSTGRESQL_SNAP_NAME,
-    VM_ARCHIVE_PATH,
-    VM_PATRONICTL_EXECUTABLE,
     VM_PGBACKREST_SERVICE_NAME,
 )
 from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
