@@ -87,6 +87,5 @@ class BackupRunError(PostgreSQLBaseError):
     """Raised when a pgBackRest backup run fails and the logs were uploaded."""
 
 
-
 class ListBackupsError(PostgreSQLBaseError):
     """Raised when pgBackRest fails to list backups."""
