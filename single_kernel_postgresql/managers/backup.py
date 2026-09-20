@@ -9,7 +9,7 @@ K8s charms). Event orchestration (defer/fail/status writes) stays in the events
 layer; this manager raises or returns values only.
 """
 
-import importlib
+import importlib.resources
 import logging
 import shlex
 from collections.abc import Callable
@@ -244,7 +244,7 @@ class BackupManager(BaseManager):
             .joinpath(self.state.substrate.name.lower(), "pgbackrest.conf.j2")
             .read_text()
         )
-        cpu_count, _ = self.workload.get_available_resources()
+        cpu_count, _ = self.resource_provider.get_available_resources()
         rendered = template.render(
             enable_tls=len(self._peer_members) > 0,
             peer_endpoints=self._peer_members,
@@ -463,11 +463,6 @@ class BackupManager(BaseManager):
         Returns:
             a boolean indicating whether the operation succeeded.
         """
-        # Ignore this operation if backups settings aren't ok.
-        are_backup_settings_ok, _ = self._are_backup_settings_ok()
-        if not are_backup_settings_ok:
-            return True
-
         # Update pgBackRest configuration (to update the TLS settings).
         if not self._render_pgbackrest_conf_file():
             return False
