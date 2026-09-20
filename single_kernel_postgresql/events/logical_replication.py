@@ -178,6 +178,9 @@ class PostgreSQLLogicalReplication(Object):
                 pass
             for database, publication in relation_resources["publications"].items():
                 self.charm.postgresql.drop_publication(database, publication["publication-name"])
+                self.charm.postgresql.drop_replication_slot(
+                    publication["replication-slot-name"], database
+                )
             del published_resources[relation_id]
             self.state.application.data["logical-replication-published-resources"] = json.dumps(
                 published_resources
@@ -905,9 +908,17 @@ class PostgreSQLLogicalReplication(Object):
             f"Creating new publication {publication_name} for tables {', '.join(tables)} in database {database} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
         )
         self.charm.postgresql.create_publication(database, publication_name, tables)
+        slot_name = self._replication_slot_name(relation.id, database)
+        # The subscriber creates its subscription with create_slot=false, so the
+        # slot must exist on this publisher before it connects. Patroni only
+        # creates the slots: block entries at startup, which the charm cannot
+        # rely on mid-flow -- create it here (canonical/postgresql-operator#1085).
+        self.charm.postgresql.create_replication_slot(
+            slot_name, database, plugin="pgoutput"
+        )
         publications[database] = {
             "publication-name": publication_name,
-            "replication-slot-name": self._replication_slot_name(relation.id, database),
+            "replication-slot-name": slot_name,
             "tables": tables,
             "replication-chains": self._build_replication_chains(database, tables),
         }
@@ -1194,13 +1205,14 @@ class PostgreSQLLogicalReplication(Object):
 
         Returns: dictionary in <slot>: <database> format.
         """
-        return {
+        raw = self.state.application.data.get("logical-replication-published-resources", "{}")
+        slots = {
             publication["replication-slot-name"]: database
-            for resources in json.loads(
-                self.state.application.data.get("logical-replication-published-resources", "{}")
-            ).values()
+            for resources in json.loads(raw).values()
             for database, publication in resources["publications"].items()
         }
+        logger.debug(f"DEBUG-SLOTS raw={raw} resolved={slots}")
+        return slots
 
     def _create_user(self, relation_id: int) -> tuple[str, str]:
         user = f"logical_replication_relation_{relation_id}"
