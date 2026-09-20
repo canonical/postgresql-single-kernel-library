@@ -315,6 +315,12 @@ class PostgreSQLLogicalReplication(Object):
                 f"Dropped subscription {subscription} from database {database} due to relation break"
             )
         self.state.application.data["logical-replication-subscriptions"] = ""
+        # Clear the applied-request baseline too: nothing is being replicated
+        # anymore, so the next validation must treat every configured table as
+        # newly added -- the empty-table guard then blocks re-subscribing onto
+        # a non-empty table (the original remove/re-integrate semantics;
+        # canonical/postgresql-k8s-operator#982 comment 3019811325).
+        self.state.application.data["logical-replication-applied-request"] = "{}"
 
     # endregion
 
