@@ -25,6 +25,7 @@ import pwd
 from datetime import UTC, datetime
 
 import psycopg2
+import psycopg2.errors
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
 
@@ -144,6 +145,10 @@ class PostgreSQLAlterPublicationError(PostgreSQLBaseError):
 
 class PostgreSQLDropPublicationError(PostgreSQLBaseError):
     """Exception raised when dropping PostgreSQL publication."""
+
+
+class PostgreSQLCreateReplicationSlotError(PostgreSQLBaseError):
+    """Exception raised when creating a logical replication slot."""
 
 
 class PostgreSQLCreateSubscriptionError(PostgreSQLBaseError):
@@ -1209,6 +1214,43 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
         except psycopg2.Error as e:
             logger.error(f"Failed to drop Postgresql publication: {e}")
             raise PostgreSQLDropPublicationError() from e
+        finally:
+            if connection:
+                connection.close()
+
+    def create_replication_slot(self, slot: str, database: str, plugin: str = "pgoutput") -> None:
+        """Create a logical replication slot on this (primary) cluster."""
+        connection = None
+        try:
+            connection = self._connect_to_database(database=database)
+            with connection, connection.cursor() as cursor:
+                cursor.execute(
+                    SQL("SELECT pg_create_logical_replication_slot({}, {});").format(
+                        Identifier(slot), Literal(plugin)
+                    )
+                )
+        except psycopg2.errors.DuplicateObject:
+            logger.debug(f"Replication slot {slot} already exists")
+        except psycopg2.Error as e:
+            logger.error(f"Failed to create replication slot {slot}: {e}")
+            raise PostgreSQLCreateReplicationSlotError() from e
+        finally:
+            if connection:
+                connection.close()
+
+    def drop_replication_slot(self, slot: str, database: str) -> None:
+        """Drop a logical replication slot, tolerating its absence."""
+        connection = None
+        try:
+            connection = self._connect_to_database(database=database)
+            with connection, connection.cursor() as cursor:
+                cursor.execute(
+                    SQL("SELECT pg_drop_replication_slot({});").format(Identifier(slot))
+                )
+        except psycopg2.errors.UndefinedObject:
+            logger.debug(f"Replication slot {slot} already absent")
+        except psycopg2.Error as e:
+            logger.error(f"Failed to drop replication slot {slot}: {e}")
         finally:
             if connection:
                 connection.close()
