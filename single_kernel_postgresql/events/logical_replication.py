@@ -286,6 +286,12 @@ class PostgreSQLLogicalReplication(Object):
         self.state.application.data["logical-replication-subscriptions"] = json.dumps({
             str(event.relation.id): subscriptions
         })
+        # Live replication state changed here: a database got a subscription
+        # (creation loop above) or lost one (drop loop above). Re-derive the
+        # baseline so the empty-table guard stays armed exactly for tables not
+        # replicated by a live subscription; this advances the baseline for
+        # databases subscribed via the creation gate.
+        self._persist_applied_request_baseline()
 
     def _on_relation_departed(self, event: RelationDepartedEvent) -> None:
         if event.departing_unit == self.charm.unit and self.state.peer_relation is not None:
@@ -455,9 +461,15 @@ class PostgreSQLLogicalReplication(Object):
 
         if self._validate_subscription_request(previous_request, empty_tables="auto"):
             self._apply_updated_subscription_request()
-            self.state.application.data["logical-replication-applied-request"] = (
-                self.state.config.logical_replication_subscription_request or "{}"
-            )
+            # The baseline means "replicated by a LIVE subscription". A
+            # newly-added database has no subscription yet (creation is
+            # deferred to _on_relation_changed); persisting its tables here
+            # would make the creation gate see them as already-subscribed
+            # (previous=None re-derives from this peer key), skip the
+            # empty-table guard and re-subscribe with copy_data=true over a
+            # non-empty table (the config-cycle duplication;
+            # canonical/postgresql-k8s-operator#982 comment 3019811325).
+            self._persist_applied_request_baseline()
             # Clear any previous blocked status from validation errors
             self.charm.set_unit_status(ActiveStatus())
         return True
@@ -557,6 +569,26 @@ class PostgreSQLLogicalReplication(Object):
             del subscriptions[database]
         self.state.application.data["logical-replication-subscriptions"] = json.dumps({
             str(relation.id): subscriptions
+        })
+
+    def _persist_applied_request_baseline(self) -> None:
+        """Persist logical-replication-applied-request = configured ∩ live.
+
+        The baseline is the "already-subscribed" comparison point for the
+        empty-table guard (_validate_table_for_subscription). It may only
+        contain databases replicated by a live subscription: a database whose
+        subscription does not exist yet is created later by the creation gate,
+        which re-derives `previous` from this peer key — a phantom entry would
+        silence the guard and duplicate non-empty tables with copy_data=true.
+        """
+        applied_request = json.loads(
+            self.state.config.logical_replication_subscription_request or "{}"
+        )
+        live_databases = self._subscriptions_info()
+        self.state.application.data["logical-replication-applied-request"] = json.dumps({
+            database: tables
+            for database, tables in applied_request.items()
+            if database in live_databases
         })
 
     def _is_error_relevant_to_request(
