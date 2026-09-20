@@ -474,7 +474,16 @@ class PostgreSQLLogicalReplication(Object):
             return
         if (
             self.state.application.data.get("logical-replication-validation") == "error"
-            and self._validate_subscription_request()
+            and self._validate_subscription_request(
+                # Re-validate against the CURRENT config: the blocked request
+                # was already pushed (push-before-validate), so every
+                # configured table counts as in-flight and the empty-table
+                # guard must not re-fire on the retry -- otherwise a mid-flight
+                # blocked extend can never unblock once the local blocker is
+                # fixed (the refresh copies nothing for already-replicated
+                # tables, so no duplication either).
+                json.loads(self.state.config.logical_replication_subscription_request or "{}")
+            )
         ):
             self._apply_updated_subscription_request()
             self.state.application.data["logical-replication-applied-request"] = (
