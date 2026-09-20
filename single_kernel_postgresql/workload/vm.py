@@ -9,7 +9,6 @@ import pathlib
 import platform
 import re
 import shlex
-import shutil
 import subprocess
 import tempfile
 from collections.abc import Generator
@@ -24,13 +23,11 @@ from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.config.literals import (
-    PATRONICTL_REMOVE_CONFIRMATION,
     POSTGRESQL_SNAP_NAME,
-    VM_ARCHIVE_PATH,
-    VM_PATRONICTL_EXECUTABLE,
     VM_PGBACKREST_SERVICE_NAME,
 )
-from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
+from single_kernel_postgresql.workload.base import BaseWorkload, CommandResult
+from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.vm import VMPaths
 
 logger = logging.getLogger(__name__)
@@ -167,22 +164,6 @@ class VMWorkload(BaseWorkload):
             logger.debug(f"Failed to check Patroni service: {e}")
             return False
 
-    @property
-    def backup_config(self) -> BackupConfig:
-        """Return the VM pgBackRest invocation settings."""
-        return BackupConfig(
-            executable="charmed-postgresql.pgbackrest",
-            conf_path=str(self.paths.pgbackrest_conf),
-            # Matches the VM charm: the versioned PostgreSQL binaries live under the
-            # snap's /snap mount point, not the writable /var/snap tree.
-            bin_path="/snap/charmed-postgresql/current/usr/lib/postgresql",
-            logs_path=str(self.paths.pgbackrest_logs),
-            service=VM_PGBACKREST_SERVICE_NAME,
-            storage_path=str(self.paths.snap_common),
-            tls_ca_chain_path=str(self.paths.pgbackrest_conf / "pgbackrest-tls-ca-chain.crt"),
-            extra_args=(),
-        )
-
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service is running.
 
@@ -270,14 +251,6 @@ class VMWorkload(BaseWorkload):
             return
         logger.warning(f"Unable to find {service} pid. Skipping reload")
 
-    def service_exists(self, service: str) -> bool:
-        """Whether the snap declares the named service."""
-        try:
-            services = snap.SnapCache()["charmed-postgresql"].services
-        except snap.SnapError:
-            return False
-        return service in services
-
     def service_is_running(self, service: str) -> bool:
         """Check whether a named snap service is running.
 
@@ -289,52 +262,6 @@ class VMWorkload(BaseWorkload):
         except (snap.SnapError, snap.SnapNotFoundError):
             return False
         return services.get(service, {}).get("active", False)
-
-    def empty_data_files(self) -> bool:
-        """Empty the PostgreSQL data directory in preparation of backup restore."""
-        paths = [
-            self.paths.snap_common / VM_ARCHIVE_PATH / self.paths.versioned_path,
-            self.paths.data,
-            self.paths.wal,
-            self.paths.temp,
-        ]
-        path = None
-        try:
-            for path in paths:
-                path_object = Path(str(path))
-                if path_object.exists() and path_object.is_dir():
-                    for item in os.listdir(str(path)):
-                        item_path = os.path.join(str(path), item)
-                        if os.path.isfile(item_path) or os.path.islink(item_path):
-                            os.remove(item_path)
-                        elif os.path.isdir(item_path):
-                            shutil.rmtree(item_path)
-        except OSError as e:
-            logger.warning(f"Failed to remove contents from {path} with error: {e!s}")
-            return False
-
-        return True
-
-    def remove_cluster_info(
-        self, cluster_name: str, namespace: str | None = None
-    ) -> CommandResult:
-        """Remove previous cluster information to make it possible to initialise a new cluster.
-
-        Args:
-            cluster_name: the Patroni cluster name.
-            namespace: unused on VM (the cluster is removed via patronictl).
-        """
-        return self.run_cmd(
-            shlex.join([
-                VM_PATRONICTL_EXECUTABLE,
-                "-c",
-                str(self.paths.patroni_config),
-                "remove",
-                cluster_name,
-            ]),
-            stdin=f"{cluster_name}\n{PATRONICTL_REMOVE_CONFIRMATION}",
-            timeout=10,
-        )
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
@@ -390,7 +317,7 @@ class VMWorkload(BaseWorkload):
         return "_daemon_"
 
     @property
-    def paths(self) -> VMPaths:
+    def paths(self) -> BasePaths:
         """Return Workload's paths."""
         return VMPaths(self.root, self.get_postgresql_version().split(".")[0])
 
