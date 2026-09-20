@@ -120,7 +120,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
                 "relation_access",
             }:
                 user_database_map.update({USER: "all", "replication": "all", "rewind": "all"})
-        except Exception as e:  # noqa: BLE001 - status hook must not crash the render
+        except Exception as e:
             logger.debug(f"Failed to build the relations user databases map: {e}")
             user_database_map.update({USER: "all", "replication": "all", "rewind": "all"})
         return user_database_map
