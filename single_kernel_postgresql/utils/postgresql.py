@@ -1232,11 +1232,9 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             with connection, connection.cursor() as cursor:
                 cursor.execute(
                     SQL(
-                        "SELECT r.schemaname, r.tablename FROM pg_subscription_rel s "
-                        "JOIN pg_class c ON c.oid = s.relid "
-                        "JOIN pg_namespace n ON n.oid = c.relnamespace "
-                        "JOIN pg_tables r ON r.tablename = c.relname AND r.schemaname = n.nspname "
-                        "WHERE s.subid = (SELECT oid FROM pg_subscription WHERE subname = {});"
+                        "SELECT schemaname, tablename FROM pg_publication_tables "
+                        "WHERE pubname = ANY (SELECT unnest(subpublications) FROM pg_subscription "
+                        "WHERE subname = {});"
                     ).format(Literal(subscription))
                 )
                 return {(row[0], row[1]) for row in cursor.fetchall()}
