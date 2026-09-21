@@ -199,9 +199,9 @@ class BackupManager(BaseManager):
         the blocked status message comes from the s3-initialization-block-message
         peer field (see the charms' _set_primary_status_message).
         """
-        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES or (
-            self.state.peer.s3_initialization_block_message in S3_BLOCK_MESSAGES
-        )
+        # The charms' status builder reads only the app-databag field; the unit
+        # field exists for the replica-primary flow but is never read back.
+        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES
 
     def _s3_initialization_set_failure(self, block_message: str) -> None:
         """Record a failed s3 initialization with the corresponding block message.
@@ -481,7 +481,7 @@ class BackupManager(BaseManager):
             a boolean indicating whether the operation succeeded.
         """
         # Ignore this operation if backups settings aren't ok.
-        are_backup_settings_ok, _ = self._are_backup_settings_ok()
+        are_backup_settings_ok, _ = self.are_backup_settings_ok()
         if not are_backup_settings_ok:
             return True
 
@@ -521,7 +521,7 @@ class BackupManager(BaseManager):
 
     # -- Backup settings and permissions -----------------------------------------
 
-    def _are_backup_settings_ok(self) -> tuple[bool, str]:
+    def are_backup_settings_ok(self) -> tuple[bool, str]:
         """Validates whether backup settings are OK."""
         if self.state.s3_relation is None:
             return (
@@ -560,7 +560,7 @@ class BackupManager(BaseManager):
         if not self.state.application.stanza:
             return False, "Stanza was not initialised"
 
-        return self._are_backup_settings_ok()
+        return self.are_backup_settings_ok()
 
     def _can_initialise_stanza(self) -> bool:
         """Validates whether this unit can initialise a stanza."""
