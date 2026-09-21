@@ -273,7 +273,7 @@ class VMWorkload(BaseWorkload):
     def service_exists(self, service: str) -> bool:
         """Whether the snap declares the named service."""
         try:
-            services = snap.SnapCache()["charmed-postgresql"].services
+            services = snap.SnapCache()[POSTGRESQL_SNAP_NAME].services
         except snap.SnapError:
             return False
         return service in services
