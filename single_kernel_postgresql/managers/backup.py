@@ -3,10 +3,6 @@
 # See LICENSE file for licensing details.
 
 """Manager of PostgreSQL backups via pgBackRest.
-
-Ported from the 16/edge charm backup modules (``src/backups.py`` on the VM and
-K8s charms). Event orchestration (defer/fail/status writes) stays in the events
-layer; this manager raises or returns values only.
 """
 
 import importlib.resources
@@ -1116,9 +1112,6 @@ Stderr:
 
     def initialise_s3_repository(self) -> bool:
         """Initialize the S3 repository after a credentials change (primary path).
-
-        Renamed port of the charms' _on_s3_credential_changed_primary: no event
-        semantics, returns success. The stanza must be cleared before calling.
         """
         self.update_config()
 
@@ -1153,10 +1146,6 @@ Stderr:
 
     def clear_s3_state(self) -> None:
         """Clear the stanza and S3 initialization markers when credentials are gone.
-
-        Renamed port of the charms' _on_s3_credential_gone: no event semantics.
-        The K8s charm also stops the rotate-logs service, kept here as workload
-        I/O. Status refreshes stay with the events layer.
         """
         if self.state.substrate == Substrates.K8S:
             self.workload.stop_service(K8S_ROTATE_LOGS_SERVICE_NAME)
