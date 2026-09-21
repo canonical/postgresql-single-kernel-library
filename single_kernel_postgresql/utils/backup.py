@@ -2,14 +2,6 @@
 # See LICENSE file for licensing details.
 
 """Pure helpers for the pgBackRest backup implementation.
-
-Ported from the 16/edge charm backup modules (``src/backups.py`` on the VM and
-K8s charms); function behavior is byte-equivalent where the charms agree.
-
-The S3 block / standby-cluster message constants live here rather than in
-``config/literals.py`` because this slice does not own that module; the events
-layer (backups-9) imports them from here to map manager results onto unit
-statuses and action failures.
 """
 
 import logging
@@ -24,7 +16,6 @@ from single_kernel_postgresql.config.literals import (
 
 logger = logging.getLogger(__name__)
 
-# S3 initialization block messages, verbatim from the charms. The events layer
 # matches the stored block message against these to tell an S3-caused blocked
 # state apart from any other blocking condition.
 ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE = "the S3 repository has backups from another cluster"
