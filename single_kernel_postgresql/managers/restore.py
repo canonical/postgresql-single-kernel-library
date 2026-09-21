@@ -2,14 +2,6 @@
 # See LICENSE file for licensing details.
 
 """Manager of PostgreSQL backup restores via pgBackRest.
-
-``RestoreManager`` holds the restore-side business logic ported from the charms
-(``src/backups.py`` on both substrates plus the PITR helpers from the charm
-bodies). Validation, timeline/PITR target resolution and the Patroni
-reconfiguration handshake return values instead of writing statuses or deferring
-events; the events layer (``events/backup.py``) maps those results onto action
-results and unit statuses. Repository reads (backups, timelines, nearest
-timeline) are consumed from the constructor-injected ``BackupManager``.
 """
 
 import logging
