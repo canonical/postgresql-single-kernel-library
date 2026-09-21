@@ -238,6 +238,26 @@ class PostgreSQLLogicalReplication(Object):
         for database, publication in publications.items():
             subscription_name = self._subscription_name(event.relation.id, database)
             if database in subscriptions:
+                # The REFRESH path must respect the same empty-table guard as
+                # the creation path: a table added to the request that the
+                # subscription does not already replicate would be copy_data-ed
+                # by REFRESH PUBLICATION (copy_data defaults to true) on top of
+                # the subscriber's local rows — the #982 duplication. Block the
+                # refresh when any newly-requested, non-replicated table is
+                # locally non-empty.
+                live_table_set = self.charm.postgresql.subscription_table_set(
+                    database, subscription_name
+                )
+                for schematable in subscription_request_config.get(database, []):
+                    schema, _, table = schematable.partition(".")
+                    if (schema, table) in live_table_set:
+                        continue
+                    if not self.charm.postgresql.is_table_empty(database, schema, table):
+                        self._fail_validation(
+                            f"table {schematable} in database {database} isn't empty",
+                            status_msg=f"table {schematable} isn't empty",
+                        )
+                        return
                 self.charm.postgresql.refresh_subscription(database, subscription_name)
                 logger.info(
                     f"Refreshed subscription {subscription_name} in database {database} due to relation change"
