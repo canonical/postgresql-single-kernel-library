@@ -526,20 +526,6 @@ class BackupManager(BaseManager):
 
     # -- Backup settings and permissions -----------------------------------------
 
-    def _are_backup_settings_ok(self) -> tuple[bool, str]:
-        """Validates whether backup settings are OK."""
-        if self.state.s3_relation is None:
-            return (
-                False,
-                "Relation with s3-integrator charm missing, cannot create/restore backup.",
-            )
-
-        _, missing_parameters = self.state.s3_connection_info.retrieve_s3_parameters()
-        if missing_parameters:
-            return False, f"Missing S3 parameters: {missing_parameters}"
-
-        return True, ""
-
     def _can_unit_perform_backup(self) -> tuple[bool, str | None]:
         """Validates whether this unit can perform a backup."""
         if self._is_standby_cluster:
@@ -565,7 +551,7 @@ class BackupManager(BaseManager):
         if not self.state.application.stanza:
             return False, "Stanza was not initialised"
 
-        return self._are_backup_settings_ok()
+        return self.are_backup_settings_ok()
 
     def _can_initialise_stanza(self) -> bool:
         """Validates whether this unit can initialise a stanza."""
