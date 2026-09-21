@@ -247,18 +247,23 @@ class PostgreSQLLogicalReplication(Object):
                 # by REFRESH PUBLICATION (copy_data defaults to true) on top of
                 # the subscriber's local rows — the #982 duplication. Block the
                 # refresh when any newly-requested, non-replicated table is
-                # locally non-empty.
+                # locally non-empty. The truth source is the CURRENT publication
+                # membership (pg_publication_tables), not pg_subscription_rel:
+                # the latter lags a publication ALTER until the next REFRESH,
+                # which would misfire the guard on safe re-widens.
+                requested = {
+                    tuple(schematable.partition(".")[::2])
+                    for schematable in subscription_request_config.get(database, [])
+                }
                 live_table_set = self.charm.postgresql.subscription_table_set(
                     database, subscription_name
                 )
-                for schematable in subscription_request_config.get(database, []):
-                    schema, _, table = schematable.partition(".")
-                    if (schema, table) in live_table_set:
-                        continue
+                for database_table in requested - live_table_set:
+                    schema, table = database_table
                     if not self.charm.postgresql.is_table_empty(database, schema, table):
                         self._fail_validation(
-                            f"table {schematable} in database {database} isn't empty",
-                            status_msg=f"table {schematable} isn't empty",
+                            f"table {schema}.{table} in database {database} isn't empty",
+                            status_msg=f"table {schema}.{table} isn't empty",
                         )
                         return
                 self.charm.postgresql.refresh_subscription(database, subscription_name)

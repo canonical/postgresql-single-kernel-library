@@ -1217,33 +1217,38 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             if connection:
                 connection.close()
 
-    def subscription_table_set(self, db: str, subscription: str) -> set[tuple[str, str]]:
-        """Return the (schema, table) pairs a live subscription currently replicates.
-
-        Reads pg_subscription_rel, the subscription's actual per-table state on
-        this cluster — the truthful source for the empty-table guard: a table
-        present here is already being replicated (skip the guard); a table
-        absent here is a NEW addition whose copy_data would duplicate any
-        local rows (enforce the guard regardless of database-level state).
-        """
+    def query_rows(self, db: str, sql: str, params: list | None = None) -> list[tuple]:
+        """Run a read-only query against the cluster and return all rows."""
         connection = None
         try:
             connection = self._connect_to_database(database=db)
             with connection, connection.cursor() as cursor:
-                cursor.execute(
-                    SQL(
-                        "SELECT schemaname, tablename FROM pg_publication_tables "
-                        "WHERE pubname = ANY (SELECT unnest(subpublications) FROM pg_subscription "
-                        "WHERE subname = {});"
-                    ).format(Literal(subscription))
-                )
-                return {(row[0], row[1]) for row in cursor.fetchall()}
+                cursor.execute(SQL(sql).format(*params or []))
+                return cursor.fetchall()
         except psycopg2.Error as e:
-            logger.error(f"Failed to read the subscription table set: {e}")
-            return set()
+            logger.error(f"Query failed on {db}: {e}")
+            return []
         finally:
             if connection:
                 connection.close()
+
+    def subscription_table_set(self, db: str, subscription: str) -> set[tuple[str, str]]:
+        """Return the (schema, table) pairs a live subscription currently replicates.
+
+        Truth source: the CURRENT publication membership (pg_publication_tables
+        via the subscription's subpublications) — not pg_subscription_rel,
+        which lags a publication ALTER until the next REFRESH. A table present
+        here is already being replicated (skip the guard); a table absent here
+        is a NEW addition whose copy_data would duplicate any local rows.
+        """
+        rows = self.query_rows(
+            db,
+            "SELECT schemaname, tablename FROM pg_publication_tables "
+            "WHERE pubname = ANY (SELECT unnest(subpublications) FROM pg_subscription "
+            "WHERE subname = {});",
+            [subscription],
+        )
+        return {(row[0], row[1]) for row in rows}
 
     def create_replication_slot(self, slot: str, database: str, plugin: str = "pgoutput") -> None:
         """Create a logical replication slot on this (primary) cluster."""
