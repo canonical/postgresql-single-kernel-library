@@ -2,12 +2,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Manager of PostgreSQL backups via pgBackRest.
-
-Ported from the 16/edge charm backup modules (``src/backups.py`` on the VM and
-K8s charms). Event orchestration (defer/fail/status writes) stays in the events
-layer; this manager raises or returns values only.
-"""
+"""Manager of PostgreSQL backups via pgBackRest."""
 
 import importlib.resources
 import json
