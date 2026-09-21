@@ -25,6 +25,7 @@ import pwd
 from datetime import UTC, datetime
 
 import psycopg2
+from tenacity import Retrying, stop_after_delay, wait_fixed
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
 
@@ -1271,12 +1272,29 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                 connection.close()
 
     def drop_replication_slot(self, slot: str, database: str) -> None:
-        """Drop a logical replication slot, tolerating its absence."""
+        """Drop a logical replication slot, tolerating absence and walsender races.
+
+        pg_drop_replication_slot fails with 'is active for PID <n>' while the
+        subscriber's walsender is still connected (the subscriber may have just
+        been dropped or its app removed). The walsender terminates shortly
+        after, so retry with a bounded backoff before giving up.
+        """
         connection = None
         try:
             connection = self._connect_to_database(database=database)
             with connection, connection.cursor() as cursor:
-                cursor.execute(SQL("SELECT pg_drop_replication_slot({});").format(Literal(slot)))
+                for attempt in Retrying(
+                    stop=stop_after_delay(60), wait=wait_fixed(5), reraise=False
+                ):
+                    with attempt:
+                        try:
+                            cursor.execute(
+                                SQL("SELECT pg_drop_replication_slot({});").format(Literal(slot))
+                            )
+                            return
+                        except psycopg2.errors.ObjectInUse as e:
+                            logger.debug(f"Replication slot {slot} still active, retrying: {e}")
+                            raise
         except psycopg2.errors.UndefinedObject:
             logger.debug(f"Replication slot {slot} already absent")
         except psycopg2.Error as e:
