@@ -3,10 +3,6 @@
 # See LICENSE file for licensing details.
 
 """Manager of PostgreSQL backups via pgBackRest.
-
-Ported from the 16/edge charm backup modules (``src/backups.py`` on the VM and
-K8s charms). Event orchestration (defer/fail/status writes) stays in the events
-layer; this manager raises or returns values only.
 """
 
 import importlib.resources
@@ -492,7 +488,6 @@ class BackupManager(BaseManager):
         are_backup_settings_ok, _ = self.are_backup_settings_ok()
         if not are_backup_settings_ok:
             return True
-
         # Update pgBackRest configuration (to update the TLS settings).
         if not self._render_pgbackrest_conf_file():
             return False
