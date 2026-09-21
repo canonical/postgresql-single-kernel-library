@@ -260,7 +260,9 @@ class PostgreSQLLogicalReplication(Object):
                 )
                 for database_table in requested - live_table_set:
                     schema, table = database_table
-                    if not self.charm.postgresql.is_table_empty(database, schema, table):
+                    if not self.charm.postgresql.table_exists(
+                        database, schema, table
+                    ) or self.charm.postgresql.is_table_empty(database, schema, table):
                         self._fail_validation(
                             f"table {schema}.{table} in database {database} isn't empty",
                             status_msg=f"table {schema}.{table} isn't empty",
