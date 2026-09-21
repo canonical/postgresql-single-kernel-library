@@ -224,6 +224,9 @@ class PostgreSQLLogicalReplication(Object):
             id=event.relation.data[event.app]["secret-id"]
         ).get_content(refresh=True)
         subscriptions = self._subscriptions_info()
+        subscription_request_config = json.loads(
+            self.state.config.logical_replication_subscription_request or "{}"
+        )
         publications = json.loads(event.relation.data[event.app].get("publications", "{}"))
 
         # The publisher may create publications for a request that failed our local
