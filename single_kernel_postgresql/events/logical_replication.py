@@ -726,8 +726,20 @@ class PostgreSQLLogicalReplication(Object):
         # restores the original #982 semantics
         # (canonical/postgresql-k8s-operator#982 comment 3019811325;
         # test_pg2_dynamic_error vs test_pg3_extend_subscription).
-        already_subscribed = (
-            database in previous_request and schematable in previous_request[database]
+        # The truthful "already replicated" test: the LIVE subscription's actual
+        # table set (pg_subscription_rel), per TABLE — the database-level
+        # bookkeeping cannot see tables added to an already-subscribed database,
+        # which silently passed the guard and re-subscribed with copy_data over
+        # non-empty tables (test_pg2_dynamic_error; the #982 comment 3019811325
+        # duplication). `previous_request` stays as the secondary signal for
+        # bookkeeping-only states (no live subscription yet).
+        live_table_set = set()
+        for _, subscription in self._subscriptions_info().items():
+            live_table_set |= self.charm.postgresql.subscription_table_set(database, subscription)
+        already_subscribed = (schema, table) in live_table_set or (
+            not live_table_set
+            and database in previous_request
+            and schematable in previous_request[database]
         )
         if not already_subscribed and not self.charm.postgresql.is_table_empty(
             database, schema, table

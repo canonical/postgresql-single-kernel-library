@@ -1217,6 +1217,36 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             if connection:
                 connection.close()
 
+    def subscription_table_set(self, db: str, subscription: str) -> set[tuple[str, str]]:
+        """Return the (schema, table) pairs a live subscription currently replicates.
+
+        Reads pg_subscription_rel, the subscription's actual per-table state on
+        this cluster — the truthful source for the empty-table guard: a table
+        present here is already being replicated (skip the guard); a table
+        absent here is a NEW addition whose copy_data would duplicate any
+        local rows (enforce the guard regardless of database-level state).
+        """
+        connection = None
+        try:
+            connection = self._connect_to_database(database=db)
+            with connection, connection.cursor() as cursor:
+                cursor.execute(
+                    SQL(
+                        "SELECT r.schemaname, r.tablename FROM pg_subscription_rel s "
+                        "JOIN pg_class c ON c.oid = s.relid "
+                        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                        "JOIN pg_tables r ON r.tablename = c.relname AND r.schemaname = n.nspname "
+                        "WHERE s.subid = (SELECT oid FROM pg_subscription WHERE subname = {});"
+                    ).format(Literal(subscription))
+                )
+                return {(row[0], row[1]) for row in cursor.fetchall()}
+        except psycopg2.Error as e:
+            logger.error(f"Failed to read the subscription table set: {e}")
+            return set()
+        finally:
+            if connection:
+                connection.close()
+
     def create_replication_slot(self, slot: str, database: str, plugin: str = "pgoutput") -> None:
         """Create a logical replication slot on this (primary) cluster."""
         connection = None
