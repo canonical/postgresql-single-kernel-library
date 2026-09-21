@@ -1223,7 +1223,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
         try:
             connection = self._connect_to_database(database=db)
             with connection, connection.cursor() as cursor:
-                cursor.execute(SQL(sql).format(*params or []))
+                cursor.execute(sql, params or [])
                 return cursor.fetchall()
         except psycopg2.Error as e:
             logger.error(f"Query failed on {db}: {e}")
@@ -1245,7 +1245,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             db,
             "SELECT schemaname, tablename FROM pg_publication_tables "
             "WHERE pubname = ANY (SELECT unnest(subpublications) FROM pg_subscription "
-            "WHERE subname = {});",
+            "WHERE subname = %s);",
             [subscription],
         )
         return {(row[0], row[1]) for row in rows}
