@@ -20,7 +20,10 @@ from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.exceptions import ListBackupsError
+from single_kernel_postgresql.config.exceptions import (
+    ListBackupsError,
+    StanzaOperationError,
+)
 from single_kernel_postgresql.config.literals import (
     BACKUP_TYPE_OVERRIDES,
     BACKUP_USER,
@@ -333,7 +336,7 @@ class BackupManager(BaseManager):
                             )
                             raise TimeoutError
                         if result.return_code != 0:
-                            raise Exception(result.stderr)
+                            raise StanzaOperationError(result.stderr)
         except TimeoutError as e:
             raise e
         except ExecError:
@@ -389,7 +392,7 @@ class BackupManager(BaseManager):
                             )
                             raise TimeoutError
                         if result.return_code != 0:
-                            raise Exception(result.stderr)
+                            raise StanzaOperationError(result.stderr)
         except TimeoutError as e:
             if self.state.substrate == Substrates.K8S:
                 # The K8s charm folds every failure (including timeouts) into the
