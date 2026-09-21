@@ -1,8 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Pure helpers for the pgBackRest backup implementation.
-"""
+"""Pure helpers for the pgBackRest backup implementation."""
 
 import logging
 import re
