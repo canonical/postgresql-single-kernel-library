@@ -25,7 +25,7 @@ import pwd
 from datetime import UTC, datetime
 
 import psycopg2
-from tenacity import Retrying, stop_after_delay, wait_fixed
+from tenacity import Retrying, retry_if_exception_type, stop_after_delay, wait_fixed
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
 
@@ -1277,31 +1277,31 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
         pg_drop_replication_slot fails with 'is active for PID <n>' while the
         subscriber's walsender is still connected (the subscriber may have just
         been dropped or its app removed). The walsender terminates shortly
-        after, so retry with a bounded backoff before giving up.
+        after, so retry with a bounded backoff before giving up. Each attempt
+        opens a fresh connection: a failed statement aborts the surrounding
+        transaction, so retrying on the same connection could only ever raise
+        InFailedSqlTransaction again.
         """
-        connection = None
         try:
-            connection = self._connect_to_database(database=database)
-            with connection, connection.cursor() as cursor:
-                for attempt in Retrying(
-                    stop=stop_after_delay(60), wait=wait_fixed(5), reraise=False
-                ):
-                    with attempt:
-                        try:
+            for attempt in Retrying(
+                stop=stop_after_delay(60),
+                wait=wait_fixed(5),
+                retry=retry_if_exception_type(psycopg2.errors.ObjectInUse),
+                reraise=True,
+            ):
+                with attempt:
+                    connection = self._connect_to_database(database=database)
+                    try:
+                        with connection, connection.cursor() as cursor:
                             cursor.execute(
                                 SQL("SELECT pg_drop_replication_slot({});").format(Literal(slot))
                             )
-                            return
-                        except psycopg2.errors.ObjectInUse as e:
-                            logger.debug(f"Replication slot {slot} still active, retrying: {e}")
-                            raise
+                    finally:
+                        connection.close()
         except psycopg2.errors.UndefinedObject:
             logger.debug(f"Replication slot {slot} already absent")
         except psycopg2.Error as e:
             logger.error(f"Failed to drop replication slot {slot}: {e}")
-        finally:
-            if connection:
-                connection.close()
 
     def create_subscription(
         self,
