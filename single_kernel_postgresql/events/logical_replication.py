@@ -311,6 +311,11 @@ class PostgreSQLLogicalReplication(Object):
                 continue
             self.charm.postgresql.drop_subscription(database, subscription)
             logger.info(f"Dropped redundant subscription {subscription} from database {database}")
+            # The subscriber's DROP SUBSCRIPTION with slot_name=NONE leaves the
+            # publisher-side slot orphaned; drop it so the slot count returns to
+            # one-per-active-relation (test_pg2_remove asserts this).
+            slot_name = self._replication_slot_name(event.relation.id, database)
+            self.charm.postgresql.drop_replication_slot(slot_name, database)
             del subscriptions[database]
 
         self.state.application.data["logical-replication-subscriptions"] = json.dumps({
