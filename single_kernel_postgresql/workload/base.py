@@ -387,6 +387,15 @@ class BaseWorkload(ABC):
         """Get the workload version."""
         raise NotImplementedError
 
+    def pitr_bootstrap_failure_logs(self) -> tuple[str, bool]:
+        """Fetch the workload logs scanned for PITR bootstrap failures (K8s-only seam).
+
+        Returns:
+            (logs, juju2): juju2 is True when the pebble logs client was unavailable
+            and the patroni log files were read instead.
+        """
+        raise NotImplementedError
+
     def get_postgresql_version(self) -> str:
         """Return the PostgreSQL version from the system."""
         with pathlib.Path("refresh_versions.toml").open("rb") as file:
