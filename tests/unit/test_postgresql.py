@@ -8,6 +8,7 @@ import psycopg2
 import pytest
 from ops.testing import Harness
 from psycopg2.sql import Composed, Identifier, Literal, SQL
+from tenacity import stop_after_delay, wait_none
 
 from single_kernel_postgresql.charms import k8s_charm, vm_charm
 from single_kernel_postgresql.config.literals import (
@@ -1115,3 +1116,141 @@ def test_remove_user_from_databases():
         with pytest.raises(PostgreSQLUpdateUserError):
             pg.remove_user_from_databases("test-user", ["db1", "db2"])
             assert False
+
+
+class _FakeCursor:
+    """Mimic psycopg2 transaction semantics around a scripted statement sequence.
+
+    A failed statement aborts the surrounding transaction: any later statement
+    on the same cursor raises InFailedSqlTransaction, exactly like a real
+    server-side session.
+    """
+
+    def __init__(self, sequence):
+        self._sequence = list(sequence)
+        self._aborted = False
+        self.calls = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, statement):
+        self.calls.append(statement)
+        if self._aborted:
+            raise psycopg2.errors.InFailedSqlTransaction()
+        outcome = self._sequence.pop(0) if self._sequence else "ok"
+        if outcome == "ok":
+            return
+        self._aborted = True
+        raise outcome
+
+
+class _FakeConnection:
+    """One connection holding one cursor with the scripted sequence."""
+
+    def __init__(self, sequence):
+        self.cursor_obj = _FakeCursor(sequence)
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def cursor(self):
+        return self.cursor_obj
+
+    def close(self):
+        self.closed = True
+
+
+_DROP_SLOT_STATEMENT = Composed(
+    [
+        SQL("SELECT pg_drop_replication_slot("),
+        Literal("relation_15_testdb"),
+        SQL(");"),
+    ]
+)
+
+
+def test_drop_replication_slot_retries_walsender_race_on_fresh_connection():
+    """ObjectInUse is retried on a NEW connection, not the aborted transaction."""
+    connections = [
+        _FakeConnection([psycopg2.errors.ObjectInUse()]),
+        _FakeConnection([]),
+    ]
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+            side_effect=connections,
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.wait_fixed", return_value=wait_none()),
+    ):
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        pg.drop_replication_slot("relation_15_testdb", "testdb")
+    assert connections[1].cursor_obj.calls == [_DROP_SLOT_STATEMENT]
+
+
+def test_drop_replication_slot_tolerates_absence_without_retrying():
+    """UndefinedObject (slot already gone) exits immediately on one connection."""
+    connections = [_FakeConnection([psycopg2.errors.UndefinedObject()])]
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+            side_effect=connections,
+        ),
+        patch(
+            "single_kernel_postgresql.utils.postgresql.stop_after_delay",
+            return_value=stop_after_delay(0.01),
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.wait_fixed", return_value=wait_none()),
+    ):
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        pg.drop_replication_slot("relation_15_testdb", "testdb")
+    assert len(connections) == 1
+    assert connections[0].cursor_obj.calls == [_DROP_SLOT_STATEMENT]
+
+
+def test_drop_replication_slot_does_not_retry_other_database_errors():
+    """Errors that are not the walsender race surface immediately and are absorbed."""
+    connections = [_FakeConnection([psycopg2.errors.OperationalError()])]
+    with patch(
+        "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+        side_effect=connections,
+    ):
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        pg.drop_replication_slot("relation_15_testdb", "testdb")
+    assert len(connections) == 1
+    assert connections[0].cursor_obj.calls == [_DROP_SLOT_STATEMENT]
+
+
+def test_drop_replication_slot_soft_fails_when_slot_stays_active():
+    """A walsender that never releases the slot must not crash the hook."""
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+            side_effect=lambda *_args, **_kwargs: _FakeConnection(
+                [psycopg2.errors.ObjectInUse()]
+            ),
+        ) as _connect_to_database,
+        patch(
+            "single_kernel_postgresql.utils.postgresql.stop_after_delay",
+            return_value=stop_after_delay(0.05),
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.wait_fixed", return_value=wait_none()),
+    ):
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        pg.drop_replication_slot("relation_15_testdb", "testdb")
+        assert _connect_to_database.call_count >= 2
