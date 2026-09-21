@@ -2,8 +2,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Manager of PostgreSQL backups via pgBackRest.
-"""
+"""Manager of PostgreSQL backups via pgBackRest."""
 
 import importlib.resources
 import logging
