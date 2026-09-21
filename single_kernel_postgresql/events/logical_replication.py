@@ -164,6 +164,23 @@ class PostgreSQLLogicalReplication(Object):
             for relation in self.model.relations.get(LOGICAL_REPLICATION_OFFER_RELATION, ())
         ]
 
+        # Deterministic slot cleanup independent of published-resources state: the
+        # slot name is derived from the relation id and database, so a slot left
+        # behind by a subscriber whose bookkeeping entry was lost (or whose app
+        # was removed) is dropped by name — Patroni never auto-removes permanent
+        # slots when their config entry disappears.
+        candidate_databases = set(
+            json.loads(self.state.config.logical_replication_subscription_request or "{}")
+        ) | set(
+            database
+            for relation_resources in published_resources.values()
+            for database in relation_resources["publications"]
+        )
+        for database in candidate_databases:
+            self.charm.postgresql.drop_replication_slot(
+                self._replication_slot_name(event.relation.id, database), database
+            )
+
         for relation_id, relation_resources in published_resources.copy().items():
             if relation_id in active_relation_ids:
                 continue
