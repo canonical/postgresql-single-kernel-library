@@ -2,8 +2,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Manager of PostgreSQL backups via pgBackRest.
-"""
+"""Manager of PostgreSQL backups via pgBackRest."""
 
 import importlib.resources
 import json
@@ -1111,8 +1110,7 @@ Stderr:
         return True, False
 
     def initialise_s3_repository(self) -> bool:
-        """Initialize the S3 repository after a credentials change (primary path).
-        """
+        """Initialize the S3 repository after a credentials change (primary path)."""
         self.update_config()
 
         try:
@@ -1145,8 +1143,7 @@ Stderr:
         return True
 
     def clear_s3_state(self) -> None:
-        """Clear the stanza and S3 initialization markers when credentials are gone.
-        """
+        """Clear the stanza and S3 initialization markers when credentials are gone."""
         if self.state.substrate == Substrates.K8S:
             self.workload.stop_service(K8S_ROTATE_LOGS_SERVICE_NAME)
         if self.state.peer.is_app_leader:
