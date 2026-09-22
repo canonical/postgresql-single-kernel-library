@@ -24,7 +24,8 @@ All revisions of PostgreSQL described below are built for *Ubuntu 22.04 LTS (Jam
 
 | Charmhub revision</br>(amd, arm)  |  PostgreSQL version | Recommended Juju version |
 |:---------------------------------|:-------------------|:--------------------|
-| {ref}`925, 924 <rev-924-925>`     | 14.23               | `3.6.24+`             |
+| {ref}`960, 959 <rev-959-960>`     | 14.24               | `3.6.24+`            |
+| {ref}`925, 924 <rev-924-925>`     | 14.23               | `3.6.24+`            |
 | {ref}`774, 775 <rev-774-775>`     | 14.20               | `3.6.1+`             |
 | {ref}`495, 494 <rev-494-495>`     | 14.15               | `3.6+`               |
 | {ref}`462, 463 <rev-462-463>`     | 14.13               | `3.6+`               |
@@ -40,6 +41,7 @@ All revisions of PostgreSQL described below are built for *Ubuntu 22.04 LTS (Jam
 :titlesonly:
 :hidden:
 
+959-960
 924-925
 774-775
 494-495
