@@ -21,7 +21,7 @@ def config(substrate):
         return_value="16.6",
     ):
         config = ConfigManager(
-            state=CharmState(charm=mock_charm, substrate=substrate),
+            state=CharmState(charm=mock_charm, substrate=substrate, s3_requirer=Mock()),
             workload=workload,
             tls_manager=Mock(),
             patroni_manager=Mock(),
