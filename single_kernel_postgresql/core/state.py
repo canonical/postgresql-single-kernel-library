@@ -55,6 +55,7 @@ class CharmState(Object):
         self,
         charm: CharmBase,
         substrate: Substrates,
+        s3_requirer: S3Requirer,
     ) -> None:
         """Initialize the CharmState object."""
         super().__init__(charm, "charm_state")
@@ -63,7 +64,7 @@ class CharmState(Object):
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
 
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
-        self._charm = charm
+        self.s3_requirer = s3_requirer
 
     # -- Charm Config
     @cached_property
@@ -141,11 +142,6 @@ class CharmState(Object):
             component=self.model.app,
             substrate=self.substrate,
         )
-
-    @cached_property
-    def s3_requirer(self) -> S3Requirer:
-        """Get the S3 requirer, which observes the s3-parameters relation events."""
-        return S3Requirer(self._charm, S3_RELATION_NAME)
 
     @property
     def s3_connection_info(self) -> S3ConnectionInfo:

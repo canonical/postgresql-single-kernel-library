@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError, ConnectTimeoutError, SSLError
-from single_kernel_postgresql.managers.s3_client import S3Client
+from single_kernel_postgresql.utils.s3 import S3Client
 
 BASE_PARAMETERS = {
     "bucket": "backups",
@@ -24,7 +24,7 @@ def _client_error(code: str) -> ClientError:
 
 @pytest.fixture
 def session():
-    with patch("single_kernel_postgresql.managers.s3_client.Session") as session:
+    with patch("single_kernel_postgresql.utils.s3.Session") as session:
         session.return_value.resource.return_value.Bucket.return_value = MagicMock()
         yield session
 
