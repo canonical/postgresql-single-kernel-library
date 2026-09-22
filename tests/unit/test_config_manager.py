@@ -554,6 +554,7 @@ def restart_engine(config):
             "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.tls",
             new_callable=PropertyMock,
         ) as _peer_tls,
+        patch("single_kernel_postgresql.managers.config.wait_fixed", lambda _: wait_fixed(0)),
     ):
         _is_tls.return_value = False
         _can_connect.return_value = True
