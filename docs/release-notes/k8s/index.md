@@ -24,6 +24,7 @@ All revisions of PostgreSQL described below are built for *Ubuntu 24.04 LTS (Nob
 
 | Charmhub revision</br>(amd, arm)  |  PostgreSQL version | Minimum Juju version |
 |:---------------------------------:|:-------------------:|:--------------------:|
+| {ref}`957, 958 <rev-957-958>`     | 16.15               | `3.6.24+`            |
 | {ref}`927, 926 <rev-926-927>`     | 16.14               | `3.6.24+`            |
 | {ref}`901, 902 <rev-901-902>`     | 16.13               | `3.6.21+`            |
 
@@ -31,6 +32,7 @@ All revisions of PostgreSQL described below are built for *Ubuntu 24.04 LTS (Nob
 :titlesonly:
 :hidden:
 
+957-958
 926-927
 901-902
 ```
