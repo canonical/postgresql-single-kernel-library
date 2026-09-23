@@ -128,7 +128,7 @@ The Charmed PostgreSQL K8s (`workload` container) based on `postgresql-image` re
 
 [Charmcraft](https://canonical-charmcraft.readthedocs-hosted.com/stable/) uploads an image as a [charm resource](https://charmhub.io/postgresql-k8s/resources/postgresql-image) to [Charmhub](https://charmhub.io/postgresql-k8s) during the [publishing](https://github.com/canonical/postgresql-k8s-operator/blob/main/.github/workflows/release.yaml).
 
-The charm supports Juju deployment on several Kubernetes environments like MicroK8s, Canonical K8s, GKE, AKS, and EKS. See {ref}`k8s-clouds`.
+The charm supports Juju deployment on several Kubernetes environments like MicroK8s, Canonical Kubernetes, GKE, AKS, and EKS. See {ref}`k8s-clouds`.
 
 The OCI/Rock ships the following components:
 
