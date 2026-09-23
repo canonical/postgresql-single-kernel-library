@@ -24,7 +24,7 @@ from single_kernel_postgresql.workload.base import (
 )
 
 if TYPE_CHECKING:
-    from single_kernel_postgresql.managers.s3_client import S3Client
+    from single_kernel_postgresql.utils.s3 import S3Client
 
 logger = logging.getLogger(__name__)
 
