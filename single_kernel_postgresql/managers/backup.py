@@ -43,11 +43,16 @@ from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     BACKUP_LABEL_STDOUT_PATTERN,
+    BLOCKED_STATE_CREATE_BACKUP_ERROR_MESSAGE,
     CANNOT_RESTORE_PITR,
+    CLUSTER_PRIMARY_CREATE_BACKUP_ERROR_MESSAGE,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
     FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
+    NOT_RUNNING_CREATE_BACKUP_ERROR_MESSAGE,
+    OFFLINE_DATABASE_CREATE_BACKUP_ERROR_MESSAGE,
     S3_BLOCK_MESSAGES,
     STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE,
+    STANZA_NOT_INITIALISED_CREATE_BACKUP_ERROR_MESSAGE,
     extract_error_message,
     fetch_backup_from_id,
     format_backup_list,
@@ -560,24 +565,24 @@ class BackupManager(BaseManager):
             return False, STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE
 
         if self.state.peer.is_blocked:
-            return False, "Unit is in a blocking state"
+            return False, BLOCKED_STATE_CREATE_BACKUP_ERROR_MESSAGE
 
         # Check if this unit is the primary (if it was not possible to retrieve that information,
         # then show that the unit cannot perform a backup, because possibly the database is offline).
         try:
             is_primary = self.is_primary
         except RetryError:
-            return False, "Unit cannot perform backups as the database seems to be offline"
+            return False, OFFLINE_DATABASE_CREATE_BACKUP_ERROR_MESSAGE
 
         # Only enable backups on primary if there are replicas but TLS is not enabled.
         if is_primary and self.state.application.planned_units > 1:
-            return False, "Unit cannot perform backups as it is the cluster primary"
+            return False, CLUSTER_PRIMARY_CREATE_BACKUP_ERROR_MESSAGE
 
         if not self.patroni_manager.member_started:
-            return False, "Unit cannot perform backups as it's not in running state"
+            return False, NOT_RUNNING_CREATE_BACKUP_ERROR_MESSAGE
 
         if not self.state.application.stanza:
-            return False, "Stanza was not initialised"
+            return False, STANZA_NOT_INITIALISED_CREATE_BACKUP_ERROR_MESSAGE
 
         return self.are_backup_settings_ok()
 
@@ -586,9 +591,7 @@ class BackupManager(BaseManager):
         # Don't allow stanza initialisation if this unit hasn't started the database
         # yet and either hasn't joined the peer relation yet or hasn't configured TLS
         # yet while other unit already has TLS enabled.
-        return not (
-            not self.patroni_manager.member_started and (len(self.state.application_peers) == 1)
-        )
+        return self.patroni_manager.member_started or len(self.state.application_peers) != 1
 
     def can_use_s3_repository(self) -> tuple[bool, str]:
         """Returns whether the charm was configured to use another cluster repository."""
