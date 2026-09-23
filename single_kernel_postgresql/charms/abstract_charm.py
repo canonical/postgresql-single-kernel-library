@@ -16,6 +16,7 @@ from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseProvides,
 )
+from single_kernel_postgresql.lib.charms.data_platform_libs.v0.s3 import S3Requirer
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
@@ -24,7 +25,7 @@ from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
 from ..config.enums import Substrates
-from ..config.literals import DATABASE
+from ..config.literals import DATABASE, S3_RELATION_NAME
 from ..utils.postgresql import PostgreSQL
 
 
@@ -35,7 +36,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         super().__init__(*args)
 
         # State
-        self.state = CharmState(charm=self, substrate=self.substrate)
+        self.state = CharmState(
+            charm=self,
+            substrate=self.substrate,
+            s3_requirer=S3Requirer(self, relation_name=S3_RELATION_NAME),
+        )
 
         # TLS events handler owns the two certificate requirers; build it before the
         # TLS manager so the manager can constructor-inject them for its live-fetch getters.
