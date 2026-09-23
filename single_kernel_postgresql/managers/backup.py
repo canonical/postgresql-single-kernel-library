@@ -342,7 +342,7 @@ class BackupManager(BaseManager):
         """
         # Enable stanza initialisation if the backup settings were fixed after being invalid
         # or pointing to a repository where there are backups from another cluster.
-        if self.state.peer.is_blocked and not self._has_s3_block_message:
+        if self.state.peer.is_blocked_status and not self._has_s3_block_message:
             logger.warning("couldn't initialize stanza due to a blocked status")
             return False
 
@@ -564,7 +564,7 @@ class BackupManager(BaseManager):
         if self.is_standby_cluster:
             return False, STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE
 
-        if self.state.peer.is_blocked:
+        if self.state.peer.is_blocked_status:
             return False, BLOCKED_STATE_CREATE_BACKUP_ERROR_MESSAGE
 
         # Check if this unit is the primary (if it was not possible to retrieve that information,
@@ -1175,7 +1175,7 @@ Stderr:
         """
         if self.state.substrate != Substrates.VM:
             return
-        if not self.state.peer.is_active or self.state.peer_relation is None:
+        if not self.state.peer.is_active_status or self.state.peer_relation is None:
             return
         if not self.workload.exists(self.workload.root / PGBACKREST_LOGROTATE_FILE.lstrip("/")):
             return
