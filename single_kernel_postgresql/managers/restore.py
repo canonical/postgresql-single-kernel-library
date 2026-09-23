@@ -210,7 +210,7 @@ class RestoreManager(BaseManager):
             a restore.
         """
         logger.info("Checking if cluster is in blocked state")
-        if self.state.peer.is_blocked and self.state.peer.status_message not in [
+        if self.state.peer.is_blocked_status and self.state.peer.status_message not in [
             ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
             CANNOT_RESTORE_PITR,
         ]:
