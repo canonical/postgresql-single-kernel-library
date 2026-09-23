@@ -642,7 +642,7 @@ class DatabaseManager(BaseManager):
         unit = self.state.model.unit
         if (
             (
-                self.state.peer.is_blocked
+                self.state.peer.is_blocked_status
                 and (
                     unit.status.message == INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE
                     or unit.status.message == INVALID_DATABASE_NAME_BLOCKING_MESSAGE
@@ -654,9 +654,9 @@ class DatabaseManager(BaseManager):
             self.set_unit_status(ActiveStatus())
         # Matches the handler's failed-init message; the charms' longer substring never
         # matched their K8s wording, leaving the block unclearable there.
-        if self.state.peer.is_blocked and "Failed to initialize" in unit.status.message:
+        if self.state.peer.is_blocked_status and "Failed to initialize" in unit.status.message:
             self.set_unit_status(ActiveStatus())
-        if self.state.peer.is_blocked and unit.status.message == PREFIX_TOO_SHORT_MSG:
+        if self.state.peer.is_blocked_status and unit.status.message == PREFIX_TOO_SHORT_MSG:
             for other in self.state.model.relations.get(self.relation_name, []):
                 # Relation is not established and custom user was requested
                 if (
@@ -667,7 +667,7 @@ class DatabaseManager(BaseManager):
                     return
                 self.set_unit_status(ActiveStatus())
                 return
-        if self.state.peer.is_blocked and unit.status.message in [
+        if self.state.peer.is_blocked_status and unit.status.message in [
             INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE,
             NO_ACCESS_TO_SECRET_MSG,
             FORBIDDEN_USER_MSG,

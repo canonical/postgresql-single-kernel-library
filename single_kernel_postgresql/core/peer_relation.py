@@ -68,7 +68,7 @@ class PostgreSQLPeer(RelationState):
         return self.unit.is_leader()
 
     @property
-    def is_active(self) -> bool:
+    def is_active_status(self) -> bool:
         """Returns whether the unit is in an active state."""
         return isinstance(self.unit.status, ActiveStatus)
 
@@ -88,7 +88,7 @@ class PostgreSQLPeer(RelationState):
         self.relation.data[self.unit]["rotate-logs-pid"] = str(value) if value else ""
 
     @property
-    def is_blocked(self) -> bool:
+    def is_blocked_status(self) -> bool:
         """Returns whether the unit is in a blocked state."""
         return isinstance(self.unit.status, BlockedStatus)
 
