@@ -55,7 +55,8 @@ def patroni(substrate):
         return_value="16.6",
     ):
         patroni = PatroniManager(
-            state=CharmState(charm=mock_charm, substrate=substrate), workload=workload
+            state=CharmState(charm=mock_charm, substrate=substrate, s3_requirer=Mock()),
+            workload=workload,
         )
     yield patroni
 

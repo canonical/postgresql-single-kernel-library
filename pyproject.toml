@@ -63,11 +63,11 @@ module-root = ""
 
 [dependency-groups]
 format = [
-    "ruff==0.16.7"
+    "ruff==0.16.8"
 ]
 lint = [
     "codespell==2.4.3",
-    "ty==0.0.80"
+    "ty==0.0.82"
 ]
 unit = [
     "coverage[toml]==7.16.1",
