@@ -2,12 +2,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Manager of PostgreSQL backups via pgBackRest.
-
-Ported from the 16/edge charm backup modules (``src/backups.py`` on the VM and
-K8s charms). Event orchestration (defer/fail/status writes) stays in the events
-layer; this manager raises or returns values only.
-"""
+"""Manager of PostgreSQL backups via pgBackRest."""
 
 import importlib.resources
 import json
@@ -28,7 +23,10 @@ from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.exceptions import ListBackupsError
+from single_kernel_postgresql.config.exceptions import (
+    ListBackupsError,
+    StanzaOperationError,
+)
 from single_kernel_postgresql.config.literals import (
     BACKUP_ID_FORMAT,
     BACKUP_TYPE_OVERRIDES,
@@ -64,7 +62,7 @@ from single_kernel_postgresql.workload.base import (
 )
 
 if TYPE_CHECKING:
-    from single_kernel_postgresql.managers.s3_client import S3Client
+    from single_kernel_postgresql.utils.s3 import S3Client
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +87,7 @@ class BackupManager(BaseManager):
     def __init__(
         self,
         state: CharmState,
-        workload: "BaseWorkload",
+        workload: BaseWorkload,
         s3_client: "S3Client",
         patroni_manager: PatroniManager,
         update_config: UpdateConfigFunction,
@@ -204,9 +202,9 @@ class BackupManager(BaseManager):
         the blocked status message comes from the s3-initialization-block-message
         peer field (see the charms' _set_primary_status_message).
         """
-        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES or (
-            self.state.peer.s3_initialization_block_message in S3_BLOCK_MESSAGES
-        )
+        # The charms' status builder reads only the app-databag field; the unit
+        # field exists for the replica-primary flow but is never read back.
+        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES
 
     def _s3_initialization_set_failure(self, block_message: str) -> None:
         """Record a failed s3 initialization with the corresponding block message.
@@ -365,7 +363,7 @@ class BackupManager(BaseManager):
                             )
                             raise TimeoutError
                         if result.return_code != 0:
-                            raise Exception(result.stderr)
+                            raise StanzaOperationError(result.stderr)
         except TimeoutError as e:
             raise e
         except ExecError:
@@ -421,7 +419,7 @@ class BackupManager(BaseManager):
                             )
                             raise TimeoutError
                         if result.return_code != 0:
-                            raise Exception(result.stderr)
+                            raise StanzaOperationError(result.stderr)
         except TimeoutError as e:
             if self.state.substrate == Substrates.K8S:
                 # The K8s charm folds every failure (including timeouts) into the
@@ -1115,11 +1113,7 @@ Stderr:
         return True, False
 
     def initialise_s3_repository(self) -> bool:
-        """Initialize the S3 repository after a credentials change (primary path).
-
-        Renamed port of the charms' _on_s3_credential_changed_primary: no event
-        semantics, returns success. The stanza must be cleared before calling.
-        """
+        """Initialize the S3 repository after a credentials change (primary path)."""
         self.update_config()
 
         try:
@@ -1152,12 +1146,7 @@ Stderr:
         return True
 
     def clear_s3_state(self) -> None:
-        """Clear the stanza and S3 initialization markers when credentials are gone.
-
-        Renamed port of the charms' _on_s3_credential_gone: no event semantics.
-        The K8s charm also stops the rotate-logs service, kept here as workload
-        I/O. Status refreshes stay with the events layer.
-        """
+        """Clear the stanza and S3 initialization markers when credentials are gone."""
         if self.state.substrate == Substrates.K8S:
             self.workload.stop_service(K8S_ROTATE_LOGS_SERVICE_NAME)
         if self.state.peer.is_app_leader:
