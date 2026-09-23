@@ -64,7 +64,7 @@ class BackupManager(BaseManager):
     def __init__(
         self,
         state: CharmState,
-        workload: "BaseWorkload",
+        workload: BaseWorkload,
         s3_client: "S3Client",
         patroni_manager: PatroniManager,
         update_config: UpdateConfigFunction,
