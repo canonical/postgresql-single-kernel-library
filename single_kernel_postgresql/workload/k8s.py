@@ -19,6 +19,8 @@ from ops.pebble import ExecError, Plan, ServiceStatus
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     DIR_PERMISSIONS_READONLY,
+    K8S_LOGS_STORAGE_PATH,
+    K8S_PATRONI_LOGS_PATH,
     K8S_PGBACK_REST_SERVER_SERVICE_NAME,
     K8S_POSTGRESQL_SERVICE_NAME,
 )
@@ -190,6 +192,36 @@ class K8sWorkload(BaseWorkload):
         if len(services) == 0:
             return False
         return services[0].current == ServiceStatus.ACTIVE
+
+    def pitr_bootstrap_failure_logs(self) -> tuple[str, bool]:
+        """Fetch the postgresql pebble service logs for PITR bootstrap-failure scanning.
+
+        Falls back to concatenating the patroni log files when the pebble logs client
+        is unavailable (Juju 2).
+        """
+        try:
+            log_exec = self.container.pebble.exec(
+                ["pebble", "logs", K8S_POSTGRESQL_SERVICE_NAME, "-n", "all"],
+                combine_stderr=True,
+            )
+            return log_exec.wait_output()[0], False
+        except ExecError:  # For Juju 2.
+            patroni_logs_dir = self.root / K8S_LOGS_STORAGE_PATH / K8S_PATRONI_LOGS_PATH
+            current = self.container.exec([
+                "cat",
+                str(patroni_logs_dir / "patroni.log"),
+            ]).wait_output()[0]
+            older = self.container.exec([
+                "find",
+                str(patroni_logs_dir) + "/",
+                "-name",
+                "patroni.log.*",
+                "-exec",
+                "cat",
+                "{}",
+                "+",
+            ]).wait_output()[0]
+            return f"{current}\n{older}", True
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
