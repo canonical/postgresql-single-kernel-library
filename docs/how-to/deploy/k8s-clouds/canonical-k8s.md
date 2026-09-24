@@ -5,7 +5,7 @@ myst:
 ---
 
 (canonical-k8s)=
-# How to deploy on Canonical K8s
+# How to deploy on Canonical Kubernetes
 {{k8s}}
 
 [Canonical Kubernetes](https://ubuntu.com/kubernetes) is a Kubernetes service built on Ubuntu and optimised for most major public clouds.
@@ -21,7 +21,7 @@ myst:
 
 Follow the instructions in the [official Canonical Kubernetes documentation](https://documentation.ubuntu.com/canonical-kubernetes/release-1.35/snap/howto/install/snap/)
 
-Once Canonical K8s is up and running, enable local storage (or any another persistent volume provider, to be used by [Juju storage](https://juju.is/docs/juju/storage) later):
+Once Canonical Kubernetes is up and running, enable local storage (or any another persistent volume provider, to be used by [Juju storage](https://juju.is/docs/juju/storage) later):
 
 ```{terminal}
 :copy:
@@ -61,7 +61,7 @@ kubectl get namespaces # to test the credentials
 ```
 ````
 
-## Bootstrap Juju on Canonical K8s
+## Bootstrap Juju on Canonical Kubernetes
 
 Add a Juju K8s cloud:
 
