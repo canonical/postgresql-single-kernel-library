@@ -171,6 +171,12 @@ class K8sWorkload(BaseWorkload):
         else:
             self.container.restart(service)
 
+    def service_exists(self, service: str) -> bool:
+        """Whether the Pebble plan declares the named service."""
+        return self.container.can_connect() and (
+            len(self.container.pebble.get_services(names=[service])) > 0
+        )
+
     def service_is_running(self, service: str) -> bool:
         """Check whether a named Pebble service is running.
 
