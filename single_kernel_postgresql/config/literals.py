@@ -188,3 +188,7 @@ RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 VM_PATRONI_SERVICE_NAME = f"snap.{POSTGRESQL_SNAP_NAME}.patroni.service"
 VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"
 VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
+
+# Watcher relation
+RAFT_PORT = 2222
+RAFT_PARTNER_PREFIX = "partner_node_status_server_"
