@@ -1,11 +1,11 @@
 ---
 myst:
   html_meta:
-    description: "Refresh and upgrade Charmed PostgreSQL to a new revision using juju refresh, with rollback guidance and recommended upgrade paths."
+    description: "Refresh and upgrade Charmed PostgreSQL VM to a new revision using juju refresh, with rollback guidance and recommended upgrade paths."
 ---
 
-(refresh)=
-# Refresh (upgrade)
+(refresh-vm)=
+# Refresh (VM)
 {{vm}}
 
 ````{dropdown} Emergency stop button
@@ -19,25 +19,19 @@ Halt an in-progress refresh with
 juju config <app name> pause-after-unit-refresh=all
 ```
 
-Then, consider {ref}`rolling back <roll-back>`.
+Then, consider {ref}`rolling back <roll-back-vm>`.
 ````
 
 Charmed PostgreSQL supports minor version in-place refresh via the [`juju refresh`](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/refresh/#details) command.
-
-**This guide is currently only available for the VM charm. Refresh instructions for K8s are in coming soon.**
 
 ## Determine which version to refresh to
 
 Get the current charm revision of the application with [`juju status`](https://documentation.ubuntu.com/juju/3.6/reference/juju-cli/list-of-juju-cli-commands/status/).
 
-(recommended-refreshes)=
+(recommended-refreshes-vm)=
 ### Recommended refreshes
 
 These refreshes are well-tested and should be preferred.
-
-`````{tab-set}
-````{tab-item} VM
-:sync: vm
 
 ```{eval-rst}
 +--------------+------------+----------+--------------+------------+----------+-------------------------------------------------------------------------------------------------+
@@ -70,33 +64,10 @@ These refreshes are well-tested and should be preferred.
 | 1088 (arm64) |            |          | 1157 (arm64) |            |          |                                                                                                 |
 +--------------+------------+----------+--------------+------------+----------+-------------------------------------------------------------------------------------------------+
 ```
-````
-
-````{tab-item} K8s
-:sync: k8s
-
-Coming soon.
-
-```{eval-rst}
-+--------------+------------+----------+--------------+------------+----------+-------------------------------------+
-|  From                                |  To                                  | Charm release notes to review       |
-+--------------+------------+----------+--------------+------------+----------+                                     |
-| Charm        | PostgreSQL | OCI      | Charm        | PostgreSQL | OCI      |                                     |
-| revision     | Version    | revision | revision     | Version    | revision |                                     |
-+==============+============+==========+==============+============+==========+=====================================+
-|    N/A       |            |          |              |            |          |                                     |
-+--------------+------------+----------+--------------+------------+----------+-------------------------------------+
-```
-````
-`````
 
 ### Supported refreshes
 
-If possible, use a {ref}`recommended refresh <recommended-refreshes>` instead.
-
-`````{tab-set}
-````{tab-item} VM
-:sync: vm
+If possible, use a {ref}`recommended refresh <recommended-refreshes-vm>` instead.
 
 ```{eval-rst}
 +------------+------------+----------+------------+------------+----------+
@@ -136,25 +107,6 @@ If possible, use a {ref}`recommended refresh <recommended-refreshes>` instead.
 | 1088, 1089 | 16.13      | 282, 283 | 1157, 1158 | 16.14      | 365, 366 |
 +------------+------------+----------+------------+------------+----------+
 ```
-````
-
-````{tab-item} K8s
-:sync: k8s
-
-Coming soon.
-
-```{eval-rst}
-+------------+------------+----------+------------+------------+----------+
-| From                    | To                                            |
-+------------+------------+----------+------------+------------+----------+
-| Charm      | PostgreSQL | OCI      | Charm      | PostgreSQL | OCI      |
-| revision   | Version    | revision | revision   | Version    | revision |
-+============+============+==========+============+============+==========+
-|   N/A      |            |          |            |            |          |
-+------------+------------+----------+------------+------------+----------+
-```
-````
-`````
 
 ### Unsupported refreshes
 
@@ -181,17 +133,17 @@ Check the restored data by ensuring that:
 
 In the event that something goes wrong (e.g. the refresh fails, the new version of PostgreSQL is not performant enough, a database client is incompatible with the new version), you may want to quickly roll back.
 
-Prepare for this possibility by reading through the entire refresh documentation—with special attention to the {ref}`halt-the-refresh` and {ref}`roll-back` sections—before starting the refresh.
+Prepare for this possibility by reading through the entire refresh documentation—with special attention to the {ref}`halt-the-refresh-vm` and {ref}`roll-back-vm` sections—before starting the refresh.
 
 ## Review release notes
 
 Review the release notes for every charm version between the version that you are refreshing from and to to understand what changed and if any action is required from you before, during, or after the refresh.
 
-For {ref}`recommended refreshes <recommended-refreshes>`, refer to the rightmost column of the table.
+For {ref}`recommended refreshes <recommended-refreshes-vm>`, refer to the rightmost column of the table.
 
 If the PostgreSQL versions that you are refreshing from and to are different, refer to the [upstream PostgreSQL release notes](https://www.postgresql.org/docs/release/) to understand what changed and if any action is required from you.
 
-(test-in-a-staging-environment)=
+(test-in-a-staging-environment-vm)=
 ## Test in a staging environment
 
 We recommend testing the entire refresh procedure in a staging environment before refreshing your production environment.
@@ -210,7 +162,7 @@ Tell your users when you will perform the refresh and remain in contact with the
 
 If possible, schedule a maintenance window during a period of low traffic.
 
-The duration of the refresh may depend on the size of your data and volume of traffic. To estimate the duration, we recommend {ref}`testing in a staging environment <test-in-a-staging-environment>`.
+The duration of the refresh may depend on the size of your data and volume of traffic. To estimate the duration, we recommend {ref}`testing in a staging environment <test-in-a-staging-environment-vm>`.
 
 ## Consider scaling up
 
@@ -228,7 +180,7 @@ To ensure that the cluster can handle all traffic during the refresh, consider s
 If you anticipate that the refresh will be in progress for an extended duration (e.g. days, weeks), scale up the application before the refresh so that it can handle the maximum load during that period.
 ```
 
-(pre-refresh-check)=
+(pre-refresh-check-vm)=
 ## Pre-refresh check
 
 Run the `pre-refresh-check` action on the leader unit to prepare the application for refresh.
@@ -241,9 +193,9 @@ If the action does not succeed, **do not refresh**.
 
 If the action succeeds, copy down the rollback command.
 
-Keep the command available in case you need to {ref}`roll back <roll-back>`.
+Keep the command available in case you need to {ref}`roll back <roll-back-vm>`.
 
-(configure-pause-after-unit-refresh)=
+(configure-pause-after-unit-refresh-vm)=
 ## Configure `pause-after-unit-refresh`
 
 After each unit is refreshed, the charm will perform automatic health checks.
@@ -298,7 +250,7 @@ Use `juju refresh` and specify the charm revision that you are refreshing to.
 juju refresh postgresql --revision <revision-number>
 ```
 
-(halt-the-refresh)=
+(halt-the-refresh-vm)=
 ## Halt the refresh
 
 If something goes wrong, halt the refresh by running:
@@ -309,25 +261,25 @@ juju config postgresql pause-after-unit-refresh=all
 
 In the command above, replace `postgresql` with the name of your Juju application.
 
-Next, assess the situation and plan the recovery. Often, the safest recovery path is to {ref}`roll back <roll-back>`.
+Next, assess the situation and plan the recovery. Often, the safest recovery path is to {ref}`roll back <roll-back-vm>`.
 
 Consider {ref}`contacting us <contact>` for guidance.
 
-(roll-back)=
+(roll-back-vm)=
 ## Roll back
 
 If something went wrong, the safest recovery path is often to roll back to the original version.
 
-First, {ref}`halt the refresh <halt-the-refresh>`.
+First, {ref}`halt the refresh <halt-the-refresh-vm>`.
 
-Run the rollback command you copied down earlier in {ref}`pre-refresh-check`.
+Run the rollback command you copied down earlier in {ref}`pre-refresh-check-vm`.
 
 In most cases, the rollback command is also displayed in the application's status message in `juju status`.
 
 ### Resume the rollback
 
 If more than one unit was refreshed before the rollback was started and `pause-after-unit-refresh` is set to `all` or `first`, your manual confirmation will be needed to complete the rollback.
-The procedure for the rollback is the same as described in {ref}`monitor-the-refresh`.
+The procedure for the rollback is the same as described in {ref}`monitor-the-refresh-vm`.
 
 ### Reflect
 
@@ -337,7 +289,7 @@ If applicable, please file a {ref}`bug report <contact>`.
 
 Once you understand what went wrong and have tested that it has been fixed, the refresh can be attempted again.
 
-(monitor-the-refresh)=
+(monitor-the-refresh-vm)=
 ## Monitor the refresh
 
 Use `juju status` to monitor the progress of the refresh.
@@ -348,7 +300,7 @@ If the application status or any of the unit statuses are `blocked`, your action
 
 If the application status or any of the unit statuses are `error`, your action may be required. Monitor `juju debug-log`.
 The error may have been a temporary issue.
-If the error persists, your action is required—consider {ref}`rolling back <roll-back>`.
+If the error persists, your action is required—consider {ref}`rolling back <roll-back-vm>`.
 
 Monitor the refresh until it successfully finishes.
 When the refresh completes, the application status will go from a message beginning with "Refreshing" to an `active` status with no message.
@@ -362,7 +314,7 @@ The application status in `juju status` will instruct you when your confirmation
 Before running the `resume-refresh` action:
 * Wait until all of the application's unit agent statuses are `idle`
 * Wait until all of the refreshed units' workload statuses are `active`
-* Perform {ref}`manual checks <configure-pause-after-unit-refresh>` to ensure that everything is healthy
+* Perform {ref}`manual checks <configure-pause-after-unit-refresh-vm>` to ensure that everything is healthy
 
 Example of running the `resume-refresh` action on unit 1:
 

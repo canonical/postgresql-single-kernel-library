@@ -86,3 +86,7 @@ body[data-theme="dark"] {
     background-color: var(--color-background-secondary);
     border-left: 3px solid var(--color-admonition-title--important);
 }
+
+.oci-image-reference {
+    overflow-wrap: anywhere;
+}
