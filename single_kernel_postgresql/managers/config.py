@@ -79,7 +79,8 @@ class ConfigManager(BaseManager):
         self.request_restart = request_restart
         self.restart_services = restart_services
         # Publishes the managed logical replication slots for the Patroni render and API
-        # sync; None until the logical replication module lands in a follow-up PR.
+        # sync; the callable is wired from the logical replication handler at the
+        # composition root and defaults to an empty mapping when absent.
         self.logical_replication_slots = logical_replication_slots or (lambda: {})
 
     @staticmethod
@@ -506,7 +507,9 @@ class ConfigManager(BaseManager):
 
         replication_slots = self.logical_replication_slots()
 
-        # TODO add rel handler
+        # The embedding charm supplies relations_user_databases_map on every
+        # render (the relation-user pg_hba rules stay charm-side until their
+        # migration phase); the library default keeps the render working.
         relations_user_databases_map = relations_user_databases_map or {}
 
         # Update and reload configuration based on TLS files availability.

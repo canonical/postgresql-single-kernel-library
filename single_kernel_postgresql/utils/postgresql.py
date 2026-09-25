@@ -25,9 +25,15 @@ import pwd
 from datetime import UTC, datetime
 
 import psycopg2
-from tenacity import Retrying, retry_if_exception_type, stop_after_delay, wait_fixed
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
+from tenacity import (
+    Retrying,
+    retry_if_exception,
+    retry_if_exception_type,
+    stop_after_delay,
+    wait_fixed,
+)
 
 from ..compat.postgresql import (
     ACCESS_GROUP_RELATION,
@@ -173,6 +179,20 @@ class PostgreSQLDropSubscriptionError(PostgreSQLBaseError):
 
 class PostgreSQLGrantDatabasePrivilegesToUserError(PostgreSQLBaseError):
     """Exception raised when granting database privileges to user."""
+
+
+def _is_transient_subscription_race(e: Exception) -> bool:
+    """Publisher-side setup races that resolve on retry.
+
+    Connection failures (OperationalError) are transient, except credential
+    errors: psycopg2 subclasses InvalidPassword from OperationalError, and a
+    stale secret is permanent — it must fail fast.
+    """
+    if isinstance(e, (psycopg2.errors.UndefinedObject, psycopg2.errors.ObjectInUse)):
+        return True
+    return isinstance(e, psycopg2.OperationalError) and not isinstance(
+        e, psycopg2.errors.InvalidPassword
+    )
 
 
 class PostgreSQL(PostgreSQLBase):
@@ -1313,27 +1333,44 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
         publication: str,
         replication_slot: str,
     ) -> None:
-        """Create PostgreSQL subscription."""
-        connection = None
+        """Create PostgreSQL subscription, retrying transient publisher races.
+
+        CREATE SUBSCRIPTION with create_slot=false connects to the publisher
+        as a walsender; while the publisher is still creating its publication
+        or a walsender is still attached to the slot, the statement fails
+        transiently (connection refused, publication not yet there, slot
+        active for a PID). Retry only those races on a fresh connection per
+        attempt; any other failure surfaces immediately as
+        PostgreSQLCreateSubscriptionError.
+        """
         try:
-            connection = self._connect_to_database(database=db)
-            with connection, connection.cursor() as cursor:
-                cursor.execute(
-                    SQL(
-                        "CREATE SUBSCRIPTION {} CONNECTION {} PUBLICATION {} WITH (copy_data=true,create_slot=false,enabled=true,slot_name={});"
-                    ).format(
-                        Identifier(subscription),
-                        Literal(f"host={host} dbname={db} user={user} password={password}"),
-                        Identifier(publication),
-                        Identifier(replication_slot),
-                    )
-                )
+            for attempt in Retrying(
+                stop=stop_after_delay(120),
+                wait=wait_fixed(3),
+                retry=retry_if_exception(_is_transient_subscription_race),
+                reraise=True,
+            ):
+                with attempt:
+                    connection = self._connect_to_database(database=db)
+                    try:
+                        with connection, connection.cursor() as cursor:
+                            cursor.execute(
+                                SQL(
+                                    "CREATE SUBSCRIPTION {} CONNECTION {} PUBLICATION {} WITH (copy_data=true,create_slot=false,enabled=true,slot_name={});"
+                                ).format(
+                                    Identifier(subscription),
+                                    Literal(
+                                        f"host={host} dbname={db} user={user} password={password}"
+                                    ),
+                                    Identifier(publication),
+                                    Identifier(replication_slot),
+                                )
+                            )
+                    finally:
+                        connection.close()
         except psycopg2.Error as e:
             logger.error(f"Failed to create Postgresql subscription: {e}")
             raise PostgreSQLCreateSubscriptionError() from e
-        finally:
-            if connection:
-                connection.close()
 
     def subscription_exists(self, db: str, subscription: str) -> bool:
         """Check whether specified subscription in database exists."""

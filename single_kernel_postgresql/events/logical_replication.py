@@ -27,7 +27,6 @@ from ops import (
     SecretNotFoundError,
 )
 from ops.framework import Object
-from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from single_kernel_postgresql.config.literals import (
     LOGICAL_REPLICATION_OFFER_RELATION,
@@ -40,6 +39,11 @@ logger = logging.getLogger(__name__)
 
 LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS = "Logical replication setup is invalid. Check logs"
 SECRET_LABEL = "logical-replication-relation"  # noqa: S105
+PUBLISHED_RESOURCES_KEY = "logical-replication-published-resources"
+SUBSCRIPTIONS_KEY = "logical-replication-subscriptions"
+APPLIED_REQUEST_KEY = "logical-replication-applied-request"
+VALIDATION_KEY = "logical-replication-validation"
+VALIDATION_STATUS_MESSAGE_KEY = "logical-replication-validation-status-message"
 
 
 class PostgreSQLLogicalReplication(Object):
@@ -157,7 +161,7 @@ class PostgreSQLLogicalReplication(Object):
             return
 
         published_resources = json.loads(
-            self.state.application.data.get("logical-replication-published-resources", "{}")
+            self.state.application.data.get(PUBLISHED_RESOURCES_KEY, "{}")
         )
         active_relation_ids = [
             str(relation.id)
@@ -199,7 +203,7 @@ class PostgreSQLLogicalReplication(Object):
                     publication["replication-slot-name"], database
                 )
             del published_resources[relation_id]
-            self.state.application.data["logical-replication-published-resources"] = json.dumps(
+            self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(
                 published_resources
             )
 
@@ -213,13 +217,13 @@ class PostgreSQLLogicalReplication(Object):
                 f"{LOGICAL_REPLICATION_RELATION} #{event.relation.id} join early exit due to unit not being a leader"
             )
             return
-        if self.state.application.data.get("logical-replication-validation") == "ongoing":
+        if self.state.application.data.get(VALIDATION_KEY) == "ongoing":
             logger.debug(
                 f"Deferring {LOGICAL_REPLICATION_RELATION} #{event.relation.id} join due to still ongoing logical replication config validation"
             )
             event.defer()
             return
-        if self.state.application.data.get("logical-replication-validation") == "error":
+        if self.state.application.data.get(VALIDATION_KEY) == "error":
             logger.debug(
                 f"{LOGICAL_REPLICATION_RELATION} #{event.relation.id} join early exit due to validation error"
             )
@@ -253,7 +257,7 @@ class PostgreSQLLogicalReplication(Object):
         # (canonical/postgresql-k8s-operator#982 comment 3019811325). Existing
         # subscriptions keep refreshing; only NEW subscriptions are gated.
         validation_error = (
-            self.state.application.data.get("logical-replication-validation") == "error"
+            self.state.application.data.get(VALIDATION_KEY) == "error"
         )
         for database, publication in publications.items():
             subscription_name = self._subscription_name(event.relation.id, database)
@@ -307,17 +311,18 @@ class PostgreSQLLogicalReplication(Object):
                 )
                 continue
             publication_name = publication["publication-name"]
-            for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True):
-                with attempt:
-                    self.charm.postgresql.create_subscription(
-                        subscription_name,
-                        secret_content["primary"],
-                        database,
-                        secret_content["username"],
-                        secret_content["password"],
-                        publication_name,
-                        publication["replication-slot-name"],
-                    )
+            # Transient publisher races are retried inside create_subscription
+            # (fresh connection per attempt); anything else surfaces
+            # immediately as PostgreSQLCreateSubscriptionError.
+            self.charm.postgresql.create_subscription(
+                subscription_name,
+                secret_content["primary"],
+                database,
+                secret_content["username"],
+                secret_content["password"],
+                publication_name,
+                publication["replication-slot-name"],
+            )
             logger.info(
                 f"Created new subscription {subscription_name} for publication {publication_name} in database {database}"
             )
@@ -335,7 +340,7 @@ class PostgreSQLLogicalReplication(Object):
             self.charm.postgresql.drop_replication_slot(slot_name, database)
             del subscriptions[database]
 
-        self.state.application.data["logical-replication-subscriptions"] = json.dumps({
+        self.state.application.data[SUBSCRIPTIONS_KEY] = json.dumps({
             str(event.relation.id): subscriptions
         })
         # Live replication state changed here: a database got a subscription
@@ -370,13 +375,13 @@ class PostgreSQLLogicalReplication(Object):
             logger.info(
                 f"Dropped subscription {subscription} from database {database} due to relation break"
             )
-        self.state.application.data["logical-replication-subscriptions"] = "{}"
+        self.state.application.data[SUBSCRIPTIONS_KEY] = "{}"
         # Clear the applied-request baseline too: nothing is being replicated
         # anymore, so the next validation must treat every configured table as
         # newly added -- the empty-table guard then blocks re-subscribing onto
         # a non-empty table (the original remove/re-integrate semantics;
         # canonical/postgresql-k8s-operator#982 comment 3019811325).
-        self.state.application.data["logical-replication-applied-request"] = "{}"
+        self.state.application.data[APPLIED_REQUEST_KEY] = "{}"
 
     # endregion
 
@@ -406,7 +411,7 @@ class PostgreSQLLogicalReplication(Object):
                 # Validation failed with current errors
                 return False
             # Validation passed, errors were stale - continue processing
-            logger.info("Publisher errors were stale, continuing with relation processing")
+            logger.debug("Publisher errors were stale, continuing with relation processing")
             return True
 
         # No subscription-request yet, or not leader - process errors as-is
@@ -482,12 +487,12 @@ class PostgreSQLLogicalReplication(Object):
             logger.debug(
                 "Marking logical replication config validation as ongoing and deferring event until primary as available"
             )
-            self.state.application.data["logical-replication-validation"] = "ongoing"
+            self.state.application.data[VALIDATION_KEY] = "ongoing"
             event.defer()
             return False
         # Clear any previous error state when config changes
         # This prevents retry_validations() from validating stale config
-        self.state.application.data["logical-replication-validation"] = "ongoing"
+        self.state.application.data[VALIDATION_KEY] = "ongoing"
 
         # Capture the PREVIOUSLY APPLIED request from the peer data: the empty-table
         # check must fire for tables being NEWLY added to the subscription (their
@@ -495,7 +500,7 @@ class PostgreSQLLogicalReplication(Object):
         # keep skipping it (canonical/postgresql-k8s-operator#1052;
         # test_pg2_dynamic_error vs test_pg3_extend_subscription).
         previous_request = json.loads(
-            self.state.application.data.get("logical-replication-applied-request", "{}")
+            self.state.application.data.get(APPLIED_REQUEST_KEY, "{}")
         )
 
         # Push the request to the relation BEFORE validating: the publisher's
@@ -535,7 +540,7 @@ class PostgreSQLLogicalReplication(Object):
         if not self.charm.unit.is_leader() or not self.charm.primary_endpoint:
             return
         if self.state.application.data.get(
-            "logical-replication-validation"
+            VALIDATION_KEY
         ) == "error" and self._validate_subscription_request(
             # Re-validate against the CURRENT config: the blocked request
             # was already pushed (push-before-validate), so every
@@ -619,7 +624,7 @@ class PostgreSQLLogicalReplication(Object):
             self.charm.postgresql.drop_subscription(database, subscription)
             logger.info(f"Dropped redundant subscription {subscription} from database {database}")
             del subscriptions[database]
-        self.state.application.data["logical-replication-subscriptions"] = json.dumps({
+        self.state.application.data[SUBSCRIPTIONS_KEY] = json.dumps({
             str(relation.id): subscriptions
         })
 
@@ -637,7 +642,7 @@ class PostgreSQLLogicalReplication(Object):
             self.state.config.logical_replication_subscription_request or "{}"
         )
         live_databases = self._subscriptions_info()
-        self.state.application.data["logical-replication-applied-request"] = json.dumps({
+        self.state.application.data[APPLIED_REQUEST_KEY] = json.dumps({
             database: tables
             for database, tables in applied_request.items()
             if database in live_databases
@@ -835,7 +840,7 @@ class PostgreSQLLogicalReplication(Object):
         # already subscribed and skip the empty-table guard.
         if previous_request is None:
             previous_request = json.loads(
-                self.state.application.data.get("logical-replication-applied-request", "{}")
+                self.state.application.data.get(APPLIED_REQUEST_KEY, "{}")
             )
 
         for database, schematables in subscription_request_config.items():
@@ -847,19 +852,19 @@ class PostgreSQLLogicalReplication(Object):
                 ):
                     return False
 
-        self.state.application.data["logical-replication-validation"] = ""
-        self.state.application.data["logical-replication-validation-status-message"] = ""
+        self.state.application.data[VALIDATION_KEY] = ""
+        self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = ""
         return True
 
     def _fail_validation(self, message: str | None = None, status_msg: str | None = None) -> bool:
         if message:
             logger.error(f"Logical replication validation: {message}")
-        self.state.application.data["logical-replication-validation"] = "error"
+        self.state.application.data[VALIDATION_KEY] = "error"
         blocked_message = status_msg or LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS
         # Persist the exact message: the composition root's status gate re-sets the
         # unit status on update-status and must surface THIS text, not a generic one
         # (canonical/postgresql-k8s-operator#1052 follow-up).
-        self.state.application.data["logical-replication-validation-status-message"] = (
+        self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = (
             blocked_message
         )
         self.charm.set_unit_status(BlockedStatus(blocked_message))
@@ -886,7 +891,7 @@ class PostgreSQLLogicalReplication(Object):
 
     def _subscriptions_info(self) -> dict[str, str]:
         for subscriptions_info in json.loads(
-            self.state.application.data.get("logical-replication-subscriptions") or "{}"
+            self.state.application.data.get(SUBSCRIPTIONS_KEY) or "{}"
         ).values():
             return subscriptions_info
         return {}
@@ -1300,13 +1305,13 @@ class PostgreSQLLogicalReplication(Object):
         publications: dict[str, dict[str, str | list[str]]],
     ) -> None:
         published_resources = json.loads(
-            self.state.application.data.get("logical-replication-published-resources", "{}")
+            self.state.application.data.get(PUBLISHED_RESOURCES_KEY, "{}")
         )
         published_resources[relation_id] = {
             "secret-id": secret_id,
             "publications": publications,
         }
-        self.state.application.data["logical-replication-published-resources"] = json.dumps(
+        self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(
             published_resources
         )
 
@@ -1315,13 +1320,12 @@ class PostgreSQLLogicalReplication(Object):
 
         Returns: dictionary in <slot>: <database> format.
         """
-        raw = self.state.application.data.get("logical-replication-published-resources", "{}")
+        raw = self.state.application.data.get(PUBLISHED_RESOURCES_KEY, "{}")
         slots = {
             publication["replication-slot-name"]: database
             for resources in json.loads(raw).values()
             for database, publication in resources["publications"].items()
         }
-        logger.debug(f"DEBUG-SLOTS raw={raw} resolved={slots}")
         return slots
 
     def _create_user(self, relation_id: int) -> tuple[str, str]:
