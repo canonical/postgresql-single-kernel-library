@@ -7,9 +7,13 @@ import logging
 import re
 import time
 from collections.abc import Callable
+from contextlib import suppress
 from typing import TYPE_CHECKING
 
-from lightkube.core.exceptions import ApiError
+# Platform specific imports
+with suppress(ImportError):
+    from lightkube.core.exceptions import ApiError
+
 from ops.pebble import ChangeError, ExecError
 
 from single_kernel_postgresql.config.enums import Substrates
