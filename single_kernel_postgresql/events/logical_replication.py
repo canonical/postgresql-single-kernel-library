@@ -176,14 +176,15 @@ class PostgreSQLLogicalReplication(Object):
         # slots when their config entry disappears.
         candidate_databases = set(
             json.loads(self.state.config.logical_replication_subscription_request or "{}")
-        ) | set(
+        ) | {
             database
             for relation_resources in published_resources.values()
             for database in relation_resources["publications"]
-        )
-# Freshly constructed per access (Patroni primary lookup + app secret); the
+        }
+
+        # Freshly constructed per access (Patroni primary lookup + app secret); the
         # candidate-database loop drops one slot per database.
-        postgresql = postgresql
+        postgresql = self.charm.postgresql
 
         for database in candidate_databases:
             postgresql.drop_replication_slot(
@@ -204,13 +205,9 @@ class PostgreSQLLogicalReplication(Object):
                 pass
             for database, publication in relation_resources["publications"].items():
                 postgresql.drop_publication(database, publication["publication-name"])
-                postgresql.drop_replication_slot(
-                    publication["replication-slot-name"], database
-                )
+                postgresql.drop_replication_slot(publication["replication-slot-name"], database)
             del published_resources[relation_id]
-            self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(
-                published_resources
-            )
+            self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(published_resources)
 
         self.charm.update_config()
 
@@ -239,6 +236,51 @@ class PostgreSQLLogicalReplication(Object):
             self.state.config.logical_replication_subscription_request or ""
         )
 
+    def _guard_subscription_refresh(
+        self,
+        database: str,
+        subscription_name: str,
+        subscription_request_config: dict[str, list[str]],
+    ) -> bool:
+        """Empty-table guard for the subscription REFRESH path.
+
+        A table added to the request that the subscription does not already
+        replicate would be copy_data-ed by REFRESH PUBLICATION (copy_data
+        defaults to true) on top of the subscriber's local rows — the #982
+        duplication. Block the refresh when any newly-requested, non-replicated
+        table is locally non-empty. The truth source is the CURRENT publication
+        membership (pg_publication_tables), not pg_subscription_rel: the latter
+        lags a publication ALTER until the next REFRESH, which would misfire
+        the guard on safe re-widens.
+
+        Args:
+            database: The database name
+            subscription_name: The subscription being refreshed
+            subscription_request_config: The configured subscription request
+
+        Returns:
+            True when the refresh may proceed, False when blocked.
+        """
+        # Freshly constructed per access (Patroni primary lookup + app secret);
+        # capture once for the three calls below, per events/database.py.
+        postgresql = self.charm.postgresql
+        requested = {
+            tuple(schematable.partition(".")[::2])
+            for schematable in subscription_request_config.get(database, [])
+        }
+        live_table_set = postgresql.subscription_table_set(database, subscription_name)
+        for database_table in requested - live_table_set:
+            schema, table = database_table
+            if not postgresql.table_exists(database, schema, table) or postgresql.is_table_empty(
+                database, schema, table
+            ):
+                self._fail_validation(
+                    f"table {schema}.{table} in database {database} isn't empty",
+                    status_msg=f"table {schema}.{table} isn't empty",
+                )
+                return False
+        return True
+
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         if not self._relation_changed_checks(event):
             return
@@ -253,7 +295,7 @@ class PostgreSQLLogicalReplication(Object):
         # constructed per access (Patroni primary lookup + app secret), and
         # this loop performs several calls per subscribed database — the
         # same per-event capture events/database.py uses.
-        postgresql = postgresql
+        postgresql = self.charm.postgresql
         subscriptions = self._subscriptions_info()
         subscription_request_config = json.loads(
             self.state.config.logical_replication_subscription_request or "{}"
@@ -266,39 +308,17 @@ class PostgreSQLLogicalReplication(Object):
         # re-subscribe with copy_data=true, duplicating rows
         # (canonical/postgresql-k8s-operator#982 comment 3019811325). Existing
         # subscriptions keep refreshing; only NEW subscriptions are gated.
-        validation_error = (
-            self.state.application.data.get(VALIDATION_KEY) == "error"
-        )
+        validation_error = self.state.application.data.get(VALIDATION_KEY) == "error"
         for database, publication in publications.items():
             subscription_name = self._subscription_name(event.relation.id, database)
             if database in subscriptions:
                 # The REFRESH path must respect the same empty-table guard as
-                # the creation path: a table added to the request that the
-                # subscription does not already replicate would be copy_data-ed
-                # by REFRESH PUBLICATION (copy_data defaults to true) on top of
-                # the subscriber's local rows — the #982 duplication. Block the
-                # refresh when any newly-requested, non-replicated table is
-                # locally non-empty. The truth source is the CURRENT publication
-                # membership (pg_publication_tables), not pg_subscription_rel:
-                # the latter lags a publication ALTER until the next REFRESH,
-                # which would misfire the guard on safe re-widens.
-                requested = {
-                    tuple(schematable.partition(".")[::2])
-                    for schematable in subscription_request_config.get(database, [])
-                }
-                live_table_set = postgresql.subscription_table_set(
-                    database, subscription_name
-                )
-                for database_table in requested - live_table_set:
-                    schema, table = database_table
-                    if not postgresql.table_exists(
-                        database, schema, table
-                    ) or postgresql.is_table_empty(database, schema, table):
-                        self._fail_validation(
-                            f"table {schema}.{table} in database {database} isn't empty",
-                            status_msg=f"table {schema}.{table} isn't empty",
-                        )
-                        return
+                # the creation path; block on any newly-requested, locally
+                # non-empty table (the #982 duplication).
+                if not self._guard_subscription_refresh(
+                    database, subscription_name, subscription_request_config
+                ):
+                    return
                 postgresql.refresh_subscription(database, subscription_name)
                 logger.info(
                     f"Refreshed subscription {subscription_name} in database {database} due to relation change"
@@ -509,9 +529,7 @@ class PostgreSQLLogicalReplication(Object):
         # local data is stale or absent), while tables already being replicated
         # keep skipping it (canonical/postgresql-k8s-operator#1052;
         # test_pg2_dynamic_error vs test_pg3_extend_subscription).
-        previous_request = json.loads(
-            self.state.application.data.get(APPLIED_REQUEST_KEY, "{}")
-        )
+        previous_request = json.loads(self.state.application.data.get(APPLIED_REQUEST_KEY, "{}"))
 
         # Push the request to the relation BEFORE validating: the publisher's
         # replication-chain checks read this request, and the multi-hop circular
@@ -752,6 +770,7 @@ class PostgreSQLLogicalReplication(Object):
             database: The database name
             schematable: The table name in schema.table format
             previous_request: The previously applied subscription request
+            empty_tables: "enforce" always guards; "auto" only guards extensions
 
         Returns:
             True if validation passes, False otherwise
@@ -785,21 +804,49 @@ class PostgreSQLLogicalReplication(Object):
                 status_msg=f"Circular replication detected for table {schematable}",
             )
 
-        # The empty-table check must be skipped only for tables ALREADY being
-        # replicated by this subscription; it must fire for tables being NEWLY
-        # added (their local data is stale or absent, and copy_data would
-        # duplicate it). The comparison baseline is the PREVIOUSLY APPLIED
-        # request -- captured before the push in apply_changed_config -- which
-        # restores the original #982 semantics
-        # (canonical/postgresql-k8s-operator#982 comment 3019811325;
-        # test_pg2_dynamic_error vs test_pg3_extend_subscription).
-        # The truthful "already replicated" test: the LIVE subscription's actual
-        # table set (pg_subscription_rel), per TABLE — the database-level
-        # bookkeeping cannot see tables added to an already-subscribed database,
-        # which silently passed the guard and re-subscribed with copy_data over
-        # non-empty tables (test_pg2_dynamic_error; the #982 comment 3019811325
-        # duplication). `previous_request` stays as the secondary signal for
-        # bookkeeping-only states (no live subscription yet).
+        return not self._enforce_empty_table_guard(
+            database, schema, table, schematable, previous_request, empty_tables
+        )
+
+    def _enforce_empty_table_guard(
+        self,
+        database: str,
+        schema: str,
+        table: str,
+        schematable: str,
+        previous_request: dict[str, list[str]],
+        empty_tables: str,
+    ) -> bool:
+        """Enforce the empty-table guard for a table about to be replicated.
+
+        The empty-table check must be skipped only for tables ALREADY being
+        replicated by this subscription; it must fire for tables being NEWLY
+        added (their local data is stale or absent, and copy_data would
+        duplicate it). The comparison baseline is the PREVIOUSLY APPLIED
+        request -- captured before the push in apply_changed_config -- which
+        restores the original #982 semantics
+        (canonical/postgresql-k8s-operator#982 comment 3019811325;
+        test_pg2_dynamic_error vs test_pg3_extend_subscription).
+        The truthful "already replicated" test: the LIVE subscription's actual
+        table set (pg_subscription_rel), per TABLE — the database-level
+        bookkeeping cannot see tables added to an already-subscribed database,
+        which silently passed the guard and re-subscribed with copy_data over
+        non-empty tables (test_pg2_dynamic_error; the #982 comment 3019811325
+        duplication). `previous_request` stays as the secondary signal for
+        bookkeeping-only states (no live subscription yet).
+
+        Args:
+            database: The database name
+            schema: The table schema
+            table: The table name
+            schematable: The table name in schema.table format
+            previous_request: The previously applied subscription request
+            empty_tables: "enforce" always guards; "auto" only fires the guard
+                for extensions of an already-subscribed database
+
+        Returns:
+            True when validation failed, False when the table may be replicated.
+        """
         live_table_set = set()
         for _, subscription in self._subscriptions_info().items():
             live_table_set |= self.charm.postgresql.subscription_table_set(database, subscription)
@@ -808,23 +855,21 @@ class PostgreSQLLogicalReplication(Object):
             and database in previous_request
             and schematable in previous_request[database]
         )
-        if not already_subscribed and not self.charm.postgresql.is_table_empty(
-            database, schema, table
-        ):
-            # "auto" (config-changed validation): the guard only fires for
-            # EXTENSIONS of an already-subscribed database -- the local block
-            # must not preempt the request round-trip the multi-hop circular
-            # detection needs (canonical/postgresql-operator#1085). For NEW
-            # databases the guard is enforced at subscription-creation time
-            # (_on_relation_changed), which still blocks the copy_data
-            # duplication. "enforce" (creation gate, retries, publisher-error
-            # re-validation) always guards.
-            if empty_tables == "enforce" or database in self._subscriptions_info():
-                return self._fail_validation(
-                    f"table {schematable} in database {database} isn't empty"
-                )
-
-        return True
+        if already_subscribed:
+            return False
+        if self.charm.postgresql.is_table_empty(database, schema, table):
+            return False
+        # "auto" (config-changed validation): the guard only fires for
+        # EXTENSIONS of an already-subscribed database -- the local block
+        # must not preempt the request round-trip the multi-hop circular
+        # detection needs (canonical/postgresql-operator#1085). For NEW
+        # databases the guard is enforced at subscription-creation time
+        # (_on_relation_changed), which still blocks the copy_data
+        # duplication. "enforce" (creation gate, retries, publisher-error
+        # re-validation) always guards.
+        if empty_tables == "enforce" or database in self._subscriptions_info():
+            return self._fail_validation(f"table {schematable} in database {database} isn't empty")
+        return False
 
     def _validate_subscription_request(
         self,
@@ -874,9 +919,7 @@ class PostgreSQLLogicalReplication(Object):
         # Persist the exact message: the composition root's status gate re-sets the
         # unit status on update-status and must surface THIS text, not a generic one
         # (canonical/postgresql-k8s-operator#1052 follow-up).
-        self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = (
-            blocked_message
-        )
+        self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = blocked_message
         self.charm.set_unit_status(BlockedStatus(blocked_message))
         return False
 
@@ -936,9 +979,7 @@ class PostgreSQLLogicalReplication(Object):
             logger.info(
                 f"Revoking replication privileges on database {database} from user {user} from {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
             )
-            postgresql.revoke_replication_privileges(
-                user, database, publication["tables"]
-            )
+            postgresql.revoke_replication_privileges(user, database, publication["tables"])
 
         for database, tables in subscriptions_request.items():
             # Check for circular replication on publisher side
@@ -985,9 +1026,7 @@ class PostgreSQLLogicalReplication(Object):
                 logger.info(
                     f"Altering replication privileges on database {database} for user {user} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
                 )
-                postgresql.grant_replication_privileges(
-                    user, database, tables, publication_tables
-                )
+                postgresql.grant_replication_privileges(user, database, tables, publication_tables)
                 logger.info(
                     f"Altering publication {publication_name} tables from {','.join(publication_tables)} to {','.join(tables)} in database {database} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
                 )
@@ -1325,9 +1364,7 @@ class PostgreSQLLogicalReplication(Object):
             "secret-id": secret_id,
             "publications": publications,
         }
-        self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(
-            published_resources
-        )
+        self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(published_resources)
 
     def replication_slots(self) -> dict[str, str]:
         """Get list of all managed replication slots.

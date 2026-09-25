@@ -34,7 +34,9 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
             # Patroni and the operator password from the app secret, exactly as in
             # the real VM charm.
             primary_host=self.primary_endpoint,
-            current_host="/tmp/snap-private-tmp/snap.charmed-postgresql/tmp/",
+            # The snap's own runtime tmp dir (not a tempfile): bandit's S108
+            # shared-temp-dir rule doesn't model snap runtime dirs.
+            current_host="/tmp/snap-private-tmp/snap.charmed-postgresql/tmp/",  # noqa: S108
             user=USER,
             password=str(self.state.application.user_password or ""),
             database="postgres",

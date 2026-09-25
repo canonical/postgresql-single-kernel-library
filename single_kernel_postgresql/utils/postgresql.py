@@ -182,7 +182,7 @@ class PostgreSQLGrantDatabasePrivilegesToUserError(PostgreSQLBaseError):
     """Exception raised when granting database privileges to user."""
 
 
-def _is_transient_subscription_race(e: Exception) -> bool:
+def _is_transient_subscription_race(e: BaseException) -> bool:
     """Publisher-side setup races that resolve on retry.
 
     Connection failures (OperationalError) are transient, except the
@@ -191,7 +191,7 @@ def _is_transient_subscription_race(e: Exception) -> bool:
     OperationalError): a bad pg_hba rule or stale secret is permanent and
     must fail fast.
     """
-    if isinstance(e, (psycopg2.errors.UndefinedObject, psycopg2.errors.ObjectInUse)):
+    if isinstance(e, (psycopg2.errors.UndefinedObject, psycopg2.errors.ObjectInUse)):  # ty: ignore[unresolved-attribute]
         return True
     return isinstance(e, psycopg2.OperationalError) and not (
         getattr(e, "pgcode", "") or ""
@@ -1285,7 +1285,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                         Literal(slot), Literal(plugin)
                     )
                 )
-        except psycopg2.errors.DuplicateObject:
+        except psycopg2.errors.DuplicateObject:  # ty: ignore[unresolved-attribute]
             logger.debug(f"Replication slot {slot} already exists")
         except psycopg2.Error as e:
             logger.error(f"Failed to create replication slot {slot}: {e}")
@@ -1309,7 +1309,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
             for attempt in Retrying(
                 stop=stop_after_delay(60),
                 wait=wait_fixed(5),
-                retry=retry_if_exception_type(psycopg2.errors.ObjectInUse),
+                retry=retry_if_exception_type(psycopg2.errors.ObjectInUse),  # ty: ignore[unresolved-attribute]
                 reraise=True,
             ):
                 with attempt:
@@ -1321,7 +1321,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                             )
                     finally:
                         connection.close()
-        except psycopg2.errors.UndefinedObject:
+        except psycopg2.errors.UndefinedObject:  # ty: ignore[unresolved-attribute]
             logger.debug(f"Replication slot {slot} already absent")
         except psycopg2.Error as e:
             logger.error(f"Failed to drop replication slot {slot}: {e}")
