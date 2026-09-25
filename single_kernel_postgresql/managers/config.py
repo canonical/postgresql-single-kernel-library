@@ -80,7 +80,8 @@ class ConfigManager(BaseManager):
         self.request_restart = request_restart
         self.restart_services = restart_services
         # Publishes the managed logical replication slots for the Patroni render and API
-        # sync; None until the composition root wires the logical replication manager.
+        # sync; the callable is wired from the logical replication manager at the
+        # composition root and defaults to an empty mapping when absent.
         self.logical_replication_slots = logical_replication_slots or (lambda: {})
 
     @staticmethod
@@ -507,7 +508,9 @@ class ConfigManager(BaseManager):
 
         replication_slots = self.logical_replication_slots()
 
-        # TODO add rel handler
+        # The embedding charm supplies relations_user_databases_map on every
+        # render (the relation-user pg_hba rules stay charm-side until their
+        # migration phase); the library default keeps the render working.
         relations_user_databases_map = relations_user_databases_map or {}
 
         # Update and reload configuration based on TLS files availability.
@@ -569,9 +572,7 @@ class ConfigManager(BaseManager):
             logger.warning("Early exit update_config: Unable to patch Patroni API")
             return False
 
-        if self.state.substrate == Substrates.K8S and not (
-            self.patroni_manager.ensure_slots_controller_by_patroni(replication_slots)
-        ):
+        if not self.patroni_manager.ensure_slots_controller_by_patroni(replication_slots):
             logger.warning(
                 "Failed to sync replication slots with Patroni — will retry on next config update"
             )
@@ -695,6 +696,7 @@ class ConfigManager(BaseManager):
             "maximum_lag_on_failover": self.state.config.durability_maximum_lag_on_failover,
             "pg_parameters": parameters,
             "pg_cron_database": PG_CRON_DATABASE,
+            "plugin_pg_cron_enable": self.state.config.plugin_pg_cron_enable,
             "primary_cluster_endpoint": async_primary_cluster_endpoint,
             "ldap_parameters": self._dict_to_hba_string(ldap_parameters),
             "patroni_password": self.state.application.patroni_password,
