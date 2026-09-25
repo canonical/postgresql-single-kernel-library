@@ -90,18 +90,18 @@ class PostgreSQLWatcherRelation(Object):
 
     def enable_watcher(self) -> None:
         """Clear up disable flag."""
-        if not self._relation or not self.charm.unit.is_leader():
+        if not self._relation or not self.state.peer.is_app_leader:
             return None
 
-        self._relation.data[self.charm.app].pop("disable-watcher", None)
+        self._relation.data[self.state.peer.app].pop("disable-watcher", None)
         self.update_watcher_secret()
 
     def disable_watcher(self) -> None:
         """Inform watcher to stop service."""
-        if not self._relation or not self.charm.unit.is_leader():
+        if not self._relation or not self.state.peer.is_app_leader:
             return None
 
-        self._relation.data[self.charm.app].update({"disable-watcher": "True"})
+        self._relation.data[self.state.peer.app].update({"disable-watcher": "True"})
         try:
             if self.watcher_raft_address:
                 self.charm._patroni.remove_raft_member(self.watcher_raft_address)
@@ -155,7 +155,7 @@ class PostgreSQLWatcherRelation(Object):
         # Every unit should publish its own per-unit data.
         self.update_unit_address(event.relation)
 
-        if not self.charm.unit.is_leader():
+        if not self.state.peer.is_app_leader:
             return
 
         logger.info("Watcher relation joined, sharing cluster information")
@@ -206,14 +206,14 @@ class PostgreSQLWatcherRelation(Object):
             logger.info(f"Watcher address updated: {watcher_address}")
             # Only the leader handles Raft membership changes and user management
             # to avoid race conditions between multiple PostgreSQL units
-            if self.charm.unit.is_leader():
+            if self.state.peer.is_app_leader:
                 self.charm._patroni.cleanup_raft_cluster()
                 self._ensure_watcher_user()
             # Update Patroni configuration to include watcher in Raft
             self.charm.update_config()
 
         # Update relation data for the watcher
-        if self.charm.unit.is_leader():
+        if self.state.peer.is_app_leader:
             self._update_relation_data(event.relation)
 
     def _on_watcher_relation_broken(self, event: RelationBrokenEvent) -> None:
@@ -229,7 +229,7 @@ class PostgreSQLWatcherRelation(Object):
 
         logger.info("Watcher relation broken, updating Patroni configuration")
         self.watcher_raft_address = None
-        if self.charm.unit.is_leader():
+        if self.state.peer.is_app_leader:
             self.charm._patroni.cleanup_raft_cluster()
         # Update Patroni configuration without the watcher
         self.charm.update_config()
@@ -371,7 +371,7 @@ class PostgreSQLWatcherRelation(Object):
         Args:
             relation: The watcher relation.
         """
-        if not self.charm.unit.is_leader():
+        if not self.state.peer.is_app_leader:
             return
 
         # Get the secret ID for sharing
@@ -405,7 +405,7 @@ class PostgreSQLWatcherRelation(Object):
             return
 
         # Update relation data
-        relation.data[self.charm.app].update({
+        relation.data[self.state.peer.app].update({
             "cluster-name": self.charm.cluster_name,
             "raft-secret-id": secret_id,
             "raft-partner-addrs": json.dumps(pg_endpoints),
@@ -432,23 +432,25 @@ class PostgreSQLWatcherRelation(Object):
         if not relation:
             return
 
-        if not (unit_ip := self.charm.state.unit_ip):
+        if not (unit_ip := self.state.unit_ip):
             return
 
-        relation.data[self.charm.unit]["version"] = self.charm.workload.get_postgresql_version()
+        relation.data[self.state.peer.unit]["version"] = (
+            self.state.workload.get_postgresql_version()
+        )
         if self.charm.refresh:
-            relation.data[self.charm.unit]["snap"] = self.charm.refresh.pinned_snap_revision
-        current_address = relation.data[self.charm.unit].get("unit-address")
+            relation.data[self.state.peer.unit]["snap"] = self.charm.refresh.pinned_snap_revision
+        current_address = relation.data[self.state.peer.unit].get("unit-address")
         if current_address != unit_ip:
             logger.info(
                 f"Updating unit-address in watcher relation from {current_address} to {unit_ip}"
             )
-            relation.data[self.charm.unit]["unit-address"] = unit_ip
+            relation.data[self.state.peer.unit]["unit-address"] = unit_ip
 
         unit_az = os.environ.get("JUJU_AVAILABILITY_ZONE")
-        current_az = relation.data[self.charm.unit].get("unit-az")
+        current_az = relation.data[self.state.peer.unit].get("unit-az")
         if unit_az and current_az != unit_az:
-            relation.data[self.charm.unit]["unit-az"] = unit_az
+            relation.data[self.state.peer.unit]["unit-az"] = unit_az
 
     def update_endpoints(self) -> None:
         """Update the watcher with current cluster endpoints.
@@ -457,7 +459,7 @@ class PostgreSQLWatcherRelation(Object):
         Also dynamically adds new PostgreSQL peers to the running Raft cluster.
         """
         if relation := self._relation:
-            if self.charm.unit.is_leader():
+            if self.state.peer.is_app_leader:
                 self._update_relation_data(relation)
             self.update_unit_address(relation)
 
@@ -481,7 +483,7 @@ class PostgreSQLWatcherRelation(Object):
         Called when credentials are rotated. Preserves existing secret content
         (e.g., watcher-password) while updating the Raft password.
         """
-        if not self.charm.unit.is_leader():
+        if not self.state.peer.is_app_leader:
             return
 
         try:
