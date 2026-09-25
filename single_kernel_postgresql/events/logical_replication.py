@@ -180,9 +180,10 @@ class PostgreSQLLogicalReplication(Object):
             for relation_resources in published_resources.values()
             for database in relation_resources["publications"]
         )
-# Freshly constructed per access (Patroni primary lookup + app secret); the
+
+        # Freshly constructed per access (Patroni primary lookup + app secret); the
         # candidate-database loop drops one slot per database.
-        postgresql = postgresql
+        postgresql = self.charm.postgresql
 
         for database in candidate_databases:
             postgresql.drop_replication_slot(
@@ -252,7 +253,7 @@ class PostgreSQLLogicalReplication(Object):
         # constructed per access (Patroni primary lookup + app secret), and
         # this loop performs several calls per subscribed database — the
         # same per-event capture events/database.py uses.
-        postgresql = postgresql
+        postgresql = self.charm.postgresql
         subscriptions = self._subscriptions_info()
         subscription_request_config = json.loads(
             self.state.config.logical_replication_subscription_request or "{}"
