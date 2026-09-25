@@ -15,7 +15,6 @@ from single_kernel_postgresql.config.literals import (
 
 logger = logging.getLogger(__name__)
 
-# The events layer
 # matches the stored block message against these to tell an S3-caused blocked
 # state apart from any other blocking condition.
 ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE = "the S3 repository has backups from another cluster"
