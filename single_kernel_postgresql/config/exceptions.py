@@ -11,7 +11,7 @@ class PostgreSQLFileOperationError(PostgreSQLBaseError):
     """Exception thrown when file operations related to PostgreSQL fail."""
 
 
-class StorageUnavailableError(Exception):
+class StorageUnavailableError(PostgreSQLBaseError):
     """Cannot find storage mountpoint."""
 
 
@@ -19,51 +19,51 @@ class SettingSystemPasswordError(PostgreSQLBaseError):
     """Exception thrown when setting the system password fails."""
 
 
-class PostgreSQLCannotConnectError(Exception):
+class PostgreSQLCannotConnectError(PostgreSQLBaseError):
     """Cannot run smoke check on connected Database."""
 
 
-class TlsError(Exception):
+class TlsError(PostgreSQLBaseError):
     """TLS implementation internal exception."""
 
 
-class RaftPostgresqlNotUpError(Exception):
+class RaftPostgresqlNotUpError(PostgreSQLBaseError):
     """Postgresql not yet started."""
 
 
-class RaftPostgresqlStillUpError(Exception):
+class RaftPostgresqlStillUpError(PostgreSQLBaseError):
     """Postgresql not yet down."""
 
 
-class RaftNotPromotedError(Exception):
+class RaftNotPromotedError(PostgreSQLBaseError):
     """Leader not yet set when reinitialising raft."""
 
 
-class ClusterNotPromotedError(Exception):
+class ClusterNotPromotedError(PostgreSQLBaseError):
     """Raised when a cluster is not promoted."""
 
 
-class NotReadyError(Exception):
+class NotReadyError(PostgreSQLBaseError):
     """Raised when not all cluster members healthy or finished initial sync."""
 
 
-class EndpointNotReadyError(Exception):
+class EndpointNotReadyError(PostgreSQLBaseError):
     """Raised when an endpoint is not ready."""
 
 
-class StandbyClusterAlreadyPromotedError(Exception):
+class StandbyClusterAlreadyPromotedError(PostgreSQLBaseError):
     """Raised when a standby cluster is already promoted."""
 
 
-class RemoveRaftMemberFailedError(Exception):
+class RemoveRaftMemberFailedError(PostgreSQLBaseError):
     """Raised when a remove raft member failed for some reason."""
 
 
-class AddRaftMemberFailedError(Exception):
+class AddRaftMemberFailedError(PostgreSQLBaseError):
     """Raised when adding raft member failed for some reason."""
 
 
-class SwitchoverFailedError(Exception):
+class SwitchoverFailedError(PostgreSQLBaseError):
     """Raised when a switchover failed for some reason."""
 
 
@@ -71,9 +71,9 @@ class SwitchoverNotSyncError(SwitchoverFailedError):
     """Raised when a switchover failed because node is not sync."""
 
 
-class UpdateSyncNodeCountError(Exception):
+class UpdateSyncNodeCountError(PostgreSQLBaseError):
     """Raised when updating synchronous_node_count failed for some reason."""
 
 
-class DeployedWithoutTrustError(Exception):
+class DeployedWithoutTrustError(PostgreSQLBaseError):
     """Raised when the K8s API denies access because the app wasn't deployed with --trust."""
