@@ -696,7 +696,6 @@ class ConfigManager(BaseManager):
             "maximum_lag_on_failover": self.state.config.durability_maximum_lag_on_failover,
             "pg_parameters": parameters,
             "pg_cron_database": PG_CRON_DATABASE,
-            "plugin_pg_cron_enable": self.state.config.plugin_pg_cron_enable,
             "primary_cluster_endpoint": async_primary_cluster_endpoint,
             "ldap_parameters": self._dict_to_hba_string(ldap_parameters),
             "patroni_password": self.state.application.patroni_password,
