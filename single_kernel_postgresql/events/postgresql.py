@@ -192,7 +192,7 @@ class PostgreSQLEventsHandler(Object):
 
         # Doesn't try to bootstrap the cluster if it's in a blocked state
         # caused, for example, because a failed installation of packages.
-        if self.state.peer.is_blocked:
+        if self.state.peer.is_blocked_status:
             logger.debug("Early exit on_start: Unit blocked")
             return False
 

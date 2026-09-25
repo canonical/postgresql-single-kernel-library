@@ -370,6 +370,11 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
+    def service_exists(self, service: str) -> bool:
+        """Whether the workload layer declares the named service at all."""
+        pass
+
+    @abstractmethod
     def service_is_running(self, service: str) -> bool:
         """Check whether a named service is running on the workload.
 
@@ -380,6 +385,38 @@ class BaseWorkload(ABC):
     @abstractmethod
     def get_workload_version(self) -> str:
         """Get the workload version."""
+        raise NotImplementedError
+
+    # -- Backup restore seams (ports of the charms' restore-side workload I/O) -----
+
+    @abstractmethod
+    def empty_data_files(self) -> bool:
+        """Empty the PostgreSQL data directory in preparation of backup restore."""
+        pass
+
+    @abstractmethod
+    def remove_cluster_info(
+        self, cluster_name: str, namespace: str | None = None
+    ) -> CommandResult:
+        """Remove previous cluster information to make it possible to initialise a new cluster.
+
+        Args:
+            cluster_name: the Patroni cluster name.
+            namespace: the K8s namespace (ignored on VM).
+        """
+        pass
+
+    def init_storage(self) -> None:
+        """Create the PostgreSQL data directories (K8s-only seam)."""
+        raise NotImplementedError
+
+    def pitr_bootstrap_failure_logs(self) -> tuple[str, bool]:
+        """Fetch the workload logs scanned for PITR bootstrap failures (K8s-only seam).
+
+        Returns:
+            (logs, juju2): juju2 is True when the pebble logs client was unavailable
+            and the patroni log files were read instead.
+        """
         raise NotImplementedError
 
     def get_postgresql_version(self) -> str:
