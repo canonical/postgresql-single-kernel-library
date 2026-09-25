@@ -636,7 +636,9 @@ class PatroniManager(BaseManager):
 
         for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3), reraise=True):
             with attempt:
-                new_primary = self.get_primary()
+                new_primary = (
+                    self.get_primary() if not async_cluster else self.get_standby_leader()
+                )
                 if (
                     candidate is not None and new_primary != candidate
                 ) or new_primary == current_primary:
