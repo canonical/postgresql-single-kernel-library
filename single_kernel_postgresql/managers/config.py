@@ -40,6 +40,7 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 
 if TYPE_CHECKING:
     # Import-time only: the VM workload pulls the snap charm lib, which K8s does not ship.
+    from single_kernel_postgresql.events.ldap import LDAP
     from single_kernel_postgresql.managers.database import DatabaseManager
     from single_kernel_postgresql.workload.vm import VMWorkload
 
@@ -59,6 +60,7 @@ class ConfigManager(BaseManager):
         tls_manager: TLSManager,
         patroni_manager: PatroniManager,
         database_manager: "DatabaseManager",
+        ldap_handler: "LDAP",
         resource_provider: Callable[[], ResourceProvider],
         request_restart: Callable[[], None],
         restart_services: Callable[[], None],
@@ -67,6 +69,7 @@ class ConfigManager(BaseManager):
         super().__init__(state, workload, "config_manager")
         self.tls_manager = tls_manager
         self.patroni_manager = patroni_manager
+        self.ldap_handler = ldap_handler
         self.database_manager = database_manager
         # Resolved on use, not at construction: the K8s manager that provides it is built
         # after this manager in the charm's __init__.
@@ -76,7 +79,8 @@ class ConfigManager(BaseManager):
         self.request_restart = request_restart
         self.restart_services = restart_services
         # Publishes the managed logical replication slots for the Patroni render and API
-        # sync; None until the logical replication module lands in a follow-up PR.
+        # sync; the callable is wired from the logical replication handler at the
+        # composition root and defaults to an empty mapping when absent.
         self.logical_replication_slots = logical_replication_slots or (lambda: {})
 
     @staticmethod
@@ -92,16 +96,18 @@ class ConfigManager(BaseManager):
 
     def configure_patroni_on_unit(self):
         """Configure Patroni (configuration files and service) on the unit."""
+        # Create the versioned data directory before taking ownership: the parent
+        # storage mount exists, but the versioned path itself is only created here.
+        self.workload.mkdir(
+            self.workload.paths.data,
+            mode=POSTGRESQL_STORAGE_PERMISSIONS,
+            parents=True,
+            exist_ok=True,
+        )
         _change_owner(self.state.substrate, str(self.workload.paths.data))
 
         # Create empty base config
         self.workload.write_text("", self.workload.paths.postgresql_conf)
-
-        # Expected permission
-        # Replicas refuse to start with the default permissions
-        self.workload.mkdir(
-            self.workload.paths.data, mode=POSTGRESQL_STORAGE_PERMISSIONS, exist_ok=True
-        )
 
     def _calculate_max_worker_processes(self, cpu_cores: int) -> str | None:
         """Calculate cpu_max_worker_processes configuration value."""
@@ -474,8 +480,6 @@ class ConfigManager(BaseManager):
         # TODO add rel handler
         relations_user_databases_map: dict[str, Any] | None = None,
         # TODO add rel handler
-        ldap_parameters: dict[str, Any] | None = None,
-        # TODO add rel handler
         async_primary_cluster_endpoint: str | None = None,
         async_partner_addresses: list[str] | None = None,
         async_standby_endpoints: list[str] | None = None,
@@ -503,7 +507,9 @@ class ConfigManager(BaseManager):
 
         replication_slots = self.logical_replication_slots()
 
-        # TODO add rel handler
+        # The embedding charm supplies relations_user_databases_map on every
+        # render (the relation-user pg_hba rules stay charm-side until their
+        # migration phase); the library default keeps the render working.
         relations_user_databases_map = relations_user_databases_map or {}
 
         # Update and reload configuration based on TLS files availability.
@@ -523,7 +529,7 @@ class ConfigManager(BaseManager):
             parameters=pg_parameters,
             user_databases_map=relations_user_databases_map,
             slots=replication_slots,
-            ldap_parameters=ldap_parameters,
+            ldap_parameters=self.ldap_handler.get_ldap_parameters(),
             async_primary_cluster_endpoint=async_primary_cluster_endpoint,
             async_partner_addresses=async_partner_addresses,
             async_standby_endpoints=async_standby_endpoints,

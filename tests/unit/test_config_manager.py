@@ -28,6 +28,7 @@ def config(substrate):
             resource_provider=Mock(),
             request_restart=Mock(),
             database_manager=Mock(),
+            ldap_handler=Mock(),
             restart_services=Mock(),
         )
     yield config
@@ -799,6 +800,15 @@ def test_update_config_threads_tls_flag_into_render(orchestrate, postgresql_clie
     assert orchestrate.render_patroni_yml_file.call_args.kwargs["enable_tls"] is False
 
 
+def test_update_config_sources_ldap_parameters_from_handler(orchestrate, postgresql_client):
+    """update_config pulls the LDAP auth parameters from the LDAP events handler."""
+    orchestrate.update_config(postgresql_client, no_peers=True)
+    assert (
+        orchestrate.render_patroni_yml_file.call_args.kwargs["ldap_parameters"]
+        == orchestrate.ldap_handler.get_ldap_parameters.return_value
+    )
+
+
 def test_update_config_workload_not_running_persists_tls_and_refreshes(
     orchestrate, postgresql_client
 ):
@@ -905,3 +915,44 @@ def test_update_config_vm_snap_gate_exits_before_restart_services(
     # config_hash is read (getter, call()) for the restart decision but never PERSISTED
     # (setter, call("newhash")) — the snap gate returns before the hash write-back.
     assert call("newhash") not in orchestrate._peer_cfg_hash.mock_calls
+
+
+@pytest.mark.parametrize(
+    ("initialised", "members_ips", "expected_strict"),
+    [
+        # Members registered but not yet joined: strict must stay off, or the
+        # leader's first commits block on a synchronous ACK no standby can send.
+        (False, {"10.0.0.1", "10.0.0.2", "10.0.0.3"}, False),
+        # Initialised cluster with replicas: strict per configuration.
+        (True, {"10.0.0.1", "10.0.0.2", "10.0.0.3"}, True),
+        # Single-unit cluster: no standby can exist.
+        (True, {"10.0.0.1"}, False),
+        (False, {"10.0.0.1"}, False),
+    ],
+)
+def test_synchronous_mode_strict_requires_initialised_cluster(
+    substrate, initialised, members_ips, expected_strict
+):
+    state = CharmState(charm=Mock(), substrate=substrate)
+    config = MagicMock()
+    config.synchronous_node_count = 2
+    config.synchronous_mode_strict = True
+    application = MagicMock()
+    application.planned_units = 3
+    application.members_ips = members_ips
+    application.is_cluster_initialised = initialised
+    with (
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.config",
+            new_callable=PropertyMock,
+            return_value=config,
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.application",
+            new_callable=PropertyMock,
+            return_value=application,
+        ),
+    ):
+        synchronous_configuration = state.synchronous_configuration
+    assert synchronous_configuration["synchronous_node_count"] == 2
+    assert synchronous_configuration["synchronous_mode_strict"] is expected_strict
