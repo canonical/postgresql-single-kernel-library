@@ -180,8 +180,12 @@ class PostgreSQLLogicalReplication(Object):
             for relation_resources in published_resources.values()
             for database in relation_resources["publications"]
         )
+# Freshly constructed per access (Patroni primary lookup + app secret); the
+        # candidate-database loop drops one slot per database.
+        postgresql = postgresql
+
         for database in candidate_databases:
-            self.charm.postgresql.drop_replication_slot(
+            postgresql.drop_replication_slot(
                 self._replication_slot_name(event.relation.id, database), database
             )
 
@@ -193,13 +197,13 @@ class PostgreSQLLogicalReplication(Object):
             )
             try:
                 secret = self.model.get_secret(id=relation_resources["secret-id"])
-                self.charm.postgresql.delete_user(secret.peek_content()["username"])
+                postgresql.delete_user(secret.peek_content()["username"])
                 secret.remove_all_revisions()
             except SecretNotFoundError:
                 pass
             for database, publication in relation_resources["publications"].items():
-                self.charm.postgresql.drop_publication(database, publication["publication-name"])
-                self.charm.postgresql.drop_replication_slot(
+                postgresql.drop_publication(database, publication["publication-name"])
+                postgresql.drop_replication_slot(
                     publication["replication-slot-name"], database
                 )
             del published_resources[relation_id]
@@ -244,6 +248,11 @@ class PostgreSQLLogicalReplication(Object):
         secret_content = self.model.get_secret(
             id=event.relation.data[event.app]["secret-id"]
         ).get_content(refresh=True)
+        # Capture the PostgreSQL client once: the property is freshly
+        # constructed per access (Patroni primary lookup + app secret), and
+        # this loop performs several calls per subscribed database — the
+        # same per-event capture events/database.py uses.
+        postgresql = postgresql
         subscriptions = self._subscriptions_info()
         subscription_request_config = json.loads(
             self.state.config.logical_replication_subscription_request or "{}"
@@ -276,20 +285,20 @@ class PostgreSQLLogicalReplication(Object):
                     tuple(schematable.partition(".")[::2])
                     for schematable in subscription_request_config.get(database, [])
                 }
-                live_table_set = self.charm.postgresql.subscription_table_set(
+                live_table_set = postgresql.subscription_table_set(
                     database, subscription_name
                 )
                 for database_table in requested - live_table_set:
                     schema, table = database_table
-                    if not self.charm.postgresql.table_exists(
+                    if not postgresql.table_exists(
                         database, schema, table
-                    ) or self.charm.postgresql.is_table_empty(database, schema, table):
+                    ) or postgresql.is_table_empty(database, schema, table):
                         self._fail_validation(
                             f"table {schema}.{table} in database {database} isn't empty",
                             status_msg=f"table {schema}.{table} isn't empty",
                         )
                         return
-                self.charm.postgresql.refresh_subscription(database, subscription_name)
+                postgresql.refresh_subscription(database, subscription_name)
                 logger.info(
                     f"Refreshed subscription {subscription_name} in database {database} due to relation change"
                 )
@@ -314,7 +323,7 @@ class PostgreSQLLogicalReplication(Object):
             # Transient publisher races are retried inside create_subscription
             # (fresh connection per attempt); anything else surfaces
             # immediately as PostgreSQLCreateSubscriptionError.
-            self.charm.postgresql.create_subscription(
+            postgresql.create_subscription(
                 subscription_name,
                 secret_content["primary"],
                 database,
@@ -331,13 +340,13 @@ class PostgreSQLLogicalReplication(Object):
         for database, subscription in subscriptions.copy().items():
             if database in publications:
                 continue
-            self.charm.postgresql.drop_subscription(database, subscription)
+            postgresql.drop_subscription(database, subscription)
             logger.info(f"Dropped redundant subscription {subscription} from database {database}")
             # The subscriber's DROP SUBSCRIPTION with slot_name=NONE leaves the
             # publisher-side slot orphaned; drop it so the slot count returns to
             # one-per-active-relation (test_pg2_remove asserts this).
             slot_name = self._replication_slot_name(event.relation.id, database)
-            self.charm.postgresql.drop_replication_slot(slot_name, database)
+            postgresql.drop_replication_slot(slot_name, database)
             del subscriptions[database]
 
         self.state.application.data[SUBSCRIPTIONS_KEY] = json.dumps({
@@ -911,18 +920,22 @@ class PostgreSQLLogicalReplication(Object):
         user = secret.peek_content()["username"]
         errors = []
 
+        # Freshly constructed per access (Patroni primary lookup + app secret); the
+        # per-database loops below hit it several times each.
+        postgresql = self.charm.postgresql
+
         for database, publication in publications.copy().items():
             if database in subscriptions_request:
                 continue
             logger.info(
                 f"Dropping redundant publication {publication['publication-name']} in database {database} from {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
             )
-            self.charm.postgresql.drop_publication(database, publication["publication-name"])
+            postgresql.drop_publication(database, publication["publication-name"])
             del publications[database]
             logger.info(
                 f"Revoking replication privileges on database {database} from user {user} from {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
             )
-            self.charm.postgresql.revoke_replication_privileges(
+            postgresql.revoke_replication_privileges(
                 user, database, publication["tables"]
             )
 
@@ -960,7 +973,7 @@ class PostgreSQLLogicalReplication(Object):
                         f"Cannot alter publication {publication_name} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}: {validation_error}"
                     )
                     continue
-                if not self.charm.postgresql.publication_exists(database, publication_name):
+                if not postgresql.publication_exists(database, publication_name):
                     errors.append(
                         f"managed publication {publication_name} in database {database} can't be found"
                     )
@@ -971,13 +984,13 @@ class PostgreSQLLogicalReplication(Object):
                 logger.info(
                     f"Altering replication privileges on database {database} for user {user} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
                 )
-                self.charm.postgresql.grant_replication_privileges(
+                postgresql.grant_replication_privileges(
                     user, database, tables, publication_tables
                 )
                 logger.info(
                     f"Altering publication {publication_name} tables from {','.join(publication_tables)} to {','.join(tables)} in database {database} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
                 )
-                self.charm.postgresql.alter_publication(database, publication_name, tables)
+                postgresql.alter_publication(database, publication_name, tables)
                 publications[database]["tables"] = tables
                 publications[database]["replication-chains"] = self._build_replication_chains(
                     database, tables

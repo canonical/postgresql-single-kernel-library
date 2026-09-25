@@ -184,15 +184,17 @@ class PostgreSQLGrantDatabasePrivilegesToUserError(PostgreSQLBaseError):
 def _is_transient_subscription_race(e: Exception) -> bool:
     """Publisher-side setup races that resolve on retry.
 
-    Connection failures (OperationalError) are transient, except credential
-    errors: psycopg2 subclasses InvalidPassword from OperationalError, and a
-    stale secret is permanent — it must fail fast.
+    Connection failures (OperationalError) are transient, except the
+    authorization class (SQLSTATE 28xxx — psycopg2 subclasses both
+    InvalidAuthorizationSpecification and InvalidPassword from
+    OperationalError): a bad pg_hba rule or stale secret is permanent and
+    must fail fast.
     """
     if isinstance(e, (psycopg2.errors.UndefinedObject, psycopg2.errors.ObjectInUse)):
         return True
-    return isinstance(e, psycopg2.OperationalError) and not isinstance(
-        e, psycopg2.errors.InvalidPassword
-    )
+    return isinstance(e, psycopg2.OperationalError) and not (
+        getattr(e, "pgcode", "") or ""
+    ).startswith("28")
 
 
 class PostgreSQL(PostgreSQLBase):
