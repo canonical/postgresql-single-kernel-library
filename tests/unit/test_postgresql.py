@@ -1274,12 +1274,24 @@ def test_create_subscription_retries_transient_race_on_fresh_connection():
             Substrates.VM, "primary", "current", "operator", "password", "postgres", None
         )
         pg.create_subscription("sub_15", "10.0.0.5", "testdb", "user", "pw", "pub", "slot_15")
-    assert connections[1].cursor_obj.calls, "second connection must run the CREATE SUBSCRIPTION"
+    assert connections[1].cursor_obj.calls == [
+        SQL(
+            "CREATE SUBSCRIPTION {} CONNECTION {} PUBLICATION {} WITH (copy_data=true,create_slot=false,enabled=true,slot_name={});"
+        ).format(
+            Identifier("sub_15"),
+            Literal("host=10.0.0.5 dbname=testdb user=user password=pw"),
+            Identifier("pub"),
+            Identifier("slot_15"),
+        )
+    ]
 
 
 def test_create_subscription_fails_fast_on_permanent_errors():
     """Bad credentials / duplicate names must not burn the retry budget."""
-    connections = [_FakeConnection([psycopg2.errors.InvalidPassword()])]
+    invalid_password = type(
+        "InvalidPasswordWithCode", (psycopg2.errors.InvalidPassword,), {"pgcode": "28P01"}
+    )()
+    connections = [_FakeConnection([invalid_password])]
     with (
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
