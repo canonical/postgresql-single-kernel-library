@@ -284,14 +284,14 @@ def _fake_info_payload():
     ])
 
 
-def testget_backups_parses_backup_ids(backup_manager):
+def test_get_backups_parses_backup_ids(backup_manager):
     _mock_run_cmd(backup_manager, stdout=_fake_info_payload())
     backups = backup_manager.get_backups(show_failed=False)
     assert list(backups) == ["2024-01-01T10:10:10Z"]
     assert backups["2024-01-01T10:10:10Z"][1] == "1"
 
 
-def testget_backups_raisesget_backups_error_on_vm_failure(backup_manager, substrate):
+def test_get_backups_raises_list_backups_error_on_vm_failure(backup_manager, substrate):
     if substrate != "vm":
         pytest.skip("ListBackupsError branch is VM-only")
     _mock_run_cmd(backup_manager, return_code=1, stderr="ERROR: boom")
@@ -299,7 +299,7 @@ def testget_backups_raisesget_backups_error_on_vm_failure(backup_manager, substr
         backup_manager.get_backups(show_failed=False)
 
 
-def testgenerate_backup_list_output_includes_header_and_row(harness, backup_manager):
+def test_generate_backup_list_output_includes_header_and_row(harness, backup_manager):
     _mock_run_cmd(backup_manager, stdout=_fake_info_payload())
     backup_manager.get_timelines = MagicMock(return_value={})
     rel_id = harness.add_relation(S3_RELATION_NAME, "s3-integrator")
