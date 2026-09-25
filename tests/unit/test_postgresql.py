@@ -1169,13 +1169,11 @@ class _FakeConnection:
         self.closed = True
 
 
-_DROP_SLOT_STATEMENT = Composed(
-    [
-        SQL("SELECT pg_drop_replication_slot("),
-        Literal("relation_15_testdb"),
-        SQL(");"),
-    ]
-)
+_DROP_SLOT_STATEMENT = Composed([
+    SQL("SELECT pg_drop_replication_slot("),
+    Literal("relation_15_testdb"),
+    SQL(");"),
+])
 
 
 def test_drop_replication_slot_retries_walsender_race_on_fresh_connection():
@@ -1240,9 +1238,7 @@ def test_drop_replication_slot_soft_fails_when_slot_stays_active():
     with (
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
-            side_effect=lambda *_args, **_kwargs: _FakeConnection(
-                [psycopg2.errors.ObjectInUse()]
-            ),
+            side_effect=lambda *_args, **_kwargs: _FakeConnection([psycopg2.errors.ObjectInUse()]),
         ) as _connect_to_database,
         patch(
             "single_kernel_postgresql.utils.postgresql.stop_after_delay",
@@ -1306,9 +1302,7 @@ def test_create_subscription_fails_fast_on_permanent_errors():
             Substrates.VM, "primary", "current", "operator", "password", "postgres", None
         )
         with pytest.raises(PostgreSQLCreateSubscriptionError):
-            pg.create_subscription(
-                "sub_15", "10.0.0.5", "testdb", "user", "pw", "pub", "slot_15"
-            )
+            pg.create_subscription("sub_15", "10.0.0.5", "testdb", "user", "pw", "pub", "slot_15")
     assert len(connections) == 1
 
 
@@ -1329,7 +1323,5 @@ def test_create_subscription_wraps_error_when_budget_exhausted():
             Substrates.VM, "primary", "current", "operator", "password", "postgres", None
         )
         with pytest.raises(PostgreSQLCreateSubscriptionError):
-            pg.create_subscription(
-                "sub_15", "10.0.0.5", "testdb", "user", "pw", "pub", "slot_15"
-            )
+            pg.create_subscription("sub_15", "10.0.0.5", "testdb", "user", "pw", "pub", "slot_15")
         assert _connect_to_database.call_count >= 2
