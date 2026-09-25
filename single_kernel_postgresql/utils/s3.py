@@ -111,7 +111,8 @@ class S3Client:
                 bucket.download_fileobj(processed_s3_path, buf)
                 return buf.getvalue().decode("utf-8")
         except ClientError as e:
-            if e.response["Error"]["Code"] == "404":
+            # S3 GetObject reports a missing key as NoSuchKey; HeadObject as "404".
+            if e.response["Error"]["Code"] in ("404", "NoSuchKey"):
                 logger.info(f"No such object to read from S3 {location}")
             else:
                 logger.exception(
