@@ -22,6 +22,7 @@ from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_INTERNAL,
     PostgreSQL,
     PostgreSQLCreateDatabaseError,
+    PostgreSQLCreateSubscriptionError,
     PostgreSQLCreateUserError,
     PostgreSQLDatabasesSetupError,
     PostgreSQLGetLastArchivedWALError,
@@ -1253,4 +1254,70 @@ def test_drop_replication_slot_soft_fails_when_slot_stays_active():
             Substrates.VM, "primary", "current", "operator", "password", "postgres", None
         )
         pg.drop_replication_slot("relation_15_testdb", "testdb")
+        assert _connect_to_database.call_count >= 2
+
+
+def test_create_subscription_retries_transient_race_on_fresh_connection():
+    """Publisher races (slot/publication not ready) are retried on a NEW connection."""
+    connections = [
+        _FakeConnection([psycopg2.errors.ObjectInUse()]),
+        _FakeConnection([]),
+    ]
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+            side_effect=connections,
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.wait_fixed", return_value=wait_none()),
+    ):
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        pg.create_subscription("sub_15", "10.0.0.5", "testdb", "user", "pw", "pub", "slot_15")
+    assert connections[1].cursor_obj.calls, "second connection must run the CREATE SUBSCRIPTION"
+
+
+def test_create_subscription_fails_fast_on_permanent_errors():
+    """Bad credentials / duplicate names must not burn the retry budget."""
+    connections = [_FakeConnection([psycopg2.errors.InvalidPassword()])]
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+            side_effect=connections,
+        ),
+        patch(
+            "single_kernel_postgresql.utils.postgresql.stop_after_delay",
+            return_value=stop_after_delay(5),
+        ),
+    ):
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        with pytest.raises(PostgreSQLCreateSubscriptionError):
+            pg.create_subscription(
+                "sub_15", "10.0.0.5", "testdb", "user", "pw", "pub", "slot_15"
+            )
+    assert len(connections) == 1
+
+
+def test_create_subscription_wraps_error_when_budget_exhausted():
+    """A walsender that never clears keeps failing the hook, wrapped, not bare."""
+    with (
+        patch(
+            "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database",
+            side_effect=lambda *_a, **_k: _FakeConnection([psycopg2.errors.ObjectInUse()]),
+        ) as _connect_to_database,
+        patch(
+            "single_kernel_postgresql.utils.postgresql.stop_after_delay",
+            return_value=stop_after_delay(0.05),
+        ),
+        patch("single_kernel_postgresql.utils.postgresql.wait_fixed", return_value=wait_none()),
+    ):
+        pg = PostgreSQL(
+            Substrates.VM, "primary", "current", "operator", "password", "postgres", None
+        )
+        with pytest.raises(PostgreSQLCreateSubscriptionError):
+            pg.create_subscription(
+                "sub_15", "10.0.0.5", "testdb", "user", "pw", "pub", "slot_15"
+            )
         assert _connect_to_database.call_count >= 2
