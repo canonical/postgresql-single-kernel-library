@@ -493,7 +493,8 @@ class RestoreManager(BaseManager):
 
         VM overrides the systemd Restart= condition to "no" through PatroniManager;
         K8s overrides the postgresql pebble service on-failure action to "ignore"
-        and refreshes the pebble layer through the injected bridge.
+        and refreshes the pebble layer through the workload's update_pebble_layers
+        seam.
         """
         if self.state.substrate == Substrates.VM:
             return self._override_patroni_systemd_restart_condition("no", repeat_cause)
