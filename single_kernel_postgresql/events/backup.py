@@ -136,7 +136,7 @@ class BackupEventsHandler(Object):
             f" has been requested on the unit"
         )
 
-        can_restore, error_message = self.restore_manager._pre_restore_checks(
+        can_restore, error_message = self.restore_manager.pre_restore_checks(
             backup_id, restore_to_time
         )
         if not can_restore:
@@ -147,7 +147,7 @@ class BackupEventsHandler(Object):
         logger.info("Validating provided backup-id and restore-to-time")
         try:
             restore_stanza_timeline, is_backup_id_real, error_message = (
-                self.restore_manager._resolve_restore_target(backup_id, restore_to_time)
+                self.restore_manager.resolve_restore_target(backup_id, restore_to_time)
             )
         except ListBackupsError as e:
             logger.exception(e)
