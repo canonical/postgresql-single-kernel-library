@@ -1204,8 +1204,8 @@ Stderr:
         """Stop the running rotate-logs loop, if this unit spawned one."""
         if self.state.substrate != Substrates.VM:
             return
-        if (
-            stored := self.state.peer.rotate_logs_pid
-        ) and self.workload.stop_rotate_logs_loop(stored):
+        if (stored := self.state.peer.rotate_logs_pid) and self.workload.stop_rotate_logs_loop(
+            stored
+        ):
             logger.info(f"Stopped rotate logs process with PID {stored}")
             self.state.peer.rotate_logs_pid = None
