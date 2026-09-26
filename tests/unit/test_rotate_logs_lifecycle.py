@@ -2,17 +2,17 @@
 # See LICENSE file for licensing details.
 """Tests for the BackupManager rotate-logs lifecycle (VM spawn, K8s no-op)."""
 
+import subprocess
 from pathlib import Path
+from signal import SIGINT
 from unittest.mock import MagicMock
 
 import pytest
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus
-from single_kernel_postgresql.config.literals import (
-    PGBACKREST_LOGROTATE_FILE,
-    VM_ROTATE_LOGS_LOG_FILE,
-)
+from single_kernel_postgresql.config.literals import PGBACKREST_LOGROTATE_FILE
 from single_kernel_postgresql.managers.backup import BackupManager
 from single_kernel_postgresql.workload.base import BackupConfig
+from single_kernel_postgresql.workload.vm import VMWorkload
 
 VM_EXECUTABLE = "charmed-postgresql.pgbackrest"
 K8S_EXECUTABLE = "pgbackrest"
@@ -87,56 +87,36 @@ def _read_pid(harness):
     return harness.get_relation_data(rel_id, harness.charm.unit.name).get("rotate-logs-pid")
 
 
-def test_start_log_rotation_spawns_loop_and_stores_pid(
-    harness, manager, substrate, monkeypatch, tmp_path
-):
+def test_start_log_rotation_spawns_loop_and_stores_pid(harness, manager, substrate):
     if substrate != "vm":
         pytest.skip("rotate-logs spawn is VM-only")
     harness.model.unit.status = ActiveStatus()
-    monkeypatch.setattr(
-        "single_kernel_postgresql.managers.backup.VM_ROTATE_LOGS_LOG_FILE",
-        str(tmp_path / "rotate_logs.log"),
-    )
-    popen = MagicMock(return_value=MagicMock(pid=4242))
-    monkeypatch.setattr("single_kernel_postgresql.managers.backup.subprocess.Popen", popen)
+    manager.workload.start_rotate_logs_loop.return_value = 4242
     manager.start_log_rotation()
-    script_path = popen.call_args.args[0][1]
-    assert script_path.endswith("rotate_logs.py")
+    manager.workload.start_rotate_logs_loop.assert_called_once_with()
     assert _read_pid(harness) == "4242"
-    assert VM_ROTATE_LOGS_LOG_FILE
 
 
-def test_start_log_rotation_reuses_running_loop(harness, manager, substrate, monkeypatch):
+def test_start_log_rotation_reuses_running_loop(harness, manager, substrate):
     if substrate != "vm":
         pytest.skip("rotate-logs spawn is VM-only")
     harness.model.unit.status = ActiveStatus()
     _set_pid(harness, 4242)
-    kill = MagicMock()
-    monkeypatch.setattr("single_kernel_postgresql.managers.backup.os.kill", kill)
-    popen = MagicMock()
-    monkeypatch.setattr("single_kernel_postgresql.managers.backup.subprocess.Popen", popen)
+    manager.workload.process_alive.return_value = True
     manager.start_log_rotation()
-    kill.assert_called_once_with(4242, 0)
-    popen.assert_not_called()
+    manager.workload.process_alive.assert_called_once_with(4242)
+    manager.workload.start_rotate_logs_loop.assert_not_called()
 
 
-def test_start_log_rotation_respawns_dead_loop(harness, manager, substrate, monkeypatch, tmp_path):
+def test_start_log_rotation_respawns_dead_loop(harness, manager, substrate):
     if substrate != "vm":
         pytest.skip("rotate-logs spawn is VM-only")
     harness.model.unit.status = ActiveStatus()
-    monkeypatch.setattr(
-        "single_kernel_postgresql.managers.backup.VM_ROTATE_LOGS_LOG_FILE",
-        str(tmp_path / "rotate_logs.log"),
-    )
     _set_pid(harness, 4242)
-    monkeypatch.setattr(
-        "single_kernel_postgresql.managers.backup.os.kill",
-        MagicMock(side_effect=OSError),
-    )
-    popen = MagicMock(return_value=MagicMock(pid=5150))
-    monkeypatch.setattr("single_kernel_postgresql.managers.backup.subprocess.Popen", popen)
+    manager.workload.process_alive.return_value = False
+    manager.workload.start_rotate_logs_loop.return_value = 5150
     manager.start_log_rotation()
-    popen.assert_called_once()
+    manager.workload.start_rotate_logs_loop.assert_called_once_with()
     assert _read_pid(harness) == "5150"
 
 
@@ -158,26 +138,23 @@ def test_start_log_rotation_gates_on_missing_logrotate_file(harness, manager, su
     manager.workload.exists.assert_called_once_with(Path(PGBACKREST_LOGROTATE_FILE))
 
 
-def test_stop_log_rotation_kills_and_clears_pid(harness, manager, substrate, monkeypatch):
+def test_stop_log_rotation_kills_and_clears_pid(harness, manager, substrate):
     if substrate != "vm":
         pytest.skip("rotate-logs spawn is VM-only")
     _set_pid(harness, 4242)
-    kill = MagicMock()
-    monkeypatch.setattr("single_kernel_postgresql.managers.backup.os.kill", kill)
+    manager.workload.stop_rotate_logs_loop.return_value = True
     manager.stop_log_rotation()
-    kill.assert_called_once_with(4242, 2)  # signal.SIGINT
+    manager.workload.stop_rotate_logs_loop.assert_called_once_with(4242)
     assert _read_pid(harness) is None
 
 
-def test_stop_log_rotation_tolerates_dead_pid(harness, manager, substrate, monkeypatch):
+def test_stop_log_rotation_tolerates_dead_pid(harness, manager, substrate):
     if substrate != "vm":
         pytest.skip("rotate-logs spawn is VM-only")
     _set_pid(harness, 4242)
-    monkeypatch.setattr(
-        "single_kernel_postgresql.managers.backup.os.kill",
-        MagicMock(side_effect=OSError),
-    )
+    manager.workload.stop_rotate_logs_loop.return_value = False
     manager.stop_log_rotation()
+    manager.workload.stop_rotate_logs_loop.assert_called_once_with(4242)
     assert _read_pid(harness) == "4242"
 
 
@@ -187,3 +164,36 @@ def test_stop_log_rotation_noop_on_k8s(manager, substrate):
     manager.stop_log_rotation()
     manager.start_log_rotation()
     manager.workload.exists.assert_not_called()
+
+
+# -- VMWorkload rotate-logs execution -----------------------------------------------
+
+
+def test_vm_workload_spawns_packaged_rotate_logs_script(tmp_path, monkeypatch):
+    log_file = tmp_path / "rotate_logs.log"
+    monkeypatch.setattr(
+        "single_kernel_postgresql.workload.vm.VM_ROTATE_LOGS_LOG_FILE", str(log_file)
+    )
+    popen = MagicMock(return_value=MagicMock(pid=4242))
+    monkeypatch.setattr("single_kernel_postgresql.workload.vm.subprocess.Popen", popen)
+    pid = VMWorkload(".").start_rotate_logs_loop()
+    assert pid == 4242
+    command = popen.call_args.args[0]
+    assert command[0] == "/usr/bin/python3"
+    assert command[1].endswith("rotate_logs.py")
+    assert popen.call_args.kwargs["stderr"] == subprocess.STDOUT
+    assert log_file.exists()
+
+
+def test_vm_workload_process_alive_and_stop_signal(monkeypatch):
+    kill = MagicMock()
+    monkeypatch.setattr("single_kernel_postgresql.workload.vm.os.kill", kill)
+    workload = VMWorkload(".")
+    assert workload.process_alive(4242) is True
+    kill.assert_called_once_with(4242, 0)
+    kill.side_effect = OSError
+    assert workload.process_alive(4242) is False
+    assert workload.stop_rotate_logs_loop(4242) is False
+    kill.side_effect = None
+    assert workload.stop_rotate_logs_loop(4242) is True
+    kill.assert_called_with(4242, SIGINT)
