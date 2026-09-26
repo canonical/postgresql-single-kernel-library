@@ -12,8 +12,6 @@ from ops.pebble import ExecError
 from single_kernel_postgresql.events.backup import BackupEventsHandler
 from tenacity import RetryError
 
-ACTION_EVENT_KWARGS = {}
-
 
 @pytest.fixture
 def backup_manager():
@@ -66,10 +64,7 @@ def test_credential_changed_initialises_on_primary(harness, handler, backup_mana
     backup_manager.credential_changed_checks.return_value = (True, False)
     backup_manager.is_primary = True
     handler._on_s3_credential_changed(make_action_event())
-    application = handler.state.application
-    # writing "" to the databag removes the key
-    assert not application.stanza
-    assert application.s3_initialization_start
+    backup_manager.reset_s3_initialization_markers.assert_called_once()
     backup_manager.initialise_s3_repository.assert_called_once()
 
 
@@ -79,6 +74,7 @@ def test_credential_changed_skips_initialization_without_done_marker(
     backup_manager.credential_changed_checks.return_value = (True, False)
     backup_manager.is_primary = False
     handler._on_s3_credential_changed(make_action_event())
+    backup_manager.initialise_s3_repository.assert_not_called()
 
 
 def test_credential_gone_clears_s3_state(handler, backup_manager):
@@ -162,7 +158,7 @@ def test_list_backups_action_maps_listing_error(handler, backup_manager):
 
 
 def test_restore_action_maps_pre_check_failure(handler, restore_manager):
-    restore_manager._pre_restore_checks.return_value = (False, "cannot restore")
+    restore_manager.pre_restore_checks.return_value = (False, "cannot restore")
     event = make_action_event({"backup-id": "2024-01-01T10:10:10Z"})
     handler._on_restore_action(event)
     event.fail.assert_called_once_with("cannot restore")
@@ -172,24 +168,24 @@ def test_restore_action_maps_pre_check_failure(handler, restore_manager):
 def test_restore_action_maps_resolution_error(handler, restore_manager):
     from single_kernel_postgresql.config.exceptions import ListBackupsError
 
-    restore_manager._pre_restore_checks.return_value = (True, "")
-    restore_manager._resolve_restore_target.side_effect = ListBackupsError("boom")
+    restore_manager.pre_restore_checks.return_value = (True, "")
+    restore_manager.resolve_restore_target.side_effect = ListBackupsError("boom")
     event = make_action_event({"restore-to-time": "2024-01-02 10:10:10"})
     handler._on_restore_action(event)
     event.fail.assert_called_once_with("Failed to retrieve backups list")
 
 
 def test_restore_action_maps_invalid_target(handler, restore_manager):
-    restore_manager._pre_restore_checks.return_value = (True, "")
-    restore_manager._resolve_restore_target.return_value = (None, False, "Invalid backup-id: x")
+    restore_manager.pre_restore_checks.return_value = (True, "")
+    restore_manager.resolve_restore_target.return_value = (None, False, "Invalid backup-id: x")
     event = make_action_event({"backup-id": "x"})
     handler._on_restore_action(event)
     event.fail.assert_called_once_with("Invalid backup-id: x")
 
 
 def test_restore_action_sets_maintenance_and_results(harness, handler, restore_manager):
-    restore_manager._pre_restore_checks.return_value = (True, "")
-    restore_manager._resolve_restore_target.return_value = (
+    restore_manager.pre_restore_checks.return_value = (True, "")
+    restore_manager.resolve_restore_target.return_value = (
         ("model.cluster", "2"),
         False,
         "",
@@ -205,8 +201,8 @@ def test_restore_action_sets_maintenance_and_results(harness, handler, restore_m
 
 
 def test_restore_action_maps_restore_failure(harness, handler, restore_manager):
-    restore_manager._pre_restore_checks.return_value = (True, "")
-    restore_manager._resolve_restore_target.return_value = (("model.cluster", "1"), True, "")
+    restore_manager.pre_restore_checks.return_value = (True, "")
+    restore_manager.resolve_restore_target.return_value = (("model.cluster", "1"), True, "")
     restore_manager.restore.return_value = (False, "Failed to stop database service")
     event = make_action_event({"backup-id": "2024-01-01T10:10:10Z"})
     handler._on_restore_action(event)

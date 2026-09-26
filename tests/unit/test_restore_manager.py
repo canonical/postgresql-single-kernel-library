@@ -71,7 +71,6 @@ def restore_manager(harness, substrate, workload, backup_manager, monkeypatch):
         update_config=MagicMock(return_value=True),
         backup_manager=backup_manager,
         is_standby_cluster=None if substrate == "k8s" else MagicMock(return_value=False),
-        update_pebble_layers=MagicMock() if substrate == "k8s" else None,
     )
     manager.patroni_manager.get_patroni_restart_condition.return_value = "always"
     # The conftest harness counts the remote peer unit, so the app reads as having
@@ -82,26 +81,26 @@ def restore_manager(harness, substrate, workload, backup_manager, monkeypatch):
     return manager
 
 
-# -- _pre_restore_checks -----------------------------------------------------------
+# -- pre_restore_checks -----------------------------------------------------------
 
 
 def test_pre_restore_checks_rejects_standby_cluster(restore_manager, substrate):
     if substrate != "vm":
         pytest.skip("standby cluster is a VM-only concept")
     restore_manager._is_standby_cluster_bridge.return_value = True
-    ok, message = restore_manager._pre_restore_checks(BACKUP_ID, None)
+    ok, message = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == STANDBY_CLUSTER_RESTORE_ERROR_MESSAGE
 
 
 def test_pre_restore_checks_rejects_missing_target(restore_manager):
-    ok, message = restore_manager._pre_restore_checks(None, None)
+    ok, message = restore_manager.pre_restore_checks(None, None)
     assert not ok
     assert "Either backup-id or restore-to-time" in message
 
 
 def test_pre_restore_checks_rejects_bad_timestamp(restore_manager):
-    ok, message = restore_manager._pre_restore_checks(None, "yesterday")
+    ok, message = restore_manager.pre_restore_checks(None, "yesterday")
     assert not ok
     assert message == "Bad restore-to-time format"
 
@@ -110,14 +109,14 @@ def test_pre_restore_checks_rejects_container_not_ready(restore_manager, substra
     if substrate != "k8s":
         pytest.skip("container readiness is a K8s-only check")
     restore_manager.workload.workload_present = False
-    ok, message = restore_manager._pre_restore_checks(BACKUP_ID, None)
+    ok, message = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == "Workload container not ready yet!"
 
 
 def test_pre_restore_checks_rejects_blocking_state(harness, restore_manager):
     harness.charm.unit.status = BlockedStatus("some blocking state")
-    ok, message = restore_manager._pre_restore_checks(BACKUP_ID, None)
+    ok, message = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == "Cluster or unit is in a blocking state"
 
@@ -125,13 +124,13 @@ def test_pre_restore_checks_rejects_blocking_state(harness, restore_manager):
 def test_pre_restore_checks_allows_pitr_blocked_status(harness, restore_manager):
     """A PITR failure blocked state must not block a new restore request."""
     harness.charm.unit.status = BlockedStatus(CANNOT_RESTORE_PITR)
-    ok, _ = restore_manager._pre_restore_checks(BACKUP_ID, None)
+    ok, _ = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert ok
 
 
 def test_pre_restore_checks_allows_foreign_repository_blocked_status(harness, restore_manager):
     harness.charm.unit.status = BlockedStatus(ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE)
-    ok, _ = restore_manager._pre_restore_checks(BACKUP_ID, None)
+    ok, _ = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert ok
 
 
@@ -139,14 +138,14 @@ def test_pre_restore_checks_rejects_multiple_units(harness, restore_manager, mon
     monkeypatch.setattr(PostgreSQLApplication, "planned_units", property(lambda self: 2))
     peer_rel_id = harness.model.get_relation("database-peers").id
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/1")
-    ok, message = restore_manager._pre_restore_checks(BACKUP_ID, None)
+    ok, message = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == "Unit cannot restore backup as there are more than one unit in the cluster"
 
 
 def test_pre_restore_checks_rejects_active_async_relation(harness, restore_manager):
     harness.add_relation("replication", "other-postgresql")
-    ok, message = restore_manager._pre_restore_checks(BACKUP_ID, None)
+    ok, message = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == "Unit cannot restore backup with an active async replication relation"
 
@@ -154,36 +153,36 @@ def test_pre_restore_checks_rejects_active_async_relation(harness, restore_manag
 def test_pre_restore_checks_rejects_non_leader(harness, restore_manager):
     with harness.hooks_disabled():
         harness.set_leader(False)
-    ok, message = restore_manager._pre_restore_checks(BACKUP_ID, None)
+    ok, message = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == "Unit cannot restore backup as it was not elected the leader unit yet"
 
 
-# -- _resolve_restore_target --------------------------------------------------------
+# -- resolve_restore_target --------------------------------------------------------
 
 
 def test_resolve_restore_target_real_backup_id(restore_manager):
-    target, is_real, message = restore_manager._resolve_restore_target(BACKUP_ID, None)
+    target, is_real, message = restore_manager.resolve_restore_target(BACKUP_ID, None)
     assert target == ("model.cluster", "1")
     assert is_real is True
     assert message == ""
 
 
 def test_resolve_restore_target_rejects_invalid_backup_id(restore_manager):
-    target, _is_real, message = restore_manager._resolve_restore_target("nope", None)
+    target, _is_real, message = restore_manager.resolve_restore_target("nope", None)
     assert target is None
     assert message == "Invalid backup-id: nope"
 
 
 def test_resolve_restore_target_rejects_timeline_without_time(restore_manager):
-    target, _is_real, message = restore_manager._resolve_restore_target(TIMELINE_ID, None)
+    target, _is_real, message = restore_manager.resolve_restore_target(TIMELINE_ID, None)
     assert target is None
     assert message == "Cannot restore to the timeline without restore-to-time parameter"
 
 
 def test_resolve_restore_target_latest_requires_base_backup(restore_manager):
     """No backup was created from the latest timeline, so "latest" must be rejected."""
-    target, _is_real, message = restore_manager._resolve_restore_target(None, "latest")
+    target, _is_real, message = restore_manager.resolve_restore_target(None, "latest")
     assert target is None
     assert message == "There is no base backup created from the latest timeline"
 
@@ -191,9 +190,7 @@ def test_resolve_restore_target_latest_requires_base_backup(restore_manager):
 def test_resolve_restore_target_resolves_nearest_timeline(restore_manager):
     restore_manager.backup_manager.get_backups.side_effect = None
     restore_manager.backup_manager.get_backups.return_value = {}
-    target, _is_real, message = restore_manager._resolve_restore_target(
-        None, "2024-01-03 00:00:00"
-    )
+    target, _is_real, message = restore_manager.resolve_restore_target(None, "2024-01-03 00:00:00")
     assert target == ("model.cluster", "2")
     assert _is_real is False
     assert message == ""
@@ -203,9 +200,7 @@ def test_resolve_restore_target_rejects_missing_timeline(restore_manager):
     restore_manager.backup_manager.get_backups.side_effect = None
     restore_manager.backup_manager.get_backups.return_value = {}
     restore_manager.backup_manager.get_timelines.return_value = {}
-    target, _is_real, message = restore_manager._resolve_restore_target(
-        None, "2024-01-03 00:00:00"
-    )
+    target, _is_real, message = restore_manager.resolve_restore_target(None, "2024-01-03 00:00:00")
     assert target is None
     assert message.startswith("Can't find the nearest timeline before timestamp")
 
@@ -284,7 +279,8 @@ def test_restore_k8s_overrides_on_failure_condition(restore_manager, substrate):
     # The layer refresh during restore must NOT replan: replanning with the
     # changed on-failure layer restarts the (stopped) postgresql service and
     # races the pgbackrest restore, leaving the unit stuck in "restoring backup".
-    restore_manager._update_pebble_layers_bridge.assert_called_once_with(replan=False)
+    restore_manager.workload.update_pebble_layers.assert_called_once()
+    assert restore_manager.workload.update_pebble_layers.call_args.kwargs["replan"] is False
 
 
 def test_restore_k8s_removes_cluster_info_before_wipe(restore_manager, substrate):
@@ -362,7 +358,7 @@ def test_restore_finalization_retries_replan_after_stopping_backup_services(
     if substrate != "k8s":
         pytest.skip("pebble replan is a K8s-only path")
     restore_manager.state.peer.data["patroni-on-failure-condition-override"] = "ignore"
-    restore_manager._update_pebble_layers_bridge.side_effect = [
+    restore_manager.workload.update_pebble_layers.side_effect = [
         ChangeError("start failed", MagicMock()),
         None,
     ]
@@ -379,12 +375,12 @@ def test_restore_finalization_swallows_second_replan_failure(restore_manager, su
     if substrate != "k8s":
         pytest.skip("pebble replan is a K8s-only path")
     restore_manager.state.peer.data["patroni-on-failure-condition-override"] = "ignore"
-    restore_manager._update_pebble_layers_bridge.side_effect = [
+    restore_manager.workload.update_pebble_layers.side_effect = [
         ChangeError("start failed", MagicMock()),
         ChangeError("still failing", MagicMock()),
     ]
     restore_manager.restore_patroni_restart_condition()
-    assert restore_manager._update_pebble_layers_bridge.call_count == 2
+    assert restore_manager.workload.update_pebble_layers.call_count == 2
     assert "patroni-on-failure-condition-override" not in restore_manager.state.peer.data
 
 

@@ -7,11 +7,10 @@
 import importlib.resources
 import json
 import logging
-import os
 import re
 import shlex
-import signal
 import subprocess
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -35,7 +34,6 @@ from single_kernel_postgresql.config.literals import (
     PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE,
     PGBACKREST_LOG_LEVEL_STDERR,
     PGBACKREST_LOGROTATE_FILE,
-    VM_ROTATE_LOGS_LOG_FILE,
 )
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
@@ -221,6 +219,20 @@ class BackupManager(BaseManager):
             self.state.peer.s3_initialization_block_message = block_message
             self.state.peer.s3_initialization_done = "True"
             self.state.peer.stanza = ""
+
+    def reset_s3_initialization_markers(self) -> None:
+        """Reset the stanza and the S3 initialization markers before a new attempt.
+
+        The charms reset these app-databag fields on the leader right before
+        attempting the stanza initialization, so a failed run leaves a fresh
+        failure state instead of a stale success marker.
+        """
+        if not self.state.peer.is_app_leader:
+            return
+        self.state.application.s3_initialization_block_message = ""
+        self.state.application.s3_initialization_start = time.asctime(time.gmtime())
+        self.state.application.stanza = ""
+        self.state.application.s3_initialization_done = ""
 
     # -- Stanza configuration rendering ----------------------------------------
 
@@ -1209,42 +1221,21 @@ Stderr:
             return
         if not self.workload.exists(self.workload.root / PGBACKREST_LOGROTATE_FILE.lstrip("/")):
             return
-        if self.state.peer.rotate_logs_pid:
-            # Double check that the PID exists.
-            try:
-                os.kill(self.state.peer.rotate_logs_pid, 0)
-                return
-            except OSError:
-                pass
+        if self.state.peer.rotate_logs_pid and self.workload.process_alive(
+            self.state.peer.rotate_logs_pid
+        ):
+            return
 
         logger.info("Starting rotate logs process")
-        # as_file yields a real path for directory installs (all we ship); the
-        # spawned rotate-logs process outlives the context manager on purpose.
-        script = importlib.resources.as_file(
-            importlib.resources.files("single_kernel_postgresql.scripts").joinpath(
-                "rotate_logs.py"
-            )
-        )
-        with (
-            script as script_path,
-            open(VM_ROTATE_LOGS_LOG_FILE, "a") as output,
-        ):
-            process = subprocess.Popen(  # noqa: S603
-                ["/usr/bin/python3", str(script_path)],
-                stdout=output,
-                stderr=subprocess.STDOUT,
-            )
-        self.state.peer.rotate_logs_pid = process.pid
-        logger.info(f"Started rotate logs process with PID {process.pid}")
+        self.state.peer.rotate_logs_pid = self.workload.start_rotate_logs_loop()
+        logger.info(f"Started rotate logs process with PID {self.state.peer.rotate_logs_pid}")
 
     def stop_log_rotation(self) -> None:
         """Stop the running rotate-logs loop, if this unit spawned one."""
         if self.state.substrate != Substrates.VM:
             return
-        if stored := self.state.peer.rotate_logs_pid:
-            try:
-                os.kill(stored, signal.SIGINT)
-                logger.info(f"Stopped rotate logs process with PID {stored}")
-                self.state.peer.rotate_logs_pid = None
-            except OSError:
-                pass
+        if (stored := self.state.peer.rotate_logs_pid) and self.workload.stop_rotate_logs_loop(
+            stored
+        ):
+            logger.info(f"Stopped rotate logs process with PID {stored}")
+            self.state.peer.rotate_logs_pid = None

@@ -10,7 +10,6 @@ results, unit statuses and defers. No business logic lives here.
 """
 
 import logging
-import time
 from typing import TYPE_CHECKING
 
 from ops import MaintenanceStatus, Object
@@ -83,12 +82,7 @@ class BackupEventsHandler(Object):
             event.defer()
             return
 
-        if self.state.peer.is_app_leader:
-            application = self.state.application
-            application.s3_initialization_block_message = ""
-            application.s3_initialization_start = time.asctime(time.gmtime())
-            application.stanza = ""
-            application.s3_initialization_done = ""
+        self.backup_manager.reset_s3_initialization_markers()
 
         if self.backup_manager.is_primary and self.state.peer.s3_initialization_done is None:
             self.backup_manager.initialise_s3_repository()
@@ -142,7 +136,7 @@ class BackupEventsHandler(Object):
             f" has been requested on the unit"
         )
 
-        can_restore, error_message = self.restore_manager._pre_restore_checks(
+        can_restore, error_message = self.restore_manager.pre_restore_checks(
             backup_id, restore_to_time
         )
         if not can_restore:
@@ -153,7 +147,7 @@ class BackupEventsHandler(Object):
         logger.info("Validating provided backup-id and restore-to-time")
         try:
             restore_stanza_timeline, is_backup_id_real, error_message = (
-                self.restore_manager._resolve_restore_target(backup_id, restore_to_time)
+                self.restore_manager.resolve_restore_target(backup_id, restore_to_time)
             )
         except ListBackupsError as e:
             logger.exception(e)
