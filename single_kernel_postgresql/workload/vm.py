@@ -3,6 +3,7 @@
 
 """Machine Workload."""
 
+import importlib.resources
 import logging
 import os
 import pathlib
@@ -15,7 +16,7 @@ import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from signal import SIGHUP
+from signal import SIGHUP, SIGINT
 
 import charm_refresh
 import psutil
@@ -29,6 +30,7 @@ from single_kernel_postgresql.config.literals import (
     VM_ARCHIVE_PATH,
     VM_PATRONICTL_EXECUTABLE,
     VM_PGBACKREST_SERVICE_NAME,
+    VM_ROTATE_LOGS_LOG_FILE,
 )
 from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
 from single_kernel_postgresql.workload.paths.vm import VMPaths
@@ -182,6 +184,46 @@ class VMWorkload(BaseWorkload):
             tls_ca_chain_path=str(self.paths.pgbackrest_conf / "pgbackrest-tls-ca-chain.crt"),
             extra_args=(),
         )
+
+    # -- Rotate-logs loop (VM) ------------------------------------------------------
+
+    def process_alive(self, pid: int) -> bool:
+        """Whether a process with the given PID is alive."""
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    def start_rotate_logs_loop(self) -> int:
+        """Spawn the packaged rotate-logs loop detached and return its PID.
+
+        as_file yields a real path for directory installs (all we ship); the
+        spawned rotate-logs process outlives the context manager on purpose.
+        """
+        script = importlib.resources.as_file(
+            importlib.resources.files("single_kernel_postgresql.scripts").joinpath(
+                "rotate_logs.py"
+            )
+        )
+        with (
+            script as script_path,
+            open(VM_ROTATE_LOGS_LOG_FILE, "a") as output,
+        ):
+            process = subprocess.Popen(  # noqa: S603
+                ["/usr/bin/python3", str(script_path)],
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
+        return process.pid
+
+    def stop_rotate_logs_loop(self, pid: int) -> bool:
+        """Send SIGINT to the rotate-logs loop; False when the PID is gone."""
+        try:
+            os.kill(pid, SIGINT)
+            return True
+        except OSError:
+            return False
 
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service is running.
