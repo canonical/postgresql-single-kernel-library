@@ -165,7 +165,7 @@ class RestoreManager(BaseManager):
 
     # -- Pre-restore checks --------------------------------------------------------
 
-    def _pre_restore_checks(
+    def pre_restore_checks(
         self, backup_id: str | None, restore_to_time: str | None
     ) -> tuple[bool, str]:
         """Run some checks before starting the restore.
@@ -257,7 +257,7 @@ class RestoreManager(BaseManager):
 
     # -- Restore target resolution ---------------------------------------------------
 
-    def _resolve_restore_target(
+    def resolve_restore_target(
         self, backup_id: str | None, restore_to_time: str | None
     ) -> tuple[tuple[str, str] | None, bool, str]:
         """Validate the backup id / restore-to-time and resolve the (stanza, timeline).
@@ -300,7 +300,7 @@ class RestoreManager(BaseManager):
         # get_nearest_timeline resolves the target from the already-fetched
         # backups and timelines dicts (no re-invocation).
         # restore_to_time is always non-None here (the no-target case is rejected in
-        # _pre_restore_checks); use `or ""` to satisfy the type checker.
+        # pre_restore_checks); use `or ""` to satisfy the type checker.
         restore_stanza_timeline = get_nearest_timeline(restore_to_time or "", backups | timelines)
         if not restore_stanza_timeline:
             return (
@@ -332,7 +332,7 @@ class RestoreManager(BaseManager):
         """Restore a pgBackRest backup (optionally to a point in time).
 
         The target must already be resolved and validated with
-        _pre_restore_checks and _resolve_restore_target (the events layer calls
+        pre_restore_checks and resolve_restore_target (the events layer calls
         them to fail the action before any service disruption).
 
         Returns:
