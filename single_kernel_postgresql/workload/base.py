@@ -466,6 +466,20 @@ class BaseWorkload(ABC):
         """
         raise NotImplementedError
 
+    # -- Rotate-logs loop seams (VM-only; the manager gates on substrate) ---------
+
+    def process_alive(self, pid: int) -> bool:
+        """Whether a process with the given PID is alive (VM-only seam)."""
+        raise NotImplementedError
+
+    def start_rotate_logs_loop(self) -> int:
+        """Spawn the packaged rotate-logs loop detached and return its PID (VM-only seam)."""
+        raise NotImplementedError
+
+    def stop_rotate_logs_loop(self, pid: int) -> bool:
+        """Send SIGINT to the rotate-logs loop; False when the PID is gone (VM-only seam)."""
+        raise NotImplementedError
+
     def get_postgresql_version(self) -> str:
         """Return the PostgreSQL version from the system."""
         with pathlib.Path("refresh_versions.toml").open("rb") as file:
