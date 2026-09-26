@@ -10,7 +10,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import tomli
 from charmlibs import pathops
@@ -19,8 +19,15 @@ from ops import ModelError
 from ops.pebble import Error as PebbleError
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
-from single_kernel_postgresql.config.literals import DIR_PERMISSIONS_READONLY
+from single_kernel_postgresql.config.literals import (
+    DIR_PERMISSIONS_READONLY,
+    ORIGINAL_PATRONI_ON_FAILURE_CONDITION,
+)
+from single_kernel_postgresql.utils import unit_name_to_pod_name
 from single_kernel_postgresql.workload.paths.base import Paths
+
+if TYPE_CHECKING:
+    from single_kernel_postgresql.core.state import CharmState
 
 
 @dataclass(frozen=True)
@@ -41,6 +48,37 @@ class CommandResult:
         stdout = repr(self.stdout[:50]) if len(self.stdout) > 50 else repr(self.stdout)
         stderr = repr(self.stderr[:50]) if len(self.stderr) > 50 else repr(self.stderr)
         return f"CommandResult(return_code={self.return_code}, stdout={stdout}, stderr={stderr})"
+
+
+@dataclass(frozen=True)
+class PebbleLayerSpec:
+    """State-derived inputs for the K8s PostgreSQL pebble layer.
+
+    Substrate-shared code (managers, event handlers) reads the charm state and
+    hands the values over; the K8s workload owns the pebble layer construction.
+    """
+
+    on_failure_condition: str
+    cluster_name: str
+    model_name: str
+    pod_name: str
+    patroni_url: str
+    monitoring_password: str | None
+
+    @classmethod
+    def from_state(cls, state: "CharmState") -> "PebbleLayerSpec":
+        """Build the spec from the charm state."""
+        return cls(
+            on_failure_condition=(
+                state.peer.patroni_on_failure_condition_override
+                or ORIGINAL_PATRONI_ON_FAILURE_CONDITION
+            ),
+            cluster_name=state.application.cluster_name,
+            model_name=state.model_name,
+            pod_name=unit_name_to_pod_name(state.peer.unit_name),
+            patroni_url=state.patroni_url,
+            monitoring_password=state.application.monitoring_password,
+        )
 
 
 @dataclass(frozen=True)
@@ -416,6 +454,15 @@ class BaseWorkload(ABC):
         Returns:
             (logs, juju2): juju2 is True when the pebble logs client was unavailable
             and the patroni log files were read instead.
+        """
+        raise NotImplementedError
+
+    def update_pebble_layers(self, spec: PebbleLayerSpec, replan: bool = True) -> None:
+        """Rebuild and reconcile the PostgreSQL pebble layer (K8s-only seam).
+
+        Args:
+            spec: the state-derived layer inputs.
+            replan: whether to replan (restart) the services after the update.
         """
         raise NotImplementedError
 
