@@ -387,6 +387,43 @@ def test_s3_initialization_failure_non_leader_writes_unit_databag_only(backup_ma
     backup_manager.set_unit_status.assert_not_called()
 
 
+def test_reset_s3_initialization_markers_resets_the_app_markers(harness, backup_manager):
+    with harness.hooks_disabled():
+        harness.set_leader()
+    app = harness.charm.state.application
+    app.s3_initialization_block_message = "some old failure"
+    app.s3_initialization_start = ""
+    app.stanza = "some-stanza"
+    app.s3_initialization_done = "True"
+
+    backup_manager.reset_s3_initialization_markers()
+
+    # Writing "" removes the databag keys, so the getters read back None.
+    assert not app.s3_initialization_block_message
+    assert app.s3_initialization_start
+    assert not app.stanza
+    assert not app.s3_initialization_done
+
+
+def test_reset_s3_initialization_markers_noop_without_leadership(harness, backup_manager):
+    with harness.hooks_disabled():
+        harness.set_leader()
+    app = harness.charm.state.application
+    app.s3_initialization_block_message = "some old failure"
+    app.s3_initialization_start = "old"
+    app.stanza = "some-stanza"
+    app.s3_initialization_done = "True"
+    with harness.hooks_disabled():
+        harness.set_leader(False)
+
+    backup_manager.reset_s3_initialization_markers()
+
+    assert app.s3_initialization_block_message == "some old failure"
+    assert app.s3_initialization_start == "old"
+    assert app.stanza == "some-stanza"
+    assert app.s3_initialization_done == "True"
+
+
 def test_clear_s3_state_clears_markers(backup_manager, substrate):
     backup_manager.clear_s3_state()
     if substrate == "k8s":
