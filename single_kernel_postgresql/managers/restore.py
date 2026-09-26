@@ -6,7 +6,6 @@
 import logging
 import re
 import time
-from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
@@ -39,6 +38,7 @@ from single_kernel_postgresql.utils.backup import (
     get_nearest_timeline,
     is_psql_timestamp,
 )
+from single_kernel_postgresql.workload.base import PebbleLayerSpec
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.core.state import CharmState
@@ -77,22 +77,21 @@ class RestoreManager(BaseManager):
         update_config: UpdateConfigFunction,
         backup_manager: "BackupManager",
         is_standby_cluster: IsStandbyClusterFunction | None = None,
-        update_pebble_layers: Callable[[], None] | None = None,
     ):
         """Manager of PostgreSQL backup restores.
 
         The bridge callables mirror ``BackupManager``: the charm wrapper
-        re-rendering the Patroni configuration (``update_config``), the VM-only
-        standby-cluster check (``is_standby_cluster``, None on K8s) and, for
-        K8s, the pebble-layer refresh that applies the on-failure condition
-        override (``update_pebble_layers``).
+        re-rendering the Patroni configuration (``update_config``) and the
+        VM-only standby-cluster check (``is_standby_cluster``, None on K8s).
+        The K8s pebble-layer refresh that applies the on-failure condition
+        override is the workload's ``update_pebble_layers`` seam, called
+        directly through the injected workload.
         """
         super().__init__(state, workload, "restore")
         self.patroni_manager = patroni_manager
         self.update_config = update_config
         self.backup_manager = backup_manager
         self._is_standby_cluster_bridge = is_standby_cluster
-        self._update_pebble_layers_bridge = update_pebble_layers
 
     # -- Substrate-bridged predicates -------------------------------------------
 
@@ -166,7 +165,7 @@ class RestoreManager(BaseManager):
 
     # -- Pre-restore checks --------------------------------------------------------
 
-    def _pre_restore_checks(
+    def pre_restore_checks(
         self, backup_id: str | None, restore_to_time: str | None
     ) -> tuple[bool, str]:
         """Run some checks before starting the restore.
@@ -258,7 +257,7 @@ class RestoreManager(BaseManager):
 
     # -- Restore target resolution ---------------------------------------------------
 
-    def _resolve_restore_target(
+    def resolve_restore_target(
         self, backup_id: str | None, restore_to_time: str | None
     ) -> tuple[tuple[str, str] | None, bool, str]:
         """Validate the backup id / restore-to-time and resolve the (stanza, timeline).
@@ -301,7 +300,7 @@ class RestoreManager(BaseManager):
         # get_nearest_timeline resolves the target from the already-fetched
         # backups and timelines dicts (no re-invocation).
         # restore_to_time is always non-None here (the no-target case is rejected in
-        # _pre_restore_checks); use `or ""` to satisfy the type checker.
+        # pre_restore_checks); use `or ""` to satisfy the type checker.
         restore_stanza_timeline = get_nearest_timeline(restore_to_time or "", backups | timelines)
         if not restore_stanza_timeline:
             return (
@@ -333,7 +332,7 @@ class RestoreManager(BaseManager):
         """Restore a pgBackRest backup (optionally to a point in time).
 
         The target must already be resolved and validated with
-        _pre_restore_checks and _resolve_restore_target (the events layer calls
+        pre_restore_checks and resolve_restore_target (the events layer calls
         them to fail the action before any service disruption).
 
         Returns:
@@ -596,13 +595,9 @@ class RestoreManager(BaseManager):
         )
         return True
 
-    def _update_pebble_layers(self) -> bool:
-        """Refresh the pebble layers through the injected K8s bridge."""
-        if self._update_pebble_layers_bridge is None:
-            logger.error("the pebble-layer refresh bridge is not injected")
-            return False
-        self._update_pebble_layers_bridge()
-        return True
+    def _update_pebble_layers(self) -> None:
+        """Rebuild and reconcile the PostgreSQL pebble layer through the K8s workload."""
+        self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state))
 
     def restore_patroni_restart_condition(self) -> None:
         """Restore the Patroni service restart/on-failure condition that was before overriding.
