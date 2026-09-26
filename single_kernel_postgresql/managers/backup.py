@@ -12,6 +12,7 @@ import re
 import shlex
 import signal
 import subprocess
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -226,6 +227,20 @@ class BackupManager(BaseManager):
             self.state.peer.s3_initialization_block_message = block_message
             self.state.peer.s3_initialization_done = "True"
             self.state.peer.stanza = ""
+
+    def reset_s3_initialization_markers(self) -> None:
+        """Reset the stanza and the S3 initialization markers before a new attempt.
+
+        The charms reset these app-databag fields on the leader right before
+        attempting the stanza initialization, so a failed run leaves a fresh
+        failure state instead of a stale success marker.
+        """
+        if not self.state.peer.is_app_leader:
+            return
+        self.state.application.s3_initialization_block_message = ""
+        self.state.application.s3_initialization_start = time.asctime(time.gmtime())
+        self.state.application.stanza = ""
+        self.state.application.s3_initialization_done = ""
 
     # -- Stanza configuration rendering ----------------------------------------
 
