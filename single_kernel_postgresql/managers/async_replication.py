@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from ops import Application, ModelError, Relation, Secret, SecretNotFoundError, Unit
 from tenacity import RetryError
 
+from single_kernel_postgresql.compat.postgresql import PostgreSQLBaseError
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 READ_ONLY_MODE_BLOCKING_MESSAGE = "Standalone read-only cluster"
 
 
-class AsyncReplicationError(Exception):
+class AsyncReplicationError(PostgreSQLBaseError):
     """Exception class for Async replication."""
 
 
@@ -88,7 +89,7 @@ class AsyncReplicationManager(BaseManager):
         self.update_config = update_config
 
     @property
-    def _relation(self) -> Relation | None:
+    def async_relation(self) -> Relation | None:
         """Return the usable async-replication relation, or None.
 
         A relation whose databags are unreadable is treated as absent — the dying
@@ -109,20 +110,20 @@ class AsyncReplicationManager(BaseManager):
         return None
 
     @property
-    def _unit_ip(self) -> str:
+    def unit_ip(self) -> str:
         """Return this unit IP address for the replication relation."""
-        if not self._relation:
+        if not self.async_relation:
             raise AsyncReplicationError("No relation to get IP for")
 
         if self.state.substrate == Substrates.K8S:
             return self._get_unit_ip()
-        if self._relation.name == REPLICATION_OFFER_RELATION:
+        if self.async_relation.name == REPLICATION_OFFER_RELATION:
             ip = self.state.replication_offer_ip
         else:
             ip = self.state.replication_consumer_ip
 
         if not ip:
-            raise AsyncReplicationError(f"No IP set for {self._relation.name}")
+            raise AsyncReplicationError(f"No IP set for {self.async_relation.name}")
         return ip
 
     def _get_unit_ip(self) -> str:
@@ -139,7 +140,7 @@ class AsyncReplicationManager(BaseManager):
 
     def get_all_primary_cluster_endpoints(self) -> list[str]:
         """Return all the primary cluster endpoints from the standby cluster."""
-        if not (relation := self._relation):
+        if not (relation := self.async_relation):
             raise AsyncReplicationError("No relation in get all primary endpoints")
 
         primary_cluster = self.get_primary_cluster()
@@ -232,7 +233,7 @@ class AsyncReplicationManager(BaseManager):
         primary_cluster = self.get_primary_cluster()
         if primary_cluster is None or self.state.model.app == primary_cluster:
             return None
-        relation = self._relation
+        relation = self.async_relation
         if relation is None:
             return None
         primary_cluster_data = _safe_databag_get(
@@ -242,7 +243,7 @@ class AsyncReplicationManager(BaseManager):
             return None
         return json.loads(primary_cluster_data).get("endpoint")
 
-    def _get_secret(self) -> Secret | None:
+    def get_shared_secret(self) -> Secret | None:
         """Return async replication necessary secrets."""
         app_secret = self.state.model.get_secret(
             label=f"{PEER_RELATION}.{self.state.model.app.name}.app"
@@ -306,7 +307,7 @@ class AsyncReplicationManager(BaseManager):
 
     def get_standby_endpoints(self) -> list[str]:
         """Return the standby endpoints."""
-        if not (relation := self._relation):
+        if not (relation := self.async_relation):
             return []
 
         primary_cluster = self.get_primary_cluster()
@@ -392,7 +393,7 @@ class AsyncReplicationManager(BaseManager):
         self.update_config()
 
     @property
-    def _primary_cluster_endpoint(self) -> str | None:
+    def primary_cluster_endpoint(self) -> str | None:
         """Return the endpoint from one of the sync-standbys, or from the primary if there is no sync-standby."""
         sync_standby_names = self.patroni_manager.get_sync_standby_names()
         if len(sync_standby_names) > 0:
@@ -409,11 +410,11 @@ class AsyncReplicationManager(BaseManager):
             if self.state.peer_relation:
                 return self.state.peer_relation.data[unit].get("private-address")
             return None
-        return self.state.unit_database_address(unit, self._relation.name)  # type: ignore
+        return self.state.unit_database_address(unit, self.async_relation.name)  # type: ignore
 
-    def _remote_secret_id(self) -> str | None:
+    def remote_secret_id(self) -> str | None:
         """Return the shared secret id published by the primary cluster, or None."""
-        relation = self._relation
+        relation = self.async_relation
         if relation is None:
             return None
         primary_cluster_info = relation.data[relation.app].get("primary-cluster-data")
@@ -424,7 +425,7 @@ class AsyncReplicationManager(BaseManager):
     def _update_internal_secret(self) -> bool:
         # Update the secrets between the clusters. Reference the secret purely by the id published
         # in relation data — never by label — so no consumer-side alias is registered (DPE-10203).
-        secret_id = self._remote_secret_id()
+        secret_id = self.remote_secret_id()
         if secret_id is None:
             return False
         try:
@@ -438,13 +439,13 @@ class AsyncReplicationManager(BaseManager):
             logger.debug("Synced %s password", user)
         return True
 
-    def _update_primary_cluster_data(
+    def update_primary_cluster_data(
         self,
         promoted_cluster_counter: int | None = None,
         system_identifier: str | None = None,
     ) -> None:
         """Update the primary cluster data."""
-        async_relation = self._relation
+        async_relation = self.async_relation
 
         if promoted_cluster_counter is not None:
             for relation in [async_relation, self.state.peer_relation]:
@@ -453,11 +454,11 @@ class AsyncReplicationManager(BaseManager):
                 })
 
         # Update the data in the relation.
-        primary_cluster_data = {"endpoint": self._primary_cluster_endpoint}
+        primary_cluster_data = {"endpoint": self.primary_cluster_endpoint}
 
         # Retrieve the secrets that will be shared between the clusters.
         if async_relation.name == REPLICATION_OFFER_RELATION:  # type: ignore
-            secret = self._get_secret()
+            secret = self.get_shared_secret()
             if secret is not None:
                 secret.grant(async_relation)  # type: ignore
                 primary_cluster_data["secret-id"] = secret.id
@@ -474,9 +475,9 @@ class AsyncReplicationManager(BaseManager):
 
         This is used to update the standby units with the new primary information.
         """
-        relation = self._relation
+        relation = self.async_relation
         if relation is None:
             return
-        relation.data[self.state.model.unit].update({"unit-address": self._unit_ip})
+        relation.data[self.state.model.unit].update({"unit-address": self.unit_ip})
         if self.is_primary_cluster() and self.state.model.unit.is_leader():
-            self._update_primary_cluster_data()
+            self.update_primary_cluster_data()
