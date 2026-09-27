@@ -27,6 +27,7 @@ import tomli
 from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
+from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     PATRONICTL_REMOVE_CONFIRMATION,
     POSTGRESQL_SNAP_NAME,
@@ -444,7 +445,9 @@ class VMWorkload(BaseWorkload):
                         elif os.path.isdir(item_path):
                             shutil.rmtree(item_path)
         except OSError as e:
-            raise Exception(f"Failed to remove contents from {path} with error: {e!s}") from e
+            raise PostgreSQLFileOperationError(
+                f"Failed to remove contents from {path} with error: {e!s}"
+            ) from e
 
     def remove_raft_state(self) -> None:
         """Remove previous cluster information to make it possible to initialise a new cluster."""
@@ -453,7 +456,7 @@ class VMWorkload(BaseWorkload):
             if path.exists() and path.is_dir():
                 shutil.rmtree(path)
         except OSError as e:
-            raise Exception(
+            raise PostgreSQLFileOperationError(
                 f"Failed to remove previous cluster information with error: {e!s}"
             ) from e
 

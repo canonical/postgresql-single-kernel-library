@@ -149,6 +149,7 @@ TLS_CERT_FILE = "cert.pem"
 METRICS_PORT = "9187"
 PGBACKREST_METRICS_PORT = "9854"
 
+# Secret/database mapping labels
 USERNAME_MAPPING_LABEL = "custom-usernames"
 DATABASE_MAPPING_LABEL = "prefix-databases"
 
