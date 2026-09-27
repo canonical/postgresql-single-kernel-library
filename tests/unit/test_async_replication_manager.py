@@ -234,7 +234,7 @@ def test_get_secret_references_the_persisted_id(harness, manager):
     )
     _update_peer_app_data(harness, {ASYNC_SHARED_SECRET_ID_KEY: secret_id})
 
-    secret = manager._get_secret()
+    secret = manager.get_shared_secret()
 
     assert secret.id == secret_id
     assert secret.peek_content() == {"operator-password": "pw", "user-password": "pw"}
@@ -243,7 +243,7 @@ def test_get_secret_references_the_persisted_id(harness, manager):
 def test_get_secret_leader_creates_the_shared_secret(harness, manager):
     _create_app_secret(harness)
 
-    secret = manager._get_secret()
+    secret = manager.get_shared_secret()
 
     assert secret is not None
     assert harness.charm.state.application.data[ASYNC_SHARED_SECRET_ID_KEY] == secret.id
@@ -254,7 +254,7 @@ def test_get_secret_non_leader_without_id_returns_none(harness, manager):
     _set_leader(harness, leader=False)
     _create_app_secret(harness)
 
-    assert manager._get_secret() is None
+    assert manager.get_shared_secret() is None
     assert ASYNC_SHARED_SECRET_ID_KEY not in harness.charm.state.application.data
 
 
@@ -270,7 +270,7 @@ def test_get_secret_adopts_the_own_published_id(harness, manager):
         {"primary-cluster-data": json.dumps({"secret-id": secret_id})},
     )
 
-    secret = manager._get_secret()
+    secret = manager.get_shared_secret()
 
     assert secret.id == secret_id
     assert harness.charm.state.application.data[ASYNC_SHARED_SECRET_ID_KEY] == secret_id
@@ -431,11 +431,11 @@ def test_update_async_replication_data_as_primary(harness, manager):
         patch.object(AsyncReplicationManager, "_get_unit_ip", return_value="10.1.1.5"),
         patch.object(
             AsyncReplicationManager,
-            "_primary_cluster_endpoint",
+            "primary_cluster_endpoint",
             new_callable=PropertyMock,
             return_value=PRIMARY_ENDPOINT,
         ),
-        patch.object(AsyncReplicationManager, "_get_secret", return_value=secret),
+        patch.object(AsyncReplicationManager, "get_shared_secret", return_value=secret),
     ):
         manager.update_async_replication_data()
 
@@ -453,13 +453,13 @@ def test_update_primary_cluster_data_writes_the_counter_everywhere(harness, mana
     with (
         patch.object(
             AsyncReplicationManager,
-            "_primary_cluster_endpoint",
+            "primary_cluster_endpoint",
             new_callable=PropertyMock,
             return_value=PRIMARY_ENDPOINT,
         ),
-        patch.object(AsyncReplicationManager, "_get_secret", return_value=secret),
+        patch.object(AsyncReplicationManager, "get_shared_secret", return_value=secret),
     ):
-        manager._update_primary_cluster_data(promoted_cluster_counter=4, system_identifier="sys-1")
+        manager.update_primary_cluster_data(promoted_cluster_counter=4, system_identifier="sys-1")
 
     app_databag = relation.data[harness.charm.model.app]
     assert app_databag["promoted-cluster-counter"] == "4"
@@ -480,13 +480,13 @@ def test_update_primary_cluster_data_on_the_consumer_side(harness, manager):
     with (
         patch.object(
             AsyncReplicationManager,
-            "_primary_cluster_endpoint",
+            "primary_cluster_endpoint",
             new_callable=PropertyMock,
             return_value=PRIMARY_ENDPOINT,
         ),
-        patch.object(AsyncReplicationManager, "_get_secret") as get_secret,
+        patch.object(AsyncReplicationManager, "get_shared_secret") as get_secret,
     ):
-        manager._update_primary_cluster_data()
+        manager.update_primary_cluster_data()
 
     data = json.loads(relation.data[harness.charm.model.app]["primary-cluster-data"])
     assert data == {"endpoint": PRIMARY_ENDPOINT}
