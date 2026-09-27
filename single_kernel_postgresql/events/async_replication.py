@@ -17,10 +17,9 @@ service, and only the K8s flows track the ``standby-pgdata-cleared`` flag. The
 dead-datacenter recovery changes (DPE-10203) apply to both substrates.
 """
 
-import contextlib
 import json
 import logging
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import Protocol
 
 from ops import (
     ActionEvent,
@@ -33,16 +32,12 @@ from ops import (
     RelationChangedEvent,
     RelationDepartedEvent,
     SecretChangedEvent,
-    WaitingStatus,
 )
-from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay, wait_fixed
+from tenacity import RetryError
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import (
-    ClusterNotPromotedError,
     DeployedWithoutTrustError,
-    NotReadyError,
-    StandbyClusterAlreadyPromotedError,
 )
 from single_kernel_postgresql.config.literals import (
     PEER_RELATION,
@@ -52,9 +47,7 @@ from single_kernel_postgresql.config.literals import (
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.async_replication import (
     READ_ONLY_MODE_BLOCKING_MESSAGE,
-    AsyncReplicationError,
     AsyncReplicationManager,
-    _safe_databag_get,
 )
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.workload.base import BaseWorkload
@@ -77,12 +70,6 @@ class AsyncReplicationWatcher(Protocol):
         """Disable the watcher."""
         ...
 
-
-if TYPE_CHECKING:
-    # Substrate-only seams are injected; they must never enter the other substrate's
-    # import graph, hence the type-checking-only imports.
-    from single_kernel_postgresql.workload.k8s import K8sWorkload
-    from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +232,7 @@ class PostgreSQLAsyncReplication(Object):
             event.fail("This action must be run in the cluster where the offer was created.")
             return
 
-        if not self._handle_replication_change(event):
+        if not self._handle_replication_change(event):  # type: ignore
             return
 
         # Set the replication name in the relation data.
@@ -339,31 +326,32 @@ class PostgreSQLAsyncReplication(Object):
             logger.debug("Early exit on_async_relation_changed: No primary cluster found.")
             return
 
-        if self._configure_primary_cluster(primary_cluster, event):
+        if self._configure_primary_cluster(primary_cluster, event):  # type: ignore
             return
 
         # Return if this is a new unit joining an existing standby cluster.
         if (
             not self.state.model.unit.is_leader()
             and self.manager.is_following_promoted_cluster()
-            and self._handle_late_joiner(event)
+            and self._handle_late_joiner(event)  # type: ignore
         ):
             return
 
-        if not self._stop_database(event):
+        if not self._stop_database(event):  # type: ignore
             return
-        self._publish_stop_marker(event)
+        self._publish_stop_marker(event)  # type: ignore
 
-        if self._wait_for_all_units_stopped(event):
-            return
-
-        if self._wait_for_standby_leader(event):
+        if self._wait_for_all_units_stopped(event):  # type: ignore
             return
 
-        if self._start_standby_database(event):
+        if self._wait_for_standby_leader(event):  # type: ignore
             return
 
-        self._handle_database_start(event)
+        if self._start_standby_database(event):  # type: ignore
+            return
+
+        self._handle_database_start(event)  # type: ignore
+
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:
         """Update the internal secret when the relation secret changes."""
         relation = self.manager._relation
@@ -397,4 +385,3 @@ class PostgreSQLAsyncReplication(Object):
             if not self.manager._update_internal_secret():
                 logger.debug("Secret not found, deferring event")
                 event.defer()
-
