@@ -19,7 +19,7 @@ dead-datacenter recovery changes (DPE-10203) apply to both substrates.
 
 import json
 import logging
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from ops import (
     ActionEvent,
@@ -45,6 +45,11 @@ from single_kernel_postgresql.config.literals import (
     REPLICATION_OFFER_RELATION,
 )
 from single_kernel_postgresql.core.state import CharmState
+
+if TYPE_CHECKING:
+    # Substrate-only seams are injected; they must never enter the other substrate's
+    # import graph, hence the type-checking-only imports.
+    from single_kernel_postgresql.managers.k8s import K8sManager
 from single_kernel_postgresql.managers.async_replication import (
     READ_ONLY_MODE_BLOCKING_MESSAGE,
     AsyncReplicationManager,
@@ -96,7 +101,7 @@ class PostgreSQLAsyncReplication(Object):
         patroni_manager: PatroniManager,
         workload: BaseWorkload,
         watcher: AsyncReplicationWatcher | None = None,
-        k8s_manager=None,
+        k8s_manager: "K8sManager | None" = None,
     ):
         """Constructor.
 
@@ -153,7 +158,7 @@ class PostgreSQLAsyncReplication(Object):
     @property
     def _relation(self):
         """Return the usable async-replication relation, or None."""
-        return self.manager._relation
+        return self.manager.async_relation
 
     # -- Public surface the charms consume
 
@@ -196,7 +201,7 @@ class PostgreSQLAsyncReplication(Object):
         if self.state.application.data.get("promoted-cluster-counter") == "0":
             self.charm.set_app_status(BlockedStatus(READ_ONLY_MODE_BLOCKING_MESSAGE))
             return
-        if self.manager._relation is None:
+        if self.manager.async_relation is None:
             self.charm.set_app_status(ActiveStatus())
             return
         primary_cluster = self.manager.get_primary_cluster()
@@ -228,7 +233,7 @@ class PostgreSQLAsyncReplication(Object):
             event.fail("There is already a replication set up.")
             return
 
-        if self.manager._relation.name == REPLICATION_CONSUMER_RELATION:  # type: ignore
+        if self.manager.async_relation.name == REPLICATION_CONSUMER_RELATION:  # type: ignore
             event.fail("This action must be run in the cluster where the offer was created.")
             return
 
@@ -236,7 +241,7 @@ class PostgreSQLAsyncReplication(Object):
             return
 
         # Set the replication name in the relation data.
-        self.manager._relation.data[self.state.model.app].update(  # type: ignore
+        self.manager.async_relation.data[self.state.model.app].update(  # type: ignore
             {"name": event.params["name"]}
         )
 
@@ -246,8 +251,8 @@ class PostgreSQLAsyncReplication(Object):
     def _on_async_relation_joined(self, _) -> None:
         """Publish this unit address in the relation data."""
         # store unit address in relation data
-        self.manager._relation.data[self.state.model.unit].update(  # type: ignore
-            {"unit-address": self.manager._unit_ip}
+        self.manager.async_relation.data[self.state.model.unit].update(  # type: ignore
+            {"unit-address": self.manager.unit_ip}
         )
 
         # Set the counter for new units.
@@ -354,7 +359,7 @@ class PostgreSQLAsyncReplication(Object):
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:
         """Update the internal secret when the relation secret changes."""
-        relation = self.manager._relation
+        relation = self.manager.async_relation
         if relation is None:
             logger.debug("Early exit on_secret_changed: No relation found.")
             return
@@ -364,13 +369,13 @@ class PostgreSQLAsyncReplication(Object):
             and event.secret.label == f"{PEER_RELATION}.{self.state.model.app.name}.app"
         ):
             logger.info("Internal secret changed, updating relation secret")
-            if not (secret := self.manager._get_secret()):
+            if not (secret := self.manager.get_shared_secret()):
                 logger.debug("Defer on_secret_changed: Secret not created yet")
                 event.defer()
                 return
             secret.grant(relation)
             primary_cluster_data = {
-                "endpoint": self.manager._primary_cluster_endpoint,
+                "endpoint": self.manager.primary_cluster_endpoint,
                 "secret-id": secret.id,
             }
             relation.data[self.state.model.app]["primary-cluster-data"] = json.dumps(
@@ -379,7 +384,7 @@ class PostgreSQLAsyncReplication(Object):
             return
 
         if relation.name == REPLICATION_CONSUMER_RELATION and _same_secret_id(
-            event.secret.id, self.manager._remote_secret_id()
+            event.secret.id, self.manager.remote_secret_id()
         ):
             logger.info("Relation secret changed, updating internal secret")
             if not self.manager._update_internal_secret():
