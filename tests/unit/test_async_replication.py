@@ -57,7 +57,7 @@ def async_rel(harness):
     _set_leader(harness)
     _initialise_cluster(harness)
     with patch.object(
-        AsyncReplicationManager, "_unit_ip", new_callable=PropertyMock, return_value=UNIT_IP
+        AsyncReplicationManager, "unit_ip", new_callable=PropertyMock, return_value=UNIT_IP
     ):
         rel_id = harness.add_relation(REPLICATION_OFFER_RELATION, REMOTE_APP)
         harness.add_relation_unit(rel_id, f"{REMOTE_APP}/0")
@@ -68,7 +68,7 @@ def async_rel(harness):
 def _add_consumer_relation(harness):
     """Add a replication (consumer-side) relation with one remote unit."""
     with patch.object(
-        AsyncReplicationManager, "_unit_ip", new_callable=PropertyMock, return_value=UNIT_IP
+        AsyncReplicationManager, "unit_ip", new_callable=PropertyMock, return_value=UNIT_IP
     ):
         rel_id = harness.add_relation(REPLICATION_CONSUMER_RELATION, REMOTE_APP)
         harness.add_relation_unit(rel_id, f"{REMOTE_APP}/0")
@@ -93,12 +93,12 @@ def _action_flow_patches(harness):
         ),
         patch.object(
             AsyncReplicationManager,
-            "_primary_cluster_endpoint",
+            "primary_cluster_endpoint",
             new_callable=PropertyMock,
             return_value=UNIT_IP,
         ),
         patch.object(
-            AsyncReplicationManager, "_get_secret", return_value=MagicMock(id="secret:abc")
+            AsyncReplicationManager, "get_shared_secret", return_value=MagicMock(id="secret:abc")
         ),
         patch.object(harness.charm, "update_config"),
         patch.object(PatroniManager, "get_standby_leader", return_value=None),
@@ -251,7 +251,7 @@ def test_relation_joined_publishes_the_unit_address_and_counter(substrate, harne
 
     relation = harness.model.get_relation(REPLICATION_OFFER_RELATION)
     with patch.object(
-        AsyncReplicationManager, "_unit_ip", new_callable=PropertyMock, return_value=UNIT_IP
+        AsyncReplicationManager, "unit_ip", new_callable=PropertyMock, return_value=UNIT_IP
     ):
         _set_primary_cluster(harness, async_rel, "4")
         # the VM charm observes relation_joined, the K8s charm relation_created
