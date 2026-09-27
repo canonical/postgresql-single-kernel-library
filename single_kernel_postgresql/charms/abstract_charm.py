@@ -9,10 +9,6 @@ from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
 from ops.charm import CharmBase
 
-if TYPE_CHECKING:
-    import charm_refresh
-
-
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.ldap import LDAP
@@ -33,6 +29,9 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 from ..config.enums import Substrates
 from ..config.literals import DATABASE, S3_RELATION_NAME
 from ..utils.postgresql import PostgreSQL
+
+if TYPE_CHECKING:
+    import charm_refresh
 
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
@@ -188,8 +187,19 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         pass
 
     @abstractmethod
-    def update_config(self) -> bool:
+    def update_config(
+        self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
+    ) -> bool:
         """Re-render the Patroni configuration and apply it."""
+        pass
+
+    @abstractmethod
+    def update_relation_endpoints(self) -> None:
+        """Refresh the client and async relation endpoints after a switchover.
+
+        Owned by the client-relation and async-replication modules until those
+        phases migrate; the VM pre-refresh checks call it after switching primary.
+        """
         pass
 
     @property
