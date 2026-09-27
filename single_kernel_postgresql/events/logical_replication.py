@@ -395,7 +395,7 @@ class PostgreSQLLogicalReplication(Object):
         )
         subscriptions = self._subscriptions_info()
         relation.data[self.model.app]["subscription-request"] = (
-            self.state.config.logical_replication_subscription_request
+            self.state.config.logical_replication_subscription_request or "{}"
         )
         for database, subscription in subscriptions.copy().items():
             if database in subscription_request_config:
