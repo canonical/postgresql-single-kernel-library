@@ -19,6 +19,7 @@ from lightkube import Client
 from lightkube.resources.core_v1 import Endpoints
 from ops import Container, ModelError
 from ops.pebble import (
+    ChangeError,
     CheckDict,
     ExecError,
     FileInfo,
@@ -560,10 +561,7 @@ class K8sWorkload(BaseWorkload):
 
     def postgresql_service_registered(self) -> bool:
         """Whether the container is connected and the postgresql service exists."""
-        if not self.container.can_connect():
-            return False
-        services = self.container.pebble.get_services(names=[K8S_POSTGRESQL_SERVICE_NAME])
-        return len(services) > 0
+        return self.service_exists(K8S_POSTGRESQL_SERVICE_NAME)
 
     def get_system_identifier(self) -> tuple[str | None, str | None]:
         """Returns the PostgreSQL system identifier from this instance."""
@@ -596,14 +594,7 @@ class K8sWorkload(BaseWorkload):
 
     def clear_data_directories(self) -> None:
         """Remove the contents of the data directories to enable replication."""
-        for path in [
-            self.paths.archive,
-            self.paths.data,
-            self.paths.logs,
-            self.paths.temp_storage,
-        ]:
-            logger.info(f"Removing contents from {path}")
-            self.container.exec(["find", str(path), "-mindepth", "1", "-delete"]).wait_output()
+        self.empty_data_files()
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
