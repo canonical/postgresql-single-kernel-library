@@ -247,9 +247,7 @@ class PostgreSQLLogicalReplication(Object):
                 )
                 continue
             publication_name = publication["publication-name"]
-            for attempt in Retrying(
-                stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True
-            ):
+            for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True):
                 with attempt:
                     self.charm.postgresql.create_subscription(
                         subscription_name,
