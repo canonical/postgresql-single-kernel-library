@@ -275,12 +275,12 @@ class AsyncReplicationManager(BaseManager):
                     secret.set_content(shared_content)
                 # Persist the id (covers the migration path, where the id came from
                 # this cluster's own relation data rather than peer data).
-                self.state.application.data.update({ASYNC_SHARED_SECRET_ID_KEY: secret.id})
+                self.state.application.data.update({ASYNC_SHARED_SECRET_ID_KEY: secret.id})  # type: ignore
                 return secret
 
         if self.state.model.unit.is_leader():
             secret = self.state.model.app.add_secret(content=shared_content)
-            self.state.application.data.update({ASYNC_SHARED_SECRET_ID_KEY: secret.id})
+            self.state.application.data.update({ASYNC_SHARED_SECRET_ID_KEY: secret.id})  # type: ignore
             return secret
         return None
 
@@ -448,7 +448,7 @@ class AsyncReplicationManager(BaseManager):
 
         if promoted_cluster_counter is not None:
             for relation in [async_relation, self.state.peer_relation]:
-                relation.data[self.state.model.app].update({  # type: ignore[union-attr]
+                relation.data[self.state.model.app].update({  # type: ignore
                     "promoted-cluster-counter": str(promoted_cluster_counter)
                 })
 
@@ -456,16 +456,16 @@ class AsyncReplicationManager(BaseManager):
         primary_cluster_data = {"endpoint": self._primary_cluster_endpoint}
 
         # Retrieve the secrets that will be shared between the clusters.
-        if async_relation.name == REPLICATION_OFFER_RELATION:  # type: ignore[union-attr]
+        if async_relation.name == REPLICATION_OFFER_RELATION:  # type: ignore
             secret = self._get_secret()
             if secret is not None:
-                secret.grant(async_relation)
+                secret.grant(async_relation)  # type: ignore
                 primary_cluster_data["secret-id"] = secret.id
 
         if system_identifier is not None:
             primary_cluster_data["system-id"] = system_identifier
 
-        async_relation.data[self.state.model.app]["primary-cluster-data"] = json.dumps(  # type: ignore[union-attr]
+        async_relation.data[self.state.model.app]["primary-cluster-data"] = json.dumps(  # type: ignore
             primary_cluster_data
         )
 
