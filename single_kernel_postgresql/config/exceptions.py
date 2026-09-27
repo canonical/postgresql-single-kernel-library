@@ -89,3 +89,7 @@ class BackupRunError(PostgreSQLBaseError):
 
 class ListBackupsError(PostgreSQLBaseError):
     """Raised when pgBackRest fails to list backups."""
+
+
+class PostgreSQLSecretNotFoundError(PostgreSQLBaseError):
+    """Raised when a secret exists but its id cannot be resolved."""

@@ -23,6 +23,7 @@ from ops import (
 )
 from ops.framework import Object
 
+from single_kernel_postgresql.config.exceptions import PostgreSQLSecretNotFoundError
 from single_kernel_postgresql.config.literals import LOGICAL_REPLICATION_OFFER_RELATION
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.utils import new_password
@@ -75,14 +76,14 @@ class PostgreSQLLogicalReplication(Object):
             event.defer()
             return
 
-        secret = self._get_secret(event.relation.id)
+        secret, secret_id = self._get_secret(event.relation.id)
         logger.debug(
             f"Sharing logical replication secret to the {LOGICAL_REPLICATION_OFFER_RELATION} #{event.relation.id}"
         )
         secret.grant(event.relation)
 
-        self._save_published_resources_info(str(event.relation.id), secret.id, {})
-        event.relation.data[self.model.app]["secret-id"] = secret.id
+        self._save_published_resources_info(str(event.relation.id), secret_id, {})
+        event.relation.data[self.model.app]["secret-id"] = secret_id
 
     def _on_offer_relation_changed(self, event: RelationChangedEvent) -> None:
         if not self.charm.unit.is_leader():
@@ -165,7 +166,7 @@ class PostgreSQLLogicalReplication(Object):
             relation.data[relation.app].get("subscription-request", "{}")
         )
         publications = json.loads(relation.data[self.model.app].get("publications", "{}"))
-        secret = self._get_secret(relation.id)
+        secret, secret_id = self._get_secret(relation.id)
         user = secret.peek_content()["username"]
         errors = []
 
@@ -242,10 +243,10 @@ class PostgreSQLLogicalReplication(Object):
                 )
                 self.charm.postgresql.alter_publication(database, publication_name, tables)
                 publications[database]["tables"] = tables
-            self._save_published_resources_info(str(relation.id), secret.id, publications)
+            self._save_published_resources_info(str(relation.id), secret_id, publications)
             relation.data[self.model.app]["publications"] = json.dumps(publications)
 
-        self._save_published_resources_info(str(relation.id), secret.id, publications)
+        self._save_published_resources_info(str(relation.id), secret_id, publications)
         relation.data[self.model.app].update({
             "errors": json.dumps(errors),
             "publications": json.dumps(publications),
@@ -324,8 +325,8 @@ class PostgreSQLLogicalReplication(Object):
         self.charm.postgresql.create_user(user, password, replication=True)
         return user, password
 
-    def _get_secret(self, relation_id: int) -> Secret:
-        """Returns logical replication secret. Updates, if content changed."""
+    def _get_secret(self, relation_id: int) -> tuple[Secret, str]:
+        """Returns the logical replication secret and its id. Updates, if content changed."""
         secret_label = f"{SECRET_LABEL}-{relation_id}"
         primary = self.charm.primary_endpoint
         try:
@@ -334,25 +335,29 @@ class PostgreSQLLogicalReplication(Object):
             if not secret.id:
                 # Workaround for the secret id not being set with model uuid.
                 secret._id = f"secret://{self.model.uuid}/{secret.get_info().id.split(':')[1]}"
+            if not secret.id:
+                raise PostgreSQLSecretNotFoundError()
             if (content := secret.peek_content())["primary"] != primary:
                 logger.debug(
                     f"Updating secret for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation_id}"
                 )
                 content["primary"] = primary
                 secret.set_content(content)
-            return secret
         except SecretNotFoundError:
             logger.debug(
                 f"Creating new secret for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation_id}"
             )
-        username, password = self._create_user(relation_id)
-        return self.charm.model.app.add_secret(
-            content={
-                "primary": primary,
-                "username": username,
-                "password": password,
-            },
-            label=secret_label,
-        )
+            username, password = self._create_user(relation_id)
+            secret = self.charm.model.app.add_secret(
+                content={
+                    "primary": primary,
+                    "username": username,
+                    "password": password,
+                },
+                label=secret_label,
+            )
+            if not secret.id:
+                raise PostgreSQLSecretNotFoundError() from None
+        return secret, secret.id
 
     # endregion
