@@ -13,6 +13,7 @@ from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.ldap import LDAP
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
+from single_kernel_postgresql.events.watcher import PostgreSQLWatcherEventsHandler
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseProvides,
 )
@@ -103,6 +104,8 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.config_manager,
             self.patroni_manager,
         )
+
+        self.watcher_handler = PostgreSQLWatcherEventsHandler(self, self.state)
 
     # Postgresql Client
     @property

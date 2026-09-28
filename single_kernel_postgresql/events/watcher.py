@@ -27,6 +27,7 @@ from ops import (
 )
 from pysyncobj.utility import TcpUtility
 
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     RAFT_PARTNER_PREFIX,
     RAFT_PASSWORD_KEY,
@@ -43,7 +44,7 @@ from single_kernel_postgresql.utils import new_password
 logger = logging.getLogger(__name__)
 
 
-class PostgreSQLWatcherRelation(Object):
+class PostgreSQLWatcherEventsHandler(Object):
     """Handles the watcher relation for stereo mode support."""
 
     def __init__(self, charm, state):
@@ -52,18 +53,19 @@ class PostgreSQLWatcherRelation(Object):
         self.charm = charm
         self.state = state
 
-        self.framework.observe(
-            self.charm.on[WATCHER_OFFER_RELATION].relation_joined,
-            self._on_watcher_relation_joined,
-        )
-        self.framework.observe(
-            self.charm.on[WATCHER_OFFER_RELATION].relation_changed,
-            self._on_watcher_relation_changed,
-        )
-        self.framework.observe(
-            self.charm.on[WATCHER_OFFER_RELATION].relation_broken,
-            self._on_watcher_relation_broken,
-        )
+        if self.state.substrate == Substrates.VM:
+            self.framework.observe(
+                self.charm.on[WATCHER_OFFER_RELATION].relation_joined,
+                self._on_watcher_relation_joined,
+            )
+            self.framework.observe(
+                self.charm.on[WATCHER_OFFER_RELATION].relation_changed,
+                self._on_watcher_relation_changed,
+            )
+            self.framework.observe(
+                self.charm.on[WATCHER_OFFER_RELATION].relation_broken,
+                self._on_watcher_relation_broken,
+            )
 
     @cached_property
     def _relation(self) -> Relation | None:
