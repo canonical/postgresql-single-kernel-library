@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
-from ops.charm import CharmBase
+from ops.charm import CharmBase, UpdateStatusEvent
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
@@ -21,6 +21,7 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.s3 import S3Requi
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
+from single_kernel_postgresql.managers.logical_replication import LogicalReplicationManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
@@ -73,9 +74,29 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
         )
 
-        # Logical replication handler owns the two logical-replication relations; the
-        # config manager reads its published slots for the Patroni render and API sync.
-        self.logical_replication = PostgreSQLLogicalReplication(self, self.state)
+        # Logical replication: retry pending validations on the update-status
+        # heartbeat. StatusHandler must be constructed AFTER this observer so its
+        # own update-status listener runs later (charm-side checks first, then the
+        # status recompute).
+        self.framework.observe(self.on.update_status, self._on_logical_replication_update_status)
+
+        # Logical replication: the manager owns the two logical-replication
+        # relations' data plane; the events handler owns the observers and the
+        # event-flow guards. The config manager reads the manager's published
+        # slots for the Patroni render and API sync.
+        self.logical_replication_manager = LogicalReplicationManager(
+            state=self.state,
+            workload=self.workload,
+            # Per-call bridges: the client and the primary lookup are freshly
+            # constructed per access (Patroni primary lookup + app secret).
+            postgresql=lambda: self.postgresql,
+            primary_endpoint=lambda: self.primary_endpoint,
+            update_config=self.update_config,
+            set_unit_status=self.set_unit_status,
+        )
+        self.logical_replication = PostgreSQLLogicalReplication(
+            self, self.state, self.logical_replication_manager
+        )
 
         self.config_manager = ConfigManager(
             state=self.state,
@@ -108,6 +129,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.logical_replication_manager,
         )
 
     # Postgresql Client
@@ -116,6 +138,15 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def postgresql(self) -> PostgreSQL:
         """Return a PostgreSQL client."""
         pass
+
+    def _on_logical_replication_update_status(self, event: UpdateStatusEvent) -> None:
+        """Retry pending logical-replication validations on the update-status heartbeat.
+
+        Runs BEFORE the StatusHandler's own update-status listener (constructed
+        later observes later), so the retry's validation results are part of the
+        status recompute that follows.
+        """
+        self.logical_replication.retry_validations()
 
     # Postgresql Workload
     @property
