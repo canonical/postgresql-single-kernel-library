@@ -331,31 +331,8 @@ class PostgreSQLAsyncReplication(Object):
             logger.debug("Early exit on_async_relation_changed: No primary cluster found.")
             return
 
-        if self._configure_primary_cluster(primary_cluster, event):  # type: ignore
-            return
-
-        # Return if this is a new unit joining an existing standby cluster.
-        if (
-            not self.state.model.unit.is_leader()
-            and self.manager.is_following_promoted_cluster()
-            and self._handle_late_joiner(event)  # type: ignore
-        ):
-            return
-
-        if not self._stop_database(event):  # type: ignore
-            return
-        self._publish_stop_marker(event)  # type: ignore
-
-        if self._wait_for_all_units_stopped(event):  # type: ignore
-            return
-
-        if self._wait_for_standby_leader(event):  # type: ignore
-            return
-
-        if self._start_standby_database(event):  # type: ignore
-            return
-
-        self._handle_database_start(event)  # type: ignore
+        # The promotion/standby flow continuation (configure, stop, and start of the
+        # database) is added by slice 4/8; this slice keeps trunk mergeable on its own.
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:
         """Update the internal secret when the relation secret changes."""
