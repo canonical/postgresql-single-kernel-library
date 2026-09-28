@@ -572,3 +572,31 @@ def test_reconcile_creates_subscription_after_publisher_clears_errors(harness):
     peer_rel_id = harness.model.get_relation(PEER_RELATION).id
     peer_data = harness.get_relation_data(peer_rel_id, harness.charm.app.name)
     assert peer_data.get(VALIDATION_KEY) != "error"
+
+
+def test_fail_validation_persists_reason_for_the_status_gate(harness):
+    """A message-only failure must persist the reason in the peer databag.
+
+    The charm's update-status self-heal gate recognizes a validation block by
+    comparing the unit status message against THIS peer field (or the generic
+    literal). Persisting "" for message-only failures defeats that allowlist:
+    the unit's message gets frozen to a third string (the publisher's raw
+    error surfaced by the status gate) that matches neither, and the
+    update-status retry that clears VALIDATION_KEY can never run.
+    """
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    manager = harness.charm.logical_replication_manager
+
+    manager._fail_validation(
+        "Publisher errors: table public.test_table in database testdb doesn't exist"
+    )
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    peer_data = harness.get_relation_data(peer_rel_id, harness.charm.app.name)
+    assert peer_data.get(VALIDATION_STATUS_MESSAGE_KEY) == (
+        "Publisher errors: table public.test_table in database testdb doesn't exist"
+    )
+
+    manager._fail_validation("guard reason", status_msg="short status")
+    peer_data = harness.get_relation_data(peer_rel_id, harness.charm.app.name)
+    assert peer_data.get(VALIDATION_STATUS_MESSAGE_KEY) == "short status"
