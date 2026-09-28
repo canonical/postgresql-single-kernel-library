@@ -8,6 +8,7 @@ import pathlib
 from unittest.mock import MagicMock, patch
 
 import charm_refresh
+import psycopg2
 import pytest
 from charm_refresh import CharmVersion, PrecheckFailed
 from data_platform_helpers.advanced_statuses import StatusObject
@@ -429,6 +430,8 @@ def test_get_statuses_returns_active_idle_for_app_scope(refresh_manager, charm):
     assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
     charm.set_app_status.assert_called()
     refresh_manager.state.statuses.set.assert_not_called()
+
+
 @pytest.fixture
 def vm_manager(charm, set_default_status):
     """A refresh manager on the VM substrate wired to the mock charm."""
@@ -536,6 +539,36 @@ def test_migrate_temp_tablespace_skips_for_async_relation(vm_manager, charm):
     charm.has_async_replication_relation.return_value = True
 
     assert vm_manager.migrate_temp_tablespace_location() is True
+
+
+def test_migrate_temp_tablespace_skips_when_tablespace_missing(vm_manager, charm):
+    """When the tablespace doesn't exist in pg_catalog, no migration is needed."""
+    temp_data_dir = MagicMock()
+    temp_data_dir.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp/16/main"
+    temp_root = MagicMock()
+    temp_root.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp"
+    charm.workload.paths.temp = temp_data_dir
+    charm.workload.paths.temp.parent = temp_root
+    charm.primary_endpoint = "10.1.0.1"
+    charm.has_async_replication_relation.return_value = False
+    with patch.object(vm_manager, "_resolve_primary_host", return_value="10.1.0.1"):
+        cursor = charm.postgresql._connect_to_database.return_value.cursor.return_value
+        cursor.fetchone.return_value = None
+
+        assert vm_manager.migrate_temp_tablespace_location() is True
+
+    cursor.execute.assert_called_once_with(
+        "SELECT pg_tablespace_location(oid) FROM pg_tablespace WHERE spcname='temp';"
+    )
+
+
+def test_migrate_temp_tablespace_returns_false_on_db_error(vm_manager, charm):
+    """When a psycopg2 error occurs, the migration reports failure."""
+    charm.primary_endpoint = "10.1.0.1"
+    charm.has_async_replication_relation.return_value = False
+    charm.postgresql._connect_to_database.side_effect = psycopg2.Error("connection failed")
+
+    assert vm_manager.migrate_temp_tablespace_location() is False
 
 
 def test_execute_temp_tablespace_migration_noop_when_already_migrated(vm_manager, charm):
