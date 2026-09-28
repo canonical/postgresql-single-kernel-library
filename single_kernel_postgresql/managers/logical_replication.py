@@ -41,6 +41,12 @@ SUBSCRIPTIONS_KEY = "logical-replication-subscriptions"
 APPLIED_REQUEST_KEY = "logical-replication-applied-request"
 VALIDATION_KEY = "logical-replication-validation"
 VALIDATION_STATUS_MESSAGE_KEY = "logical-replication-validation-status-message"
+# Never cleared: the charm's update-status allowlist gate compares the unit's
+# (frozen) Blocked message against this field, so the marker must survive the
+# healing validation that clears VALIDATION_KEY/VALIDATION_STATUS_MESSAGE_KEY --
+# otherwise the stale blocked message matches nothing and the gate early-exits
+# forever, keeping the unit blocked despite a healthy, replicating flow.
+LAST_BLOCK_MESSAGE_KEY = "logical-replication-last-block-message"
 
 # Publisher error prose for circular rejections, singular or plural:
 # "circular replication detected for table public.t1 in database db1"
@@ -1304,6 +1310,9 @@ class LogicalReplicationManager(BaseManager):
         # message here makes the gate early-exit forever (the resolve
         # deadlock).
         self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = status_msg or message or ""
+        # Persistent marker for the charm's update-status allowlist gate (see
+        # the literal's comment): written at every failure, NEVER cleared.
+        self.state.application.data[LAST_BLOCK_MESSAGE_KEY] = status_msg or message or ""
         self.set_unit_status(
             BlockedStatus(status_msg or LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS)
         )
