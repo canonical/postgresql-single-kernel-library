@@ -11,7 +11,7 @@ from single_kernel_postgresql.charms.k8s_charm import PostgreSQLK8sCharm
 
 
 class PostgreSQLK8sTestCharm(PostgreSQLK8sCharm):
-    """Test charm: dispatches the promote action like the production charm."""
+    """Test charm: dispatches the cluster-scope promote action."""
 
     def __init__(self, *args):
         super().__init__(*args)

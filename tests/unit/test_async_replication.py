@@ -101,7 +101,7 @@ def _action_flow_patches(harness):
         patch.object(
             AsyncReplicationManager, "get_shared_secret", return_value=MagicMock(id="secret:abc")
         ),
-        patch.object(harness.charm, "update_config"),
+        patch.object(harness.charm.async_replication_manager, "update_config"),
         patch.object(PatroniManager, "get_standby_leader", return_value=None),
     ):
         yield
@@ -290,7 +290,6 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
         if substrate == "k8s":
             with (
                 patch.object(type(harness.charm.workload), "stop"),
-                patch.object(type(harness.charm.workload), "init_storage"),
                 patch.object(harness.charm.k8s_manager, "delete_patroni_cluster_resources"),
             ):
                 yield
@@ -308,6 +307,7 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
             return_value="backup.tar.gz",
         ),
         patch.object(type(harness.charm.workload), "clear_data_directories"),
+        patch.object(type(harness.charm.workload), "init_storage") as init_storage,
         patch.object(PatroniManager, "stop_patroni", return_value=True),
         patch.object(PatroniManager, "get_standby_leader", return_value=None),
         patch.object(harness.charm, "update_config"),
@@ -319,6 +319,9 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
     if substrate == "vm":
         # The VM flow publishes the counter for the demoted cluster's pre-check.
         assert harness.get_relation_data(async_rel, harness.model.unit.name)["stopped"] == "1"
+    else:
+        # D3: the K8s leader recreates pgdata right after clearing it.
+        init_storage.assert_called_once()
     assert harness.model.unit.status == WaitingStatus(
         "Waiting for the database to be stopped in all units"
     )
@@ -594,7 +597,6 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
         if substrate == "k8s":
             with (
                 patch.object(type(harness.charm.workload), "stop"),
-                patch.object(type(harness.charm.workload), "init_storage"),
                 patch.object(harness.charm.k8s_manager, "delete_patroni_cluster_resources"),
             ):
                 yield
@@ -612,6 +614,7 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
             return_value="backup.tar.gz",
         ) as create_tarball,
         patch.object(type(harness.charm.workload), "clear_data_directories"),
+        patch.object(type(harness.charm.workload), "init_storage") as init_storage,
         patch.object(PatroniManager, "stop_patroni", return_value=True),
         patch.object(PatroniManager, "get_standby_leader", return_value=None),
         patch.object(harness.charm, "update_config"),
@@ -620,6 +623,9 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
         harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
 
     create_tarball.assert_called_once()
+    if substrate == "k8s":
+        # D3: the K8s leader recreates pgdata right after clearing it.
+        init_storage.assert_called_once()
 
 
 def test_relation_changed_defers_when_the_standby_secret_is_missing(harness):
