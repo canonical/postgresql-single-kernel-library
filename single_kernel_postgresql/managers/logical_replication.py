@@ -13,10 +13,11 @@ the charm-side events handler owns the observers and event-flow guards.
 
 import json
 import logging
-from collections.abc import Callable
-from typing import cast
+import re
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 
-from ops import BlockedStatus, Relation, Secret, SecretNotFoundError, StatusBase
+from ops import ActiveStatus, BlockedStatus, Relation, Secret, SecretNotFoundError, StatusBase
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from single_kernel_postgresql.config.literals import (
@@ -32,6 +33,27 @@ from single_kernel_postgresql.utils.postgresql import PostgreSQL
 from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
+
+CIRCULAR_REPLICATION_STATUS = "Circular replication detected"
+
+# Publisher error prose for circular rejections:
+# "circular replication detected for tables public.t1, public.t2 in database db1"
+_CIRCULAR_ERROR_PATTERN = re.compile(
+    r"circular replication detected for tables (?P<tables>.*) in database (?P<database>\S+)"
+)
+
+
+def safe_databag_json(databag: Mapping[str, str], key: str, default: Any) -> Any:
+    """Read a JSON databag field, treating unreadable content as the default.
+
+    Foreign or older writers may leave malformed (e.g. empty) values behind;
+    readers must behave as if the field were absent instead of crashing the hook.
+    """
+    try:
+        return json.loads(databag.get(key) or default)
+    except json.JSONDecodeError:
+        return json.loads(default)
+
 
 # The charm-side hooks the data plane needs; the composition root injects them (the
 # manager never touches the charm directly). The PostgreSQL client is constructed
@@ -162,6 +184,11 @@ class LogicalReplicationManager(BaseManager):
             f"Creating new user {user} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation_id}"
         )
         self.postgresql().create_user(user, password, replication=True)
+        # The real charm renders per-relation-user pg_hba rules from
+        # relations_user_databases_map (an un-ported TODO here); grant the internal
+        # access group so the subscriber's replication worker matches the
+        # `host all +internal_access` rule on the publisher.
+        self.postgresql().grant_internal_access_group_membership(user)
         return user, password
 
     def clean_up_published_resources(self) -> None:
@@ -510,6 +537,21 @@ class LogicalReplicationManager(BaseManager):
 
     # region Subscription
 
+    def push_subscription_request(self, relation: Relation) -> None:
+        """Push the configured subscription request to the publisher, pre-validated.
+
+        The request is pushed before local validation so the publisher's circular
+        guard can reject it; only syntactically valid JSON is ever pushed, so a
+        malformed config cannot crash the remote publisher's hook.
+        """
+        raw_request = self.state.config.logical_replication_subscription_request or "{}"
+        try:
+            parsed = json.loads(raw_request)
+        except json.JSONDecodeError as err:
+            self._fail_validation(f"JSON decode error {err}")
+            return
+        relation.data[self.state.model.app]["subscription-request"] = json.dumps(parsed)
+
     def validate_subscription_request(self) -> bool:
         """Validate the logical-replication-subscription-request config parameter."""
         try:
@@ -520,36 +562,166 @@ class LogicalReplicationManager(BaseManager):
             return self._fail_validation(f"JSON decode error {err}")
 
         relation = self.state.model.get_relation(LOGICAL_REPLICATION_RELATION)
-        subscription_request_relation = (
-            json.loads(relation.data[self.state.model.app].get("subscription-request", "{}"))
-            if relation
-            else {}
-        )
+
+        # Check for errors from the publisher first
+        if self._check_publisher_errors(relation, subscription_request_config):
+            return False
 
         for database, schematables in subscription_request_config.items():
             if not self.postgresql().database_exists(database):
                 return self._fail_validation(f"database {database} doesn't exist")
             for schematable in schematables:
-                try:
-                    schema, table = schematable.split(".")
-                except ValueError:
-                    return self._fail_validation(f"table format isn't right at {schematable}")
-                if not self.postgresql().table_exists(database, schema, table):
-                    return self._fail_validation(
-                        f"table {schematable} in database {database} doesn't exist"
-                    )
-                already_subscribed = (
-                    database in subscription_request_relation
-                    and schematable in subscription_request_relation[database]
-                )
-                if not already_subscribed and not self.postgresql().is_table_empty(
-                    database, schema, table
-                ):
-                    return self._fail_validation(
-                        f"table {schematable} in database {database} isn't empty"
-                    )
+                if not self._validate_table_for_subscription(relation, database, schematable):
+                    return False
 
         self.state.application.data["logical-replication-validation"] = ""
+        return True
+
+    def _validate_table_for_subscription(
+        self,
+        relation: Relation | None,
+        database: str,
+        schematable: str,
+    ) -> bool:
+        """Validate a single table for subscription.
+
+        Args:
+            relation: The subscription relation
+            database: The database name
+            schematable: The table name in schema.table format
+
+        Returns:
+            True if validation passes, False otherwise
+        """
+        try:
+            schema, table = schematable.split(".")
+        except ValueError:
+            return self._fail_validation(f"table format isn't right at {schematable}")
+
+        if not self.postgresql().table_exists(database, schema, table):
+            return self._fail_validation(
+                f"table {schematable} in database {database} doesn't exist"
+            )
+
+        # Check for circular replication FIRST before checking if table is empty
+        # This is important because:
+        # 1. If we're already publishing to the remote app, we can't subscribe from them
+        # 2. The table might not be empty because of existing data (not from replication)
+        if relation and self._check_subscriber_circular_replication(
+            relation, database, schematable
+        ):
+            return self._fail_validation(
+                f"circular replication detected for table {schematable} in database {database}",
+                status_msg=f"Circular replication detected for table {schematable}",
+            )
+
+        # Also check replication chains (for multi-hop scenarios)
+        if relation and self._would_create_circular_replication(relation, database, schematable):
+            return self._fail_validation(
+                f"circular replication detected for table {schematable} in database {database}",
+                status_msg=f"Circular replication detected for table {schematable}",
+            )
+
+        # The empty-table check must be skipped only when this database is genuinely
+        # subscribed (its data was replicated by us). Deriving this from the relation
+        # request is unsafe: apply_changed_config pushes the NEW request into the
+        # relation data before validating, so a request-derived flag would bypass the
+        # check for a table that was never subscribed and re-subscribe with
+        # copy_data=true, duplicating its rows (canonical/postgresql-k8s-operator#982
+        # comment 3019811325). The created-subscriptions bookkeeping is the source of
+        # truth: relation-broken clears it, so a re-subscribe after a break re-enforces
+        # the check.
+        already_subscribed = bool(self._subscriptions_info().get(database))
+        if not already_subscribed and not self.postgresql().is_table_empty(
+            database, schema, table
+        ):
+            return self._fail_validation(f"table {schematable} in database {database} isn't empty")
+
+        return True
+
+    def _is_error_relevant_to_request(
+        self, error: str, subscription_request: dict[str, list[str]]
+    ) -> bool:
+        """Check if a publisher error is relevant to the current subscription request.
+
+        Args:
+            error: The error message from the publisher
+            subscription_request: The subscription request being validated (database -> tables)
+
+        Returns:
+            True if the error is relevant to this request, False otherwise
+        """
+        # Non-circular errors apply to the whole request
+        if "circular replication" not in error.lower():
+            return True
+
+        # For circular replication errors, match the reported tables and database as
+        # whole tokens: a substring check would let "public.t" match "public.t2" and
+        # wrongly fail validation on a stale error about a different table.
+        match = _CIRCULAR_ERROR_PATTERN.search(error)
+        if not match:
+            # Unparsable circular error - treat it as relevant (fail-safe)
+            return True
+        if match.group("database") not in subscription_request:
+            return False
+        reported_tables = {table.strip() for table in match.group("tables").split(",")}
+        requested_tables = {
+            schematable for tables in subscription_request.values() for schematable in tables
+        }
+        return bool(reported_tables & requested_tables)
+
+    def _check_publisher_errors(
+        self, relation: Relation | None, subscription_request: dict[str, list[str]]
+    ) -> bool:
+        """Check if the publisher has reported errors for the current subscription request.
+
+        Args:
+            relation: The subscription relation
+            subscription_request: The subscription request being validated (database -> tables)
+
+        Returns:
+            True if validation should fail, False to continue validation
+        """
+        if not relation:
+            return False
+
+        publisher_errors = json.loads(relation.data[relation.app].get("errors", "[]"))
+        if not publisher_errors:
+            return False
+
+        # Check if we have the same subscription request in relation data
+        # If the request has changed, old errors may not be relevant
+        current_relation_request = safe_databag_json(
+            relation.data[self.state.model.app], "subscription-request", "{}"
+        )
+
+        # If requests don't match, publisher errors are stale - ignore them
+        # The publisher will re-validate when we update the subscription-request
+        if current_relation_request != subscription_request:
+            return False
+
+        # Filter to only errors relevant to the tables we're trying to subscribe to
+        relevant_errors = [
+            error
+            for error in publisher_errors
+            if self._is_error_relevant_to_request(error, subscription_request)
+        ]
+
+        # Only fail if we have relevant errors
+        if not relevant_errors:
+            return False
+
+        # Check if any relevant error mentions circular replication
+        for error in relevant_errors:
+            if "circular replication" in error.lower():
+                self._fail_validation(
+                    f"Publisher rejected subscription: {error}",
+                    status_msg=CIRCULAR_REPLICATION_STATUS,
+                )
+                return True
+
+        # Generic publisher error
+        self._fail_validation(f"Publisher errors: {', '.join(relevant_errors)}")
         return True
 
     def apply_updated_subscription_request(self) -> None:
@@ -587,6 +759,8 @@ class LogicalReplicationManager(BaseManager):
             and self.validate_subscription_request()
         ):
             self.apply_updated_subscription_request()
+            # Clear any previous blocked status from validation errors
+            self.set_unit_status(ActiveStatus())
         for relation in self.state.model.relations.get(LOGICAL_REPLICATION_OFFER_RELATION, ()):
             if json.loads(relation.data[self.state.model.app].get("errors", "[]")):
                 self.process_offer(relation)
@@ -597,20 +771,63 @@ class LogicalReplicationManager(BaseManager):
             relation := self.state.model.get_relation(LOGICAL_REPLICATION_RELATION)
         ) and json.loads(relation.data[relation.app].get("errors", "[]"))
 
-    def reconcile_subscriptions(self, relation: Relation) -> None:
-        """Reconcile the local subscriptions with the publisher's publications."""
-        for error in json.loads(relation.data[relation.app].get("errors", "[]")):
+    def handle_publisher_errors(self, relation: Relation) -> bool:
+        """Surface publisher errors on the unit status; drop the stale ones.
+
+        Returns:
+            False when relation processing must stop, True to continue.
+        """
+        errors = json.loads(relation.data[relation.app].get("errors", "[]"))
+        if not errors:
+            return True
+
+        our_request = safe_databag_json(
+            relation.data[self.state.model.app], "subscription-request", "{}"
+        )
+
+        # If we have a subscription-request, re-validate to check if these errors are
+        # current; _check_publisher_errors() handles the stale-error detection.
+        if our_request:
+            logger.debug(
+                f"Publisher reported errors: {errors}. Re-validating to check if errors are current."
+            )
+            if not self.validate_subscription_request():
+                # Validation failed with current errors
+                return False
+            # Validation passed, errors were stale - continue processing
+            logger.info("Publisher errors were stale, continuing with relation processing")
+            self.set_unit_status(ActiveStatus())
+            return True
+
+        # No subscription-request yet - process errors as-is
+        for error in errors:
             logger.error(
                 f"Got logical replication error from the publisher in {LOGICAL_REPLICATION_RELATION} #{relation.id}: {error}"
             )
-            self.set_unit_status(BlockedStatus(LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS))
+            # Set specific message for circular replication errors
+            if "circular replication" in error.lower():
+                self.set_unit_status(BlockedStatus(CIRCULAR_REPLICATION_STATUS))
+            else:
+                self.set_unit_status(BlockedStatus(LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS))
+        return False
 
+    def reconcile_subscriptions(self, relation: Relation) -> None:
+        """Reconcile the local subscriptions with the publisher's publications."""
         secret_content = self.state.model.get_secret(
             id=relation.data[relation.app]["secret-id"]
         ).get_content(refresh=True)
         subscriptions = self._subscriptions_info()
         publications = json.loads(relation.data[relation.app].get("publications", "{}"))
 
+        # The publisher may create publications for a request that failed our local
+        # validation (apply_changed_config pushes the request before validating).
+        # Creating a subscription here would bypass the empty-table guard and
+        # re-subscribe with copy_data=true, duplicating rows
+        # (canonical/postgresql-k8s-operator#982 comment 3019811325). Existing
+        # subscriptions keep refreshing; only NEW subscriptions are gated.
+        validation_error = (
+            self.state.application.data.get("logical-replication-validation") == "error"
+        )
         for database, publication in publications.items():
             subscription_name = self._subscription_name(relation.id, database)
             if database in subscriptions:
@@ -618,25 +835,28 @@ class LogicalReplicationManager(BaseManager):
                 logger.info(
                     f"Refreshed subscription {subscription_name} in database {database} due to relation change"
                 )
-            else:
-                publication_name = publication["publication-name"]
-                for attempt in Retrying(
-                    stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True
-                ):
-                    with attempt:
-                        self.postgresql().create_subscription(
-                            subscription_name,
-                            secret_content["primary"],
-                            database,
-                            secret_content["username"],
-                            secret_content["password"],
-                            publication_name,
-                            publication["replication-slot-name"],
-                        )
-                logger.info(
-                    f"Created new subscription {subscription_name} for publication {publication_name} in database {database}"
+                continue
+            if validation_error:
+                logger.debug(
+                    f"Skipping subscription {subscription_name}: the current subscription request failed validation"
                 )
-                subscriptions[database] = subscription_name
+                continue
+            publication_name = publication["publication-name"]
+            for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True):
+                with attempt:
+                    self.postgresql().create_subscription(
+                        subscription_name,
+                        secret_content["primary"],
+                        database,
+                        secret_content["username"],
+                        secret_content["password"],
+                        publication_name,
+                        publication["replication-slot-name"],
+                    )
+            logger.info(
+                f"Created new subscription {subscription_name} for publication {publication_name} in database {database}"
+            )
+            subscriptions[database] = subscription_name
 
         for database, subscription in subscriptions.copy().items():
             if database in publications:
@@ -724,7 +944,8 @@ class LogicalReplicationManager(BaseManager):
         - App A tries to subscribe to table X from App B (via subscription relation)
 
         This check runs on the subscriber side during validation, before the
-        subscription request is even sent to the publisher.
+        subscription is applied; the request itself is pushed to the publisher first
+        so the publisher's guard can also reject the mirrored setup.
 
         Args:
             relation: The subscription relation we're trying to create
@@ -764,11 +985,13 @@ class LogicalReplicationManager(BaseManager):
 
         return False
 
-    def _fail_validation(self, message: str | None = None) -> bool:
+    def _fail_validation(self, message: str | None = None, status_msg: str | None = None) -> bool:
         if message:
             logger.error(f"Logical replication validation: {message}")
         self.state.application.data["logical-replication-validation"] = "error"
-        self.set_unit_status(BlockedStatus(LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS))
+        self.set_unit_status(
+            BlockedStatus(status_msg or LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS)
+        )
         return False
 
     def _subscriptions_info(self) -> dict[str, str]:
