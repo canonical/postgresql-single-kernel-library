@@ -128,4 +128,4 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         """Reconcile the workload's Pebble layers (K8s only)."""
 
     def ensure_pgdata_dirs_and_symlinks(self) -> None:
-        """Create the storage directories and symlinks for the PostgreSQL data paths."""
+        """Create the storage directories and symlinks for the PostgreSQL data paths (K8s only)."""

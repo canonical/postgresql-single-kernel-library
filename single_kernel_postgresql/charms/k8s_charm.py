@@ -13,7 +13,7 @@ from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCha
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import CONTAINER_NAME, SYSTEM_USERS, USER
 from single_kernel_postgresql.managers.k8s import K8sManager
-from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
 from single_kernel_postgresql.workload.k8s import K8sWorkload
 
 if TYPE_CHECKING:
@@ -151,7 +151,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
 
     def update_pebble_layers(self) -> None:
         """Reconcile the workload's Pebble layers."""
-        self.k8s_manager.update_pebble_layers(replan=True)
+        self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state))
 
     def ensure_pgdata_dirs_and_symlinks(self) -> None:
         """Create the storage directories and symlinks for the PostgreSQL data paths."""
