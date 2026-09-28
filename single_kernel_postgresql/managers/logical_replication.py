@@ -1094,7 +1094,15 @@ class LogicalReplicationManager(BaseManager):
         # re-subscribe with copy_data=true, duplicating rows
         # (canonical/postgresql-k8s-operator#982 comment 3019811325). Existing
         # subscriptions keep refreshing; only NEW subscriptions are gated.
-        validation_error = self.state.application.data.get(VALIDATION_KEY) == "error"
+        # The gate is the LIVE creation-time validation below -- NOT the
+        # persisted VALIDATION_KEY flag: the flag is only cleared by the
+        # update-status retry, and the publisher may clear its errors and
+        # publish in between, so a flag-gated skip deadlocks the resolve path
+        # (the relation-changed arrives while the flag is still "error" and
+        # nothing ever creates the subscription). The creation-time
+        # validation re-checks the publisher's CURRENT errors, the local
+        # tables and the empty-table guard, so the #982 protection is
+        # unchanged; on success it also clears the stale flag.
         for database, publication in publications.items():
             subscription_name = self._subscription_name(relation.id, database)
             if database in subscriptions:
@@ -1108,11 +1116,6 @@ class LogicalReplicationManager(BaseManager):
                 postgresql.refresh_subscription(database, subscription_name)
                 logger.info(
                     f"Refreshed subscription {subscription_name} in database {database} due to relation change"
-                )
-                continue
-            if validation_error:
-                logger.debug(
-                    f"Skipping subscription {subscription_name}: the current subscription request failed validation"
                 )
                 continue
             # Re-validate at creation time: the validations that ran on
