@@ -5,6 +5,7 @@
 
 from unittest.mock import MagicMock, PropertyMock, patch
 
+import pytest
 from single_kernel_postgresql.events.watcher import PostgreSQLWatcherEventsHandler
 
 
@@ -12,7 +13,7 @@ def create_mock_charm():
     """Create a mock charm for testing."""
     mock_charm = MagicMock()
     mock_state = MagicMock()
-    mock_charm.unit.is_leader.return_value = True
+    mock_state.peer.is_app_leader = True
     mock_charm.cluster_name = "postgresql"
     mock_charm._unit_ip = "10.0.0.1"
     mock_charm._patroni.unit_ip = "10.0.0.1"
@@ -38,8 +39,10 @@ def create_mock_relation():
 class TestWatcherRelation:
     """Tests for PostgreSQLWatcherRelation class."""
 
-    def test_watcher_address_no_relation(self):
+    def test_watcher_address_no_relation(self, substrate):
         """Test watcher_address returns None when no relation exists."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
         mock_charm = create_mock_charm()
 
         with patch.object(
@@ -51,8 +54,11 @@ class TestWatcherRelation:
             relation = PostgreSQLWatcherEventsHandler(mock_charm, mock_charm.state)
             assert relation.watcher_raft_address is None
 
-    def test_watcher_address_with_relation(self):
+    def test_watcher_address_with_relation(self, substrate):
         """Test watcher_address returns the watcher IP when available."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_relation = MagicMock()
 
@@ -73,10 +79,13 @@ class TestWatcherRelation:
             relation = PostgreSQLWatcherEventsHandler(mock_charm, mock_charm.state)
             assert relation.watcher_raft_address == "10.0.0.10:2222"
 
-    def test_on_watcher_relation_joined_not_leader(self):
+    def test_on_watcher_relation_joined_not_leader(self, substrate):
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         """Test relation joined event is ignored for non-leader units."""
         mock_charm = create_mock_charm()
-        mock_charm.unit.is_leader.return_value = False
+        mock_charm.state.peer.is_app_leader = False
         mock_event = MagicMock()
 
         relation = PostgreSQLWatcherEventsHandler(mock_charm, mock_charm.state)
@@ -89,8 +98,11 @@ class TestWatcherRelation:
             update_unit_address.assert_called_once_with(mock_event.relation)
             mock_secret.assert_not_called()
 
-    def test_on_watcher_relation_joined_leader(self):
+    def test_on_watcher_relation_joined_leader(self, substrate):
         """Test relation joined event creates secret for leader."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_event = MagicMock()
         mock_secret = MagicMock()
@@ -106,8 +118,11 @@ class TestWatcherRelation:
             mock_secret.grant.assert_called_once_with(mock_event.relation)
             mock_update.assert_called_once_with(mock_event.relation)
 
-    def test_on_watcher_relation_joined_no_secret(self):
+    def test_on_watcher_relation_joined_no_secret(self, substrate):
         """Test relation joined event defers when secret creation fails."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_event = MagicMock()
 
@@ -117,8 +132,11 @@ class TestWatcherRelation:
             relation._on_watcher_relation_joined(mock_event)
             mock_event.defer.assert_called_once()
 
-    def test_on_watcher_relation_changed_not_initialized(self):
+    def test_on_watcher_relation_changed_not_initialized(self, substrate):
         """Test relation changed event defers when cluster not initialized."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_charm.is_cluster_initialised = False
         mock_event = MagicMock()
@@ -128,8 +146,11 @@ class TestWatcherRelation:
 
         mock_event.defer.assert_called_once()
 
-    def test_on_watcher_relation_changed_updates_config(self):
+    def test_on_watcher_relation_changed_updates_config(self, substrate):
         """Test relation changed event updates Patroni config."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_event = MagicMock()
 
@@ -138,7 +159,7 @@ class TestWatcherRelation:
         mock_event.relation.units = {mock_unit}
         mock_event.relation.data = {
             mock_unit: {"unit-address": "10.0.0.10"},
-            mock_charm.unit: {},
+            mock_charm.state.peer.unit: {},
         }
 
         relation = PostgreSQLWatcherEventsHandler(mock_charm, mock_charm.state)
@@ -147,8 +168,11 @@ class TestWatcherRelation:
             relation._on_watcher_relation_changed(mock_event)
             mock_charm.update_config.assert_called_once()
 
-    def test_update_relation_data_not_leader(self):
+    def test_update_relation_data_not_leader(self, substrate):
         """Test _update_relation_data does nothing for non-leader."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_charm.unit.is_leader.return_value = False
         mock_relation = MagicMock()
@@ -159,15 +183,18 @@ class TestWatcherRelation:
         # Should not try to update relation data
         assert not mock_relation.data[mock_charm.app].update.called
 
-    def test_update_relation_data_leader(self):
+    def test_update_relation_data_leader(self, substrate):
         """Test _update_relation_data populates relation data correctly."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_charm._units_ips = ["10.0.0.1", "10.0.0.2"]  # Mock PostgreSQL endpoints
         mock_charm._unit_ip = "10.0.0.1"
         mock_relation = MagicMock()
         mock_relation.data = {
-            mock_charm.app: {},
-            mock_charm.unit: {},
+            mock_charm.state.peer.app: {},
+            mock_charm.state.peer.unit: {},
         }
 
         mock_secret = MagicMock()
@@ -182,7 +209,7 @@ class TestWatcherRelation:
             relation._update_relation_data(mock_relation)
 
         # Verify app data was updated
-        app_data = mock_relation.data[mock_charm.app]
+        app_data = mock_relation.data[mock_charm.state.peer.app]
         assert "cluster-name" in app_data
         assert app_data["cluster-name"] == "postgresql"
         assert "raft-secret-id" in app_data
@@ -190,15 +217,18 @@ class TestWatcherRelation:
         assert "raft-port" in app_data
 
         # Verify unit data was updated
-        unit_data = mock_relation.data[mock_charm.unit]
+        unit_data = mock_relation.data[mock_charm.state.peer.unit]
         assert "unit-address" in unit_data
 
-    def test_update_unit_address_updates_az(self):
+    def test_update_unit_address_updates_az(self, substrate):
         """Test update_unit_address also publishes unit AZ."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_relation = MagicMock()
         mock_relation.data = {
-            mock_charm.unit: {
+            mock_charm.state.peer.unit: {
                 "unit-address": "10.0.0.1",
             }
         }
@@ -208,12 +238,15 @@ class TestWatcherRelation:
         with patch.dict("os.environ", {"JUJU_AVAILABILITY_ZONE": "az1"}, clear=False):
             relation.update_unit_address(mock_relation)
 
-        assert mock_relation.data[mock_charm.unit]["unit-az"] == "az1"
+        assert mock_relation.data[mock_charm.state.peer.unit]["unit-az"] == "az1"
 
-    def test_update_watcher_secret_not_leader(self):
+    def test_update_watcher_secret_not_leader(self, substrate):
         """Test update_watcher_secret does nothing for non-leader."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
-        mock_charm.unit.is_leader.return_value = False
+        mock_charm.state.peer.is_app_leader = False
 
         relation = PostgreSQLWatcherEventsHandler(mock_charm, mock_charm.state)
 
@@ -221,8 +254,11 @@ class TestWatcherRelation:
             relation.update_watcher_secret()
             mock_get.assert_not_called()
 
-    def test_update_watcher_secret_leader(self):
+    def test_update_watcher_secret_leader(self, substrate):
         """Test update_watcher_secret updates secret content."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_secret = MagicMock()
 
@@ -236,8 +272,11 @@ class TestWatcherRelation:
 class TestWatcherRelationSecrets:
     """Tests for secret management in watcher relation."""
 
-    def test_get_or_create_watcher_secret_existing(self):
+    def test_get_or_create_watcher_secret_existing(self, substrate):
         """Test _get_or_create_watcher_secret returns existing secret."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_secret = MagicMock()
 
@@ -247,8 +286,11 @@ class TestWatcherRelationSecrets:
             result = relation._get_or_create_watcher_secret()
             assert result == mock_secret
 
-    def test_get_or_create_watcher_secret_creates_new(self):
+    def test_get_or_create_watcher_secret_creates_new(self, substrate):
         """Test _get_or_create_watcher_secret creates new secret."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_secret = MagicMock()
 
@@ -272,8 +314,11 @@ class TestWatcherRelationSecrets:
             assert result == mock_secret
             mock_charm.model.app.add_secret.assert_called_once()
 
-    def test_get_or_create_watcher_secret_no_raft_password(self):
+    def test_get_or_create_watcher_secret_no_raft_password(self, substrate):
         """Test _get_or_create_watcher_secret returns None without password."""
+        if substrate == "k8s":
+            pytest.skip("Test only applicable for VM substrate")
+
         mock_charm = create_mock_charm()
         mock_charm._patroni.raft_password = None
 
