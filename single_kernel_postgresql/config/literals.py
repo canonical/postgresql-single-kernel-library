@@ -198,8 +198,6 @@ VM_ROTATE_LOGS_LOG_FILE = "/var/log/rotate_logs.log"
 
 ## K8s restore storage paths (must match the metadata.yaml storage locations)
 K8S_LOGS_STORAGE_PATH = "var/lib/pg/logs"
-K8S_ARCHIVE_PATH = "var/lib/pg/archive"
-K8S_TEMP_STORAGE_PATH = "var/lib/pg/temp"
 K8S_WAL_DIR = "pg_wal"
 K8S_TEMP_TABLESPACE_DIR = "pgsql_tmp"
 K8S_PG_LOGS_PATH = "16/main/pg_logs"
