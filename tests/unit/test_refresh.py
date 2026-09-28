@@ -113,7 +113,18 @@ def test_pre_refresh_check_after_1_unit_refreshed_member_not_running(refresh_k8s
         refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
 
 
-def test_pre_refresh_check_after_1_unit_refreshed_switches_primary(refresh_k8s, charm):
+@pytest.mark.parametrize(
+    "endpoint,expected_async_cluster",
+    [
+        # No async replication relation: cluster switchover.
+        (None, False),
+        # Async replication relation: async switchover.
+        ("primary.async-replication:5432", True),
+    ],
+)
+def test_pre_refresh_check_after_1_unit_refreshed_switches_primary(
+    refresh_k8s, charm, endpoint, expected_async_cluster
+):
     charm.app.planned_units.return_value = 3
     charm.app.name = "postgresql-k8s"
     charm.patroni_manager.is_creating_backup = False
@@ -123,12 +134,13 @@ def test_pre_refresh_check_after_1_unit_refreshed_switches_primary(refresh_k8s, 
         "postgresql-k8s-2",
     ]
     charm.patroni_manager.get_primary.return_value = "postgresql-k8s/2"
-    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.get_async_primary_cluster_endpoint.return_value = endpoint
 
     refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
 
+    charm.patroni_manager.get_primary.assert_called_once_with(unit_name_pattern=True)
     charm.patroni_manager.switchover.assert_called_once_with(
-        candidate="postgresql-k8s/0", async_cluster=False
+        candidate="postgresql-k8s/0", async_cluster=expected_async_cluster
     )
 
 
