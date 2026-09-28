@@ -8,6 +8,7 @@ import pathlib
 from unittest.mock import MagicMock, patch
 
 import charm_refresh
+import psycopg2
 import pytest
 from charm_refresh import CharmVersion, PrecheckFailed
 from data_platform_helpers.advanced_statuses import StatusObject
@@ -21,13 +22,13 @@ from single_kernel_postgresql.managers.refresh import (
 )
 from tenacity import RetryError, stop_after_attempt
 
-CHARM_VERSION = "16/1.0.0"
-
 
 @pytest.fixture
 def charm():
     """A mock charm with the surfaces the K8s pre-refresh checks touch."""
-    return MagicMock(name="charm")
+    charm = MagicMock(name="charm")
+    charm.unit.status = ActiveStatus()
+    return charm
 
 
 @pytest.fixture
@@ -240,10 +241,12 @@ def test_refresh_manager_peer_relation_not_ready(state, charm, set_default_statu
 def test_set_unit_status_suppressed_by_higher_priority(refresh_manager, charm):
     refresh_manager.refresh.unit_status_higher_priority = MaintenanceStatus("refreshing")
     charm.unit.status = ActiveStatus("prior status")
+    cached = pathlib.Path(".last_refresh_unit_status.json").read_text()
 
     refresh_manager.set_unit_status(ActiveStatus("would override"))
 
     assert charm.unit.status == ActiveStatus("prior status")
+    assert pathlib.Path(".last_refresh_unit_status.json").read_text() == cached
 
 
 def test_set_unit_status_writes_lower_priority_for_active_status(refresh_manager, charm):
@@ -295,9 +298,11 @@ def test_set_unit_status_explicit_refresh_argument_wins(refresh_manager, charm):
 def test_reconcile_refresh_status_sets_higher_priority_status(refresh_manager, charm):
     higher = MaintenanceStatus("refresh in progress")
     refresh_manager.refresh.unit_status_higher_priority = higher
+    charm.set_app_status.reset_mock()
 
     refresh_manager.reconcile_refresh_status()
 
+    charm.set_app_status.assert_called_once()
     assert charm.unit.status == higher
     assert pathlib.Path(".last_refresh_unit_status.json").read_text() == json.dumps(higher.message)
 
@@ -322,10 +327,14 @@ def test_reconcile_refresh_status_restores_lower_priority_from_cached_status(
     pathlib.Path(".last_refresh_unit_status.json").write_text(json.dumps("PostgreSQL 16.14"))
     charm.unit.status = ActiveStatus("PostgreSQL 16.14")
     refresh_manager.refresh.unit_status_lower_priority = MagicMock(return_value=lower)
+    refresh_manager.workload.is_patroni_running.return_value = False
 
     refresh_manager.reconcile_refresh_status()
 
     assert charm.unit.status == lower
+    refresh_manager.refresh.unit_status_lower_priority.assert_called_once_with(
+        workload_is_running=False
+    )
 
 
 def test_reconcile_refresh_status_ignores_unrelated_status(refresh_manager, charm):
@@ -510,6 +519,36 @@ def test_migrate_temp_tablespace_skips_for_async_relation(vm_manager, charm):
     charm.has_async_replication_relation.return_value = True
 
     assert vm_manager.migrate_temp_tablespace_location() is True
+
+
+def test_migrate_temp_tablespace_skips_when_tablespace_missing(vm_manager, charm):
+    """When the tablespace doesn't exist in pg_catalog, no migration is needed."""
+    temp_data_dir = MagicMock()
+    temp_data_dir.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp/16/main"
+    temp_root = MagicMock()
+    temp_root.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp"
+    charm.workload.paths.temp = temp_data_dir
+    charm.workload.paths.temp.parent = temp_root
+    charm.primary_endpoint = "10.1.0.1"
+    charm.has_async_replication_relation.return_value = False
+    with patch.object(vm_manager, "_resolve_primary_host", return_value="10.1.0.1"):
+        cursor = charm.postgresql._connect_to_database.return_value.cursor.return_value
+        cursor.fetchone.return_value = None
+
+        assert vm_manager.migrate_temp_tablespace_location() is True
+
+    cursor.execute.assert_called_once_with(
+        "SELECT pg_tablespace_location(oid) FROM pg_tablespace WHERE spcname='temp';"
+    )
+
+
+def test_migrate_temp_tablespace_returns_false_on_db_error(vm_manager, charm):
+    """When a psycopg2 error occurs, the migration reports failure."""
+    charm.primary_endpoint = "10.1.0.1"
+    charm.has_async_replication_relation.return_value = False
+    charm.postgresql._connect_to_database.side_effect = psycopg2.Error("connection failed")
+
+    assert vm_manager.migrate_temp_tablespace_location() is False
 
 
 def test_execute_temp_tablespace_migration_noop_when_already_migrated(vm_manager, charm):
