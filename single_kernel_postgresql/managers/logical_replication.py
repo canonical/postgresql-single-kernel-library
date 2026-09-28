@@ -742,7 +742,10 @@ class LogicalReplicationManager(BaseManager):
         # duplication. "enforce" (creation gate, retries, publisher-error
         # re-validation) always guards.
         if empty_tables == "enforce" or database in self._subscriptions_info():
-            return self._fail_validation(f"table {schematable} in database {database} isn't empty")
+            self._fail_validation(f"table {schematable} in database {database} isn't empty")
+            # True = validation failed: _validate_table_for_subscription flips this
+            # with `not`, so the blocked table stops the request.
+            return True
         return False
 
     def _guard_subscription_refresh(
@@ -1259,6 +1262,9 @@ class LogicalReplicationManager(BaseManager):
         if message:
             logger.error(f"Logical replication validation: {message}")
         self.state.application.data[VALIDATION_KEY] = "error"
+        # Persist the specific reason so the composition-root status gate can
+        # re-surface it after any later transient status write.
+        self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = status_msg or ""
         self.set_unit_status(
             BlockedStatus(status_msg or LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS)
         )
