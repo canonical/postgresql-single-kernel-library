@@ -10,21 +10,23 @@ from unittest.mock import MagicMock, patch
 import charm_refresh
 import pytest
 from charm_refresh import CharmVersion, PrecheckFailed
+from data_platform_helpers.advanced_statuses import StatusObject
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import SwitchoverFailedError
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.managers.refresh import (
     PostgreSQLRefreshK8s,
     RefreshManager,
 )
 
-CHARM_VERSION = "16/1.0.0"
-
 
 @pytest.fixture
 def charm():
     """A mock charm with the surfaces the K8s pre-refresh checks touch."""
-    return MagicMock(name="charm")
+    charm = MagicMock(name="charm")
+    charm.unit.status = ActiveStatus()
+    return charm
 
 
 @pytest.fixture
@@ -237,10 +239,12 @@ def test_refresh_manager_peer_relation_not_ready(state, charm, set_default_statu
 def test_set_unit_status_suppressed_by_higher_priority(refresh_manager, charm):
     refresh_manager.refresh.unit_status_higher_priority = MaintenanceStatus("refreshing")
     charm.unit.status = ActiveStatus("prior status")
+    cached = pathlib.Path(".last_refresh_unit_status.json").read_text()
 
     refresh_manager.set_unit_status(ActiveStatus("would override"))
 
     assert charm.unit.status == ActiveStatus("prior status")
+    assert pathlib.Path(".last_refresh_unit_status.json").read_text() == cached
 
 
 def test_set_unit_status_writes_lower_priority_for_active_status(refresh_manager, charm):
@@ -292,9 +296,11 @@ def test_set_unit_status_explicit_refresh_argument_wins(refresh_manager, charm):
 def test_reconcile_refresh_status_sets_higher_priority_status(refresh_manager, charm):
     higher = MaintenanceStatus("refresh in progress")
     refresh_manager.refresh.unit_status_higher_priority = higher
+    charm.set_app_status.reset_mock()
 
     refresh_manager.reconcile_refresh_status()
 
+    charm.set_app_status.assert_called_once()
     assert charm.unit.status == higher
     assert pathlib.Path(".last_refresh_unit_status.json").read_text() == json.dumps(higher.message)
 
@@ -319,10 +325,14 @@ def test_reconcile_refresh_status_restores_lower_priority_from_cached_status(
     pathlib.Path(".last_refresh_unit_status.json").write_text(json.dumps("PostgreSQL 16.14"))
     charm.unit.status = ActiveStatus("PostgreSQL 16.14")
     refresh_manager.refresh.unit_status_lower_priority = MagicMock(return_value=lower)
+    refresh_manager.workload.is_patroni_running.return_value = False
 
     refresh_manager.reconcile_refresh_status()
 
     assert charm.unit.status == lower
+    refresh_manager.refresh.unit_status_lower_priority.assert_called_once_with(
+        workload_is_running=False
+    )
 
 
 def test_reconcile_refresh_status_ignores_unrelated_status(refresh_manager, charm):
@@ -336,3 +346,65 @@ def test_reconcile_refresh_status_ignores_unrelated_status(refresh_manager, char
 
     assert charm.unit.status == BlockedStatus("unrelated")
     refresh_manager.refresh.unit_status_lower_priority.assert_not_called()
+
+
+def test_reconcile_refresh_status_substitutes_active_status_without_cached_message(
+    refresh_manager, charm
+):
+    lower = ActiveStatus("PostgreSQL 16.14 running")
+    pathlib.Path(".last_refresh_unit_status.json").write_text(json.dumps(None))
+    charm.unit.status = ActiveStatus("stale message")
+    refresh_manager.refresh.unit_status_lower_priority = MagicMock(return_value=lower)
+
+    refresh_manager.reconcile_refresh_status()
+
+    assert charm.unit.status == lower
+    assert pathlib.Path(".last_refresh_unit_status.json").read_text() == json.dumps(lower.message)
+
+
+def test_get_statuses_replays_the_reconciliation_on_recompute(refresh_manager, charm):
+    higher = MaintenanceStatus("refresh in progress")
+    refresh_manager.refresh.unit_status_higher_priority = higher
+    record = StatusObject(status="maintenance", message="refresh in progress")
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert charm.unit.status == higher
+    assert statuses == [record]
+    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+
+
+def test_get_statuses_persists_the_reconciled_active_status(refresh_manager, charm):
+    refresh_manager.refresh = None
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_called_once_with(
+        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
+    )
+
+
+def test_get_statuses_returns_the_cached_records_without_recompute(refresh_manager):
+    record = StatusObject(status="blocked", message="upgrade failed")
+    refresh_manager.state.statuses.get.return_value.root = [record]
+
+    assert refresh_manager.get_statuses("unit") == [record]
+
+
+def test_get_statuses_defaults_to_active_idle_without_cached_records(refresh_manager):
+    refresh_manager.state.statuses.get.return_value.root = []
+
+    assert refresh_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
+def test_get_statuses_returns_active_idle_for_app_scope(refresh_manager, charm):
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("app", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    charm.set_app_status.assert_called()
+    refresh_manager.state.statuses.set.assert_not_called()
