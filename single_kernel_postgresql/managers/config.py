@@ -79,7 +79,7 @@ class ConfigManager(BaseManager):
         self.request_restart = request_restart
         self.restart_services = restart_services
         # Publishes the managed logical replication slots for the Patroni render and API
-        # sync; the callable is wired from the logical replication handler at the
+        # sync; the callable is wired from the logical replication manager at the
         # composition root and defaults to an empty mapping when absent.
         self.logical_replication_slots = logical_replication_slots or (lambda: {})
 
