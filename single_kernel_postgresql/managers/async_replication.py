@@ -742,7 +742,7 @@ class AsyncReplicationManager(BaseManager):
             # Update the asynchronous replication configuration and start the database.
             self.update_config()
             if not self.patroni_manager.start_patroni():
-                raise AsyncReplicationError
+                raise AsyncReplicationError("Failed to start patroni service.")
         return False
 
     def _configure_primary_cluster(
@@ -861,7 +861,7 @@ class AsyncReplicationManager(BaseManager):
             for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(3)):
                 with attempt:
                     if not self.patroni_manager.stop_patroni():
-                        raise AsyncReplicationError
+                        raise AsyncReplicationError("Failed to stop patroni service.")
         except RetryError:
             logger.debug("Deferring on_async_relation_changed: patroni hasn't stopped yet.")
             event.defer()
