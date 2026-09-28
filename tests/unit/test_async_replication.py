@@ -267,7 +267,7 @@ def test_relation_changed_exits_early_for_a_following_non_leader(substrate, harn
         patch.object(
             PatroniManager, "member_started", new_callable=PropertyMock, return_value=True
         ),
-        patch.object(harness.charm, "update_config") as update_config,
+        patch.object(harness.charm.async_replication_manager, "update_config") as update_config,
         patch.object(PatroniManager, "stop_patroni") as stop_patroni,
     ):
         harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
@@ -290,6 +290,7 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
         if substrate == "k8s":
             with (
                 patch.object(type(harness.charm.workload), "stop"),
+                patch.object(type(harness.charm.workload), "init_storage"),
                 patch.object(harness.charm.k8s_manager, "delete_patroni_cluster_resources"),
             ):
                 yield
@@ -497,7 +498,7 @@ def test_relation_departed_sets_the_departing_flag_for_the_own_unit(harness, asy
     relation = harness.model.get_relation(REPLICATION_OFFER_RELATION)
     with harness.hooks_disabled():
         harness.charm.on[REPLICATION_OFFER_RELATION].relation_departed.emit(
-            relation, app=relation.app, departing_unit=harness.charm.unit
+            relation, app=relation.app, departing_unit_name=harness.charm.unit.name
         )
     assert _unit_peer_data(harness)["departing"] == "True"
 
@@ -506,7 +507,7 @@ def test_relation_departed_ignores_a_remote_departing_unit(harness, async_rel):
     relation = harness.model.get_relation(REPLICATION_OFFER_RELATION)
     with harness.hooks_disabled():
         harness.charm.on[REPLICATION_OFFER_RELATION].relation_departed.emit(
-            relation, app=relation.app, departing_unit=f"{REMOTE_APP}/0"
+            relation, app=relation.app, departing_unit_name=f"{REMOTE_APP}/0"
         )
     assert "departing" not in _unit_peer_data(harness)
 
@@ -520,6 +521,7 @@ def test_relation_broken_primary_non_leader_keeps_the_counter(harness, async_rel
         )
     with (
         patch.object(PatroniManager, "get_standby_leader", return_value=None),
+        patch.object(harness.charm, "update_config"),
         patch.object(harness.charm.async_replication, "set_app_status") as set_app_status,
     ):
         _emit_broken(harness)
@@ -538,6 +540,7 @@ def test_relation_broken_standby_non_leader_keeps_the_counter(harness, async_rel
         )
     with (
         patch.object(PatroniManager, "get_standby_leader", return_value="postgresql-standby-0"),
+        patch.object(harness.charm, "update_config"),
         patch.object(harness.charm.async_replication, "set_app_status") as set_app_status,
     ):
         _emit_broken(harness)
@@ -547,8 +550,9 @@ def test_relation_broken_standby_non_leader_keeps_the_counter(harness, async_rel
 
 
 def test_create_replication_fails_without_remote_unit_addresses(substrate, harness, async_rel):
+    # a second remote unit that never published its unit-address
     with harness.hooks_disabled():
-        harness.update_relation_data(async_rel, f"{REMOTE_APP}/0", {})
+        harness.add_relation_unit(async_rel, f"{REMOTE_APP}/1")
     with pytest.raises(ActionFailed) as exc:
         harness.run_action("create-replication", {"name": "default"})
     assert exc.value.message == (
@@ -590,6 +594,7 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
         if substrate == "k8s":
             with (
                 patch.object(type(harness.charm.workload), "stop"),
+                patch.object(type(harness.charm.workload), "init_storage"),
                 patch.object(harness.charm.k8s_manager, "delete_patroni_cluster_resources"),
             ):
                 yield
@@ -652,9 +657,9 @@ def test_relation_changed_starts_the_standby_database_after_all_units_stopped(
     substrate, harness, async_rel
 ):
     """Once every unit stopped and the standby leader is up, the database restarts."""
-    harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
+    peer_rel = harness.model.get_relation(PEER_RELATION)
     with harness.hooks_disabled():
-        for unit in (harness.charm.unit.name, f"{PEER_APP}/1"):
+        for unit in {u.name for u in peer_rel.units} | {harness.charm.unit.name}:
             harness.update_relation_data(
                 _peer_rel_id(harness),
                 unit,
@@ -673,7 +678,7 @@ def test_relation_changed_starts_the_standby_database_after_all_units_stopped(
             create=True,
         ),
         patch.object(type(harness.charm.workload), "start_service", create=True) as start_service,
-        patch.object(harness.charm, "update_config") as update_config,
+        patch.object(harness.charm.async_replication_manager, "update_config") as update_config,
     ):
         harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
 
