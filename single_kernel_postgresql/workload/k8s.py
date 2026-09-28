@@ -17,7 +17,17 @@ from charmlibs.pathops import PathProtocol
 from lightkube import Client
 from lightkube.resources.core_v1 import Endpoints
 from ops import Container, ModelError
-from ops.pebble import ExecError, FileInfo, FileType, Plan, ServiceStatus
+from ops.pebble import (
+    CheckDict,
+    ExecError,
+    FileInfo,
+    FileType,
+    Layer,
+    LayerDict,
+    Plan,
+    ServiceDict,
+    ServiceStatus,
+)
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
@@ -25,20 +35,34 @@ from single_kernel_postgresql.config.literals import (
     K8S_ARCHIVE_PATH,
     K8S_DATA_PATH,
     K8S_DEBIAN_DATA_SYMLINK,
+    K8S_LDAP_SYNC_SERVICE_NAME,
     K8S_LOGS_STORAGE_PATH,
+    K8S_METRICS_SERVER_SERVICE_NAME,
     K8S_PATRONI_LOGS_PATH,
     K8S_PATRONI_LOGS_SYMLINK_PATH,
     K8S_PG_LOGS_PATH,
     K8S_PGBACK_REST_SERVER_SERVICE_NAME,
     K8S_PGBACKREST_LOGS_PATH,
     K8S_PGBACKREST_LOGS_SYMLINK_PATH,
+    K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
     K8S_POSTGRESQL_LOGS_SYMLINK_PATH,
     K8S_POSTGRESQL_SERVICE_NAME,
+    K8S_ROTATE_LOGS_SERVICE_NAME,
     K8S_TEMP_STORAGE_PATH,
     K8S_TEMP_TABLESPACE_DIR,
     K8S_WAL_DIR,
+    K8S_WORKLOAD_OS_GROUP,
+    K8S_WORKLOAD_OS_USER,
+    MONITORING_USER,
+    REPLICATION_USER,
+    USER,
 )
-from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
+from single_kernel_postgresql.workload.base import (
+    BackupConfig,
+    BaseWorkload,
+    CommandResult,
+    PebbleLayerSpec,
+)
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.k8s import K8sPaths
 
@@ -82,6 +106,110 @@ class K8sWorkload(BaseWorkload):
             # Changes were made, add the new layer.
             self.container.add_layer(K8S_POSTGRESQL_SERVICE_NAME, new_layer, combine=True)
             logging.info("Updated health checks")
+
+    def update_pebble_layers(self, spec: PebbleLayerSpec, replan: bool = True) -> None:
+        """Rebuild the PostgreSQL pebble layer from the spec and reconcile it."""
+        new_layer = self._postgresql_layer(spec)
+        self.reconcile_pebble_layer(new_layer, replan)
+
+    def _postgresql_layer(self, spec: PebbleLayerSpec) -> Layer:
+        """Returns a Pebble configuration layer for PostgreSQL."""
+        layer_config = LayerDict({
+            "summary": "postgresql + patroni layer",
+            "description": "pebble config layer for postgresql + patroni",
+            "services": {
+                K8S_POSTGRESQL_SERVICE_NAME: ServiceDict({
+                    "override": "replace",
+                    "summary": "entrypoint of the postgresql + patroni image",
+                    "command": f"patroni {self.paths.patroni_config}",
+                    "startup": "enabled",
+                    "on-failure": spec.on_failure_condition,
+                    "user": K8S_WORKLOAD_OS_USER,
+                    "group": K8S_WORKLOAD_OS_GROUP,
+                    "environment": {
+                        "PATRONI_KUBERNETES_LABELS": (
+                            f"{{application: patroni, cluster-name: {spec.cluster_name}}}"
+                        ),
+                        "PATRONI_KUBERNETES_LEADER_LABEL_VALUE": "primary",
+                        "PATRONI_KUBERNETES_NAMESPACE": spec.model_name,
+                        "PATRONI_KUBERNETES_USE_ENDPOINTS": "true",
+                        "PATRONI_NAME": spec.pod_name,
+                        "PATRONI_SCOPE": spec.cluster_name,
+                        "PATRONI_REPLICATION_USERNAME": REPLICATION_USER,
+                        "PATRONI_SUPERUSER_USERNAME": USER,
+                    },
+                }),
+                K8S_PGBACK_REST_SERVER_SERVICE_NAME: ServiceDict({
+                    "override": "replace",
+                    "summary": "pgBackRest server",
+                    "command": K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+                    "startup": "disabled",
+                    "user": K8S_WORKLOAD_OS_USER,
+                    "group": K8S_WORKLOAD_OS_GROUP,
+                }),
+                K8S_LDAP_SYNC_SERVICE_NAME: ServiceDict({
+                    "override": "replace",
+                    "summary": "synchronize LDAP users",
+                    "command": "/start-ldap-synchronizer.sh",
+                    "startup": "disabled",
+                }),
+                K8S_METRICS_SERVER_SERVICE_NAME: self._generate_metrics_service(spec),
+                K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME: (
+                    self._generate_pgbackrest_metrics_service()
+                ),
+                K8S_ROTATE_LOGS_SERVICE_NAME: ServiceDict({
+                    "override": "replace",
+                    "summary": "rotate logs",
+                    "command": "python3 /home/postgres/rotate_logs.py",
+                    "startup": "disabled",
+                }),
+            },
+            "checks": {
+                K8S_POSTGRESQL_SERVICE_NAME: CheckDict({
+                    "override": "replace",
+                    "level": "ready",
+                    "exec": {
+                        "command": "python3 /scripts/self-signed-checker.py",
+                        "user": K8S_WORKLOAD_OS_USER,
+                        "environment": {
+                            "ENDPOINT": f"{spec.patroni_url}/health",
+                        },
+                    },
+                })
+            },
+        })
+        return Layer(layer_config)
+
+    def _generate_metrics_service(self, spec: PebbleLayerSpec) -> ServiceDict:
+        """Generate the metrics service definition."""
+        return {
+            "override": "replace",
+            "summary": "postgresql metrics exporter",
+            "command": "/start-exporter.sh",
+            "startup": "enabled" if spec.monitoring_password is not None else "disabled",
+            "after": [K8S_POSTGRESQL_SERVICE_NAME],
+            "user": K8S_WORKLOAD_OS_USER,
+            "group": K8S_WORKLOAD_OS_GROUP,
+            "environment": {
+                "DATA_SOURCE_NAME": (
+                    f"user={MONITORING_USER} "
+                    f"password={spec.monitoring_password} "
+                    "host=/var/run/postgresql port=5432 database=postgres"
+                ),
+            },
+        }
+
+    def _generate_pgbackrest_metrics_service(self) -> ServiceDict:
+        """Generate the pgbackrest metrics service definition."""
+        return {
+            "override": "replace",
+            "summary": "pgbackrest metrics exporter",
+            "command": "/usr/bin/pgbackrest_exporter",
+            "startup": "enabled",
+            "after": [K8S_POSTGRESQL_SERVICE_NAME],
+            "user": K8S_WORKLOAD_OS_USER,
+            "group": K8S_WORKLOAD_OS_GROUP,
+        }
 
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service is running.
