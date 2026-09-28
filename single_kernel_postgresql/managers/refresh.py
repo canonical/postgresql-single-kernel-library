@@ -22,6 +22,8 @@ import psycopg2
 from charm_refresh import CharmVersion, PrecheckFailed
 from cryptography.x509 import load_pem_x509_certificate
 from cryptography.x509.oid import NameOID
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, StatusBase, WaitingStatus
 from tenacity import (
     RetryError,
@@ -41,6 +43,7 @@ from single_kernel_postgresql.config.literals import (
     VM_CHARM_NAME,
     WORKLOAD_NAME,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.workload.base import BaseWorkload
@@ -236,7 +239,9 @@ class RefreshManager(BaseManager):
     Owns the ``charm_refresh`` integration and the refresh-aware unit status handling.
     Status writes route through the priority gate so refresh statuses are never
     overridden, and the collect-unit-status reconciliation keeps the cached refresh
-    status in sync with the workload state.
+    status in sync with the workload state. The status handler consumes the
+    reconciliation outcome through ``get_statuses``, whose recompute replays it and
+    persists the resulting unit status as this manager's status record.
     """
 
     def __init__(
@@ -279,6 +284,39 @@ class RefreshManager(BaseManager):
                 self._charm.unit.status = MaintenanceStatus("Tearing down")
                 sys.exit()
         self.reconcile_refresh_status()
+        self._persist_machinery_status()
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses.
+
+        The refresh statuses are maintained statefully (see reconcile_refresh_status),
+        so recompute replays the reconciliation and surfaces the resulting unit status
+        as this manager's status record; the machinery record stays available to the
+        status handler's collect evaluation between recomputes.
+        """
+        if not recompute:
+            return self.state.statuses.get(scope, self.name).root or [
+                GeneralStatuses.ACTIVE_IDLE.value
+            ]
+        self.reconcile_refresh_status()
+        if scope == "app":
+            # App statuses stay charm-owned (the async-replication phase migrates
+            # them); the leader set-app-status call ran in the reconciliation.
+            return [GeneralStatuses.ACTIVE_IDLE.value]
+        return [self._persist_machinery_status()]
+
+    def _persist_machinery_status(self) -> StatusObject:
+        """Persist the reconciled unit status as this manager's status record."""
+        status = self._charm.unit.status
+        if status.name not in ("active", "blocked", "maintenance", "waiting"):
+            # Unknown/error unit statuses carry no refresh information.
+            record = GeneralStatuses.ACTIVE_IDLE.value
+        else:
+            record = StatusObject(status=status.name, message=status.message)
+        self.state.statuses.set(record, "unit", self.name)
+        return record
 
     def set_unit_status(
         self,
@@ -308,9 +346,10 @@ class RefreshManager(BaseManager):
         """Reconcile the unit status with the refresh status.
 
         Workaround for other unit statuses being set in a stateful way (i.e. unable to
-        recompute status on every event). The charms observe this on collect-unit-status;
-        do not use collect status events elsewhere - otherwise ops will prioritize
-        statuses incorrectly.
+        recompute status on every event). get_statuses() replays this reconciliation on
+        the status handler's collect-unit-status evaluation; the construction-time call
+        runs it directly. Do not use collect status events elsewhere - otherwise ops
+        will prioritize statuses incorrectly.
         """
         if self._charm.unit.is_leader():
             self._charm.set_app_status()

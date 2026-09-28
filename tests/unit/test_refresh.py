@@ -10,14 +10,16 @@ from unittest.mock import MagicMock, patch
 import charm_refresh
 import pytest
 from charm_refresh import CharmVersion, PrecheckFailed
+from data_platform_helpers.advanced_statuses import StatusObject
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import SwitchoverFailedError
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.managers.refresh import (
     PostgreSQLRefreshK8s,
     RefreshManager,
 )
-from tenacity import RetryError
+from tenacity import RetryError, stop_after_attempt
 
 CHARM_VERSION = "16/1.0.0"
 
@@ -339,6 +341,68 @@ def test_reconcile_refresh_status_ignores_unrelated_status(refresh_manager, char
     refresh_manager.refresh.unit_status_lower_priority.assert_not_called()
 
 
+def test_reconcile_refresh_status_substitutes_active_status_without_cached_message(
+    refresh_manager, charm
+):
+    lower = ActiveStatus("PostgreSQL 16.14 running")
+    pathlib.Path(".last_refresh_unit_status.json").write_text(json.dumps(None))
+    charm.unit.status = ActiveStatus("stale message")
+    refresh_manager.refresh.unit_status_lower_priority = MagicMock(return_value=lower)
+
+    refresh_manager.reconcile_refresh_status()
+
+    assert charm.unit.status == lower
+    assert pathlib.Path(".last_refresh_unit_status.json").read_text() == json.dumps(lower.message)
+
+
+def test_get_statuses_replays_the_reconciliation_on_recompute(refresh_manager, charm):
+    higher = MaintenanceStatus("refresh in progress")
+    refresh_manager.refresh.unit_status_higher_priority = higher
+    record = StatusObject(status="maintenance", message="refresh in progress")
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert charm.unit.status == higher
+    assert statuses == [record]
+    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+
+
+def test_get_statuses_persists_the_reconciled_active_status(refresh_manager, charm):
+    refresh_manager.refresh = None
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_called_once_with(
+        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
+    )
+
+
+def test_get_statuses_returns_the_cached_records_without_recompute(refresh_manager):
+    record = StatusObject(status="blocked", message="upgrade failed")
+    refresh_manager.state.statuses.get.return_value.root = [record]
+
+    assert refresh_manager.get_statuses("unit") == [record]
+
+
+def test_get_statuses_defaults_to_active_idle_without_cached_records(refresh_manager):
+    refresh_manager.state.statuses.get.return_value.root = []
+
+    assert refresh_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
+def test_get_statuses_returns_active_idle_for_app_scope(refresh_manager, charm):
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("app", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    charm.set_app_status.assert_called()
+    refresh_manager.state.statuses.set.assert_not_called()
+
+
 @pytest.fixture
 def vm_manager(charm, set_default_status):
     """A refresh manager on the VM substrate wired to the mock charm."""
@@ -536,6 +600,7 @@ def test_reconcile_updates_layers_and_allows_next_unit(refresh_manager, charm):
     charm.unit.name = "postgresql/0"
     charm.patroni_manager.cluster_members = {"postgresql-0"}
     charm.patroni_manager.is_replication_healthy.return_value = True
+    refresh_manager.refresh.next_unit_allowed_to_refresh = False
 
     refresh_manager.reconcile()
 
@@ -575,6 +640,29 @@ def test_reconcile_blocks_when_retries_exhausted(refresh_manager, charm):
     with patch(
         "single_kernel_postgresql.managers.refresh.Retrying",
         side_effect=RetryError("last attempt"),
+    ) as retrying:
+        refresh_manager.reconcile()
+
+    assert charm.unit.status == BlockedStatus(
+        "upgrade failed. Check logs for rollback instruction"
+    )
+    assert refresh_manager.refresh.next_unit_allowed_to_refresh is False
+    retry_kwargs = retrying.call_args.kwargs
+    assert retry_kwargs["stop"].max_attempt_number == 6
+    assert retry_kwargs["wait"].wait_fixed == 10
+
+
+def test_reconcile_blocks_when_replication_unhealthy(refresh_manager, charm):
+    charm.patroni_manager.member_started = True
+    charm.unit.is_leader.return_value = False
+    charm.unit.name = "postgresql/0"
+    charm.patroni_manager.cluster_members = {"postgresql-0"}
+    charm.patroni_manager.is_replication_healthy.return_value = False
+    refresh_manager.refresh.next_unit_allowed_to_refresh = False
+
+    with patch(
+        "single_kernel_postgresql.managers.refresh.stop_after_attempt",
+        return_value=stop_after_attempt(1),
     ):
         refresh_manager.reconcile()
 
@@ -582,6 +670,7 @@ def test_reconcile_blocks_when_retries_exhausted(refresh_manager, charm):
         "upgrade failed. Check logs for rollback instruction"
     )
     assert refresh_manager.refresh.next_unit_allowed_to_refresh is False
+    charm.patroni_manager.is_replication_healthy.assert_called()
 
 
 def test_on_init_reconciles_when_in_progress(refresh_manager):
