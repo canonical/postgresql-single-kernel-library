@@ -6,7 +6,7 @@
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from ops import (
     InstallEvent,
@@ -30,12 +30,11 @@ from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
-from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
 from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
-    from single_kernel_postgresql.charms.k8s_charm import PostgreSQLK8sCharm
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +123,6 @@ class PostgreSQLEventsHandler(Object):
 
     def _on_postgresql_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event handler for PostgreSQL container on PebbleReadyEvent."""
-        charm = cast("PostgreSQLK8sCharm", self.charm)
         # TODO: Safeguard against refresh
         if self.state.endpoint in self.state.endpoints:
             # TODO: Fix pod by adding services
@@ -152,7 +150,7 @@ class PostgreSQLEventsHandler(Object):
             self.tls_manager.configure_internal_peer_cert()
 
         # Start the database service
-        charm.k8s_manager.update_pebble_layers()
+        self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state))
 
         # Assert the member is up and running before marking it as initialised.
         if not self.patroni_manager.member_started:

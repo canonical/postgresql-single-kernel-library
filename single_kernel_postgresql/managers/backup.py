@@ -7,18 +7,17 @@
 import importlib.resources
 import json
 import logging
-import os
 import re
 import shlex
-import signal
 import subprocess
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import jinja2
 from botocore.exceptions import ClientError, ParamValidationError, SSLError
-from ops import ActiveStatus, JujuVersion, MaintenanceStatus
+from ops import ActiveStatus, BlockedStatus, JujuVersion, MaintenanceStatus
 from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
 
@@ -35,7 +34,6 @@ from single_kernel_postgresql.config.literals import (
     PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE,
     PGBACKREST_LOG_LEVEL_STDERR,
     PGBACKREST_LOGROTATE_FILE,
-    VM_ROTATE_LOGS_LOG_FILE,
 )
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
@@ -99,6 +97,7 @@ class BackupManager(BaseManager):
         resource_provider: ResourceProvider,
         is_standby_cluster: IsStandbyClusterFunction | None = None,
         set_unit_status: Callable[..., None] | None = None,
+        refresh_primary_status: Callable[[], None] | None = None,
     ):
         """Manager of PostgreSQL backups."""
         super().__init__(state, workload, "backup")
@@ -107,6 +106,7 @@ class BackupManager(BaseManager):
         self.update_config = update_config
         self.resource_provider = resource_provider
         self.set_unit_status = set_unit_status
+        self.refresh_primary_status = refresh_primary_status
         self._is_standby_cluster_bridge = is_standby_cluster
 
     @property
@@ -199,33 +199,40 @@ class BackupManager(BaseManager):
             return None
         return self.state._get_hostname_from_unit(primary)
 
-    @property
-    def _has_s3_block_message(self) -> bool:
-        """Whether the unit is blocked because of an S3 initialization failure.
-
-        State-derived replacement of the charms' unit-status-message reads:
-        the blocked status message comes from the s3-initialization-block-message
-        peer field (see the charms' _set_primary_status_message).
-        """
-        # The charms' status builder reads only the app-databag field; the unit
-        # field exists for the replica-primary flow but is never read back.
-        return self.state.application.s3_initialization_block_message in S3_BLOCK_MESSAGES
-
     def _s3_initialization_set_failure(self, block_message: str) -> None:
         """Record a failed s3 initialization with the corresponding block message.
 
         Written to the app databag on the leader (leader == primary, so no
-        cross-unit sync is needed) or to the unit databag otherwise. The events
-        layer refreshes the unit status.
+        cross-unit sync is needed) or to the unit databag otherwise. On the
+        leader the unit status is refreshed in-hook with the block message:
+        blocked units early-exit from update-status and peer-relation-changed,
+        so without this the message would never surface (parity with the
+        charms' ``_s3_initialization_set_failure(update_leader_status=True)``).
         """
         if self.state.peer.is_app_leader:
             self.state.application.s3_initialization_block_message = block_message
             self.state.application.s3_initialization_start = ""
             self.state.application.stanza = ""
+            if self.set_unit_status:
+                self.set_unit_status(BlockedStatus(block_message))
         else:
             self.state.peer.s3_initialization_block_message = block_message
             self.state.peer.s3_initialization_done = "True"
             self.state.peer.stanza = ""
+
+    def reset_s3_initialization_markers(self) -> None:
+        """Reset the stanza and the S3 initialization markers before a new attempt.
+
+        The charms reset these app-databag fields on the leader right before
+        attempting the stanza initialization, so a failed run leaves a fresh
+        failure state instead of a stale success marker.
+        """
+        if not self.state.peer.is_app_leader:
+            return
+        self.state.application.s3_initialization_block_message = ""
+        self.state.application.s3_initialization_start = time.asctime(time.gmtime())
+        self.state.application.stanza = ""
+        self.state.application.s3_initialization_done = ""
 
     # -- Stanza configuration rendering ----------------------------------------
 
@@ -342,12 +349,36 @@ class BackupManager(BaseManager):
         """
         # Enable stanza initialisation if the backup settings were fixed after being invalid
         # or pointing to a repository where there are backups from another cluster.
-        if self.state.peer.is_blocked_status and not self._has_s3_block_message:
+        # Gate on the LIVE unit status message: the events layer clears the
+        # s3-initialization-block-message peer field before this point, so a
+        # state-derived read would classify the S3 block as a foreign block and
+        # refuse the recovery (the charms gate on self.unit.status.message).
+        if (
+            self.state.peer.is_blocked_status
+            and self.state.peer.status_message not in S3_BLOCK_MESSAGES
+        ):
             logger.warning("couldn't initialize stanza due to a blocked status")
             return False
 
-        # Create the stanza.
+        if not self._create_stanza():
+            return False
+
+        self.start_stop_pgbackrest_service()
+
+        # Rest of the successful s3 initialization sequence such as s3-initialization-start and s3-initialization-done
+        # are left to the check_stanza func.
+        if self.state.peer.is_app_leader:
+            self.state.application.stanza = self.stanza_name
+        else:
+            self.state.peer.stanza = self.stanza_name
+
+        return True
+
+    def _create_stanza(self) -> bool:
+        """Run stanza-create with the charms' retry and failure semantics."""
         try:
+            if self.set_unit_status:
+                self.set_unit_status(MaintenanceStatus("initialising stanza"))
             # If the tls is enabled, it requires all the units in the cluster to run the pgBackRest service to
             # successfully complete validation, and upon receiving the same parent event other units should start it.
             # Therefore, the first retry may fail due to the delay of these other units to start this service. 60s given
@@ -383,15 +414,6 @@ class BackupManager(BaseManager):
             self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
             return False
 
-        self.start_stop_pgbackrest_service()
-
-        # Rest of the successful s3 initialization sequence such as s3-initialization-start and s3-initialization-done
-        # are left to the check_stanza func.
-        if self.state.peer.is_app_leader:
-            self.state.application.stanza = self.stanza_name
-        else:
-            self.state.peer.stanza = self.stanza_name
-
         return True
 
     def check_stanza(self) -> bool:
@@ -403,6 +425,18 @@ class BackupManager(BaseManager):
         # Update the configuration to use pgBackRest as the archiving mechanism.
         self.update_config()
 
+        if not self._check_stanza_command():
+            return False
+
+        if self.state.peer.is_app_leader:
+            self.state.application.s3_initialization_start = ""
+        else:
+            self.state.peer.s3_initialization_done = "True"
+
+        return True
+
+    def _check_stanza_command(self) -> bool:
+        """Run the pgbackrest stanza check with the charms' retry semantics."""
         try:
             # If the tls is enabled, it requires all the units in the cluster to run the pgBackRest service to
             # successfully complete validation, and upon receiving the same parent event other units should start it.
@@ -425,6 +459,11 @@ class BackupManager(BaseManager):
                             raise TimeoutError
                         if result.return_code != 0:
                             raise StanzaOperationError(result.stderr)
+            # Recompute the unit status on success: the unit may be blocked
+            # with a stale S3 failure message from before the settings were
+            # fixed (the charms call _set_primary_status_message here).
+            if self.refresh_primary_status:
+                self.refresh_primary_status()
         except TimeoutError as e:
             if self.state.substrate == Substrates.K8S:
                 # The K8s charm folds every failure (including timeouts) into the
@@ -443,12 +482,6 @@ class BackupManager(BaseManager):
             if self.state.substrate == Substrates.VM:
                 self.update_config()
             return False
-
-        if self.state.peer.is_app_leader:
-            self.state.application.s3_initialization_start = ""
-        else:
-            self.state.peer.s3_initialization_done = "True"
-
         return True
 
     def coordinate_stanza_fields(self) -> None:
@@ -1116,7 +1149,11 @@ Stderr:
         return True, False
 
     def initialise_s3_repository(self) -> bool:
-        """Initialize the S3 repository after a credentials change (primary path)."""
+        """Initialize the S3 repository after a credentials change (primary path).
+
+        Renamed port of the charms' _on_s3_credential_changed_primary: no event
+        semantics, returns success. The stanza must be cleared before calling.
+        """
         self.update_config()
 
         try:
@@ -1149,7 +1186,12 @@ Stderr:
         return True
 
     def clear_s3_state(self) -> None:
-        """Clear the stanza and S3 initialization markers when credentials are gone."""
+        """Clear the stanza and S3 initialization markers when credentials are gone.
+
+        Renamed port of the charms' _on_s3_credential_gone: no event semantics.
+        The K8s charm also stops the rotate-logs service, kept here as workload
+        I/O. Status refreshes stay with the events layer.
+        """
         if self.state.substrate == Substrates.K8S:
             self.workload.stop_service(K8S_ROTATE_LOGS_SERVICE_NAME)
         if self.state.peer.is_app_leader:
@@ -1179,40 +1221,21 @@ Stderr:
             return
         if not self.workload.exists(self.workload.root / PGBACKREST_LOGROTATE_FILE.lstrip("/")):
             return
-        if self.state.peer.rotate_logs_pid:
-            # Double check that the PID exists.
-            try:
-                os.kill(self.state.peer.rotate_logs_pid, 0)
-                return
-            except OSError:
-                pass
+        if self.state.peer.rotate_logs_pid and self.workload.process_alive(
+            self.state.peer.rotate_logs_pid
+        ):
+            return
 
         logger.info("Starting rotate logs process")
-        script = importlib.resources.as_file(
-            importlib.resources.files("single_kernel_postgresql.scripts").joinpath(
-                "rotate_logs.py"
-            )
-        )
-        with (
-            script as script_path,
-            open(VM_ROTATE_LOGS_LOG_FILE, "a") as output,
-        ):
-            process = subprocess.Popen(  # noqa: S603
-                ["/usr/bin/python3", str(script_path)],
-                stdout=output,
-                stderr=subprocess.STDOUT,
-            )
-        self.state.peer.rotate_logs_pid = process.pid
-        logger.info(f"Started rotate logs process with PID {process.pid}")
+        self.state.peer.rotate_logs_pid = self.workload.start_rotate_logs_loop()
+        logger.info(f"Started rotate logs process with PID {self.state.peer.rotate_logs_pid}")
 
     def stop_log_rotation(self) -> None:
         """Stop the running rotate-logs loop, if this unit spawned one."""
         if self.state.substrate != Substrates.VM:
             return
-        if stored := self.state.peer.rotate_logs_pid:
-            try:
-                os.kill(stored, signal.SIGINT)
-                logger.info(f"Stopped rotate logs process with PID {stored}")
-                self.state.peer.rotate_logs_pid = None
-            except OSError:
-                pass
+        if (stored := self.state.peer.rotate_logs_pid) and self.workload.stop_rotate_logs_loop(
+            stored
+        ):
+            logger.info(f"Stopped rotate logs process with PID {stored}")
+            self.state.peer.rotate_logs_pid = None
