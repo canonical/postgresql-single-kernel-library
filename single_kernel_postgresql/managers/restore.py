@@ -1,7 +1,16 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Manager of PostgreSQL backup restores via pgBackRest."""
+"""Manager of PostgreSQL backup restores via pgBackRest.
+
+``RestoreManager`` holds the restore-side business logic ported from the charms
+(``src/backups.py`` on both substrates plus the PITR helpers from the charm
+bodies). Validation, timeline/PITR target resolution and the Patroni
+reconfiguration handshake return values instead of writing statuses or deferring
+events; the events layer (``events/backup.py``) maps those results onto action
+results and unit statuses. Repository reads (backups, timelines, nearest
+timeline) are consumed from the constructor-injected ``BackupManager``.
+"""
 
 import logging
 import re
@@ -17,6 +26,8 @@ from ops.pebble import ChangeError, ExecError
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
+    K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+    K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
     K8S_POSTGRESQL_SERVICE_NAME,
     ORIGINAL_PATRONI_ON_FAILURE_CONDITION,
     REPLICATION_CONSUMER_RELATION,
@@ -340,19 +351,15 @@ class RestoreManager(BaseManager):
             the failure reason otherwise. The restore proceeds asynchronously as
             Patroni bootstraps the restored cluster.
         """
-        logger.info("Stopping database service")
-        error_message = self._stop_database()
-        if error_message:
-            logger.error(f"Restore failed: {error_message}")
-            return False, error_message
-
         # Temporarily disabling patroni service auto-restart. This is required as
         # point-in-time-recovery can fail on restore, therefore during cluster
         # bootstrapping process. In this case, we need be able to check patroni
         # service status and logs. Disabling auto-restart feature is essential to
         # prevent wrong status indicated and logs reading race condition (as logs
-        # cleared / moved with service restarts).
-        if not self._override_patroni_restart_condition(RESTORE_REPEAT_CAUSE):
+        # cleared / moved with service restarts). This MUST happen before the
+        # database service is stopped: replanning with a changed layer would
+        # restart a stopped service and race the restore.
+        if not self._override_patroni_restart_condition(RESTORE_REPEAT_CAUSE, replan=False):
             # The K8s charm words this after the Pebble on-failure condition it
             # overrides; the VM charm after the systemd restart condition.
             error_message = (
@@ -362,6 +369,12 @@ class RestoreManager(BaseManager):
             )
             logger.error(f"Restore failed: {error_message}")
             self._restart_database()
+            return False, error_message
+
+        logger.info("Stopping database service")
+        error_message = self._stop_database()
+        if error_message:
+            logger.error(f"Restore failed: {error_message}")
             return False, error_message
 
         error_message = self._remove_cluster_info_before_wiping()
@@ -494,7 +507,9 @@ class RestoreManager(BaseManager):
 
     # -- Patroni restart-condition override ---------------------------------------------
 
-    def _override_patroni_restart_condition(self, repeat_cause: str | None) -> bool:
+    def _override_patroni_restart_condition(
+        self, repeat_cause: str | None, replan: bool = True
+    ) -> bool:
         """Temporarily disable Patroni auto-restart for the restore.
 
         VM overrides the systemd Restart= condition to "no" through PatroniManager;
@@ -504,7 +519,7 @@ class RestoreManager(BaseManager):
         """
         if self.state.substrate == Substrates.VM:
             return self._override_patroni_systemd_restart_condition("no", repeat_cause)
-        return self._override_patroni_on_failure_condition("ignore", repeat_cause)
+        return self._override_patroni_on_failure_condition("ignore", repeat_cause, replan)
 
     def _override_patroni_systemd_restart_condition(
         self, new_condition: str, repeat_cause: str | None
@@ -550,7 +565,7 @@ class RestoreManager(BaseManager):
         return True
 
     def _override_patroni_on_failure_condition(
-        self, new_condition: str, repeat_cause: str | None
+        self, new_condition: str, repeat_cause: str | None, replan: bool = True
     ) -> bool:
         """Temporary override Patroni pebble service on-failure condition (K8s)."""
         if "patroni-on-failure-condition-override" in self.state.peer.data:
@@ -574,7 +589,7 @@ class RestoreManager(BaseManager):
                 )
                 return False
             self.state.peer.data["patroni-on-failure-condition-override"] = new_condition
-            self._update_pebble_layers()
+            self._update_pebble_layers(replan=replan)
             logger.debug(
                 f"Patroni on-failure condition re-overridden to {new_condition} within repeat"
                 f" cause {repeat_cause}"
@@ -588,7 +603,7 @@ class RestoreManager(BaseManager):
             self.state.peer.data["overridden-patroni-on-failure-condition-repeat-cause"] = (
                 repeat_cause
             )
-        self._update_pebble_layers()
+        self._update_pebble_layers(replan=replan)
         logger.debug(
             f"Patroni on-failure condition overridden from"
             f" {ORIGINAL_PATRONI_ON_FAILURE_CONDITION} to {new_condition}"
@@ -596,9 +611,9 @@ class RestoreManager(BaseManager):
         )
         return True
 
-    def _update_pebble_layers(self) -> None:
+    def _update_pebble_layers(self, replan: bool = True) -> None:
         """Rebuild and reconcile the PostgreSQL pebble layer through the K8s workload."""
-        self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state))
+        self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state), replan=replan)
 
     def restore_patroni_restart_condition(self) -> None:
         """Restore the Patroni service restart/on-failure condition that was before overriding.
@@ -622,9 +637,49 @@ class RestoreManager(BaseManager):
                 "patroni-on-failure-condition-override": "",
                 "overridden-patroni-on-failure-condition-repeat-cause": "",
             })
-            self._update_pebble_layers()
+            self._update_pebble_layers_after_restore()
             logger.debug(
                 f"restored Patroni on-failure condition to {ORIGINAL_PATRONI_ON_FAILURE_CONDITION}"
             )
         else:
             logger.warning("not restoring patroni on-failure condition as it's not overridden")
+
+    def _update_pebble_layers_after_restore(self) -> None:
+        """Refresh the pebble layers after a restore, resilient to a failing service start.
+
+        A stale pgBackRest exporter from before the restore can still hold its
+        port (``bind: address already in use``); without this guard the
+        replan's ``ChangeError`` escapes through ``_was_restore_successful``
+        and the unit stays in ``restoring backup`` forever, because the
+        restoring-backup flags are only cleared after the replan. Free the
+        pgBackRest service ports before the replan and retry once on failure;
+        if it still fails, leave the reconciliation to the next hook instead
+        of crashing it.
+        """
+        self._stop_pgbackrest_services()
+        try:
+            self._update_pebble_layers()
+        except ChangeError:
+            logger.warning(
+                "Post-restore pebble replan failed; stopping pgBackRest services and retrying"
+            )
+            self._stop_pgbackrest_services()
+            try:
+                self._update_pebble_layers()
+            except ChangeError:
+                logger.exception(
+                    "Post-restore pebble replan failed again; deferring reconciliation"
+                    " to the next hook"
+                )
+
+    def _stop_pgbackrest_services(self) -> None:
+        """Best-effort stop of the pgBackRest services on the K8s substrate."""
+        for service in (
+            K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+            K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
+        ):
+            try:
+                self.workload.stop_service(service)
+            # Best-effort port release; a stale service may not be pebble-managed.
+            except Exception as e:
+                logger.debug(f"Failed to stop {service}: {e!s}")
