@@ -12,7 +12,7 @@ import psycopg2
 import pytest
 from charm_refresh import CharmVersion, PrecheckFailed
 from data_platform_helpers.advanced_statuses import StatusObject
-from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
+from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, UnknownStatus, WaitingStatus
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import SwitchoverFailedError
 from single_kernel_postgresql.config.statuses import GeneralStatuses
@@ -387,6 +387,26 @@ def test_get_statuses_persists_the_reconciled_active_status(refresh_manager, cha
     refresh_manager.state.statuses.set.assert_called_once_with(
         GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
     )
+
+
+def test_get_statuses_persists_active_idle_for_unsettled_unit_status(refresh_manager, charm):
+    charm.unit.status = UnknownStatus()
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_called_once_with(
+        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
+    )
+
+
+def test_get_statuses_returns_cached_active_idle_for_app_scope_without_recompute(
+    refresh_manager,
+):
+    refresh_manager.state.statuses.get.return_value.root = []
+
+    assert refresh_manager.get_statuses("app") == [GeneralStatuses.ACTIVE_IDLE.value]
 
 
 def test_get_statuses_returns_the_cached_records_without_recompute(refresh_manager):
