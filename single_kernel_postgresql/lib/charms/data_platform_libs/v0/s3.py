@@ -114,8 +114,11 @@ class ExampleRequirerCharm(CharmBase):
 import json
 import logging
 from collections import namedtuple
+from typing import Dict, List, Optional, Union
 
 import ops.charm
+import ops.framework
+import ops.model
 from ops.charm import (
     CharmBase,
     CharmEvents,
@@ -148,7 +151,7 @@ changed - keys that still exist but have new values
 deleted - key that were deleted"""
 
 
-def diff(event: RelationChangedEvent, bucket: Unit | Application) -> Diff:
+def diff(event: RelationChangedEvent, bucket: Union[Unit, Application]) -> Diff:
     """Retrieves the diff of the data in the relation changed databag.
 
     Args:
@@ -189,7 +192,7 @@ class BucketEvent(RelationEvent):
     """Base class for bucket events."""
 
     @property
-    def bucket(self) -> str | None:
+    def bucket(self) -> Optional[str]:
         """Returns the bucket was requested."""
         if not self.relation.app:
             return None
@@ -233,7 +236,9 @@ class S3Provider(Object):
         diff = self._diff(event)
         # emit on credential requested if bucket is provided by the requirer application
         if "bucket" in diff.added:
-            self.on.credentials_requested.emit(event.relation, app=event.app, unit=event.unit)
+            getattr(self.on, "credentials_requested").emit(
+                event.relation, app=event.app, unit=event.unit
+            )
 
     def _load_relation_data(self, raw_relation_data: dict) -> dict:
         """Loads relation data from the relation data bag.
@@ -353,7 +358,7 @@ class S3Provider(Object):
         logger.debug("Updated S3 connection info.")
 
     @property
-    def relations(self) -> list[Relation]:
+    def relations(self) -> List[Relation]:
         """The list of Relation instances associated with this relation_name."""
         return list(self.charm.model.relations[self.relation_name])
 
@@ -453,7 +458,7 @@ class S3Provider(Object):
         """
         self.update_connection_info(relation_id, {"storage-class": storage_class})
 
-    def set_tls_ca_chain(self, relation_id: int, tls_ca_chain: list[str]) -> None:
+    def set_tls_ca_chain(self, relation_id: int, tls_ca_chain: List[str]) -> None:
         """Sets the tls_ca_chain value in application databag.
 
         This function writes in the application data bag, therefore,
@@ -489,7 +494,7 @@ class S3Provider(Object):
         """
         self.update_connection_info(relation_id, {"delete-older-than-days": str(days)})
 
-    def set_attributes(self, relation_id: int, attributes: list[str]) -> None:
+    def set_attributes(self, relation_id: int, attributes: List[str]) -> None:
         """Sets the connection attributes in application databag.
 
         This function writes in the application data bag, therefore,
@@ -506,7 +511,7 @@ class S3Event(RelationEvent):
     """Base class for S3 storage events."""
 
     @property
-    def bucket(self) -> str | None:
+    def bucket(self) -> Optional[str]:
         """Returns the bucket name."""
         if not self.relation.app:
             return None
@@ -514,7 +519,7 @@ class S3Event(RelationEvent):
         return self.relation.data[self.relation.app].get("bucket")
 
     @property
-    def access_key(self) -> str | None:
+    def access_key(self) -> Optional[str]:
         """Returns the access key."""
         if not self.relation.app:
             return None
@@ -522,7 +527,7 @@ class S3Event(RelationEvent):
         return self.relation.data[self.relation.app].get("access-key")
 
     @property
-    def secret_key(self) -> str | None:
+    def secret_key(self) -> Optional[str]:
         """Returns the secret key."""
         if not self.relation.app:
             return None
@@ -530,7 +535,7 @@ class S3Event(RelationEvent):
         return self.relation.data[self.relation.app].get("secret-key")
 
     @property
-    def path(self) -> str | None:
+    def path(self) -> Optional[str]:
         """Returns the path where data can be stored."""
         if not self.relation.app:
             return None
@@ -538,7 +543,7 @@ class S3Event(RelationEvent):
         return self.relation.data[self.relation.app].get("path")
 
     @property
-    def endpoint(self) -> str | None:
+    def endpoint(self) -> Optional[str]:
         """Returns the endpoint address."""
         if not self.relation.app:
             return None
@@ -546,7 +551,7 @@ class S3Event(RelationEvent):
         return self.relation.data[self.relation.app].get("endpoint")
 
     @property
-    def region(self) -> str | None:
+    def region(self) -> Optional[str]:
         """Returns the region."""
         if not self.relation.app:
             return None
@@ -554,7 +559,7 @@ class S3Event(RelationEvent):
         return self.relation.data[self.relation.app].get("region")
 
     @property
-    def s3_uri_style(self) -> str | None:
+    def s3_uri_style(self) -> Optional[str]:
         """Returns the s3 uri style."""
         if not self.relation.app:
             return None
@@ -562,7 +567,7 @@ class S3Event(RelationEvent):
         return self.relation.data[self.relation.app].get("s3-uri-style")
 
     @property
-    def storage_class(self) -> str | None:
+    def storage_class(self) -> Optional[str]:
         """Returns the storage class name."""
         if not self.relation.app:
             return None
@@ -570,7 +575,7 @@ class S3Event(RelationEvent):
         return self.relation.data[self.relation.app].get("storage-class")
 
     @property
-    def tls_ca_chain(self) -> list[str] | None:
+    def tls_ca_chain(self) -> Optional[List[str]]:
         """Returns the TLS CA chain."""
         if not self.relation.app:
             return None
@@ -581,7 +586,7 @@ class S3Event(RelationEvent):
         return None
 
     @property
-    def s3_api_version(self) -> str | None:
+    def s3_api_version(self) -> Optional[str]:
         """Returns the S3 API version."""
         if not self.relation.app:
             return None
@@ -589,7 +594,7 @@ class S3Event(RelationEvent):
         return self.relation.data[self.relation.app].get("s3-api-version")
 
     @property
-    def delete_older_than_days(self) -> int | None:
+    def delete_older_than_days(self) -> Optional[int]:
         """Returns the retention days for full backups."""
         if not self.relation.app:
             return None
@@ -600,7 +605,7 @@ class S3Event(RelationEvent):
         return int(days)
 
     @property
-    def attributes(self) -> list[str] | None:
+    def attributes(self) -> Optional[List[str]]:
         """Returns the attributes."""
         if not self.relation.app:
             return None
@@ -635,7 +640,7 @@ class S3Requirer(Object):
     on = S3CredentialRequiresEvents()  # pyright: ignore[reportAssignmentType]
 
     def __init__(
-        self, charm: ops.charm.CharmBase, relation_name: str, bucket_name: str | None = None
+        self, charm: ops.charm.CharmBase, relation_name: str, bucket_name: Optional[str] = None
     ):
         """Manager of the s3 client relations."""
         super().__init__(charm, relation_name)
@@ -719,7 +724,7 @@ class S3Requirer(Object):
         relation.data[self.local_app].update(updated_connection_data)
         logger.debug("Updated S3 credentials.")
 
-    def _load_relation_data(self, raw_relation_data: RelationDataContent) -> dict[str, str]:
+    def _load_relation_data(self, raw_relation_data: RelationDataContent) -> Dict[str, str]:
         """Loads relation data from the relation data bag.
 
         Args:
@@ -761,13 +766,15 @@ class S3Requirer(Object):
                 missing_options.append(configuration_option)
         # emit credential change event only if all mandatory fields are present
         if contains_required_options:
-            self.on.credentials_changed.emit(event.relation, app=event.app, unit=event.unit)
+            getattr(self.on, "credentials_changed").emit(
+                event.relation, app=event.app, unit=event.unit
+            )
         else:
             logger.warning(
                 f"Some mandatory fields: {missing_options} are not present, do not emit credential change event!"
             )
 
-    def get_s3_connection_info(self) -> dict[str, str]:
+    def get_s3_connection_info(self) -> Dict[str, str]:
         """Return the s3 credentials as a dictionary."""
         for relation in self.relations:
             if relation and relation.app:
@@ -777,9 +784,9 @@ class S3Requirer(Object):
 
     def _on_relation_broken(self, event: RelationBrokenEvent) -> None:
         """Notify the charm about a broken S3 credential store relation."""
-        self.on.credentials_gone.emit(event.relation, app=event.app, unit=event.unit)
+        getattr(self.on, "credentials_gone").emit(event.relation, app=event.app, unit=event.unit)
 
     @property
-    def relations(self) -> list[Relation]:
+    def relations(self) -> List[Relation]:
         """The list of Relation instances associated with this relation_name."""
         return list(self.charm.model.relations[self.relation_name])
