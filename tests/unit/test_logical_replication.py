@@ -600,3 +600,71 @@ def test_fail_validation_persists_reason_for_the_status_gate(harness):
     manager._fail_validation("guard reason", status_msg="short status")
     peer_data = harness.get_relation_data(peer_rel_id, harness.charm.app.name)
     assert peer_data.get(VALIDATION_STATUS_MESSAGE_KEY) == "short status"
+
+
+def test_fail_validation_persists_marker_that_survives_healing(harness):
+    """The last-block marker must persist after a successful validation.
+
+    The charm's update-status gate allowlist compares the unit's (frozen)
+    Blocked message against this field: once a validation SUCCEEDS it clears
+    the flag and the peer status message, so a marker that only mirrors them
+    would re-break the allowlist exactly when the self-heal needs to run
+    (update-status sets active on the healed flow). The marker is therefore
+    written at every failure and NEVER cleared.
+    """
+    rel_id = _add_logical_relation(harness, "logical-replication", "publisher")
+    relation = harness.model.get_relation("logical-replication", rel_id)
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    manager = harness.charm.logical_replication_manager
+
+    manager._fail_validation(
+        "Publisher errors: table public.test_table in database testdb doesn't exist"
+    )
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    peer_data = harness.get_relation_data(peer_rel_id, harness.charm.app.name)
+    assert peer_data.get("logical-replication-last-block-message") == (
+        "Publisher errors: table public.test_table in database testdb doesn't exist"
+    )
+
+    postgresql = Mock()
+    postgresql.database_exists.return_value = True
+    postgresql.table_exists.return_value = True
+    postgresql.is_table_empty.return_value = True
+    postgresql.subscription_table_set.return_value = set()
+    secret_id = harness.add_model_secret(
+        owner=harness.charm.app.name,
+        content={"primary": "10.0.0.1", "username": "u", "password": "p"},
+    )
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            rel_id,
+            "publisher",
+            {
+                "errors": "[]",
+                "publications": json.dumps({
+                    TESTING_DATABASE: {
+                        "publication-name": "relation_15_testdb",
+                        "replication-slot-name": "slot_testdb",
+                    }
+                }),
+                "secret-id": secret_id,
+            },
+        )
+        _set_peer_data(
+            harness,
+            {SUBSCRIPTIONS_KEY: "{}"},
+        )
+    with (
+        _patch_config({TESTING_DATABASE: ["public.test_table"]}),
+        patch.object(type(harness.charm), "postgresql", PropertyMock(return_value=postgresql)),
+    ):
+        # The healing validation succeeds and clears the flag + status message.
+        harness.charm.logical_replication_manager.reconcile_subscriptions(relation)
+    peer_data = harness.get_relation_data(peer_rel_id, harness.charm.app.name)
+    assert peer_data.get(VALIDATION_KEY) != "error"
+    # ...but the marker survives, so the charm's gate keeps recognizing the
+    # (now stale) blocked message and lets update-status set active.
+    assert peer_data.get("logical-replication-last-block-message") == (
+        "Publisher errors: table public.test_table in database testdb doesn't exist"
+    )
