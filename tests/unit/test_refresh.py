@@ -19,7 +19,7 @@ from single_kernel_postgresql.managers.refresh import (
     PostgreSQLRefreshK8s,
     RefreshManager,
 )
-from tenacity import RetryError
+from tenacity import RetryError, stop_after_attempt
 
 CHARM_VERSION = "16/1.0.0"
 
@@ -600,6 +600,7 @@ def test_reconcile_updates_layers_and_allows_next_unit(refresh_manager, charm):
     charm.unit.name = "postgresql/0"
     charm.patroni_manager.cluster_members = {"postgresql-0"}
     charm.patroni_manager.is_replication_healthy.return_value = True
+    refresh_manager.refresh.next_unit_allowed_to_refresh = False
 
     refresh_manager.reconcile()
 
@@ -639,6 +640,29 @@ def test_reconcile_blocks_when_retries_exhausted(refresh_manager, charm):
     with patch(
         "single_kernel_postgresql.managers.refresh.Retrying",
         side_effect=RetryError("last attempt"),
+    ) as retrying:
+        refresh_manager.reconcile()
+
+    assert charm.unit.status == BlockedStatus(
+        "upgrade failed. Check logs for rollback instruction"
+    )
+    assert refresh_manager.refresh.next_unit_allowed_to_refresh is False
+    retry_kwargs = retrying.call_args.kwargs
+    assert retry_kwargs["stop"].max_attempt_number == 6
+    assert retry_kwargs["wait"].wait_fixed == 10
+
+
+def test_reconcile_blocks_when_replication_unhealthy(refresh_manager, charm):
+    charm.patroni_manager.member_started = True
+    charm.unit.is_leader.return_value = False
+    charm.unit.name = "postgresql/0"
+    charm.patroni_manager.cluster_members = {"postgresql-0"}
+    charm.patroni_manager.is_replication_healthy.return_value = False
+    refresh_manager.refresh.next_unit_allowed_to_refresh = False
+
+    with patch(
+        "single_kernel_postgresql.managers.refresh.stop_after_attempt",
+        return_value=stop_after_attempt(1),
     ):
         refresh_manager.reconcile()
 
@@ -646,6 +670,7 @@ def test_reconcile_blocks_when_retries_exhausted(refresh_manager, charm):
         "upgrade failed. Check logs for rollback instruction"
     )
     assert refresh_manager.refresh.next_unit_allowed_to_refresh is False
+    charm.patroni_manager.is_replication_healthy.assert_called()
 
 
 def test_on_init_reconciles_when_in_progress(refresh_manager):
