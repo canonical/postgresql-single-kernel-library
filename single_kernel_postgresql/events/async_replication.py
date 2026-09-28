@@ -379,3 +379,20 @@ class PostgreSQLAsyncReplication(Object):
             if not self.manager._update_internal_secret():
                 logger.debug("Secret not found, deferring event")
                 event.defer()
+
+    def _re_emit_async_relation_changed_event(self) -> None:
+        """Re-emit the async relation changed event."""
+        if relation := self.manager.async_relation:
+            relation_unit = next(
+                (unit for unit in relation.units if unit.app == relation.app), None
+            )
+            if relation_unit is None:
+                logger.debug(
+                    "Skipping re-emitting relation-changed event: no related units found yet."
+                )
+                return
+            getattr(self.charm.on, f"{relation.name.replace('-', '_')}_relation_changed").emit(
+                relation,
+                app=relation.app,
+                unit=relation_unit,
+            )
