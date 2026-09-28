@@ -152,9 +152,8 @@ merged_data = get_relation_data_as(
 """
 
 import json
-from collections.abc import Callable, MutableMapping
 from functools import reduce, wraps
-from typing import Generic, Optional, TypeVar
+from typing import Callable, Generic, MutableMapping, Optional, Type, TypeVar, Union
 
 import pydantic
 from ops.charm import ActionEvent, CharmBase, RelationEvent
@@ -199,7 +198,7 @@ class BaseConfigModel(BaseModel):
 class TypedCharmBase(CharmBase, Generic[T]):
     """Class to be used for extending config-typed charms."""
 
-    config_type: type[T]
+    config_type: Type[T]
 
     @property
     def config(self) -> T:
@@ -208,7 +207,7 @@ class TypedCharmBase(CharmBase, Generic[T]):
         return self.config_type(**translated_keys)
 
 
-def validate_params(cls: type[T]):
+def validate_params(cls: Type[T]):
     """Return a decorator to allow pydantic parsing of action parameters.
 
     Args:
@@ -217,14 +216,14 @@ def validate_params(cls: type[T]):
     """
 
     def decorator(
-        f: Callable[[CharmBase, ActionEvent, T | ValidationError], G],
+        f: Callable[[CharmBase, ActionEvent, Union[T, ValidationError]], G],
     ) -> Callable[[CharmBase, ActionEvent], G]:
         @wraps(f)
         def event_wrapper(self: CharmBase, event: ActionEvent):
             try:
-                params = cls(**{
-                    key.replace("-", "_"): value for key, value in event.params.items()
-                })
+                params = cls(
+                    **{key.replace("-", "_"): value for key, value in event.params.items()}
+                )
             except ValidationError as e:
                 params = e
             return f(self, event, params)
@@ -252,28 +251,30 @@ def write(relation_data: RelationDataContent, model: BaseModel):
             relation_data[key.replace("_", "-")] = ""
 
 
-def read(relation_data: MutableMapping[str, str], obj: type[T]) -> T:
+def read(relation_data: MutableMapping[str, str], obj: Type[T]) -> T:
     """Read data from a relation databag and parse it into a domain object.
 
     Args:
         relation_data: pointer to the relation databag
         obj: pydantic class representing the model to be used for parsing
     """
-    return obj(**{
-        field_name: (
-            relation_data[parsed_key]
-            if field_info.annotation in DataBagNativeTypes
-            else json.loads(relation_data[parsed_key])
-        )
-        for field_name, field_info in obj.model_fields.items()
-        # pyright: ignore[reportGeneralTypeIssues]
-        if (parsed_key := field_name.replace("_", "-")) in relation_data
-        if relation_data[parsed_key]
-    })
+    return obj(
+        **{
+            field_name: (
+                relation_data[parsed_key]
+                if field_info.annotation in DataBagNativeTypes
+                else json.loads(relation_data[parsed_key])
+            )
+            for field_name, field_info in obj.model_fields.items()
+            # pyright: ignore[reportGeneralTypeIssues]
+            if (parsed_key := field_name.replace("_", "-")) in relation_data
+            if relation_data[parsed_key]
+        }
+    )
 
 
 def parse_relation_data(
-    app_model: type[AppModel] | None = None, unit_model: type[UnitModel] | None = None
+    app_model: Optional[Type[AppModel]] = None, unit_model: Optional[Type[UnitModel]] = None
 ):
     """Return a decorator to allow pydantic parsing of the app and unit databags.
 
@@ -289,8 +290,8 @@ def parse_relation_data(
             [
                 CharmBase,
                 RelationEvent,
-                AppModel | ValidationError | None,
-                UnitModel | ValidationError | None,
+                Optional[Union[AppModel, ValidationError]],
+                Optional[Union[UnitModel, ValidationError]],
             ],
             G,
         ],
@@ -344,9 +345,9 @@ class RelationDataModel(BaseModel):
 
 
 def get_relation_data_as(
-    model_type: type[AppModel],
+    model_type: Type[AppModel],
     *relation_data: RelationDataContent,
-) -> AppModel | ValidationError:
+) -> Union[AppModel, ValidationError]:
     """Return a merged representation of the provider and requirer databag into a single object.
 
     Args:
