@@ -226,8 +226,8 @@ class LogicalReplicationManager(BaseManager):
         self.postgresql().grant_internal_access_group_membership(user)
         return user, password
 
-    def clean_up_published_resources(self) -> None:
-        """Drop the publications, users and secrets of relations that no longer exist."""
+    def clean_up_published_resources(self, relation_id: int) -> None:
+        """Drop the publications, users, secrets and slots of broken offer relations."""
         published_resources = json.loads(
             self.state.application.data.get(PUBLISHED_RESOURCES_KEY, "{}")
         )
@@ -261,18 +261,21 @@ class LogicalReplicationManager(BaseManager):
             if stale_relation_id in active_relation_ids:
                 continue
             logger.info(
-                f"Cleaning up published logical replication resources for the redundant {LOGICAL_REPLICATION_OFFER_RELATION} #{relation_id}"
+                f"Cleaning up published logical replication resources for the redundant {LOGICAL_REPLICATION_OFFER_RELATION} #{stale_relation_id}"
             )
             try:
                 secret = self.state.model.get_secret(id=relation_resources["secret-id"])
-                self.postgresql().delete_user(secret.peek_content()["username"])
+                postgresql.delete_user(secret.peek_content()["username"])
                 secret.remove_all_revisions()
             except SecretNotFoundError:
                 pass
             for database, publication in relation_resources["publications"].items():
-                self.postgresql().drop_publication(database, publication["publication-name"])
-            del published_resources[relation_id]
-            self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(published_resources)
+                postgresql.drop_publication(database, publication["publication-name"])
+                postgresql.drop_replication_slot(publication["replication-slot-name"], database)
+            del published_resources[stale_relation_id]
+            self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(
+                published_resources
+            )
 
         self.update_config()
 
@@ -758,7 +761,10 @@ class LogicalReplicationManager(BaseManager):
         # duplication. "enforce" (creation gate, retries, publisher-error
         # re-validation) always guards.
         if empty_tables == "enforce" or database in self._subscriptions_info():
-            return self._fail_validation(f"table {schematable} in database {database} isn't empty")
+            self._fail_validation(f"table {schematable} in database {database} isn't empty")
+            # True = validation failed: _validate_table_for_subscription flips this
+            # with `not`, so the blocked table stops the request.
+            return True
         return False
 
     def _guard_subscription_refresh(
@@ -1275,6 +1281,9 @@ class LogicalReplicationManager(BaseManager):
         if message:
             logger.error(f"Logical replication validation: {message}")
         self.state.application.data[VALIDATION_KEY] = "error"
+        # Persist the specific reason so the composition-root status gate can
+        # re-surface it after any later transient status write.
+        self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = status_msg or ""
         self.set_unit_status(
             BlockedStatus(status_msg or LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS)
         )
