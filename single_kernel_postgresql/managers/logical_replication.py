@@ -14,6 +14,7 @@ the charm-side events handler owns the observers and event-flow guards.
 import json
 import logging
 from collections.abc import Callable
+from typing import cast
 
 from ops import Relation, Secret, SecretNotFoundError
 
@@ -112,7 +113,9 @@ class LogicalReplicationManager(BaseManager):
     def get_offer_secret(self, relation_id: int) -> tuple[Secret, str]:
         """Returns the logical replication secret and its id. Updates, if content changed."""
         secret_label = f"{SECRET_LABEL}-{relation_id}"
-        primary = self.primary_endpoint()
+        # The events handlers defer/exit while the primary endpoint is unavailable;
+        # the manager is only invoked with a primary present.
+        primary = cast("str", self.primary_endpoint())
         try:
             # Avoid recreating the secret.
             secret = self.state.model.get_secret(label=secret_label)
@@ -140,7 +143,9 @@ class LogicalReplicationManager(BaseManager):
                 },
                 label=secret_label,
             )
-        return secret, secret.id
+        # The id resolves on both paths (the workaround above / a fresh add_secret);
+        # the callers write it straight into the relation databag, as the references do.
+        return secret, cast("str", secret.id)
 
     def _create_user(self, relation_id: int) -> tuple[str, str]:
         user = f"logical_replication_relation_{relation_id}"
