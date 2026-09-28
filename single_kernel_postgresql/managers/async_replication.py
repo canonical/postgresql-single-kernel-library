@@ -12,14 +12,14 @@ promotion/standby lifecycle flows.
 Ported from the PostgreSQL VM and K8s charms' async replication module, including the
 dead-datacenter recovery changes (DPE-10203): relation databag reads tolerate ModelError
 from a force-removed cross-model relation, the shared secret is referenced by id instead
-of label, and a stale promoted-cluster-counter is cleared on update-status and before the
-create-replication/promote actions.
+of label, and a stale promoted-cluster-counter is cleared before the create-replication
+and promote actions.
 """
 
 import json
 import logging
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ops import Application, ModelError, Relation, Secret, SecretNotFoundError, Unit
 from tenacity import RetryError
@@ -40,6 +40,8 @@ from single_kernel_postgresql.workload.base import BaseWorkload
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from single_kernel_postgresql.workload.k8s import K8sWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -127,16 +129,8 @@ class AsyncReplicationManager(BaseManager):
         return ip
 
     def _get_unit_ip(self) -> str:
-        """Reads some files to quickly figure out its own pod IP.
-
-        It should work for any Ubuntu-based image
-        """
-        with open("/etc/hosts") as f:
-            hosts = f.read()
-        with open("/etc/hostname") as f:
-            hostname = f.read().replace("\n", "")
-        line = next(ln for ln in hosts.split("\n") if ln.find(hostname) >= 0)
-        return line.split("\t")[0]
+        """Return this unit's pod IP, resolved from the pod filesystem (K8s only)."""
+        return cast("K8sWorkload", self.workload).get_unit_ip_from_hosts()
 
     def get_all_primary_cluster_endpoints(self) -> list[str]:
         """Return all the primary cluster endpoints from the standby cluster."""
@@ -206,15 +200,12 @@ class AsyncReplicationManager(BaseManager):
         ]:
             if async_relation is None:
                 continue
-            for app, relation_data in {
-                async_relation.app: async_relation.data,
-                self.state.model.app: self.state.peer_relation.data
-                if self.state.peer_relation
-                else {},
-            }.items():
-                if app is None or relation_data is None:
+            for app, databag in [
+                (async_relation.app, async_relation.data[async_relation.app]),
+                (self.state.model.app, self.state.application.data),
+            ]:
+                if app is None:
                     continue
-                databag = relation_data[app]
                 try:
                     relation_promoted_cluster_counter = databag.get(
                         "promoted-cluster-counter", "0"
@@ -417,7 +408,9 @@ class AsyncReplicationManager(BaseManager):
         relation = self.async_relation
         if relation is None:
             return None
-        primary_cluster_info = relation.data[relation.app].get("primary-cluster-data")
+        primary_cluster_info = _safe_databag_get(
+            relation.data[relation.app], "primary-cluster-data"
+        )
         if primary_cluster_info is None:
             return None
         return json.loads(primary_cluster_info).get("secret-id")
