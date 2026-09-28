@@ -11,7 +11,7 @@ import charm_refresh
 import pytest
 from charm_refresh import CharmVersion, PrecheckFailed
 from data_platform_helpers.advanced_statuses import StatusObject
-from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
+from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, UnknownStatus, WaitingStatus
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import SwitchoverFailedError
 from single_kernel_postgresql.config.statuses import GeneralStatuses
@@ -308,11 +308,11 @@ def test_set_unit_status_explicit_refresh_argument_wins(refresh_manager, charm):
 def test_reconcile_refresh_status_sets_higher_priority_status(refresh_manager, charm):
     higher = MaintenanceStatus("refresh in progress")
     refresh_manager.refresh.unit_status_higher_priority = higher
-    charm.set_app_status.reset_mock()
+    charm._recompute_async_app_status.reset_mock()
 
     refresh_manager.reconcile_refresh_status()
 
-    charm.set_app_status.assert_called_once()
+    charm._recompute_async_app_status.assert_called_once()
     assert charm.unit.status == higher
     assert pathlib.Path(".last_refresh_unit_status.json").read_text() == json.dumps(higher.message)
 
@@ -399,6 +399,26 @@ def test_get_statuses_persists_the_reconciled_active_status(refresh_manager, cha
     )
 
 
+def test_get_statuses_persists_active_idle_for_unsettled_unit_status(refresh_manager, charm):
+    charm.unit.status = UnknownStatus()
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_called_once_with(
+        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
+    )
+
+
+def test_get_statuses_returns_cached_active_idle_for_app_scope_without_recompute(
+    refresh_manager,
+):
+    refresh_manager.state.statuses.get.return_value.root = []
+
+    assert refresh_manager.get_statuses("app") == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
 def test_get_statuses_returns_the_cached_records_without_recompute(refresh_manager):
     record = StatusObject(status="blocked", message="upgrade failed")
     refresh_manager.state.statuses.get.return_value.root = [record]
@@ -418,5 +438,5 @@ def test_get_statuses_returns_active_idle_for_app_scope(refresh_manager, charm):
     statuses = refresh_manager.get_statuses("app", recompute=True)
 
     assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
-    charm.set_app_status.assert_called()
+    charm._recompute_async_app_status.assert_called()
     refresh_manager.state.statuses.set.assert_not_called()
