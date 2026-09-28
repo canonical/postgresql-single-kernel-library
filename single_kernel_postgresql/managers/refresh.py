@@ -298,7 +298,11 @@ class RefreshManager(BaseManager):
     def _persist_machinery_status(self) -> StatusObject:
         """Persist the reconciled unit status as this manager's status record."""
         status = self._charm.unit.status
-        record = StatusObject(status=status.name, message=status.message)
+        if status.name not in ("active", "blocked", "maintenance", "waiting"):
+            # Unknown/error unit statuses carry no refresh information.
+            record = GeneralStatuses.ACTIVE_IDLE.value
+        else:
+            record = StatusObject(status=status.name, message=status.message)
         self.state.statuses.set(record, "unit", self.name)
         return record
 
