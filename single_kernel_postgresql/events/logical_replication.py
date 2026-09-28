@@ -15,6 +15,7 @@ through ``set_unit_status``.
 import logging
 
 from ops import (
+    ActiveStatus,
     EventBase,
     LeaderElectedEvent,
     Object,
@@ -113,8 +114,20 @@ class PostgreSQLLogicalReplication(Object):
             self.state.application.data["logical-replication-validation"] = "ongoing"
             event.defer()
             return False
+        # Clear any previous error state when config changes
+        # This prevents retry_validations() from validating stale config
+        self.state.application.data["logical-replication-validation"] = "ongoing"
+
+        # Send subscription request to publisher first, before full validation
+        # This allows the publisher to detect circular replication and report errors
+        # which we can then check before doing our local validation
+        if relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION):
+            self.manager.push_subscription_request(relation)
+
         if self.manager.validate_subscription_request():
             self.manager.apply_updated_subscription_request()
+            # Clear any previous blocked status from validation errors
+            self.charm.set_unit_status(ActiveStatus())
         return True
 
     def retry_validations(self) -> None:
@@ -158,6 +171,8 @@ class PostgreSQLLogicalReplication(Object):
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
         if not self._relation_changed_checks(event):
+            return
+        if not self.manager.handle_publisher_errors(event.relation):
             return
         self.manager.reconcile_subscriptions(event.relation)
 
@@ -310,6 +325,6 @@ class PostgreSQLLogicalReplication(Object):
             event.defer()
             return
 
-        self.manager.clean_up_published_resources()
+        self.manager.clean_up_published_resources(event.relation.id)
 
     # endregion
