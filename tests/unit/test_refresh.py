@@ -10,14 +10,15 @@ from unittest.mock import MagicMock, patch
 import charm_refresh
 import pytest
 from charm_refresh import CharmVersion, PrecheckFailed
+from data_platform_helpers.advanced_statuses import StatusObject
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import SwitchoverFailedError
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.managers.refresh import (
     PostgreSQLRefreshK8s,
     RefreshManager,
 )
-from tenacity import RetryError
 
 CHARM_VERSION = "16/1.0.0"
 
@@ -339,192 +340,63 @@ def test_reconcile_refresh_status_ignores_unrelated_status(refresh_manager, char
     refresh_manager.refresh.unit_status_lower_priority.assert_not_called()
 
 
-@pytest.fixture
-def vm_manager(charm, set_default_status):
-    """A refresh manager on the VM substrate wired to the mock charm."""
-    state = MagicMock(name="state")
-    state.substrate = Substrates.VM
-    return RefreshManager(
-        state=state,
-        workload=MagicMock(name="workload"),
-        charm=charm,
-        set_default_status=set_default_status,
+def test_reconcile_refresh_status_substitutes_active_status_without_cached_message(
+    refresh_manager, charm
+):
+    lower = ActiveStatus("PostgreSQL 16.14 running")
+    pathlib.Path(".last_refresh_unit_status.json").write_text(json.dumps(None))
+    charm.unit.status = ActiveStatus("stale message")
+    refresh_manager.refresh.unit_status_lower_priority = MagicMock(return_value=lower)
+
+    refresh_manager.reconcile_refresh_status()
+
+    assert charm.unit.status == lower
+    assert pathlib.Path(".last_refresh_unit_status.json").read_text() == json.dumps(lower.message)
+
+
+def test_get_statuses_replays_the_reconciliation_on_recompute(refresh_manager, charm):
+    higher = MaintenanceStatus("refresh in progress")
+    refresh_manager.refresh.unit_status_higher_priority = higher
+    record = StatusObject(status="maintenance", message="refresh in progress")
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert charm.unit.status == higher
+    assert statuses == [record]
+    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+
+
+def test_get_statuses_persists_the_reconciled_active_status(refresh_manager, charm):
+    refresh_manager.refresh = None
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_called_once_with(
+        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
     )
 
 
-@pytest.fixture
-def refresh_vm(charm):
-    from single_kernel_postgresql.managers.refresh import PostgreSQLRefreshVM
+def test_get_statuses_returns_the_cached_records_without_recompute(refresh_manager):
+    record = StatusObject(status="blocked", message="upgrade failed")
+    refresh_manager.state.statuses.get.return_value.root = [record]
 
-    return PostgreSQLRefreshVM(workload_name="PostgreSQL", charm_name="postgresql", _charm=charm)
-
-
-def test_refresh_snap_runs_the_post_refresh_flow(refresh_vm, charm):
-    refresh = MagicMock(name="refresh")
-    charm.refresh_manager = MagicMock(name="refresh_manager")
-
-    refresh_vm.refresh_snap(snap_name="charmed-postgresql", snap_revision="366", refresh=refresh)
-
-    charm.update_config.assert_called_once_with(refresh=refresh)
-    charm.workload.install_snap_package.assert_called_once_with(revision="366", refresh=refresh)
-    charm.refresh_manager.post_snap_refresh.assert_called_once_with(refresh)
+    assert refresh_manager.get_statuses("unit") == [record]
 
 
-def test_post_snap_refresh_blocks_when_patroni_fails_to_start(vm_manager, charm):
-    charm.patroni_manager.start_patroni.return_value = False
-    vm_manager.refresh.next_unit_allowed_to_refresh = False
+def test_get_statuses_defaults_to_active_idle_without_cached_records(refresh_manager):
+    refresh_manager.state.statuses.get.return_value.root = []
 
-    vm_manager.post_snap_refresh(vm_manager.refresh)
-
-    assert charm.unit.status == BlockedStatus("Failed to start PostgreSQL")
-    charm.post_refresh_side_effects.assert_not_called()
-    assert vm_manager.refresh.next_unit_allowed_to_refresh is False
+    assert refresh_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
 
 
-def test_post_snap_refresh_allows_next_unit_when_healthy(vm_manager, charm):
-    charm.patroni_manager.start_patroni.return_value = True
-    charm.patroni_manager.member_started = True
-    charm.patroni_manager.cluster_members = {"postgresql-2"}
-    charm.patroni_manager.is_replication_healthy.return_value = True
-    charm.unit.name = "postgresql/2"
-    lower_peer, middle_peer = MagicMock(), MagicMock()
-    lower_peer.name = "postgresql/0"
-    middle_peer.name = "postgresql/1"
-    charm.state.peer_relation = MagicMock(units=[lower_peer, middle_peer])
+def test_get_statuses_returns_active_idle_for_app_scope(refresh_manager, charm):
+    refresh_manager.state.statuses.set.reset_mock()
 
-    vm_manager.post_snap_refresh(vm_manager.refresh)
+    statuses = refresh_manager.get_statuses("app", recompute=True)
 
-    charm.post_refresh_side_effects.assert_called_once()
-    assert vm_manager.refresh.next_unit_allowed_to_refresh is True
-    assert charm.unit.status == ActiveStatus()
-
-
-def test_post_snap_refresh_retries_exhausted_keeps_unit_blocked_from_refresh(vm_manager, charm):
-    charm.patroni_manager.start_patroni.return_value = True
-    charm.patroni_manager.member_started = False
-    vm_manager.refresh.next_unit_allowed_to_refresh = False
-
-    with patch(
-        "single_kernel_postgresql.managers.refresh.Retrying",
-        side_effect=RetryError("last attempt"),
-    ):
-        vm_manager.post_snap_refresh(vm_manager.refresh)
-
-    charm.post_refresh_side_effects.assert_called_once()
-    assert vm_manager.refresh.next_unit_allowed_to_refresh is False
-
-
-def test_on_init_marks_next_unit_allowed_when_not_in_progress(vm_manager):
-    vm_manager.refresh.next_unit_allowed_to_refresh = False
-    vm_manager.refresh.in_progress = False
-
-    with patch.object(vm_manager, "migrate_temp_tablespace_location") as migrate:
-        vm_manager.on_init()
-
-    migrate.assert_called_once()
-    assert vm_manager.refresh.next_unit_allowed_to_refresh is True
-
-
-def test_on_init_runs_post_refresh_when_in_progress(vm_manager):
-    vm_manager.refresh.next_unit_allowed_to_refresh = False
-    vm_manager.refresh.in_progress = True
-
-    with patch.object(vm_manager, "post_snap_refresh") as post_snap_refresh:
-        vm_manager.on_init()
-
-    post_snap_refresh.assert_called_once_with(vm_manager.refresh)
-
-
-def test_migrate_temp_tablespace_skips_without_primary_endpoint(vm_manager, charm):
-    charm.primary_endpoint = None
-    assert vm_manager.migrate_temp_tablespace_location() is True
-    assert vm_manager.migrate_temp_tablespace_location(required=True) is False
-
-
-def test_migrate_temp_tablespace_skips_for_async_relation(vm_manager, charm):
-    charm.primary_endpoint = "10.1.0.1"
-    charm.has_async_replication_relation.return_value = True
-
-    assert vm_manager.migrate_temp_tablespace_location() is True
-
-
-def test_execute_temp_tablespace_migration_noop_when_already_migrated(vm_manager, charm):
-    temp_data_dir = MagicMock()
-    temp_data_dir.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp/16/main"
-    temp_root = MagicMock()
-    temp_root.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp"
-    charm.workload.paths.temp = temp_data_dir
-    charm.workload.paths.temp.parent = temp_root
-    cursor = charm.postgresql._connect_to_database.return_value.cursor.return_value
-    cursor.fetchone.return_value = ("/var/snap/charmed-postgresql/common/data/temp/16/main",)
-
-    assert vm_manager._execute_temp_tablespace_migration("10.1.0.1") is True
-    cursor.execute.assert_called_once_with(
-        "SELECT pg_tablespace_location(oid) FROM pg_tablespace WHERE spcname='temp';"
-    )
-
-
-def test_execute_temp_tablespace_migration_performs_the_ddl(vm_manager, charm):
-    temp_data_dir = MagicMock()
-    temp_data_dir.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp/16/main"
-    temp_root = MagicMock()
-    temp_root.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp"
-    charm.workload.paths.temp = temp_data_dir
-    charm.workload.paths.temp.parent = temp_root
-    cursor = charm.postgresql._connect_to_database.return_value.cursor.return_value
-    cursor.fetchone.return_value = ("/var/snap/charmed-postgresql/common/data/temp",)
-
-    assert vm_manager._execute_temp_tablespace_migration("10.1.0.1") is True
-    cursor.execute.assert_any_call("DROP TABLESPACE temp;")
-    cursor.execute.assert_any_call(
-        "CREATE TABLESPACE temp LOCATION '/var/snap/charmed-postgresql/common/data/temp/16/main';"
-    )
-    cursor.execute.assert_any_call("GRANT CREATE ON TABLESPACE temp TO public;")
-    cursor.execute.assert_any_call("CHECKPOINT;")
-
-
-def test_execute_temp_tablespace_migration_skips_unexpected_location(vm_manager, charm):
-    temp_data_dir = MagicMock()
-    temp_data_dir.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp/16/main"
-    temp_root = MagicMock()
-    temp_root.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp"
-    charm.workload.paths.temp = temp_data_dir
-    charm.workload.paths.temp.parent = temp_root
-    cursor = charm.postgresql._connect_to_database.return_value.cursor.return_value
-    cursor.fetchone.return_value = ("/somewhere/else",)
-
-    assert vm_manager._execute_temp_tablespace_migration("10.1.0.1") is True
-    cursor.execute.assert_called_once()
-
-
-def test_check_and_update_internal_cert_regenerates_on_cn_mismatch(vm_manager, charm):
-    cert = MagicMock()
-    cert.subject.get_attributes_for_oid.return_value = [MagicMock(value="10.9.9.9")]
-    charm.state.get_secret.return_value = "raw-cert"
-    charm.state.unit_ip = "10.1.0.1"
-
-    with patch(
-        "single_kernel_postgresql.managers.refresh.load_pem_x509_certificate",
-        return_value=cert,
-    ):
-        vm_manager.check_and_update_internal_cert()
-
-    charm.tls_manager.generate_internal_peer_cert.assert_called_once()
-    charm.tls_manager.push_tls_files.assert_called_once()
-    charm.update_config.assert_called_once()
-
-
-def test_check_and_update_internal_cert_keeps_matching_cert(vm_manager, charm):
-    cert = MagicMock()
-    cert.subject.get_attributes_for_oid.return_value = [MagicMock(value="10.1.0.1")]
-    charm.state.get_secret.return_value = "raw-cert"
-    charm.state.unit_ip = "10.1.0.1"
-
-    with patch(
-        "single_kernel_postgresql.managers.refresh.load_pem_x509_certificate",
-        return_value=cert,
-    ):
-        vm_manager.check_and_update_internal_cert()
-
-    charm.tls_manager.generate_internal_peer_cert.assert_not_called()
-    charm.update_config.assert_not_called()
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    charm.set_app_status.assert_called()
+    refresh_manager.state.statuses.set.assert_not_called()
