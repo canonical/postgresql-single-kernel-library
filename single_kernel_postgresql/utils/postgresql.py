@@ -25,8 +25,10 @@ import pwd
 from datetime import UTC, datetime
 
 import psycopg2
+import psycopg2.errors
 from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
+from tenacity import Retrying, retry_if_exception_type, stop_after_delay, wait_fixed
 
 from ..compat.postgresql import (
     ACCESS_GROUP_RELATION,
@@ -1181,6 +1183,38 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
         finally:
             if connection:
                 connection.close()
+
+    def drop_replication_slot(self, slot: str, database: str) -> None:
+        """Drop a logical replication slot, tolerating absence and walsender races.
+
+        pg_drop_replication_slot fails with 'is active for PID <n>' while the
+        subscriber's walsender is still connected (the subscriber may have just
+        been dropped or its app removed). The walsender terminates shortly
+        after, so retry with a bounded backoff before giving up. Each attempt
+        opens a fresh connection: a failed statement aborts the surrounding
+        transaction, so retrying on the same connection could only ever raise
+        InFailedSqlTransaction again.
+        """
+        try:
+            for attempt in Retrying(
+                stop=stop_after_delay(60),
+                wait=wait_fixed(5),
+                retry=retry_if_exception_type(psycopg2.errors.ObjectInUse),  # ty: ignore[unresolved-attribute]
+                reraise=True,
+            ):
+                with attempt:
+                    connection = self._connect_to_database(database=database)
+                    try:
+                        with connection, connection.cursor() as cursor:
+                            cursor.execute(
+                                SQL("SELECT pg_drop_replication_slot({});").format(Literal(slot))
+                            )
+                    finally:
+                        connection.close()
+        except psycopg2.errors.UndefinedObject:  # ty: ignore[unresolved-attribute]
+            logger.debug(f"Replication slot {slot} already absent")
+        except psycopg2.Error as e:
+            logger.error(f"Failed to drop replication slot {slot}: {e}")
 
     def create_subscription(
         self,
