@@ -102,7 +102,8 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         return False
 
     def create_pgdata(self) -> None:
-        """Create the PostgreSQL data directories; the production charm owns the real body."""
+        """Create the PostgreSQL data directories (ported from the K8s charm)."""
+        self.workload.init_storage()
 
     @property
     def primary_endpoint(self) -> str | None:
