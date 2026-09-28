@@ -153,7 +153,7 @@ class PostgreSQLLogicalReplication(Object):
         if not self.manager.validate_subscription_request():
             return
         event.relation.data[self.model.app]["subscription-request"] = (
-            self.state.config.logical_replication_subscription_request or ""
+            self.state.config.logical_replication_subscription_request or "{}"
         )
 
     def _on_relation_changed(self, event: RelationChangedEvent) -> None:
