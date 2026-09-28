@@ -54,7 +54,7 @@ def _patch_postgresql(harness, database_exists=True, table_exists=True, is_table
 def test_would_create_circular_replication_no_relation(harness):
     """Circular detection returns False when there's no subscription relation."""
     assert (
-        harness.charm.logical_replication._would_create_circular_replication(
+        harness.charm.logical_replication_manager._would_create_circular_replication(
             None, TESTING_DATABASE, "public.test_table"
         )
         is False
@@ -68,7 +68,7 @@ def test_would_create_circular_replication_no_database_published(harness):
     harness.update_relation_data(rel_id, "remote-app", {"publications": json.dumps({})})
 
     assert (
-        harness.charm.logical_replication._would_create_circular_replication(
+        harness.charm.logical_replication_manager._would_create_circular_replication(
             relation, TESTING_DATABASE, "public.test_table"
         )
         is False
@@ -88,7 +88,7 @@ def test_would_create_circular_replication_table_not_published(harness):
     harness.update_relation_data(rel_id, "remote-app", {"publications": json.dumps(publications)})
 
     assert (
-        harness.charm.logical_replication._would_create_circular_replication(
+        harness.charm.logical_replication_manager._would_create_circular_replication(
             relation, TESTING_DATABASE, "public.test_table"
         )
         is False
@@ -108,7 +108,7 @@ def test_would_create_circular_replication_simple_bidirectional(harness):
     harness.update_relation_data(rel_id, "remote-app", {"publications": json.dumps(publications)})
 
     assert (
-        harness.charm.logical_replication._would_create_circular_replication(
+        harness.charm.logical_replication_manager._would_create_circular_replication(
             relation, TESTING_DATABASE, "public.test_table"
         )
         is True
@@ -130,7 +130,7 @@ def test_would_create_circular_replication_multihop(harness):
     harness.update_relation_data(rel_id, "cluster-c", {"publications": json.dumps(publications)})
 
     assert (
-        harness.charm.logical_replication._would_create_circular_replication(
+        harness.charm.logical_replication_manager._would_create_circular_replication(
             relation, TESTING_DATABASE, "public.test_table"
         )
         is True
@@ -150,7 +150,7 @@ def test_would_create_circular_replication_different_table_ok(harness):
     harness.update_relation_data(rel_id, "remote-app", {"publications": json.dumps(publications)})
 
     assert (
-        harness.charm.logical_replication._would_create_circular_replication(
+        harness.charm.logical_replication_manager._would_create_circular_replication(
             relation, TESTING_DATABASE, "public.table2"
         )
         is False
@@ -163,7 +163,7 @@ def test_check_publisher_circular_replication_no_subscription(harness):
     offer_relation = harness.model.get_relation("logical-replication-offer", offer_rel_id)
 
     assert (
-        harness.charm.logical_replication._check_publisher_circular_replication(
+        harness.charm.logical_replication_manager._check_publisher_circular_replication(
             offer_relation, TESTING_DATABASE, ["public.test_table"]
         )
         == []
@@ -190,7 +190,7 @@ def test_check_publisher_circular_replication_different_database(harness):
     offer_relation = harness.model.get_relation("logical-replication-offer", offer_rel_id)
 
     assert (
-        harness.charm.logical_replication._check_publisher_circular_replication(
+        harness.charm.logical_replication_manager._check_publisher_circular_replication(
             offer_relation, TESTING_DATABASE, ["public.test_table"]
         )
         == []
@@ -220,14 +220,14 @@ def test_check_publisher_circular_replication_detects_cycle(harness):
     offer_rel_id = _add_logical_relation(harness, "logical-replication-offer", "remote-app")
     offer_relation = harness.model.get_relation("logical-replication-offer", offer_rel_id)
 
-    assert harness.charm.logical_replication._check_publisher_circular_replication(
+    assert harness.charm.logical_replication_manager._check_publisher_circular_replication(
         offer_relation, TESTING_DATABASE, ["public.test_table", "public.another_table"]
     ) == ["public.test_table"]
 
 
 def test_build_replication_chains_no_subscription(harness):
     """Without a subscription, this app is the origin for every published table."""
-    chains = harness.charm.logical_replication._build_replication_chains(
+    chains = harness.charm.logical_replication_manager._build_replication_chains(
         TESTING_DATABASE, ["public.table1", "public.table2"]
     )
 
@@ -255,7 +255,7 @@ def test_build_replication_chains_extends_chain(harness):
         },
     )
 
-    chains = harness.charm.logical_replication._build_replication_chains(
+    chains = harness.charm.logical_replication_manager._build_replication_chains(
         TESTING_DATABASE, ["public.table1", "public.table2", "public.table3"]
     )
 
@@ -288,7 +288,7 @@ def test_validate_subscription_request_blocks_circular(harness):
         _patch_postgresql(harness),
         harness.hooks_disabled(),
     ):
-        result = harness.charm.logical_replication._validate_subscription_request()
+        result = harness.charm.logical_replication_manager.validate_subscription_request()
 
     assert result is False
     assert harness.charm.state.application.data.get("logical-replication-validation") == "error"
@@ -316,7 +316,7 @@ def test_validate_subscription_request_passes_non_circular(harness):
         _patch_postgresql(harness),
         harness.hooks_disabled(),
     ):
-        result = harness.charm.logical_replication._validate_subscription_request()
+        result = harness.charm.logical_replication_manager.validate_subscription_request()
 
     assert result is True
     # Juju clears peer relation data on empty-string writes: the validation marker
@@ -342,8 +342,6 @@ def test_stale_publisher_errors_do_not_block(harness):
         harness.update_relation_data(
             rel_id, harness.charm.app.name, {"subscription-request": json.dumps(request)}
         )
-        result = harness.charm.logical_replication._handle_publisher_errors(
-            Mock(relation=relation, app=relation.app)
-        )
+        result = harness.charm.logical_replication_manager.handle_publisher_errors(relation)
 
     assert result is True
