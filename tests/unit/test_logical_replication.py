@@ -10,7 +10,13 @@ test charms.
 import json
 from unittest.mock import Mock, PropertyMock, patch
 
-from single_kernel_postgresql.config.literals import PEER_RELATION
+from single_kernel_postgresql.config.literals import PEER_RELATION, SECRET_LABEL
+from single_kernel_postgresql.managers.logical_replication import (
+    APPLIED_REQUEST_KEY,
+    SUBSCRIPTIONS_KEY,
+    VALIDATION_KEY,
+    VALIDATION_STATUS_MESSAGE_KEY,
+)
 
 TESTING_DATABASE = "testdb"
 
@@ -345,3 +351,165 @@ def test_stale_publisher_errors_do_not_block(harness):
         result = harness.charm.logical_replication_manager.handle_publisher_errors(relation)
 
     assert result is True
+
+
+def test_guard_subscription_refresh_blocks_non_empty_new_table(harness):
+    """The refresh guard blocks a newly-requested locally non-empty table (#982)."""
+    _set_peer_data(harness, {SUBSCRIPTIONS_KEY: json.dumps({"1": {TESTING_DATABASE: "sub"}})})
+    postgresql = Mock()
+    postgresql.subscription_table_set.return_value = set()
+    postgresql.is_table_empty.return_value = False
+    with patch.object(type(harness.charm), "postgresql", PropertyMock(return_value=postgresql)):
+        result = harness.charm.logical_replication_manager._guard_subscription_refresh(
+            TESTING_DATABASE, "sub", {TESTING_DATABASE: ["public.fresh"]}
+        )
+
+    assert result is False
+    assert harness.charm.state.application.data.get(VALIDATION_KEY) == "error"
+    assert (
+        harness.charm.state.application.data.get(VALIDATION_STATUS_MESSAGE_KEY)
+        == "table public.fresh isn't empty"
+    )
+
+
+def test_guard_subscription_refresh_allows_empty_new_table(harness):
+    """The refresh guard lets a locally empty newly-requested table through."""
+    _set_peer_data(harness, {SUBSCRIPTIONS_KEY: json.dumps({"1": {TESTING_DATABASE: "sub"}})})
+    postgresql = Mock()
+    postgresql.subscription_table_set.return_value = set()
+    postgresql.is_table_empty.return_value = True
+    with patch.object(type(harness.charm), "postgresql", PropertyMock(return_value=postgresql)):
+        result = harness.charm.logical_replication_manager._guard_subscription_refresh(
+            TESTING_DATABASE, "sub", {TESTING_DATABASE: ["public.fresh"]}
+        )
+
+    assert result is True
+
+
+def test_guard_subscription_refresh_reports_missing_table(harness):
+    """The refresh guard blocks a missing table with a truthful message."""
+    _set_peer_data(harness, {SUBSCRIPTIONS_KEY: json.dumps({"1": {TESTING_DATABASE: "sub"}})})
+    postgresql = Mock()
+    postgresql.subscription_table_set.return_value = set()
+    postgresql.table_exists.return_value = False
+    with patch.object(type(harness.charm), "postgresql", PropertyMock(return_value=postgresql)):
+        result = harness.charm.logical_replication_manager._guard_subscription_refresh(
+            TESTING_DATABASE, "sub", {TESTING_DATABASE: ["public.ghost"]}
+        )
+
+    assert result is False
+    assert (
+        harness.charm.state.application.data.get(VALIDATION_STATUS_MESSAGE_KEY)
+        == "table public.ghost doesn't exist"
+    )
+
+
+def test_enforce_empty_table_guard_skips_already_replicated(harness):
+    """The empty-table guard passes tables the live subscription replicates."""
+    _set_peer_data(harness, {SUBSCRIPTIONS_KEY: json.dumps({"1": {TESTING_DATABASE: "sub"}})})
+    postgresql = Mock()
+    postgresql.subscription_table_set.return_value = {("public", "replicated")}
+    with patch.object(type(harness.charm), "postgresql", PropertyMock(return_value=postgresql)):
+        failed = harness.charm.logical_replication_manager._enforce_empty_table_guard(
+            TESTING_DATABASE, "public", "replicated", "public.replicated", {}, "enforce"
+        )
+
+    assert failed is False
+
+
+def test_enforce_empty_table_guard_blocks_non_empty_new_table(harness):
+    """The empty-table guard fires for a newly-added locally non-empty table."""
+    _set_peer_data(harness, {SUBSCRIPTIONS_KEY: json.dumps({"1": {TESTING_DATABASE: "sub"}})})
+    postgresql = Mock()
+    postgresql.subscription_table_set.return_value = set()
+    postgresql.is_table_empty.return_value = False
+    with patch.object(type(harness.charm), "postgresql", PropertyMock(return_value=postgresql)):
+        failed = harness.charm.logical_replication_manager._enforce_empty_table_guard(
+            TESTING_DATABASE, "public", "fresh", "public.fresh", {}, "enforce"
+        )
+
+    assert failed is True
+
+
+def test_apply_changed_config_pushes_then_persists_baseline(harness):
+    """apply_changed_config pushes the request, validates and persists the baseline."""
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    relation = harness.model.get_relation("logical-replication", rel_id)
+    request = {TESTING_DATABASE: ["public.other_table"]}
+    with (
+        _patch_config(request),
+        _patch_postgresql(harness),
+        patch.object(
+            type(harness.charm), "primary_endpoint", PropertyMock(return_value="10.0.0.1")
+        ),
+        harness.hooks_disabled(),
+    ):
+        harness.set_leader(True)
+        result = harness.charm.logical_replication.apply_changed_config(Mock())
+
+    assert result is True
+    assert json.loads(relation.data[harness.charm.app]["subscription-request"]) == request
+    baseline = json.loads(harness.charm.state.application.data.get(APPLIED_REQUEST_KEY, "{}"))
+    # No live subscription yet: nothing counts as replicated by the baseline.
+    assert baseline == {}
+
+
+def test_apply_changed_config_rejects_malformed_json(harness):
+    """Malformed subscription-request config fails validation and pushes nothing."""
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    relation = harness.model.get_relation("logical-replication", rel_id)
+    config = Mock(logical_replication_subscription_request="not-json")
+    with (
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.config",
+            new_callable=PropertyMock,
+            return_value=config,
+        ),
+        _patch_postgresql(harness),
+        patch.object(
+            type(harness.charm), "primary_endpoint", PropertyMock(return_value="10.0.0.1")
+        ),
+        harness.hooks_disabled(),
+    ):
+        harness.set_leader(True)
+        result = harness.charm.logical_replication.apply_changed_config(Mock())
+
+    assert result is True
+    assert harness.charm.state.application.data.get(VALIDATION_KEY) == "error"
+    assert "subscription-request" not in relation.data[harness.charm.app]
+
+
+def test_secret_changed_updates_subscriptions(harness):
+    """A publisher secret change rotates the credentials of live subscriptions."""
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    harness.update_relation_data(rel_id, "remote-app", {"secret-id": "secret:1"})
+    _set_peer_data(
+        harness, {SUBSCRIPTIONS_KEY: json.dumps({str(rel_id): {TESTING_DATABASE: "sub"}})}
+    )
+    secret_content = {"primary": "10.0.0.1", "username": "u", "password": "p"}
+    secret = Mock()
+    secret.get_content.return_value = secret_content
+    model = Mock()
+    model.get_secret.return_value = secret
+    model.get_relation.return_value = harness.model.get_relation(PEER_RELATION)
+    model.app = harness.charm.app
+    postgresql = Mock()
+    event = Mock()
+    event.secret.label = f"{SECRET_LABEL}-1"
+    with (
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.model",
+            PropertyMock(return_value=model),
+        ),
+        patch.object(type(harness.charm), "postgresql", PropertyMock(return_value=postgresql)),
+        patch.object(
+            type(harness.charm), "primary_endpoint", PropertyMock(return_value="10.0.0.1")
+        ),
+        harness.hooks_disabled(),
+    ):
+        harness.set_leader(True)
+        harness.charm.logical_replication._on_secret_changed(event)
+
+    postgresql.update_subscription.assert_called_once_with(
+        TESTING_DATABASE, "sub", "10.0.0.1", "u", "p"
+    )
