@@ -513,3 +513,62 @@ def test_secret_changed_updates_subscriptions(harness):
     postgresql.update_subscription.assert_called_once_with(
         TESTING_DATABASE, "sub", "10.0.0.1", "u", "p"
     )
+
+
+def test_reconcile_creates_subscription_after_publisher_clears_errors(harness):
+    """The stale VALIDATION_KEY flag must not deadlock subscription creation.
+
+    The publisher may clear its errors and publish after this unit last
+    validated (the relation-changed then arrives while the flag is still
+    "error"). reconcile_subscriptions must trust the CURRENT state: the
+    creation-time validation re-checks publisher errors, local tables and
+    the empty-table guard, so a passing re-validation must proceed to
+    create_subscription instead of skipping on the stale flag (the
+    blocked-forever resolve deadlock).
+    """
+    rel_id = _add_logical_relation(harness, "logical-replication", "publisher")
+    relation = harness.model.get_relation("logical-replication", rel_id)
+
+    secret_id = harness.add_model_secret(
+        owner=harness.charm.app.name,
+        content={"primary": "10.0.0.1", "username": "u", "password": "p"},
+    )
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            rel_id,
+            "publisher",
+            {
+                "errors": "[]",
+                "publications": json.dumps({
+                    TESTING_DATABASE: {
+                        "publication-name": "relation_15_testdb",
+                        "replication-slot-name": "slot_testdb",
+                    }
+                }),
+                "secret-id": secret_id,
+            },
+        )
+    _set_peer_data(
+        harness,
+        {
+            VALIDATION_KEY: "error",
+            VALIDATION_STATUS_MESSAGE_KEY: "stale error",
+            SUBSCRIPTIONS_KEY: "{}",
+        },
+    )
+
+    postgresql = Mock()
+    postgresql.database_exists.return_value = True
+    postgresql.table_exists.return_value = True
+    postgresql.is_table_empty.return_value = True
+    postgresql.subscription_table_set.return_value = set()
+    with (
+        _patch_config({TESTING_DATABASE: ["public.test_table"]}),
+        patch.object(type(harness.charm), "postgresql", PropertyMock(return_value=postgresql)),
+    ):
+        harness.charm.logical_replication_manager.reconcile_subscriptions(relation)
+
+    postgresql.create_subscription.assert_called_once()
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    peer_data = harness.get_relation_data(peer_rel_id, harness.charm.app.name)
+    assert peer_data.get(VALIDATION_KEY) != "error"
