@@ -310,6 +310,6 @@ class PostgreSQLLogicalReplication(Object):
             event.defer()
             return
 
-        self.manager.clean_up_published_resources()
+        self.manager.clean_up_published_resources(event.relation.id)
 
     # endregion
