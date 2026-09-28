@@ -3,10 +3,15 @@
 """Skeleton for the abstract charm."""
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
 from ops.charm import CharmBase
+
+if TYPE_CHECKING:
+    import charm_refresh
+
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
@@ -21,6 +26,7 @@ from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
+from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
@@ -84,6 +90,16 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             restart_services=self.restart_services,
         )
 
+        # The refresh manager owns the charm_refresh integration and the priority gate
+        # every unit status write routes through. Constructed before the events handler
+        # so the K8s pebble-ready handler can consult the refresh state.
+        self.refresh_manager = RefreshManager(
+            state=self.state,
+            workload=self.workload,
+            charm=self,
+            set_default_status=self.set_default_unit_status,
+        )
+
         # Events Handler
         self.postgresql_events_handler = PostgreSQLEventsHandler(
             self,
@@ -93,11 +109,16 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.refresh_manager,
         )
+
+        # Resume or prepare the refresh (the charms' post-construction resume block).
+        self.refresh_manager.on_init()
 
         # Status Handler
         self.status_handler = StatusHandler(
             self,
+            self.refresh_manager,
             self.cluster_manager,
             self.tls_manager,
             self.config_manager,
@@ -147,17 +168,85 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         pass
 
     @abstractmethod
-    def set_unit_status(self, status: StatusBase) -> None:
+    def set_unit_status(
+        self,
+        status: StatusBase,
+        /,
+        *,
+        refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None,
+    ) -> None:
         """Set the unit status without overriding a higher-priority refresh status."""
         pass
 
     @abstractmethod
-    def update_config(self) -> bool:
+    def set_default_unit_status(self) -> None:
+        """Set the unit status that applies when no refresh status is active."""
+        pass
+
+    @abstractmethod
+    def set_app_status(self) -> None:
+        """Set the application status from the async-replication state.
+
+        Owned by the async-replication module until that phase migrates; the refresh
+        status reconciliation consults it for the leader's app status interplay.
+        """
+        pass
+
+    @abstractmethod
+    def update_config(
+        self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
+    ) -> bool:
         """Re-render the Patroni configuration and apply it."""
+        pass
+
+    @abstractmethod
+    def post_refresh_side_effects(self) -> None:
+        """Run the post-snap-refresh side effects owned by not-yet-migrated modules.
+
+        The VM charm sets up the exporter and pgBackRest exporter, starts/stops the
+        pgBackRest service and updates the watcher unit address here.
+        """
+        pass
+
+    @abstractmethod
+    def has_async_replication_relation(self) -> bool:
+        """Whether this unit is related to an async replication partner.
+
+        Owned by the async-replication module until that phase migrates; the temp
+        tablespace migration skips units inside an async cluster.
+        """
+        pass
+
+    @abstractmethod
+    def update_relation_endpoints(self) -> None:
+        """Refresh the client and async relation endpoints after a switchover.
+
+        Owned by the client-relation and async-replication modules until those
+        phases migrate; the VM pre-refresh checks call it after switching primary.
+        """
         pass
 
     @property
     @abstractmethod
     def primary_endpoint(self) -> str | None:
         """Address of the cluster primary, or None when there is not one."""
+        pass
+
+    @abstractmethod
+    def get_async_primary_cluster_endpoint(self) -> str | None:
+        """Endpoint of the primary cluster of the async replication partner, if any.
+
+        Owned by the async-replication module until that phase migrates; the refresh
+        pre-refresh checks need it to decide whether a switchover crosses clusters.
+        """
+        pass
+
+    @abstractmethod
+    def update_pebble_layers(self) -> None:
+        """Reconcile the workload's Pebble layers (K8s)."""
+        pass
+
+    @abstractmethod
+    def ensure_pgdata_dirs_and_symlinks(self) -> None:
+        """Create the storage directories and symlinks for the PostgreSQL data paths (K8s)."""
         pass

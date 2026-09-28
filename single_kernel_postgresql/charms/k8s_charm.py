@@ -5,8 +5,9 @@
 """PostgreSQL Kubernetes Charm."""
 
 import logging
+from typing import TYPE_CHECKING
 
-from ops import StatusBase
+from ops import ActiveStatus, StatusBase
 
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
@@ -14,6 +15,9 @@ from single_kernel_postgresql.config.literals import CONTAINER_NAME, SYSTEM_USER
 from single_kernel_postgresql.managers.k8s import K8sManager
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.k8s import K8sWorkload
+
+if TYPE_CHECKING:
+    import charm_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +72,8 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         return Substrates.K8S
 
     # The concrete production charm owns these bridges (update_scrape_job_spec +
-    # acquire_lock, pebble metrics/ldap restarts, the refresh-aware status write and the
-    # config re-render), so they are minimal here.
+    # acquire_lock, pebble metrics/ldap restarts, the async app status and the config
+    # re-render), so they are minimal here.
     def get_resource_provider(self) -> K8sManager:
         """Return the substrate's (cpu_cores, memory_bytes) introspector."""
         return self.k8s_manager
@@ -80,11 +84,33 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def restart_services(self) -> None:
         """Restart the monitoring and LDAP-sync sidecar services."""
 
-    def set_unit_status(self, status: StatusBase) -> None:
+    def set_unit_status(
+        self,
+        status: StatusBase,
+        /,
+        *,
+        refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None,
+    ) -> None:
         """Set the unit status without overriding a higher-priority refresh status."""
-        self.unit.status = status
+        self.refresh_manager.set_unit_status(status, refresh=refresh)
 
-    def update_config(self) -> bool:
+    def set_default_unit_status(self) -> None:
+        """Set the unit status that applies when no refresh status is active."""
+        self.unit.status = ActiveStatus()
+
+    def set_app_status(self) -> None:
+        """Set the application status from the async-replication state."""
+
+    def post_refresh_side_effects(self) -> None:
+        """Run the post-snap-refresh side effects owned by not-yet-migrated modules."""
+
+    def has_async_replication_relation(self) -> bool:
+        """Whether this unit is related to an async replication partner."""
+        return False
+
+    def update_config(
+        self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
+    ) -> bool:
         """Re-render the Patroni configuration and apply it."""
         return self.config_manager.update_config(self.postgresql)
 
@@ -92,3 +118,18 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def primary_endpoint(self) -> str | None:
         """Address of the cluster primary's Service."""
         return self.state.primary_endpoint
+
+    def get_async_primary_cluster_endpoint(self) -> str | None:
+        """Endpoint of the primary cluster of the async replication partner, if any."""
+        return None
+
+    def update_relation_endpoints(self) -> None:
+        """Refresh the client and async relation endpoints after a switchover."""
+
+    def update_pebble_layers(self) -> None:
+        """Reconcile the workload's Pebble layers."""
+        self.k8s_manager.update_pebble_layers(replan=True)
+
+    def ensure_pgdata_dirs_and_symlinks(self) -> None:
+        """Create the storage directories and symlinks for the PostgreSQL data paths."""
+        self.workload.init_storage()

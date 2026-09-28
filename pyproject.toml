@@ -4,7 +4,7 @@
 [project]
 name = "postgresql-charms-single-kernel"
 description = "Shared and reusable code for PostgreSQL-related charms"
-version = "16.3.10"
+version = "16.3.12"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -17,6 +17,7 @@ classifiers = [
 ]
 requires-python = ">=3.8,<4.0"
 dependencies = [
+    "cryptography>=42.0.0",
     "ops>=2.0.0",
     "tenacity>=9.0.0",
 ]
