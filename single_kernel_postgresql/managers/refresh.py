@@ -21,7 +21,7 @@ import charm_refresh
 from charm_refresh import CharmVersion, PrecheckFailed
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from ops import ActiveStatus, MaintenanceStatus, StatusBase
+from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, StatusBase, WaitingStatus
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
@@ -298,7 +298,9 @@ class RefreshManager(BaseManager):
     def _persist_machinery_status(self) -> StatusObject:
         """Persist the reconciled unit status as this manager's status record."""
         status = self._charm.unit.status
-        if status.name not in ("active", "blocked", "maintenance", "waiting"):
+        if status.name not in ("active", "blocked", "maintenance", "waiting") or not isinstance(
+            status, (ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus)
+        ):
             # Unknown/error unit statuses carry no refresh information.
             record = GeneralStatuses.ACTIVE_IDLE.value
         else:
