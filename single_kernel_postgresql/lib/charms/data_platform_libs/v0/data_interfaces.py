@@ -905,19 +905,18 @@ class CachedSecret:
 
     def get_content(self) -> dict[str, str]:
         """Getting cached secret content."""
-        if not self._secret_content:
-            if self.meta:
-                try:
-                    self._secret_content = self.meta.get_content(refresh=True)
-                except (ValueError, ModelError) as err:
-                    # https://bugs.launchpad.net/juju/+bug/2042596
-                    # Only triggered when 'refresh' is set
-                    if isinstance(err, ModelError) and not any(
-                        msg in str(err) for msg in self.KNOWN_MODEL_ERRORS
-                    ):
-                        raise
-                    # Due to: ValueError: Secret owner cannot use refresh=True
-                    self._secret_content = self.meta.get_content()
+        if not self._secret_content and self.meta:
+            try:
+                self._secret_content = self.meta.get_content(refresh=True)
+            except (ValueError, ModelError) as err:
+                # https://bugs.launchpad.net/juju/+bug/2042596
+                # Only triggered when 'refresh' is set
+                if isinstance(err, ModelError) and not any(
+                    msg in str(err) for msg in self.KNOWN_MODEL_ERRORS
+                ):
+                    raise
+                # Due to: ValueError: Secret owner cannot use refresh=True
+                self._secret_content = self.meta.get_content()
         return self._secret_content
 
     def set_content(self, content: dict[str, str]) -> None:
