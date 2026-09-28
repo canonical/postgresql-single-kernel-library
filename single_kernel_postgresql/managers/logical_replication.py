@@ -1296,8 +1296,14 @@ class LogicalReplicationManager(BaseManager):
             logger.error(f"Logical replication validation: {message}")
         self.state.application.data[VALIDATION_KEY] = "error"
         # Persist the specific reason so the composition-root status gate can
-        # re-surface it after any later transient status write.
-        self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = status_msg or ""
+        # re-surface it after any later transient status write: the gate's
+        # allowlist compares the unit status message against THIS field (or
+        # the generic literal), so it must mirror what the unit actually
+        # shows -- the update-status retry is the path that clears
+        # VALIDATION_KEY while the unit stays blocked, and an empty/stale
+        # message here makes the gate early-exit forever (the resolve
+        # deadlock).
+        self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = status_msg or message or ""
         self.set_unit_status(
             BlockedStatus(status_msg or LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS)
         )
