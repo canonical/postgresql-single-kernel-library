@@ -76,9 +76,6 @@ class AsyncReplicationWatcher(Protocol):
         ...
 
 
-logger = logging.getLogger(__name__)
-
-
 def _same_secret_id(a: str | None, b: str | None) -> bool:
     """Whether two Juju secret ids refer to the same secret.
 
@@ -237,13 +234,15 @@ class PostgreSQLAsyncReplication(Object):
             event.fail("This action must be run in the cluster where the offer was created.")
             return
 
-        if not self._handle_replication_change(event):  # type: ignore
-            return
+        # The replication-change flow (promotion guards, counter increment, and
+        # address checks) is added by slice 4/8; this slice keeps trunk mergeable
+        # on its own.
+        return
 
         # Set the replication name in the relation data.
-        self.manager.async_relation.data[self.state.model.app].update(  # type: ignore
-            {"name": event.params["name"]}
-        )
+        self.manager.async_relation.data[self.state.model.app].update({
+            "name": event.params["name"]
+        })
 
         # Set the status.
         self.charm.set_unit_status(MaintenanceStatus("Creating replication..."))
