@@ -11,7 +11,7 @@ from single_kernel_postgresql.charms.vm_charm import PostgreSQLVMCharm
 
 
 class PostgreSQLVMTestCharm(PostgreSQLVMCharm):
-    """Test charm: dispatches the promote action like the production charm."""
+    """Test charm: dispatches the cluster-scope promote action."""
 
     def __init__(self, *args):
         super().__init__(*args)
