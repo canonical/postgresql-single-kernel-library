@@ -155,3 +155,4 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
 
     def ensure_pgdata_dirs_and_symlinks(self) -> None:
         """Create the storage directories and symlinks for the PostgreSQL data paths."""
+        self.workload.init_storage()

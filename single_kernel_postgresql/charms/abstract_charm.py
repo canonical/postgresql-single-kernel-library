@@ -158,11 +158,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         # Status Handler
         self.status_handler = StatusHandler(
             self,
+            self.refresh_manager,
             self.cluster_manager,
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
-            self.refresh_manager,
         )
 
     # Postgresql Client
