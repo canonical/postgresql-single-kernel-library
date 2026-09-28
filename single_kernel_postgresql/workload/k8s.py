@@ -292,7 +292,7 @@ class K8sWorkload(BaseWorkload):
 
     def stop(self) -> None:
         """Stop the PostgreSQL service."""
-        ...
+        self.stop_service(K8S_POSTGRESQL_SERVICE_NAME)
 
     def start_service(self, service: str) -> None:
         """Start a named Pebble service."""
