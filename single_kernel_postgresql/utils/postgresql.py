@@ -1293,6 +1293,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
         finally:
             if connection:
                 connection.close()
+
     def drop_replication_slot(self, slot: str, database: str) -> None:
         """Drop a logical replication slot, tolerating absence and walsender races.
 

@@ -273,9 +273,7 @@ class LogicalReplicationManager(BaseManager):
                 postgresql.drop_publication(database, publication["publication-name"])
                 postgresql.drop_replication_slot(publication["replication-slot-name"], database)
             del published_resources[stale_relation_id]
-            self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(
-                published_resources
-            )
+            self.state.application.data[PUBLISHED_RESOURCES_KEY] = json.dumps(published_resources)
 
         self.update_config()
 
@@ -475,12 +473,13 @@ class LogicalReplicationManager(BaseManager):
             if database not in subscriptions or database not in publications:
                 # Fresh mutual setups race: our bookkeeping or the remote's
                 # publications can lag while both sides configure each other. Fall back
-                # to our own outgoing request: if we already asked for the same tables,
-                # accepting their mirror request would close the direct cycle.
-                outgoing_request = json.loads(
-                    subscription_relation.data[self.state.model.app].get(
-                        "subscription-request", "{}"
-                    )
+                # to our own outgoing subscription-request: if we already asked this app
+                # for any of the same tables, accepting their mirror request would close
+                # the direct cycle.
+                outgoing_request = safe_databag_json(
+                    subscription_relation.data[self.state.model.app],
+                    "subscription-request",
+                    "{}",
                 )
                 overlap = set(tables) & set(outgoing_request.get(database, []))
                 if overlap:
@@ -869,6 +868,17 @@ class LogicalReplicationManager(BaseManager):
         }
         return bool(reported_tables & requested_tables)
 
+    def _configured_subscription_request(self) -> dict[str, list[str]]:
+        """Parse the configured subscription request, treating malformed JSON as empty.
+
+        Local readers must not crash hooks on a malformed config; the validation
+        path reports malformed JSON via _fail_validation instead.
+        """
+        try:
+            return json.loads(self.state.config.logical_replication_subscription_request or "{}")
+        except json.JSONDecodeError:
+            return {}
+
     def _current_publisher_error(self) -> str | None:
         """Return the publisher's first CURRENT error, or None.
 
@@ -880,9 +890,7 @@ class LogicalReplicationManager(BaseManager):
         relation = self.state.model.get_relation(LOGICAL_REPLICATION_RELATION)
         if not relation:
             return None
-        subscription_request = json.loads(
-            self.state.config.logical_replication_subscription_request or "{}"
-        )
+        subscription_request = self._configured_subscription_request()
         current_relation_request = safe_databag_json(
             relation.data[self.state.model.app], "subscription-request", "{}"
         )
@@ -999,7 +1007,7 @@ class LogicalReplicationManager(BaseManager):
             # blocked extend can never unblock once the local blocker is
             # fixed (the refresh copies nothing for already-replicated
             # tables, so no duplication either).
-            json.loads(self.state.config.logical_replication_subscription_request or "{}")
+            self._configured_subscription_request()
         ):
             self.apply_updated_subscription_request()
             # NOTE: no applied-request baseline update here. The retry
@@ -1072,9 +1080,7 @@ class LogicalReplicationManager(BaseManager):
         # same per-event capture events/database.py uses.
         postgresql = self.postgresql()
         subscriptions = self._subscriptions_info()
-        subscription_request_config = json.loads(
-            self.state.config.logical_replication_subscription_request or "{}"
-        )
+        subscription_request_config = self._configured_subscription_request()
         publications = json.loads(relation.data[relation.app].get("publications", "{}"))
 
         # The publisher may create publications for a request that failed our local
