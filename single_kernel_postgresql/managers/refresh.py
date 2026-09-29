@@ -239,6 +239,15 @@ class RefreshManager(BaseManager):
         charm: "AbstractPostgreSQLCharm",
         set_default_status: Callable[[], None],
     ) -> None:
+        """Construct the refresh manager.
+
+        ``set_default_status`` computes the unit's default (non-refresh) status. The
+        manager calls it during construction-time ``reconcile_refresh_status()`` and on
+        later reconciles, so it must not route through the charm's delegating
+        ``set_unit_status`` seam: the ``refresh_manager`` attribute that seam
+        dereferences is not assigned until this constructor returns. Set the ops status
+        directly instead.
+        """
         super().__init__(state, workload, "refresh_manager")
         self._charm = charm
         self.set_default_status = set_default_status
