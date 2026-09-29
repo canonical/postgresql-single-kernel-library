@@ -152,8 +152,9 @@ merged_data = get_relation_data_as(
 """
 
 import json
+from collections.abc import Callable, MutableMapping
 from functools import reduce, wraps
-from typing import Callable, Generic, MutableMapping, Optional, Type, TypeVar, Union
+from typing import Generic, Optional, TypeVar
 
 import pydantic
 from ops.charm import ActionEvent, CharmBase, RelationEvent
@@ -198,7 +199,7 @@ class BaseConfigModel(BaseModel):
 class TypedCharmBase(CharmBase, Generic[T]):
     """Class to be used for extending config-typed charms."""
 
-    config_type: Type[T]
+    config_type: type[T]
 
     @property
     def config(self) -> T:
@@ -207,7 +208,7 @@ class TypedCharmBase(CharmBase, Generic[T]):
         return self.config_type(**translated_keys)
 
 
-def validate_params(cls: Type[T]):
+def validate_params(cls: type[T]):
     """Return a decorator to allow pydantic parsing of action parameters.
 
     Args:
@@ -216,7 +217,7 @@ def validate_params(cls: Type[T]):
     """
 
     def decorator(
-        f: Callable[[CharmBase, ActionEvent, Union[T, ValidationError]], G],
+        f: Callable[[CharmBase, ActionEvent, T | ValidationError], G],
     ) -> Callable[[CharmBase, ActionEvent], G]:
         @wraps(f)
         def event_wrapper(self: CharmBase, event: ActionEvent):
@@ -251,7 +252,7 @@ def write(relation_data: RelationDataContent, model: BaseModel):
             relation_data[key.replace("_", "-")] = ""
 
 
-def read(relation_data: MutableMapping[str, str], obj: Type[T]) -> T:
+def read(relation_data: MutableMapping[str, str], obj: type[T]) -> T:
     """Read data from a relation databag and parse it into a domain object.
 
     Args:
@@ -274,7 +275,7 @@ def read(relation_data: MutableMapping[str, str], obj: Type[T]) -> T:
 
 
 def parse_relation_data(
-    app_model: Optional[Type[AppModel]] = None, unit_model: Optional[Type[UnitModel]] = None
+    app_model: type[AppModel] | None = None, unit_model: type[UnitModel] | None = None
 ):
     """Return a decorator to allow pydantic parsing of the app and unit databags.
 
@@ -290,8 +291,8 @@ def parse_relation_data(
             [
                 CharmBase,
                 RelationEvent,
-                Optional[Union[AppModel, ValidationError]],
-                Optional[Union[UnitModel, ValidationError]],
+                AppModel | ValidationError | None,
+                UnitModel | ValidationError | None,
             ],
             G,
         ],
@@ -345,9 +346,9 @@ class RelationDataModel(BaseModel):
 
 
 def get_relation_data_as(
-    model_type: Type[AppModel],
+    model_type: type[AppModel],
     *relation_data: RelationDataContent,
-) -> Union[AppModel, ValidationError]:
+) -> AppModel | ValidationError:
     """Return a merged representation of the provider and requirer databag into a single object.
 
     Args:

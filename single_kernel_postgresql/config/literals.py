@@ -134,6 +134,12 @@ ALL_CLIENT_RELATIONS = [DATABASE]
 REPLICATION_CONSUMER_RELATION = "replication"
 REPLICATION_OFFER_RELATION = "replication-offer"
 
+# Logical replication relations
+LOGICAL_REPLICATION_OFFER_RELATION = "logical-replication-offer"
+LOGICAL_REPLICATION_RELATION = "logical-replication"
+LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS = "Logical replication setup is invalid. Check logs"
+SECRET_LABEL = "logical-replication-relation"  # noqa: S105
+
 # TLS files
 TLS_KEY_FILE = "key.pem"
 TLS_CA_FILE = "ca.pem"
