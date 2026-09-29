@@ -15,6 +15,7 @@ import json
 import logging
 import os
 from functools import cached_property
+from typing import TYPE_CHECKING
 
 from ops import (
     Object,
@@ -41,17 +42,23 @@ from single_kernel_postgresql.config.literals import (
 )
 from single_kernel_postgresql.utils import new_password
 
+if TYPE_CHECKING:
+    from single_kernel_postgresql.core.state import CharmState
+    from single_kernel_postgresql.workload.base import BaseWorkload
+
+
 logger = logging.getLogger(__name__)
 
 
 class PostgreSQLWatcherEventsHandler(Object):
     """Handles the watcher relation for stereo mode support."""
 
-    def __init__(self, charm, state):
+    def __init__(self, charm, state: "CharmState", workload: "BaseWorkload"):
         """Initialize the watcher relation handler."""
         super().__init__(charm, WATCHER_OFFER_RELATION)
         self.charm = charm
         self.state = state
+        self.workload = workload
 
         if self.state.substrate == Substrates.VM:
             self.framework.observe(
@@ -95,7 +102,7 @@ class PostgreSQLWatcherEventsHandler(Object):
         if not self._relation or not self.state.peer.is_app_leader:
             return None
 
-        self._relation.data[self.state.peer.app].pop("disable-watcher", None)
+        self._relation.data[self.state.peer.unit.app].pop("disable-watcher", None)
         self.update_watcher_secret()
 
     def disable_watcher(self) -> None:
@@ -103,7 +110,7 @@ class PostgreSQLWatcherEventsHandler(Object):
         if not self._relation or not self.state.peer.is_app_leader:
             return None
 
-        self._relation.data[self.state.peer.app].update({"disable-watcher": "True"})
+        self._relation.data[self.state.peer.unit.app].update({"disable-watcher": "True"})
         try:
             if self.watcher_raft_address:
                 self.charm._patroni.remove_raft_member(self.watcher_raft_address)
@@ -407,7 +414,7 @@ class PostgreSQLWatcherEventsHandler(Object):
             return
 
         # Update relation data
-        relation.data[self.state.peer.app].update({
+        relation.data[self.state.peer.unit.app].update({
             "cluster-name": self.charm.cluster_name,
             "raft-secret-id": secret_id,
             "raft-partner-addrs": json.dumps(pg_endpoints),
@@ -437,9 +444,7 @@ class PostgreSQLWatcherEventsHandler(Object):
         if not (unit_ip := self.state.unit_ip):
             return
 
-        relation.data[self.state.peer.unit]["version"] = (
-            self.state.workload.get_postgresql_version()
-        )
+        relation.data[self.state.peer.unit]["version"] = self.workload.get_postgresql_version()
         if self.charm.refresh:
             relation.data[self.state.peer.unit]["snap"] = self.charm.refresh.pinned_snap_revision
         current_address = relation.data[self.state.peer.unit].get("unit-address")
