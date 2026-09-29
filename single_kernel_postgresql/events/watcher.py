@@ -86,6 +86,9 @@ class PostgreSQLWatcherEventsHandler(Object):
         Returns:
             True if a watcher is connected, False otherwise.
         """
+        if self.state.substrate == Substrates.K8S:
+            return True
+
         try:
             syncobj_util = TcpUtility(password=self.charm._patroni.raft_password, timeout=3)
             raft_status = syncobj_util.executeCommand(f"127.0.0.1:{RAFT_PORT}", ["status"])
@@ -99,7 +102,11 @@ class PostgreSQLWatcherEventsHandler(Object):
 
     def enable_watcher(self) -> None:
         """Clear up disable flag."""
-        if not self._relation or not self.state.peer.is_app_leader:
+        if (
+            self.state.substrate == Substrates.K8S
+            or not self._relation
+            or not self.state.peer.is_app_leader
+        ):
             return None
 
         self._relation.data[self.state.peer.unit.app].pop("disable-watcher", None)
@@ -107,7 +114,11 @@ class PostgreSQLWatcherEventsHandler(Object):
 
     def disable_watcher(self) -> None:
         """Inform watcher to stop service."""
-        if not self._relation or not self.state.peer.is_app_leader:
+        if (
+            self.state.substrate == Substrates.K8S
+            or not self._relation
+            or not self.state.peer.is_app_leader
+        ):
             return None
 
         self._relation.data[self.state.peer.unit.app].update({"disable-watcher": "True"})
@@ -120,7 +131,7 @@ class PostgreSQLWatcherEventsHandler(Object):
     @cached_property
     def is_active(self) -> bool:
         """Check if the watcher should be added to peers."""
-        if not self._relation:
+        if self.state.substrate == Substrates.K8S or not self._relation:
             return False
 
         return self._relation.data[self._relation.app].get("raft-status") == "connected"
@@ -132,7 +143,7 @@ class PostgreSQLWatcherEventsHandler(Object):
         Returns:
             The watcher's Raft address (ip:port), or None if not available.
         """
-        if not self._relation:
+        if self.state.substrate == Substrates.K8S or not self._relation:
             return None
 
         unit_address = None
@@ -161,6 +172,9 @@ class PostgreSQLWatcherEventsHandler(Object):
         Args:
             event: The relation joined event.
         """
+        if self.state.substrate == Substrates.K8S:
+            return
+
         # Every unit should publish its own per-unit data.
         self.update_unit_address(event.relation)
 
@@ -465,6 +479,9 @@ class PostgreSQLWatcherEventsHandler(Object):
         Called when cluster membership changes (peer joins/departs).
         Also dynamically adds new PostgreSQL peers to the running Raft cluster.
         """
+        if self.state.substrate == Substrates.K8S:
+            return
+
         if relation := self._relation:
             if self.state.peer.is_app_leader:
                 self._update_relation_data(relation)
