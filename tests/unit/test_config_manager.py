@@ -886,17 +886,22 @@ def test_update_config_happy_path_persists_hashes_and_calls_bridges(
     orchestrate._app_user_hash.assert_called_with("uh")
 
 
-def test_update_config_ensure_slots_is_k8s_only(substrate, orchestrate, postgresql_client):
+def test_update_config_ensure_slots_runs_on_all_substrates(
+    substrate, orchestrate, postgresql_client
+):
+    """The publisher-side slot sync must run on every substrate.
+
+    The subscriber's CREATE SUBSCRIPTION uses create_slot=false and depends on
+    the pre-agreed slot existing (the VM apply worker fails forever with
+    'slot does not exist' when the sync is skipped).
+    """
     with patch(
         "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.is_app_leader",
         new_callable=PropertyMock,
         return_value=False,
     ):
         orchestrate.update_config(postgresql_client)
-    if substrate == Substrates.K8S:
-        orchestrate.patroni_manager.ensure_slots_controller_by_patroni.assert_called_once()
-    else:
-        orchestrate.patroni_manager.ensure_slots_controller_by_patroni.assert_not_called()
+    orchestrate.patroni_manager.ensure_slots_controller_by_patroni.assert_called_once()
 
 
 def test_update_config_vm_snap_gate_exits_before_restart_services(

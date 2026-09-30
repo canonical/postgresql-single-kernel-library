@@ -571,9 +571,7 @@ class ConfigManager(BaseManager):
             logger.warning("Early exit update_config: Unable to patch Patroni API")
             return False
 
-        if self.state.substrate == Substrates.K8S and not (
-            self.patroni_manager.ensure_slots_controller_by_patroni(replication_slots)
-        ):
+        if not self.patroni_manager.ensure_slots_controller_by_patroni(replication_slots):
             logger.warning(
                 "Failed to sync replication slots with Patroni — will retry on next config update"
             )
