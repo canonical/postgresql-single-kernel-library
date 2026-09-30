@@ -79,7 +79,8 @@ class ConfigManager(BaseManager):
         self.request_restart = request_restart
         self.restart_services = restart_services
         # Publishes the managed logical replication slots for the Patroni render and API
-        # sync; None until the composition root wires the logical replication manager.
+        # sync; the callable is wired from the logical replication manager at the
+        # composition root and defaults to an empty mapping when absent.
         self.logical_replication_slots = logical_replication_slots or (lambda: {})
 
     @staticmethod
@@ -95,16 +96,18 @@ class ConfigManager(BaseManager):
 
     def configure_patroni_on_unit(self):
         """Configure Patroni (configuration files and service) on the unit."""
+        # Create the versioned data directory before taking ownership: the parent
+        # storage mount exists, but the versioned path itself is only created here.
+        self.workload.mkdir(
+            self.workload.paths.data,
+            mode=POSTGRESQL_STORAGE_PERMISSIONS,
+            parents=True,
+            exist_ok=True,
+        )
         _change_owner(self.state.substrate, str(self.workload.paths.data))
 
         # Create empty base config
         self.workload.write_text("", self.workload.paths.postgresql_conf)
-
-        # Expected permission
-        # Replicas refuse to start with the default permissions
-        self.workload.mkdir(
-            self.workload.paths.data, mode=POSTGRESQL_STORAGE_PERMISSIONS, exist_ok=True
-        )
 
     def _calculate_max_worker_processes(self, cpu_cores: int) -> str | None:
         """Calculate cpu_max_worker_processes configuration value."""
@@ -504,7 +507,9 @@ class ConfigManager(BaseManager):
 
         replication_slots = self.logical_replication_slots()
 
-        # TODO add rel handler
+        # The embedding charm supplies relations_user_databases_map on every
+        # render (the relation-user pg_hba rules stay charm-side until their
+        # migration phase); the library default keeps the render working.
         relations_user_databases_map = relations_user_databases_map or {}
 
         # Update and reload configuration based on TLS files availability.
@@ -566,9 +571,7 @@ class ConfigManager(BaseManager):
             logger.warning("Early exit update_config: Unable to patch Patroni API")
             return False
 
-        if self.state.substrate == Substrates.K8S and not (
-            self.patroni_manager.ensure_slots_controller_by_patroni(replication_slots)
-        ):
+        if not self.patroni_manager.ensure_slots_controller_by_patroni(replication_slots):
             logger.warning(
                 "Failed to sync replication slots with Patroni — will retry on next config update"
             )

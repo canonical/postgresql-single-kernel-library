@@ -12,6 +12,7 @@ bridge, Patroni re-render stays behind ``update_config``, and status writes go
 through ``set_unit_status``.
 """
 
+import json
 import logging
 
 from ops import (
@@ -32,7 +33,11 @@ from single_kernel_postgresql.config.literals import (
     SECRET_LABEL,
 )
 from single_kernel_postgresql.core.state import CharmState
-from single_kernel_postgresql.managers.logical_replication import LogicalReplicationManager
+from single_kernel_postgresql.managers.logical_replication import (
+    APPLIED_REQUEST_KEY,
+    VALIDATION_KEY,
+    LogicalReplicationManager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,16 +121,39 @@ class PostgreSQLLogicalReplication(Object):
             return False
         # Clear any previous error state when config changes
         # This prevents retry_validations() from validating stale config
-        self.state.application.data["logical-replication-validation"] = "ongoing"
+        self.state.application.data[VALIDATION_KEY] = "ongoing"
 
-        # Send subscription request to publisher first, before full validation
-        # This allows the publisher to detect circular replication and report errors
-        # which we can then check before doing our local validation
+        # Capture the PREVIOUSLY APPLIED request from the peer data: the empty-table
+        # check must fire for tables being NEWLY added to the subscription (their
+        # local data is stale or absent), while tables already being replicated
+        # keep skipping it (canonical/postgresql-k8s-operator#1052;
+        # test_pg2_dynamic_error vs test_pg3_extend_subscription).
+        previous_request = json.loads(self.state.application.data.get(APPLIED_REQUEST_KEY, "{}"))
+
+        # Push the request to the relation BEFORE validating: the publisher's
+        # replication-chain checks read this request, and the multi-hop circular
+        # detection only works after the round-trip (the chain data lives in the
+        # publisher's publications, which don't exist until it sees a request).
+        # Only syntactically valid JSON is ever pushed (push_subscription_request),
+        # so a malformed config cannot crash the remote publisher's hook. A local
+        # validation failure below leaves the request pushed: the publisher may
+        # create publications, but the subscriber's validation gate and the
+        # creation-time check keep the empty-table guard intact
+        # (canonical/postgresql-operator#1085 exact order).
         if relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION):
             self.manager.push_subscription_request(relation)
 
-        if self.manager.validate_subscription_request():
+        if self.manager.validate_subscription_request(previous_request, empty_tables="auto"):
             self.manager.apply_updated_subscription_request()
+            # The baseline means "replicated by a LIVE subscription". A
+            # newly-added database has no subscription yet (creation is
+            # deferred to the relation-changed handler); persisting its tables
+            # here would make the creation gate see them as already-subscribed
+            # (previous=None re-derives from this peer key), skip the
+            # empty-table guard and re-subscribe with copy_data=true over a
+            # non-empty table (the config-cycle duplication;
+            # canonical/postgresql-k8s-operator#982 comment 3019811325).
+            self.manager.persist_applied_request_baseline()
             # Clear any previous blocked status from validation errors
             self.charm.set_unit_status(ActiveStatus())
         return True
@@ -152,13 +180,13 @@ class PostgreSQLLogicalReplication(Object):
                 f"{LOGICAL_REPLICATION_RELATION} #{event.relation.id} join early exit due to unit not being a leader"
             )
             return
-        if self.state.application.data.get("logical-replication-validation") == "ongoing":
+        if self.state.application.data.get(VALIDATION_KEY) == "ongoing":
             logger.debug(
                 f"Deferring {LOGICAL_REPLICATION_RELATION} #{event.relation.id} join due to still ongoing logical replication config validation"
             )
             event.defer()
             return
-        if self.state.application.data.get("logical-replication-validation") == "error":
+        if self.state.application.data.get(VALIDATION_KEY) == "error":
             logger.debug(
                 f"{LOGICAL_REPLICATION_RELATION} #{event.relation.id} join early exit due to validation error"
             )
