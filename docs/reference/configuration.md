@@ -14,12 +14,12 @@ For example:
 
     juju deploy postgresql --channel 14/stable --config profile=testing
 
-The full list can be accessed on [Charmhub](https://charmhub.io/postgresql/configurations?channel=16/stable) or by running `juju config postgresql`
+The full list can be accessed on [Charmhub](https://charmhub.io/postgresql/configurations?channel=14/stable) or by running `juju config postgresql`
 ```
 ```{tab-item} K8s
 :sync: k8s
 
-The full list can be accessed on [Charmhub](https://charmhub.io/postgresql-k8s/configurations?channel=16/stable) or by running `juju config postgresql-k8s`
+The full list can be accessed on [Charmhub](https://charmhub.io/postgresql-k8s/configurations?channel=14/stable) or by running `juju config postgresql-k8s`
 ```
 ````
 
