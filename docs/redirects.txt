@@ -65,6 +65,10 @@ how-to/upgrade/perform-a-minor-upgrade how-to/refresh/
 
 how-to/upgrade/perform-a-minor-rollback how-to/refresh/
 
+how-to/refresh/minor-rollback/ how-to/refresh
+
+how-to/refresh/minor-upgrade/ how-to/refresh
+
 how-to/cross-regional-async-replication/ how-to/cluster-cluster-replication
 
 how-to/cross-regional-async-replication/set-up-clusters how-to/cluster-cluster-replication/set-up-clusters
