@@ -21,6 +21,7 @@ import contextlib
 import json
 import logging
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, cast
 
 from ops import (
@@ -635,8 +636,7 @@ class AsyncReplicationManager(BaseManager):
             return False
 
         # Increment the current cluster counter in this application side based on the highest counter value.
-        promoted_cluster_counter = int(self.get_highest_promoted_cluster_counter_value())
-        promoted_cluster_counter += 1
+        promoted_cluster_counter = int(datetime.now(UTC).timestamp())
         logger.debug("Promoted cluster counter: %s", promoted_cluster_counter)
 
         self.update_primary_cluster_data(promoted_cluster_counter, system_identifier)
