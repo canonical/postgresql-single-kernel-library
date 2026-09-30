@@ -139,6 +139,7 @@ PR
 preconfigured
 preload
 programmatically
+PRs
 PSC
 psql
 PVCs
@@ -205,6 +206,7 @@ URI(s)?
 URL
 utils
 uv
+validators
 venv
 vm
 VMs
