@@ -11,7 +11,7 @@ myst:
 Charmed PostgreSQL uses the [Juju storage](https://documentation.ubuntu.com/juju/3.6/reference/storage/) abstraction to utilise data volume provided by different [clouds](https://documentation.ubuntu.com/juju/3.6/reference/cloud/#cloud) while keeping the same UI/UX for end users.
 
 Charmed PostgreSQL 16 supports multiple storage types:
-* `archive`:Holds local backups (before typically sending them to remote object storage) when relevant/needed.
+* `archive`: Holds local backups (before typically sending them to remote object storage) when relevant/needed.
 * `data`: Stores all tables, indexes, and so on except those from temporary tablespaces.
 * `logs`: Stores all the logs that are part of the transactional commit path (WAL files).
 * `temp`: Stores temporary tablespaces (where typically sort operations happen).
@@ -24,66 +24,64 @@ If you are deploying with Terraform, note that the Juju Terraform Provider intro
 
 ## Check Juju storage details
 
-``````{tab-set}
-`````{tab-item} VM
+`````{tab-set}
+````{tab-item} VM
 :sync: vm
 
 Charmed PostgreSQL 16 supports multiple storage types: `archive` , `data` , `logs` and `temp`. Check the [`metadata.yaml`](https://github.com/canonical/postgresql-operator/blob/16/edge/metadata.yaml) to find more technical details.
 
-````{dropdown} Charmed PostgreSQL 16 storage list
+```{dropdown} Charmed PostgreSQL 16 storage list
 :open:
 :color: light
 :icon: list-unordered
 :class-title: sd-font-weight-normal
 :class-body: sd-py-0
 
-```
-storage:
-  archive:
-    type: filesystem
-    location: /var/snap/charmed-postgresql/common/data/archive
-  data:
-    type: filesystem
-    location: /var/snap/charmed-postgresql/common/var/lib/postgresql
-  logs:
-    type: filesystem
-    location: /var/snap/charmed-postgresql/common/data/logs
-  temp:
-    type: filesystem
-    location: /var/snap/charmed-postgresql/common/data/temp
+    storage:
+      archive:
+        type: filesystem
+        location: /var/snap/charmed-postgresql/common/data/archive
+      data:
+        type: filesystem
+        location: /var/snap/charmed-postgresql/common/var/lib/postgresql
+      logs:
+        type: filesystem
+        location: /var/snap/charmed-postgresql/common/data/logs
+      temp:
+        type: filesystem
+        location: /var/snap/charmed-postgresql/common/data/temp
+
 ```
 ````
-
-`````{tab-item} K8s
+````{tab-item} K8s
 :sync: k8s
 
 Charmed PostgreSQL 16 supports multiple storage types: `archive` , `data` , `logs` and `temp`. Check the [`metadata.yaml`](https://github.com/canonical/postgresql-k8s-operator/blob/16/edge/metadata.yaml) to find more technical details.
 
-````{dropdown} Charmed PostgreSQL 16 storage list
+```{dropdown} Charmed PostgreSQL 16 storage list
 :open:
 :color: light
 :icon: list-unordered
 :class-title: sd-font-weight-normal
 :class-body: sd-py-0
 
-```
-storage:
-  archive:
-    type: filesystem
-    location: /var/lib/pg/archive
-  data:
-    type: filesystem
-    location: /var/lib/pg/data
-  logs:
-    type: filesystem
-    location: /var/lib/pg/logs
-  temp:
-    type: filesystem
-    location: /var/lib/pg/temp
+    storage:
+      archive:
+        type: filesystem
+        location: /var/lib/pg/archive
+      data:
+        type: filesystem
+        location: /var/lib/pg/data
+      logs:
+        type: filesystem
+        location: /var/lib/pg/logs
+      temp:
+        type: filesystem
+        location: /var/lib/pg/temp
+
 ```
 ````
 `````
-``````
 
 ```{dropdown} The charm only supports using tmpfs as a storage provider for <code>temp</code> storage.
 :open:
@@ -96,17 +94,30 @@ Using tmpfs for `archive`, `data`, or `logs` storage is not supported. These sto
 
 ## Define storage size
 
-```shell
-$ juju deploy postgresql --channel 16/stable --storage pgdata=10G
+Define storage size at deploy time with the `--storage` flag.
 
-$ juju storage
-Unit          Storage ID  Type        Pool  Size    Status    Message
-postgresql/1  pgdata/1    filesystem  lxd   10 GiB  attached
+For example, to define 10GB:
+
+````{tab-set}
+```{tab-item} VM
+:sync: vm
+
+    juju deploy postgresql --channel 16/stable --storage pgdata=10G
 ```
+```{tab-item} K8s
 
-## Define storage location
+    juju deploy postgresql-k8s --channel 16/stable --storage pgdata=10G --trust
+```
+````
 
-Juju supports wide list of different [storage pools](https://bobcares.com/blog/lxd-create-storage-pool/):
+To see a table of storage units created, run `juju storage`.
+
+## Define storage location (VM only)
+{{vm}}
+
+Juju supports wide list of different [storage pools](https://bobcares.com/blog/lxd-create-storage-pool/).
+
+In the example below, we create an LXD pool called `mystoragepool`:
 
 ```shell
 $ juju create-storage-pool mystoragepool lxd
@@ -121,7 +132,8 @@ Unit          Storage ID  Type        Pool           Size    Status    Message
 postgresql/2  pgdata/2    filesystem  mystoragepool  5 GiB   attached
 ```
 
-## Example: Re-deploy detached storage
+## Re-deploy detached storage (VM only)
+{{vm}}
 
 To re-deploy the application with the old Juju storage, it is necessary to provide all charm/database credentials as Juju user secrets.
 
