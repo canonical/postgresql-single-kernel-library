@@ -241,17 +241,26 @@ class RefreshManager(BaseManager):
     ) -> None:
         """Construct the refresh manager.
 
-        ``set_default_status`` computes the unit's default (non-refresh) status. The
+        ``set_default_status`` computes the unit's default (non-refresh) status; the
         manager calls it during construction-time ``reconcile_refresh_status()`` and on
-        later reconciles, so it must not route through the charm's delegating
-        ``set_unit_status`` seam: the ``refresh_manager`` attribute that seam
-        dereferences is not assigned until this constructor returns. Set the ops status
-        directly instead.
+        later reconciles.
+
+        charm_refresh resume callbacks (e.g. ``refresh_snap``) run during the
+        ``charm_refresh`` object construction below and dispatch back through this
+        manager, so ``charm.refresh_manager`` is published before that construction
+        starts; the charm's own assignment rebinds the same object.
         """
         super().__init__(state, workload, "refresh_manager")
         self._charm = charm
         self.set_default_status = set_default_status
         self.can_set_app_status = True
+        # charm_refresh resume callbacks (e.g. refresh_snap) run DURING the
+        # charm_refresh.Machines()/Kubernetes() construction below and dispatch back
+        # through this manager (refresh_snap ends with
+        # ``self._charm.refresh_manager.post_snap_refresh(refresh)``); publish early so
+        # those callbacks reach the manager while its constructor is still running. The
+        # charm's own assignment rebinds the same object.
+        charm.refresh_manager = self
         self.refresh: charm_refresh.Machines | charm_refresh.Kubernetes | None
         if state.substrate == Substrates.VM:
             try:
