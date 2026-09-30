@@ -4,6 +4,7 @@
 
 import json
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -107,6 +108,15 @@ def _action_flow_patches(harness):
         yield
 
 
+@contextmanager
+def _frozen_epoch():
+    """Freeze the manager's clock so the promoted-cluster-counter is deterministic."""
+    _now = datetime.now(UTC)
+    with patch("single_kernel_postgresql.managers.async_replication.datetime") as _datetime:
+        _datetime.now.return_value = _now
+        yield _now
+
+
 def _emit_broken(harness):
     """Emit relation-broken for the offer relation through the framework."""
     relation = harness.model.get_relation(REPLICATION_OFFER_RELATION)
@@ -135,11 +145,12 @@ def test_create_replication_sets_up_replication(harness, async_rel):
     with (
         _action_flow_patches(harness),
         patch.object(harness.charm.config_manager, "update_config"),
+        _frozen_epoch() as _now,
     ):
         harness.run_action("create-replication", {"name": "async-replication"})
 
     peer_data = _peer_app_data(harness)
-    assert peer_data["promoted-cluster-counter"] == "1"
+    assert peer_data["promoted-cluster-counter"] == str(int(_now.timestamp()))
     offer_data = harness.get_relation_data(async_rel, harness.charm.app.name)
     assert offer_data["name"] == "async-replication"
     assert json.loads(offer_data["primary-cluster-data"])["endpoint"] == UNIT_IP
@@ -157,11 +168,12 @@ def test_create_replication_clears_a_stale_promotion_counter(harness, async_rel)
     with (
         _action_flow_patches(harness),
         patch.object(harness.charm.config_manager, "update_config"),
+        _frozen_epoch() as _now,
     ):
         harness.run_action("create-replication", {"name": "async-replication"})
 
     # the stale counter was cleared before the guard, and the successful setup re-promotes
-    assert _peer_app_data(harness)["promoted-cluster-counter"] == "1"
+    assert _peer_app_data(harness)["promoted-cluster-counter"] == str(int(_now.timestamp()))
 
 
 def test_create_replication_keeps_a_live_promotion_counter(harness, async_rel):
@@ -207,10 +219,11 @@ def test_promote_to_primary_promotes_a_read_only_standby(substrate, harness, asy
         _action_flow_patches(harness),
         patch.object(harness.charm.config_manager, "update_config"),
         patch.object(AsyncReplicationManager, "get_primary_cluster", return_value=None),
+        _frozen_epoch() as _now,
     ):
         harness.run_action("promote-to-primary", {"scope": "cluster", "force": True})
 
-    assert _peer_app_data(harness)["promoted-cluster-counter"] == "1"
+    assert _peer_app_data(harness)["promoted-cluster-counter"] == str(int(_now.timestamp()))
     message = "Promoting cluster..." if substrate == "k8s" else "Creating replication..."
     assert harness.model.unit.status == MaintenanceStatus(message)
 
@@ -226,10 +239,11 @@ def test_promote_to_primary_clears_a_stale_promotion_counter(harness, async_rel)
         _action_flow_patches(harness),
         patch.object(harness.charm.config_manager, "update_config"),
         patch.object(AsyncReplicationManager, "get_primary_cluster", return_value=None),
+        _frozen_epoch() as _now,
     ):
         harness.run_action("promote-to-primary", {"scope": "cluster", "force": True})
 
-    assert _peer_app_data(harness)["promoted-cluster-counter"] == "1"
+    assert _peer_app_data(harness)["promoted-cluster-counter"] == str(int(_now.timestamp()))
 
 
 # -- relation joined / created
