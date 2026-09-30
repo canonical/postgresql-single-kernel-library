@@ -6,11 +6,15 @@ myst:
 
 (juju-storage)=
 # How to deploy on Juju storage
-{{vm}} <!--TODO: create K8s docs -->
+{{vm_k8s}}
 
 Charmed PostgreSQL uses the [Juju storage](https://documentation.ubuntu.com/juju/3.6/reference/storage/) abstraction to utilise data volume provided by different [clouds](https://documentation.ubuntu.com/juju/3.6/reference/cloud/#cloud) while keeping the same UI/UX for end users.
 
-[Charmed PostgreSQL 16](https://charmhub.io/postgresql?channel=16/stable) supports multiple storage types: `archive`, `data`, `logs` and `temp`.
+Charmed PostgreSQL 16 supports multiple storage types:
+* `archive`:Holds local backups (before typically sending them to remote object storage) when relevant/needed.
+* `data`: Stores all tables, indexes, and so on except those from temporary tablespaces.
+* `logs`: Stores all the logs that are part of the transactional commit path (WAL files).
+* `temp`: Stores temporary tablespaces (where typically sort operations happen).
 
 ## Prerequisites
 
@@ -19,6 +23,10 @@ If you are deploying with Terraform, note that the Juju Terraform Provider intro
 ---
 
 ## Check Juju storage details
+
+``````{tab-set}
+`````{tab-item} VM
+:sync: vm
 
 Charmed PostgreSQL 16 supports multiple storage types: `archive` , `data` , `logs` and `temp`. Check the [`metadata.yaml`](https://github.com/canonical/postgresql-operator/blob/16/edge/metadata.yaml) to find more technical details.
 
@@ -45,6 +53,37 @@ storage:
     location: /var/snap/charmed-postgresql/common/data/temp
 ```
 ````
+
+`````{tab-item} K8s
+:sync: k8s
+
+Charmed PostgreSQL 16 supports multiple storage types: `archive` , `data` , `logs` and `temp`. Check the [`metadata.yaml`](https://github.com/canonical/postgresql-k8s-operator/blob/16/edge/metadata.yaml) to find more technical details.
+
+````{dropdown} Charmed PostgreSQL 16 storage list
+:open:
+:color: light
+:icon: list-unordered
+:class-title: sd-font-weight-normal
+:class-body: sd-py-0
+
+```
+storage:
+  archive:
+    type: filesystem
+    location: /var/lib/pg/archive
+  data:
+    type: filesystem
+    location: /var/lib/pg/data
+  logs:
+    type: filesystem
+    location: /var/lib/pg/logs
+  temp:
+    type: filesystem
+    location: /var/lib/pg/temp
+```
+````
+`````
+``````
 
 ```{dropdown} The charm only supports using tmpfs as a storage provider for <code>temp</code> storage.
 :open:
