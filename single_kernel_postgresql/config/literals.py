@@ -27,6 +27,9 @@ SNAP_USER = "_daemon_"
 USER = "operator"
 SYSTEM_USERS = [BACKUP_USER, MONITORING_USER, REPLICATION_USER, REWIND_USER, USER]
 
+# Extensions
+PG_CRON_DATABASE = "postgres"
+
 # Paths
 ## VM Paths
 BASE_SNAP_DIR = f"/var/snap/{POSTGRESQL_SNAP_NAME}"

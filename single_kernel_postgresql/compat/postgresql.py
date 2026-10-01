@@ -30,6 +30,7 @@ from psycopg2.sql import SQL, Identifier, Literal
 
 from ..config.literals import (
     BACKUP_USER,
+    PG_CRON_DATABASE,
     SYSTEM_USERS,
 )
 
@@ -473,8 +474,7 @@ class PostgreSQLBase:
             ordered_extensions = OrderedDict()
             for plugin in DEPENDENCY_PLUGINS:
                 ordered_extensions[plugin] = extensions.get(plugin, False)
-            for extension, enable in extensions.items():
-                ordered_extensions[extension] = enable
+            ordered_extensions.update(extensions)
 
             self._configure_pgaudit(False)
 
@@ -484,6 +484,8 @@ class PostgreSQLBase:
                     database=database
                 ) as connection, connection.cursor() as cursor:
                     for extension, enable in ordered_extensions.items():
+                        if extension == "pg_cron" and database != PG_CRON_DATABASE:
+                            continue
                         cursor.execute(
                             f"CREATE EXTENSION IF NOT EXISTS {extension};"
                             if enable

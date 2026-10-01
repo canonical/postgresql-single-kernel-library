@@ -155,6 +155,7 @@ class CharmConfig(BaseConfigModel):
     plugin_ltree_enable: bool
     plugin_old_snapshot_enable: bool
     plugin_orafce_enable: bool
+    plugin_pg_cron_enable: bool
     plugin_pg_freespacemap_enable: bool
     plugin_pg_similarity_enable: bool
     plugin_pg_trgm_enable: bool

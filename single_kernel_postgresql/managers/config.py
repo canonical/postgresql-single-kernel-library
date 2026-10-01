@@ -24,6 +24,7 @@ from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay,
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import PostgreSQLCannotConnectError
 from single_kernel_postgresql.config.literals import (
+    PG_CRON_DATABASE,
     PGBACKREST_CONF_FILE,
     POSTGRESQL_STORAGE_PERMISSIONS,
     REWIND_USER,
@@ -688,6 +689,7 @@ class ConfigManager(BaseManager):
             "synchronous_node_count": self.state.synchronous_node_count,
             "maximum_lag_on_failover": self.state.config.durability_maximum_lag_on_failover,
             "pg_parameters": parameters,
+            "pg_cron_database": PG_CRON_DATABASE,
             "primary_cluster_endpoint": async_primary_cluster_endpoint,
             "ldap_parameters": self._dict_to_hba_string(ldap_parameters),
             "patroni_password": self.state.application.patroni_password,
