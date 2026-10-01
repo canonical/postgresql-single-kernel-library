@@ -95,6 +95,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.config_manager,
             self.patroni_manager,
         )
+        self.watcher_handler = PostgreSQLWatcherEventsHandler(self, self.state, self.workload)
 
         # Status Handler
         self.status_handler = StatusHandler(
@@ -104,8 +105,6 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.config_manager,
             self.patroni_manager,
         )
-
-        self.watcher_handler = PostgreSQLWatcherEventsHandler(self, self.state, self.workload)
 
     # Postgresql Client
     @property

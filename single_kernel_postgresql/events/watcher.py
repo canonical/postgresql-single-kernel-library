@@ -26,7 +26,9 @@ from ops import (
     Secret,
     SecretNotFoundError,
 )
-from pysyncobj.utility import TcpUtility
+
+with contextlib.suppress(ImportError):
+    from pysyncobj.utility import TcpUtility
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
