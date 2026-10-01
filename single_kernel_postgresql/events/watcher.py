@@ -52,10 +52,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PostgreSQLWatcherEventsHandler(Object):
+class WatcherEventsHandler(Object):
     """Handles the watcher relation for stereo mode support."""
 
-    def __init__(self, charm, state: "CharmState", workload: "BaseWorkload"):
+    def __init__(self, charm, workload: "BaseWorkload", state: "CharmState"):
         """Initialize the watcher relation handler."""
         super().__init__(charm, WATCHER_OFFER_RELATION)
         self.charm = charm
@@ -92,7 +92,7 @@ class PostgreSQLWatcherEventsHandler(Object):
             return True
 
         try:
-            syncobj_util = TcpUtility(password=self.charm._patroni.raft_password, timeout=3)
+            syncobj_util = TcpUtility(password=self.state.application.raft_password, timeout=3)
             raft_status = syncobj_util.executeCommand(f"127.0.0.1:{RAFT_PORT}", ["status"])
             if raft_status:
                 # Check if watcher is in the partner_node_status entries
@@ -278,7 +278,7 @@ class PostgreSQLWatcherEventsHandler(Object):
                 logger.debug(f"User {WATCHER_USER} already exists")
                 # Get existing password from secret if available
                 try:
-                    secret = self.charm.model.get_secret(label=WATCHER_SECRET_LABEL)
+                    secret = self.model.get_secret(label=WATCHER_SECRET_LABEL)
                     content = secret.get_content(refresh=True)
                     existing_pw = content.get(WATCHER_PASSWORD_KEY)
                     if existing_pw:
@@ -321,7 +321,7 @@ class PostgreSQLWatcherEventsHandler(Object):
             watcher_password: The password for the watcher PostgreSQL user.
         """
         try:
-            secret = self.charm.model.get_secret(label=WATCHER_SECRET_LABEL)
+            secret = self.model.get_secret(label=WATCHER_SECRET_LABEL)
             content = secret.get_content(refresh=True)
             content[WATCHER_PASSWORD_KEY] = watcher_password
             secret.set_content(content)
@@ -337,7 +337,7 @@ class PostgreSQLWatcherEventsHandler(Object):
     def _get_existing_watcher_password(self) -> str | None:
         """Get the watcher password from an existing secret if available."""
         try:
-            secret = self.charm.model.get_secret(label=WATCHER_SECRET_LABEL)
+            secret = self.model.get_secret(label=WATCHER_SECRET_LABEL)
             content = secret.get_content(refresh=True)
             return content.get(WATCHER_PASSWORD_KEY)
         except SecretNotFoundError:
@@ -356,7 +356,7 @@ class PostgreSQLWatcherEventsHandler(Object):
             The Juju secret containing Raft password, or None if creation failed.
         """
         try:
-            secret = self.charm.model.get_secret(label=WATCHER_SECRET_LABEL)
+            secret = self.model.get_secret(label=WATCHER_SECRET_LABEL)
             logger.debug("Found existing watcher secret")
             return secret
         except SecretNotFoundError:
@@ -364,7 +364,7 @@ class PostgreSQLWatcherEventsHandler(Object):
 
         # Get the Raft password from the internal secret
         try:
-            raft_password = self.charm._patroni.raft_password
+            raft_password = self.state.application.raft_password
         except Exception as e:
             logger.warning(f"Error getting raft_password: {e}")
             raft_password = None
@@ -380,7 +380,7 @@ class PostgreSQLWatcherEventsHandler(Object):
             watcher_pw = watcher_password or self._get_existing_watcher_password()
             if watcher_pw:
                 content[WATCHER_PASSWORD_KEY] = watcher_pw
-            secret = self.charm.model.app.add_secret(
+            secret = self.model.app.add_secret(
                 content=content,
                 label=WATCHER_SECRET_LABEL,
             )
@@ -401,7 +401,7 @@ class PostgreSQLWatcherEventsHandler(Object):
 
         # Get the secret ID for sharing
         try:
-            secret = self.charm.model.get_secret(label=WATCHER_SECRET_LABEL)
+            secret = self.model.get_secret(label=WATCHER_SECRET_LABEL)
             secret_id = secret.id
             if not secret_id:
                 # When a secret is retrieved by label, the ops library may lazily load the ID.
@@ -424,14 +424,14 @@ class PostgreSQLWatcherEventsHandler(Object):
         # Collect PostgreSQL unit endpoints using fresh IPs from unit relation data.
         # _units_ips reads directly from unit relation data (always fresh), while
         # _peer_members_ips reads from app peer data (may be stale after network disruptions).
-        pg_endpoints: list[str] = sorted(self.charm._units_ips)
+        pg_endpoints: list[str] = sorted(self.state.endpoints)
         if not pg_endpoints:
             logger.warning("No PostgreSQL endpoints available")
             return
 
         # Update relation data
         relation.data[self.state.peer.unit.app].update({
-            "cluster-name": self.charm.cluster_name,
+            "cluster-name": self.state.cluster_name,
             "raft-secret-id": secret_id,
             "raft-partner-addrs": json.dumps(pg_endpoints),
             "raft-port": str(RAFT_PORT),
@@ -513,8 +513,8 @@ class PostgreSQLWatcherEventsHandler(Object):
             return
 
         try:
-            if raft_password := self.charm._patroni.raft_password:
-                secret = self.charm.model.get_secret(label=WATCHER_SECRET_LABEL)
+            if raft_password := self.state.application.raft_password:
+                secret = self.model.get_secret(label=WATCHER_SECRET_LABEL)
                 content = secret.get_content(refresh=True)
                 if content.get(RAFT_PASSWORD_KEY) != raft_password:
                     content[RAFT_PASSWORD_KEY] = raft_password

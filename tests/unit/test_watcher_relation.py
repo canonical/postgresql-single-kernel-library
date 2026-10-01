@@ -7,22 +7,22 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from ops import SecretNotFoundError
-from single_kernel_postgresql.events.watcher import PostgreSQLWatcherEventsHandler
+from single_kernel_postgresql.events.watcher import WatcherEventsHandler
 
 
 def create_mock_charm():
     """Create a mock charm for testing."""
     mock_state = MagicMock()
+    mock_state.cluster_name = "postgresql"
+    mock_state.unit_ip = "10.0.0.1"
     mock_state.peer.is_app_leader = True
+    mock_state.application.raft_password = "test-raft-password"
 
     mock_workload = MagicMock()
 
     mock_charm = MagicMock()
-    mock_charm.cluster_name = "postgresql"
-    mock_charm._unit_ip = "10.0.0.1"
     mock_charm._patroni.unit_ip = "10.0.0.1"
     mock_charm._patroni.peers_ips = {"10.0.0.2"}
-    mock_charm._patroni.raft_password = "test-raft-password"
     mock_charm.is_cluster_initialised = True
     mock_charm.state = mock_state
     mock_charm.workload = mock_workload
@@ -51,14 +51,9 @@ class TestWatcherRelation:
         mock_charm = create_mock_charm()
 
         with patch.object(
-            PostgreSQLWatcherEventsHandler,
-            "_relation",
-            new_callable=PropertyMock,
-            return_value=None,
+            WatcherEventsHandler, "_relation", new_callable=PropertyMock, return_value=None
         ):
-            relation = PostgreSQLWatcherEventsHandler(
-                mock_charm, mock_charm.state, mock_charm.workload
-            )
+            relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
             assert relation.watcher_raft_address is None
 
     def test_watcher_address_with_relation(self, substrate):
@@ -78,14 +73,12 @@ class TestWatcherRelation:
         }
 
         with patch.object(
-            PostgreSQLWatcherEventsHandler,
+            WatcherEventsHandler,
             "_relation",
             new_callable=PropertyMock,
             return_value=mock_relation,
         ):
-            relation = PostgreSQLWatcherEventsHandler(
-                mock_charm, mock_charm.state, mock_charm.workload
-            )
+            relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
             assert relation.watcher_raft_address == "10.0.0.10:2222"
 
     def test_on_watcher_relation_joined_not_leader(self, substrate):
@@ -97,9 +90,7 @@ class TestWatcherRelation:
         mock_charm.state.peer.is_app_leader = False
         mock_event = MagicMock()
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
 
         with (
             patch.object(relation, "update_unit_address") as update_unit_address,
@@ -119,9 +110,7 @@ class TestWatcherRelation:
         mock_secret = MagicMock()
         mock_secret.id = "secret:abc123"
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
 
         with (
             patch.object(relation, "_get_or_create_watcher_secret", return_value=mock_secret),
@@ -139,9 +128,7 @@ class TestWatcherRelation:
         mock_charm = create_mock_charm()
         mock_event = MagicMock()
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
 
         with patch.object(relation, "_get_or_create_watcher_secret", return_value=None):
             relation._on_watcher_relation_joined(mock_event)
@@ -156,9 +143,7 @@ class TestWatcherRelation:
         mock_charm.is_cluster_initialised = False
         mock_event = MagicMock()
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
         relation._on_watcher_relation_changed(mock_event)
 
         mock_event.defer.assert_called_once()
@@ -179,9 +164,7 @@ class TestWatcherRelation:
             mock_charm.state.peer.unit: {},
         }
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
 
         with patch.object(relation, "_update_relation_data"):
             relation._on_watcher_relation_changed(mock_event)
@@ -196,9 +179,7 @@ class TestWatcherRelation:
         mock_charm.unit.is_leader.return_value = False
         mock_relation = MagicMock()
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
         relation._update_relation_data(mock_relation)
 
         # Should not try to update relation data
@@ -210,8 +191,8 @@ class TestWatcherRelation:
             pytest.skip("Test only applicable for VM substrate")
 
         mock_charm = create_mock_charm()
-        mock_charm._units_ips = ["10.0.0.1", "10.0.0.2"]  # Mock PostgreSQL endpoints
-        mock_charm._unit_ip = "10.0.0.1"
+        mock_charm.state.endpoints = ["10.0.0.1", "10.0.0.2"]  # Mock PostgreSQL endpoints
+        mock_charm.state.unit_ip = "10.0.0.1"
         mock_relation = MagicMock()
         mock_relation.data = {
             mock_charm.state.peer.unit.app: {},
@@ -221,19 +202,16 @@ class TestWatcherRelation:
         mock_secret = MagicMock()
         mock_secret.id = "secret:abc123"
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
 
         with (
-            patch.object(mock_charm.model, "get_secret", return_value=mock_secret),
+            patch.object(relation.model, "get_secret", return_value=mock_secret),
             patch.object(relation, "_get_standby_clusters", return_value=[]),
         ):
             relation._update_relation_data(mock_relation)
 
         # Verify app data was updated
         app_data = mock_relation.data[mock_charm.state.peer.unit.app]
-        assert "cluster-name" in app_data
         assert app_data["cluster-name"] == "postgresql"
         assert "raft-secret-id" in app_data
         assert "raft-partner-addrs" in app_data
@@ -256,9 +234,7 @@ class TestWatcherRelation:
             }
         }
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
 
         with patch.dict("os.environ", {"JUJU_AVAILABILITY_ZONE": "az1"}, clear=False):
             relation.update_unit_address(mock_relation)
@@ -273,9 +249,7 @@ class TestWatcherRelation:
         mock_charm = create_mock_charm()
         mock_charm.state.peer.is_app_leader = False
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
 
         with patch.object(mock_charm.model, "get_secret") as mock_get:
             relation.update_watcher_secret()
@@ -289,11 +263,9 @@ class TestWatcherRelation:
         mock_charm = create_mock_charm()
         mock_secret = MagicMock()
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
 
-        with patch.object(mock_charm.model, "get_secret", return_value=mock_secret):
+        with patch.object(relation.model, "get_secret", return_value=mock_secret):
             relation.update_watcher_secret()
             mock_secret.set_content.assert_called_once()
 
@@ -309,11 +281,9 @@ class TestWatcherRelationSecrets:
         mock_charm = create_mock_charm()
         mock_secret = MagicMock()
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
 
-        with patch.object(mock_charm.model, "get_secret", return_value=mock_secret):
+        with patch.object(relation.model, "get_secret", return_value=mock_secret):
             result = relation._get_or_create_watcher_secret()
             assert result == mock_secret
 
@@ -325,25 +295,14 @@ class TestWatcherRelationSecrets:
         mock_charm = create_mock_charm()
         mock_secret = MagicMock()
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
+        with patch.object(WatcherEventsHandler, "model", new_callable=PropertyMock) as _model:
+            _model.return_value.get_secret.side_effect = SecretNotFoundError("not found")
+            _model.return_value.app.add_secret.return_value = mock_secret
 
-        with (
-            patch.object(
-                mock_charm.model,
-                "get_secret",
-                side_effect=SecretNotFoundError("not found"),
-            ),
-            patch.object(
-                mock_charm.model.app,
-                "add_secret",
-                return_value=mock_secret,
-            ),
-        ):
+            relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
             result = relation._get_or_create_watcher_secret()
             assert result == mock_secret
-            mock_charm.model.app.add_secret.assert_called_once()
+            _model.return_value.app.add_secret.assert_called_once()
 
     def test_get_or_create_watcher_secret_no_raft_password(self, substrate):
         """Test _get_or_create_watcher_secret returns None without password."""
@@ -351,16 +310,10 @@ class TestWatcherRelationSecrets:
             pytest.skip("Test only applicable for VM substrate")
 
         mock_charm = create_mock_charm()
-        mock_charm._patroni.raft_password = None
+        mock_charm.state.application.raft_password = None
 
-        relation = PostgreSQLWatcherEventsHandler(
-            mock_charm, mock_charm.state, mock_charm.workload
-        )
-
-        with patch.object(
-            mock_charm.model,
-            "get_secret",
-            side_effect=SecretNotFoundError("not found"),
-        ):
+        with patch.object(WatcherEventsHandler, "model", new_callable=PropertyMock) as _model:
+            _model.return_value.get_secret.side_effect = SecretNotFoundError("not found")
+            relation = WatcherEventsHandler(mock_charm, mock_charm.workload, mock_charm.state)
             result = relation._get_or_create_watcher_secret()
             assert result is None
