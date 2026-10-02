@@ -4,10 +4,10 @@
 
 """Async Replication events handler.
 
-Owns the observers for the ``replication-offer``/``replication`` relations, the
-create-replication and promote flows, and the standby lifecycle (stop, pgdata reset,
-start) that moves a cluster between the primary and standby roles. The data plane
-(counters, endpoints, secrets, primary-cluster-data publication) lives in the
+Owns the observers for the ``replication-offer``/``replication`` relations and the
+public surface the charms consume. The data plane (counters, endpoints, secrets,
+primary-cluster-data publication) and the promotion/standby flows (configure, stop,
+pgdata reset, start) live in the
 :class:`~single_kernel_postgresql.managers.async_replication.AsyncReplicationManager`.
 
 Ported from the PostgreSQL VM and K8s charms' async replication module. Substrate
@@ -19,7 +19,7 @@ dead-datacenter recovery changes (DPE-10203) apply to both substrates.
 
 import json
 import logging
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from ops import (
     ActionEvent,
@@ -36,23 +36,17 @@ from ops import (
 from tenacity import RetryError
 
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.exceptions import (
-    DeployedWithoutTrustError,
-)
+from single_kernel_postgresql.config.exceptions import DeployedWithoutTrustError
 from single_kernel_postgresql.config.literals import (
     PEER_RELATION,
     REPLICATION_CONSUMER_RELATION,
     REPLICATION_OFFER_RELATION,
 )
 from single_kernel_postgresql.core.state import CharmState
-
-if TYPE_CHECKING:
-    # Substrate-only seams are injected; they must never enter the other substrate's
-    # import graph, hence the type-checking-only imports.
-    from single_kernel_postgresql.managers.k8s import K8sManager
 from single_kernel_postgresql.managers.async_replication import (
     READ_ONLY_MODE_BLOCKING_MESSAGE,
     AsyncReplicationManager,
+    AsyncReplicationWatcher,
 )
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.workload.base import BaseWorkload
@@ -60,20 +54,10 @@ from single_kernel_postgresql.workload.base import BaseWorkload
 logger = logging.getLogger(__name__)
 
 
-class AsyncReplicationWatcher(Protocol):
-    """The substrate-provided watcher bridge (only the VM charm has a watcher)."""
-
-    def enable_watcher(self) -> None:
-        """Enable the watcher."""
-        ...
-
-    def update_endpoints(self) -> None:
-        """Update the watcher endpoints."""
-        ...
-
-    def disable_watcher(self) -> None:
-        """Disable the watcher."""
-        ...
+if TYPE_CHECKING:
+    # Substrate-only seams are injected; they must never enter the other substrate's
+    # import graph, hence the type-checking-only imports.
+    from single_kernel_postgresql.managers.k8s import K8sManager
 
 
 def _same_secret_id(a: str | None, b: str | None) -> bool:
@@ -234,18 +218,22 @@ class PostgreSQLAsyncReplication(Object):
             event.fail("This action must be run in the cluster where the offer was created.")
             return
 
-        # The replication-change flow (promotion guards, counter increment, and
-        # address checks) is added by slice 4/8; this slice keeps trunk mergeable
-        # on its own.
-        return
+        if not self.manager._handle_replication_change(event):
+            return
 
         # Set the replication name in the relation data.
-        self.manager.async_relation.data[self.state.model.app].update({
-            "name": event.params["name"]
-        })
+        self.manager.async_relation.data[self.state.model.app].update(  # type: ignore
+            {"name": event.params["name"]}
+        )
 
         # Set the status.
         self.charm.set_unit_status(MaintenanceStatus("Creating replication..."))
+
+    def promote_to_primary(self, event: ActionEvent) -> None:
+        """Promote this cluster to the primary cluster."""
+        self.manager.promote_to_primary(event)
+
+    # -- Relation lifecycle
 
     def _on_async_relation_joined(self, _) -> None:
         """Publish this unit address in the relation data."""
@@ -330,8 +318,33 @@ class PostgreSQLAsyncReplication(Object):
             logger.debug("Early exit on_async_relation_changed: No primary cluster found.")
             return
 
-        # The promotion/standby flow continuation (configure, stop, and start of the
-        # database) is added by slice 4/8; this slice keeps trunk mergeable on its own.
+        if self.manager._configure_primary_cluster(primary_cluster, event):
+            return
+
+        # Return if this is a new unit joining an existing standby cluster.
+        if (
+            not self.state.model.unit.is_leader()
+            and self.manager.is_following_promoted_cluster()
+            and self.manager._handle_late_joiner(event)
+        ):
+            return
+
+        if not self.manager._stop_database(event):
+            return
+        self.manager._publish_stop_marker(event)
+
+        if self.manager._wait_for_all_units_stopped(event):
+            return
+
+        if self.manager._wait_for_standby_leader(event):
+            return
+
+        if self.manager._start_standby_database(event):
+            return
+
+        self.manager._handle_database_start(event)
+
+    # -- Secrets
 
     def _on_secret_changed(self, event: SecretChangedEvent) -> None:
         """Update the internal secret when the relation secret changes."""
@@ -366,3 +379,20 @@ class PostgreSQLAsyncReplication(Object):
             if not self.manager._update_internal_secret():
                 logger.debug("Secret not found, deferring event")
                 event.defer()
+
+    def _re_emit_async_relation_changed_event(self) -> None:
+        """Re-emit the async relation changed event."""
+        if relation := self.manager.async_relation:
+            relation_unit = next(
+                (unit for unit in relation.units if unit.app == relation.app), None
+            )
+            if relation_unit is None:
+                logger.debug(
+                    "Skipping re-emitting relation-changed event: no related units found yet."
+                )
+                return
+            getattr(self.charm.on, f"{relation.name.replace('-', '_')}_relation_changed").emit(
+                relation,
+                app=relation.app,
+                unit=relation_unit,
+            )
