@@ -150,6 +150,20 @@ def test_pre_restore_checks_rejects_active_async_relation(harness, restore_manag
     assert message == "Unit cannot restore backup with an active async replication relation"
 
 
+@pytest.mark.parametrize(
+    "endpoint",
+    ["logical-replication", "logical-replication-offer"],
+)
+def test_pre_restore_checks_rejects_active_logical_replication_relation(
+    harness, restore_manager, endpoint
+):
+    with harness.hooks_disabled():
+        harness.add_relation(endpoint, "other-postgresql")
+    ok, message = restore_manager.pre_restore_checks(BACKUP_ID, None)
+    assert not ok
+    assert message == "Unit cannot restore backup with an active logical replication relation"
+
+
 def test_pre_restore_checks_rejects_non_leader(harness, restore_manager):
     with harness.hooks_disabled():
         harness.set_leader(False)
