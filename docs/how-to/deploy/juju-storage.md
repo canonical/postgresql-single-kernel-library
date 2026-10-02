@@ -94,19 +94,27 @@ Using tmpfs for `archive`, `data`, or `logs` storage is not supported. These sto
 
 ## Define storage size
 
-Define storage size at deploy time with the `--storage` flag.
+Define storage sizes at deploy time with the `--storage` flag before each storage type.
 
-For example, to define 10GB:
+For example:
 
 ````{tab-set}
 ```{tab-item} VM
 :sync: vm
 
-    juju deploy postgresql --channel 16/stable --storage pgdata=10G
+    juju deploy postgresql --channel 16/stable \
+    --storage archive=10G \
+    --storage data=30G \
+    --storage logs=1G \
+    --storage temp=1G
 ```
 ```{tab-item} K8s
 
-    juju deploy postgresql-k8s --channel 16/stable --storage pgdata=10G --trust
+    juju deploy postgresql-k8s --channel 16/stable --trust \
+    --storage archive=10G \
+    --storage data=30G \
+    --storage logs=1G \
+    --storage temp=1G
 ```
 ````
 
@@ -125,11 +133,11 @@ $ juju create-storage-pool mystoragepool lxd
 $ juju storage-pools | grep mystoragepool
 mystoragepool  lxd
 
-$ juju deploy postgresql --channel 16/stable --storage pgdata=5G,mystoragepool
+$ juju deploy postgresql --channel 16/stable --storage data=5G,mystoragepool
 
 $ juju storage
 Unit          Storage ID  Type        Pool           Size    Status    Message
-postgresql/2  pgdata/2    filesystem  mystoragepool  5 GiB   attached
+postgresql/2  data/2      filesystem  mystoragepool  5 GiB   attached
 ```
 
 ## Re-deploy detached storage (VM only)
@@ -158,7 +166,7 @@ $ juju storage
 # Re-deploy new app re-using old storage and old credentials
 $ juju deploy postgresql \
   --channel 16/stable \
-  --attach-storage pgdata/5 \
+  --attach-storage data/5 \
   --config system-users=newsecret54321id
 
 # Grant access to new secrets for re-deployed application
@@ -174,7 +182,7 @@ Prepare the test data to restore later:
 $ juju add-model teststorage
 
 # Deploy the new postgresql to dump storage with credentials
-$ juju deploy postgresql --channel 16/stable --storage pgdata=5Gcompleted
+$ juju deploy postgresql --channel 16/stable --storage data=5G
 Deployed "postgresql" from charm-hub charm "postgresql", revision 613 in channel 16/stable on ubuntu@24.04/stable
 
 # Wait for deployment completed:
@@ -213,14 +221,14 @@ $ PGPASSWORD=I8mkza6vIhD2w1Rh psql -h 10.189.210.99 -U operator -d postgres -c "
 # Check the storage status
 $ juju storage
 Unit          Storage ID  Type        Pool  Size     Status    Message
-postgresql/0  pgdata/0    filesystem  lxd   5.0 GiB  attached
+postgresql/0  data/0    filesystem  lxd   5.0 GiB  attached
 
 # Remove the old application keeping the storage:
 $ juju remove-application postgresql --destroy-storage=false
 WARNING This command will perform the following actions:
 will remove application postgresql
 - will remove unit postgresql/0
-- will detach storage pgdata/0
+- will detach storage data/0
 Continue [y/N]? y
 
 # Check the status (app and secrets are gone, but storage stays):
@@ -235,10 +243,10 @@ ID  Name  Owner  Rotation  Revision  Last updated
 
 $ juju storage
 Unit  Storage ID  Type        Pool  Size     Status    Message
-      pgdata/0    filesystem  lxd   5.0 GiB  detached
+      data/0      filesystem  lxd   5.0 GiB  detached
 ```
 
-Re-deploy the postgresql application reusing storage `pgdata/0 `:
+Re-deploy the postgresql application reusing storage `data/0 `:
 
 ```shell
 # Create a new Juju User secret
@@ -254,7 +262,7 @@ secret:d09vcn1oie738j7af4ng
 # Re-deploy app with old storage and old passwords
 $ juju deploy postgresql \
   --channel 16/stable \
-  --attach-storage pgdata/0 \
+  --attach-storage data/0 \
   --config system-users=d09vcn1oie738j7af4ng
 Deployed "postgresql" from charm-hub charm "postgresql", revision 613 in channel 16/stable on ubuntu@24.04/stable
 
@@ -277,7 +285,7 @@ $ PGPASSWORD=I8mkza6vIhD2w1Rh psql -h 10.189.210.179 -U operator -d postgres -c 
 # Old storage re-used:
 $ juju storage
 Unit          Storage ID  Type        Pool  Size     Status    Message
-postgresql/1  pgdata/0    filesystem  lxd   5.0 GiB  attached
+postgresql/1  data/0    filesystem  lxd   5.0 GiB  attached
 ```
 </details>
 
