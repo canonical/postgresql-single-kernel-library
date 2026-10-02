@@ -1,12 +1,22 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import importlib.util
+import sys
 from unittest.mock import patch, sentinel
 
 import pytest
 from ops.testing import Harness
-from single_kernel_postgresql.charms import k8s_charm, vm_charm
 from single_kernel_postgresql.config.literals import PEER_RELATION
+
+
+def _test_charm_class(test_charm_path: str, module_name: str):
+    """Load the test charm's subclass from its src/charm.py entrypoint."""
+    spec = importlib.util.spec_from_file_location(module_name, f"{test_charm_path}/src/charm.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -39,9 +49,17 @@ def harness(substrate, test_charm_path):
     with open(test_charm_path + "/actions.yaml") as actions_file:
         actions = actions_file.read()
     if substrate == "vm":
-        harness = Harness(vm_charm.PostgreSQLVMCharm, meta=meta, actions=actions)
+        harness = Harness(
+            _test_charm_class(test_charm_path, "vm_test_charm").PostgreSQLVMTestCharm,
+            meta=meta,
+            actions=actions,
+        )
     else:
-        harness = Harness(k8s_charm.PostgreSQLK8sCharm, meta=meta, actions=actions)
+        harness = Harness(
+            _test_charm_class(test_charm_path, "k8s_test_charm").PostgreSQLK8sTestCharm,
+            meta=meta,
+            actions=actions,
+        )
     peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
     # Set before begin(): Model.name (K8s namespace) is read by substrate-aware
