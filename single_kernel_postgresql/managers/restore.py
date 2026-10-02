@@ -29,6 +29,8 @@ from single_kernel_postgresql.config.literals import (
     K8S_PGBACK_REST_SERVER_SERVICE_NAME,
     K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
     K8S_POSTGRESQL_SERVICE_NAME,
+    LOGICAL_REPLICATION_OFFER_RELATION,
+    LOGICAL_REPLICATION_RELATION,
     ORIGINAL_PATRONI_ON_FAILURE_CONDITION,
     REPLICATION_CONSUMER_RELATION,
     REPLICATION_OFFER_RELATION,
@@ -255,6 +257,19 @@ class RestoreManager(BaseManager):
             if not relation:
                 continue
             error_message = "Unit cannot restore backup with an active async replication relation"
+            logger.error(f"Restore failed: {error_message}")
+            return error_message
+
+        logger.info("Checking that cluster does not have an active logical replication relation")
+        for relation in [
+            self.state.model.get_relation(LOGICAL_REPLICATION_RELATION),
+            *self.state.model.relations.get(LOGICAL_REPLICATION_OFFER_RELATION, ()),
+        ]:
+            if not relation:
+                continue
+            error_message = (
+                "Unit cannot restore backup with an active logical replication relation"
+            )
             logger.error(f"Restore failed: {error_message}")
             return error_message
 
