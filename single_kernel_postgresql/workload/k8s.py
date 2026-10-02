@@ -10,6 +10,7 @@ import signal
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 from charmlibs import pathops
@@ -18,6 +19,7 @@ from lightkube import Client
 from lightkube.resources.core_v1 import Endpoints
 from ops import Container, ModelError
 from ops.pebble import (
+    ChangeError,
     CheckDict,
     ExecError,
     FileInfo,
@@ -290,7 +292,7 @@ class K8sWorkload(BaseWorkload):
 
     def stop(self) -> None:
         """Stop the PostgreSQL service."""
-        ...
+        self.stop_service(K8S_POSTGRESQL_SERVICE_NAME)
 
     def start_service(self, service: str) -> None:
         """Start a named Pebble service."""
@@ -556,6 +558,43 @@ class K8sWorkload(BaseWorkload):
                 "+",
             ]).wait_output()[0]
             return f"{current}\n{older}", True
+
+    def postgresql_service_registered(self) -> bool:
+        """Whether the container is connected and the postgresql service exists."""
+        return self.service_exists(K8S_POSTGRESQL_SERVICE_NAME)
+
+    def get_system_identifier(self) -> tuple[str | None, str | None]:
+        """Returns the PostgreSQL system identifier from this instance."""
+        major_version = self.get_postgresql_version().split(".")[0]
+        try:
+            system_identifier, error = self.container.exec(
+                [
+                    f"/usr/lib/postgresql/{major_version}/bin/pg_controldata",
+                    str(self.paths.data),
+                ],
+                user=K8S_WORKLOAD_OS_USER,
+                group=K8S_WORKLOAD_OS_GROUP,
+            ).wait_output()
+        except ChangeError as e:
+            return None, str(e)
+        if error != "":
+            return None, error
+        system_identifier = next(
+            line for line in system_identifier.splitlines() if "Database system identifier" in line
+        ).split(" ")[-1]
+        return system_identifier, None
+
+    def create_data_backup_tarball(self) -> str:
+        """Store the current pgdata folder in a tar.gz file and return its name."""
+        filename = (
+            f"{self.paths.data}-{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.gz"
+        )
+        self.container.exec(f"tar -zcf {filename} {self.paths.data}".split()).wait_output()
+        return filename
+
+    def clear_data_directories(self) -> None:
+        """Remove the contents of the data directories to enable replication."""
+        self.empty_data_files()
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
