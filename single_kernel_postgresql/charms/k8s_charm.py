@@ -92,3 +92,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def primary_endpoint(self) -> str | None:
         """Address of the cluster primary's Service."""
         return self.state.primary_endpoint
+
+    def get_async_primary_cluster_endpoint(self) -> str | None:
+        """Endpoint of the primary cluster of the async replication partner, if any."""
+        return None

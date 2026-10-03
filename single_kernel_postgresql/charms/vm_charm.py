@@ -84,3 +84,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         """Address of the cluster primary, or None when there is not one."""
         primary = self.patroni_manager.get_primary()
         return self.patroni_manager.get_member_ip(primary) if primary else None
+
+    def get_async_primary_cluster_endpoint(self) -> str | None:
+        """Endpoint of the primary cluster of the async replication partner, if any."""
+        return None
