@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from http.client import HTTPException
 from pathlib import Path
 from signal import SIGHUP, SIGINT
 
@@ -27,6 +28,9 @@ from charmlibs.pathops import PathProtocol
 from single_kernel_postgresql.config.literals import (
     PATRONICTL_REMOVE_CONFIRMATION,
     POSTGRESQL_SNAP_NAME,
+    SNAP_OOM_SCORE_ADJUST_MIN,
+    SNAP_VITALITY_HINT,
+    SNAP_VITALITY_MAX_SNAPS,
     VM_ARCHIVE_PATH,
     VM_PATRONICTL_EXECUTABLE,
     VM_PGBACKREST_SERVICE_NAME,
@@ -73,6 +77,58 @@ def _find_service_pid(service: str) -> int | None:
         ):
             return process.pid
     return None
+
+
+def _read_vitality_hint(system_snap: snap.Snap) -> str:
+    """Read the hint without confusing a failed query with an absent setting."""
+    config = system_snap.get(None, typed=True)
+    if not isinstance(config, dict):
+        raise ValueError("Snap system configuration must be an object")
+    resilience = config.get("resilience", {})
+    if not isinstance(resilience, dict):
+        raise ValueError("Snap resilience configuration must be an object")
+    hint = resilience.get("vitality-hint", "")
+    if not isinstance(hint, str):
+        raise ValueError("Snap vitality hint must be a string")
+    if hint and len(hint.split(",")) > SNAP_VITALITY_MAX_SNAPS:
+        raise ValueError("Snap vitality hint exceeds the supported limit")
+    return hint
+
+
+def ensure_snap_oom_protection(snap_name: str) -> int:
+    """Append a missing snap to the hint and return its effective OOM adjustment.
+
+    Juju serializes the synchronous hooks and actions that call this helper.
+    Administrator changes to the same setting must not run concurrently because
+    snapd has no atomic append API.
+    Existing processes keep their adjustment until their normal next startup.
+    """
+    try:
+        # Only the name is used by get/set; the remaining metadata are placeholders.
+        system_snap = snap.Snap(
+            name="system",
+            state=snap.SnapState.Present,
+            channel="",
+            revision="",
+            confinement="",
+        )
+        hint = _read_vitality_hint(system_snap)
+        entries = hint.split(",") if hint else []
+        if snap_name not in entries:
+            if len(entries) >= SNAP_VITALITY_MAX_SNAPS:
+                raise ValueError("Snap vitality hint is full")
+            updated_hint = f"{hint},{snap_name}" if hint else snap_name
+            system_snap.set({SNAP_VITALITY_HINT: updated_hint})
+            verified_hint = _read_vitality_hint(system_snap)
+            verified_entries = verified_hint.split(",") if verified_hint else []
+            if verified_entries[: len(entries)] != entries or snap_name not in verified_entries:
+                raise ValueError("Snap vitality hint verification failed")
+            entries = verified_entries
+        # snapd overwrites earlier duplicate ranks with the last occurrence.
+        rank = len(entries) - entries[::-1].index(snap_name)
+        return SNAP_OOM_SCORE_ADJUST_MIN + rank
+    except (snap.Error, OSError, HTTPException, ValueError) as exc:
+        raise snap.SnapError(f"Failed to configure OOM protection for {snap_name}: {exc}") from exc
 
 
 class VMWorkload(BaseWorkload):
@@ -127,6 +183,7 @@ class VMWorkload(BaseWorkload):
                 logger.error("Unavailable snap architecture %s", platform.machine())
                 raise
         try:
+            ensure_snap_oom_protection(charm_refresh.snap_name())
             snap_cache = snap.SnapCache()
             snap_package = snap_cache[charm_refresh.snap_name()]
             if not snap_package.present or refresh is not None:
