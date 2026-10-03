@@ -207,3 +207,10 @@ K8S_PGBACKREST_LOGS_SYMLINK_PATH = "var/log/pgbackrest"
 VM_PATRONICTL_EXECUTABLE = "charmed-postgresql.patronictl"
 PATRONICTL_REMOVE_CONFIRMATION = "Yes I am aware"
 RESTORE_REPEAT_CAUSE = "restore-backup"
+
+# Refresh (charm_refresh integration)
+WORKLOAD_NAME = "PostgreSQL"
+VM_CHARM_NAME = "postgresql"
+K8S_CHARM_NAME = "postgresql-k8s"
+K8S_OCI_RESOURCE_NAME = "postgresql-image"
+LAST_REFRESH_UNIT_STATUS_FILE = ".last_refresh_unit_status.json"

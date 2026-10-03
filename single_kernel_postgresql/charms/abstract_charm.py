@@ -3,6 +3,7 @@
 """Skeleton for the abstract charm."""
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
@@ -21,12 +22,16 @@ from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
+from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
 from ..config.enums import Substrates
 from ..config.literals import DATABASE, S3_RELATION_NAME
 from ..utils.postgresql import PostgreSQL
+
+if TYPE_CHECKING:
+    import charm_refresh
 
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
@@ -82,6 +87,16 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             resource_provider=self.get_resource_provider,
             request_restart=self.request_restart,
             restart_services=self.restart_services,
+        )
+
+        # The refresh manager owns the charm_refresh integration and the priority gate
+        # every unit status write routes through. Constructed before the events handler
+        # so the K8s pebble-ready handler can consult the refresh state.
+        self.refresh_manager = RefreshManager(
+            state=self.state,
+            workload=self.workload,
+            charm=self,
+            set_default_status=self.set_default_unit_status,
         )
 
         # Events Handler
@@ -147,13 +162,44 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         pass
 
     @abstractmethod
-    def set_unit_status(self, status: StatusBase) -> None:
+    def set_unit_status(
+        self,
+        status: StatusBase,
+        /,
+        *,
+        refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None,
+    ) -> None:
         """Set the unit status without overriding a higher-priority refresh status."""
         pass
 
     @abstractmethod
-    def update_config(self) -> bool:
+    def set_default_unit_status(self) -> None:
+        """Set the unit status that applies when no refresh status is active."""
+        pass
+
+    @abstractmethod
+    def set_app_status(self) -> None:
+        """Set the application status from the async-replication state.
+
+        Owned by the async-replication module until that phase migrates; the refresh
+        status reconciliation consults it for the leader's app status interplay.
+        """
+        pass
+
+    @abstractmethod
+    def update_config(
+        self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
+    ) -> bool:
         """Re-render the Patroni configuration and apply it."""
+        pass
+
+    @abstractmethod
+    def update_relation_endpoints(self) -> None:
+        """Refresh the client and async relation endpoints after a switchover.
+
+        Owned by the client-relation and async-replication modules until those
+        phases migrate; the VM pre-refresh checks call it after switching primary.
+        """
         pass
 
     @property

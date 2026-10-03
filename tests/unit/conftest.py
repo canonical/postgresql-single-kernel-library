@@ -1,12 +1,64 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import pathlib
+import shutil
 from unittest.mock import patch, sentinel
 
 import pytest
 from ops.testing import Harness
 from single_kernel_postgresql.charms import k8s_charm, vm_charm
 from single_kernel_postgresql.config.literals import PEER_RELATION
+
+
+class _MockRefresh:
+    """Stands in for charm_refresh.Machines/Kubernetes in every unit test."""
+
+    in_progress = False
+    next_unit_allowed_to_refresh = True
+    workload_allowed_to_start = True
+    app_status_higher_priority = None
+    unit_status_higher_priority = None
+
+    def __init__(self, _, /):
+        pass
+
+    def unit_status_lower_priority(self, *, workload_is_running=True):
+        return None
+
+
+@pytest.fixture(autouse=True)
+def mock_refresh(request, monkeypatch):
+    """Shunt the charm_refresh integration.
+
+    The refresh manager constructs its charm_refresh object whenever a charm is
+    instantiated, and charm_refresh reads refresh_versions.toml (pinned charm and
+    workload versions) from the working directory, which the unit environment does
+    not have. Patch the entry points and provide a minimal versions file; the file
+    is backed up and restored when one already exists.
+    """
+    monkeypatch.setattr("charm_refresh.Machines", _MockRefresh)
+    monkeypatch.setattr("charm_refresh.Kubernetes", _MockRefresh)
+
+    # Anchor on the setup-time working directory: other fixtures may chdir for the
+    # duration of a test, and the shared monkeypatch undo runs after this teardown.
+    base = pathlib.Path.cwd()
+    path = base / "refresh_versions.toml"
+    backup = base / "refresh_versions.toml.backup"
+    status_path = base / ".last_refresh_unit_status.json"
+    existed = path.exists()
+    if existed:
+        shutil.copy(path, backup)
+    # Overwrite with minimal pinned versions; tests never read the real pins (the
+    # charm_refresh entry points and the workload version getter are patched).
+    path.write_text('charm = "16/0.0.0"\nworkload = "16.0"\n')
+
+    yield
+
+    status_path.unlink(missing_ok=True)
+    path.unlink(missing_ok=True)
+    if existed:
+        shutil.move(backup, path)
 
 
 @pytest.fixture
