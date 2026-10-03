@@ -12,6 +12,9 @@ POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 
 # Snap
 POSTGRESQL_SNAP_NAME = "charmed-postgresql"
+SNAP_OOM_SCORE_ADJUST_MIN = -900
+SNAP_VITALITY_HINT = "resilience.vitality-hint"
+SNAP_VITALITY_MAX_SNAPS = 100
 
 # Relations
 PEER_RELATION = "database-peers"
