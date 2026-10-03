@@ -9,6 +9,10 @@ from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
 from ops.charm import CharmBase
 
+if TYPE_CHECKING:
+    import charm_refresh
+
+
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.ldap import LDAP
@@ -29,9 +33,6 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 from ..config.enums import Substrates
 from ..config.literals import DATABASE, S3_RELATION_NAME
 from ..utils.postgresql import PostgreSQL
-
-if TYPE_CHECKING:
-    import charm_refresh
 
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
@@ -108,11 +109,16 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.refresh_manager,
         )
+
+        # Resume or prepare the refresh (the charms' post-construction resume block).
+        self.refresh_manager.on_init()
 
         # Status Handler
         self.status_handler = StatusHandler(
             self,
+            self.refresh_manager,
             self.cluster_manager,
             self.tls_manager,
             self.config_manager,
@@ -194,6 +200,24 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         pass
 
     @abstractmethod
+    def post_refresh_side_effects(self) -> None:
+        """Run the post-snap-refresh side effects owned by not-yet-migrated modules.
+
+        The VM charm sets up the exporter and pgBackRest exporter, starts/stops the
+        pgBackRest service and updates the watcher unit address here.
+        """
+        pass
+
+    @abstractmethod
+    def has_async_replication_relation(self) -> bool:
+        """Whether this unit is related to an async replication partner.
+
+        Owned by the async-replication module until that phase migrates; the temp
+        tablespace migration skips units inside an async cluster.
+        """
+        pass
+
+    @abstractmethod
     def update_relation_endpoints(self) -> None:
         """Refresh the client and async relation endpoints after a switchover.
 
@@ -215,4 +239,14 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         Owned by the async-replication module until that phase migrates; the refresh
         pre-refresh checks need it to decide whether a switchover crosses clusters.
         """
+        pass
+
+    @abstractmethod
+    def update_pebble_layers(self) -> None:
+        """Reconcile the workload's Pebble layers (K8s)."""
+        pass
+
+    @abstractmethod
+    def ensure_pgdata_dirs_and_symlinks(self) -> None:
+        """Create the storage directories and symlinks for the PostgreSQL data paths (K8s)."""
         pass
