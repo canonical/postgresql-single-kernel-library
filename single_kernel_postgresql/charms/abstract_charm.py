@@ -22,7 +22,6 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.s3 import S3Requirer
 from single_kernel_postgresql.managers.async_replication import (
     AsyncReplicationManager,
-    AsyncReplicationWatcher,
 )
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
@@ -229,7 +228,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         """Re-emitting the async relation-changed event goes through the handler."""
         self.async_replication._re_emit_async_relation_changed_event()
 
-    def _async_watcher(self) -> AsyncReplicationWatcher | None:
+    def _async_watcher(self) -> "WatcherEventsHandler | None":
         """Overridable hook supplying the VM watcher bridge (K8s has none)."""
         return None
 
