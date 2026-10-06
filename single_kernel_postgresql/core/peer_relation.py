@@ -40,7 +40,6 @@ class PeerRelationState(RelationState):
     ):
         super().__init__(relation, data_interface, component)
         self.data_interface = data_interface
-        self._component = component
 
     def get_secret(self, key: str) -> str | None:
         """Get the secret value for 'key' from the peer relation data."""
@@ -418,7 +417,6 @@ class PostgreSQLApplication(PeerRelationState):
         """Initialize the PostgreSQLApplication object."""
         super().__init__(relation, data_interface, component)
         self.app = component
-        self.data_interface = data_interface
         self.substrate = substrate
 
     @property
