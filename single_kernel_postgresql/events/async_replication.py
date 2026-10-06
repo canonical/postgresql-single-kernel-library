@@ -19,7 +19,7 @@ dead-datacenter recovery changes (DPE-10203) apply to both substrates.
 
 import json
 import logging
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from ops import (
     ActionEvent,
@@ -49,6 +49,7 @@ from single_kernel_postgresql.core.state import CharmState
 if TYPE_CHECKING:
     # Substrate-only seams are injected; they must never enter the other substrate's
     # import graph, hence the type-checking-only imports.
+    from single_kernel_postgresql.events.watcher import WatcherEventsHandler
     from single_kernel_postgresql.managers.k8s import K8sManager
 from single_kernel_postgresql.managers.async_replication import (
     READ_ONLY_MODE_BLOCKING_MESSAGE,
@@ -58,22 +59,6 @@ from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
-
-
-class AsyncReplicationWatcher(Protocol):
-    """The substrate-provided watcher bridge (only the VM charm has a watcher)."""
-
-    def enable_watcher(self) -> None:
-        """Enable the watcher."""
-        ...
-
-    def update_endpoints(self) -> None:
-        """Update the watcher endpoints."""
-        ...
-
-    def disable_watcher(self) -> None:
-        """Disable the watcher."""
-        ...
 
 
 def _same_secret_id(a: str | None, b: str | None) -> bool:
@@ -97,7 +82,7 @@ class PostgreSQLAsyncReplication(Object):
         manager: AsyncReplicationManager,
         patroni_manager: PatroniManager,
         workload: BaseWorkload,
-        watcher: AsyncReplicationWatcher | None = None,
+        watcher: "WatcherEventsHandler | None" = None,
         k8s_manager: "K8sManager | None" = None,
     ):
         """Constructor.
