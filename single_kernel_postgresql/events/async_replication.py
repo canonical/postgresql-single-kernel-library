@@ -52,14 +52,11 @@ if TYPE_CHECKING:
 from single_kernel_postgresql.managers.async_replication import (
     READ_ONLY_MODE_BLOCKING_MESSAGE,
     AsyncReplicationManager,
-    AsyncReplicationWatcher,
 )
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
-
-
 
 
 def _same_secret_id(a: str | None, b: str | None) -> bool:
