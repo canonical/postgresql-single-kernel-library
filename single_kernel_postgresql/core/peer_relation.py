@@ -27,22 +27,20 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
 )
 
 
-class PostgreSQLPeer(RelationState):
-    """State/Relation data collection for a PostgreSQL unit."""
+class PeerRelationState(RelationState):
+    """Common state for the unit and application sides of the peer relation."""
 
-    data_interface: DataPeerUnitData
-    unit: Unit
+    data_interface: DataPeerData
 
     def __init__(
         self,
         relation: Relation | None,
-        data_interface: DataPeerUnitData,
-        component: Unit,
+        data_interface: DataPeerData,
+        component: Unit | Application,
     ):
-        """Initialize the PostgreSQLPeer object."""
         super().__init__(relation, data_interface, component)
         self.data_interface = data_interface
-        self.unit = component
+        self._component = component
 
     def get_secret(self, key: str) -> str | None:
         """Get the secret value for 'key' from the peer relation data."""
@@ -61,6 +59,23 @@ class PostgreSQLPeer(RelationState):
         if not self.relation:
             return
         self.data_interface.delete_relation_data(self.relation.id, [key])
+
+
+class PostgreSQLPeer(PeerRelationState):
+    """State/Relation data collection for a PostgreSQL unit."""
+
+    data_interface: DataPeerUnitData
+    unit: Unit
+
+    def __init__(
+        self,
+        relation: Relation | None,
+        data_interface: DataPeerUnitData,
+        component: Unit,
+    ):
+        """Initialize the PostgreSQLPeer object."""
+        super().__init__(relation, data_interface, component)
+        self.unit = component
 
     @property
     def is_app_leader(self) -> bool:
@@ -384,7 +399,7 @@ class PostgreSQLPeer(RelationState):
         return peer_addrs
 
 
-class PostgreSQLApplication(RelationState):
+class PostgreSQLApplication(PeerRelationState):
     """An PostgreSQL Application is the peer application state.
 
     This class defines state/relation data for a single PostgreSQL application.
@@ -673,24 +688,6 @@ class PostgreSQLApplication(RelationState):
         if not self.relation:
             return
         self.relation.data[self.app]["restore-to-time"] = value
-
-    def get_secret(self, key: str) -> str | None:
-        """Get the secret value for 'key' from the peer relation data."""
-        if not self.relation:
-            return None
-        return self.data_interface.get_secret(self.relation.id, key)
-
-    def set_secret(self, key: str, value: str) -> None:
-        """Set the secret value for 'key' in the peer relation data."""
-        if not self.relation:
-            return
-        self.data_interface.set_secret(self.relation.id, key, value)
-
-    def remove_secret(self, key: str) -> None:
-        """Remove the secret value for 'key' from the peer relation data."""
-        if not self.relation:
-            return
-        self.data_interface.delete_relation_data(self.relation.id, [key])
 
     @cached_property
     def data(self) -> MutableMapping[str, str]:
