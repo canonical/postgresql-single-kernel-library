@@ -8,6 +8,7 @@ import logging
 import os
 import pathlib
 import platform
+import pwd
 import re
 import shlex
 import shutil
@@ -15,8 +16,10 @@ import subprocess
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from signal import SIGHUP, SIGINT
+from subprocess import run
 
 import charm_refresh
 import psutil
@@ -24,9 +27,12 @@ import tomli
 from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
+from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     PATRONICTL_REMOVE_CONFIRMATION,
     POSTGRESQL_SNAP_NAME,
+    SNAP,
+    SNAP_USER,
     VM_ARCHIVE_PATH,
     VM_PATRONICTL_EXECUTABLE,
     VM_PGBACKREST_SERVICE_NAME,
@@ -377,6 +383,82 @@ class VMWorkload(BaseWorkload):
             stdin=f"{cluster_name}\n{PATRONICTL_REMOVE_CONFIRMATION}",
             timeout=10,
         )
+
+    def get_system_identifier(self) -> tuple[str | None, str | None]:
+        """Returns the PostgreSQL system identifier from this instance."""
+
+        def demote():
+            pw_record = pwd.getpwnam(SNAP_USER)
+
+            def result():
+                os.setgid(pw_record.pw_gid)
+                os.setuid(pw_record.pw_uid)
+
+            return result
+
+        major_version = self.get_postgresql_version().split(".")[0]
+        # Input is hardcoded
+        process = run(  # noqa: S603
+            [
+                f"{SNAP}/usr/lib/postgresql/{major_version}/bin/pg_controldata",
+                str(self.paths.data),
+            ],
+            capture_output=True,
+            preexec_fn=demote(),
+        )
+        if process.returncode != 0:
+            return None, process.stderr.decode()
+        system_identifier = next(
+            line
+            for line in process.stdout.decode().splitlines()
+            if "Database system identifier" in line
+        ).split(" ")[-1]
+        return system_identifier, None
+
+    def create_data_backup_tarball(self) -> str:
+        """Store the current data folder in a tar.gz file and return its name."""
+        filename = (
+            f"{self.paths.data.parent}-"
+            f"{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.gz"
+        )
+        # Input is hardcoded
+        subprocess.check_call(f"tar -zcf {filename} {self.paths.data}".split())  # noqa: S603
+        return filename
+
+    def clear_data_directories(self) -> None:
+        """Remove the contents of the data directories to initialise a new cluster."""
+        paths = [
+            self.paths.archive,
+            self.paths.data,
+            self.paths.wal,
+            self.paths.temp,
+        ]
+        path = None
+        try:
+            for path in paths:
+                path_object = Path(str(path))
+                if path_object.exists() and path_object.is_dir():
+                    for item in os.listdir(path_object):
+                        item_path = os.path.join(path_object, item)
+                        if os.path.isfile(item_path) or os.path.islink(item_path):
+                            os.remove(item_path)
+                        elif os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+        except OSError as e:
+            raise PostgreSQLFileOperationError(
+                f"Failed to remove contents from {path} with error: {e!s}"
+            ) from e
+
+    def remove_raft_state(self) -> None:
+        """Remove previous cluster information to make it possible to initialise a new cluster."""
+        try:
+            path = Path(f"{self.paths.patroni_conf}/raft")
+            if path.exists() and path.is_dir():
+                shutil.rmtree(path)
+        except OSError as e:
+            raise PostgreSQLFileOperationError(
+                f"Failed to remove previous cluster information with error: {e!s}"
+            ) from e
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
