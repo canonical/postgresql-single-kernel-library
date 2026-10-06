@@ -207,3 +207,7 @@ K8S_PGBACKREST_LOGS_SYMLINK_PATH = "var/log/pgbackrest"
 VM_PATRONICTL_EXECUTABLE = "charmed-postgresql.patronictl"
 PATRONICTL_REMOVE_CONFIRMATION = "Yes I am aware"
 RESTORE_REPEAT_CAUSE = "restore-backup"
+
+# Watcher relation
+RAFT_PORT = 2222
+RAFT_PARTNER_PREFIX = "partner_node_status_server_"
