@@ -563,6 +563,18 @@ class K8sWorkload(BaseWorkload):
         """Whether the container is connected and the postgresql service exists."""
         return self.service_exists(K8S_POSTGRESQL_SERVICE_NAME)
 
+    def get_unit_ip_from_hosts(self) -> str:
+        """Reads some files to quickly figure out its own pod IP.
+
+        It should work for any Ubuntu-based image
+        """
+        with open("/etc/hosts") as f:
+            hosts = f.read()
+        with open("/etc/hostname") as f:
+            hostname = f.read().replace("\n", "")
+        line = next(ln for ln in hosts.split("\n") if ln.find(hostname) >= 0)
+        return line.split("\t")[0]
+
     def get_system_identifier(self) -> tuple[str | None, str | None]:
         """Returns the PostgreSQL system identifier from this instance."""
         major_version = self.get_postgresql_version().split(".")[0]
