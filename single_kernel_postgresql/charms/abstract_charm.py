@@ -3,7 +3,7 @@
 """Skeleton for the abstract charm."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
@@ -35,7 +35,7 @@ from ..config.literals import DATABASE, S3_RELATION_NAME
 from ..utils.postgresql import PostgreSQL
 
 if TYPE_CHECKING:
-    from single_kernel_postgresql.workload.k8s import K8sWorkload
+    from single_kernel_postgresql.managers.k8s import K8sManager
 
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
@@ -69,18 +69,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         self.patroni_manager = PatroniManager(state=self.state, workload=self.workload)
         self.cluster_manager = ClusterManager(state=self.state, workload=self.workload)
 
-        # Substrate-only K8s API seam, injected into the handlers that need it; built
-        # here so the async-replication handler (below) can consume it.
-        if self.substrate == Substrates.K8S:
-            from single_kernel_postgresql.managers.k8s import K8sManager
-
-            # The K8s substrate asserts a K8sWorkload in PostgreSQLK8sCharm.
-            self.k8s_manager: K8sManager | None = K8sManager(
-                self.state,
-                cast("K8sWorkload", self.workload),
-            )
-        else:
-            self.k8s_manager = None
+        # Substrate-only K8s API seam: the K8s charm builds it by overriding
+        # build_k8s_manager(); VM charms need no K8s API access. Built here so the
+        # async-replication subsystem (below) can consume it.
+        k8s_manager = self.build_k8s_manager()
 
         # Async-replication subsystem: the manager owns the data plane and the
         # promotion/standby flows; the handler owns the observers and the public facade.
@@ -96,7 +88,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             create_pgdata=self.create_pgdata,
             fix_leader_annotation=self.fix_leader_annotation,
             re_emit_relation_changed=self._re_emit_async_relation_changed,
-            k8s_manager=self.k8s_manager,
+            k8s_manager=k8s_manager,
             watcher=watcher,
         )
         self.async_replication = PostgreSQLAsyncReplication(
@@ -105,7 +97,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.async_replication_manager,
             self.patroni_manager,
             self.workload,
-            k8s_manager=self.k8s_manager,
+            k8s_manager=k8s_manager,
             watcher=watcher,
         )
 
@@ -230,6 +222,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
 
     def _async_watcher(self) -> "WatcherEventsHandler | None":
         """Overridable hook supplying the VM watcher bridge (K8s has none)."""
+        return None
+
+    def build_k8s_manager(self) -> "K8sManager | None":
+        """Overridable hook supplying the K8s API seam (K8s charm only)."""
         return None
 
     def create_pgdata(self) -> None:

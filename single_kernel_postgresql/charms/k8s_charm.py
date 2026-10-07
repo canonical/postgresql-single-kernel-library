@@ -5,6 +5,7 @@
 """PostgreSQL Kubernetes Charm."""
 
 import logging
+from typing import cast
 
 from ops import StatusBase
 
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     """PostgreSQL K8s Charm."""
 
+    # Built by build_k8s_manager() while the abstract __init__ wires the
+    # async-replication subsystem; never None on the K8s substrate.
+    k8s_manager: K8sManager
+
     def __init__(self, *args):
         """Initialize the PostgreSQL Kubernetes Charm."""
         super().__init__(*args)
@@ -28,7 +33,13 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             "Workload must be an instance of K8sWorkload"
         )
 
-        # The abstract charm builds self.k8s_manager and the async-replication handler.
+    def build_k8s_manager(self) -> K8sManager:
+        """Build the K8s API seam the async-replication subsystem consumes."""
+        self.k8s_manager = K8sManager(
+            self.state,
+            cast("K8sWorkload", self.workload),
+        )
+        return self.k8s_manager
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -73,7 +84,6 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     # config re-render), so they are minimal here.
     def get_resource_provider(self) -> K8sManager:
         """Return the substrate's (cpu_cores, memory_bytes) introspector."""
-        assert self.k8s_manager is not None  # noqa: S101
         return self.k8s_manager
 
     def request_restart(self) -> None:
