@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from charmlibs.systemd import daemon_reload, service_enable
 from jinja2 import Template
-from ops import ActiveStatus, CharmEvents, EventBase, EventSource
+from ops import ActiveStatus
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.managers.base import BaseManager
@@ -29,29 +29,6 @@ logger = logging.getLogger(__name__)
 # File path for the spawned cluster topology observer process to write logs.
 LOG_FILE_PATH = "/var/log/cluster_topology_observer.log"
 RUN_CMD = "/usr/bin/juju-exec"
-
-
-class ClusterTopologyChangeEvent(EventBase):
-    """A custom event for cluster topology changes."""
-
-
-class DatabasesChangeEvent(EventBase):
-    """A custom event for databases changes."""
-
-
-class RaftReconnectEvent(EventBase):
-    """A custom event for databases changes."""
-
-
-class ClusterTopologyChangeCharmEvents(CharmEvents):
-    """A CharmEvents extension for cluster topology changes.
-
-    Includes :class:`ClusterTopologyChangeEvent` in those that can be handled.
-    """
-
-    cluster_topology_change = EventSource(ClusterTopologyChangeEvent)
-    databases_change = EventSource(DatabasesChangeEvent)
-    raft_reconnect = EventSource(RaftReconnectEvent)
 
 
 class ObserverManager(BaseManager):
@@ -138,6 +115,30 @@ class ObserverManager(BaseManager):
             except OSError:
                 pass
 
+    def start_raft_observer(self) -> None:
+        """Render systemd units and start the observer."""
+        timer_service_file = "/etc/systemd/system/raft-observer.timer"
+        oneshot_service_file = "/etc/systemd/system/raft-observer.service"
+
+        with open("templates/vm/raft-observer.service.j2") as file:
+            template = Template(file.read())
+
+        rendered = template.render(
+            envvars=copy_environment(), script=f"{os.getcwd()}/scripts/raft_observer.py"
+        )
+        render_file(Substrates.VM, oneshot_service_file, rendered, 0o644, change_owner=False)
+
+        with open("templates/raft-observer.timer.j2") as file:
+            template = Template(file.read())
+
+        rendered = template.render()
+        render_file(Substrates.VM, timer_service_file, rendered, 0o644, change_owner=False)
+
+        # Reload systemd to pick up the new service
+        daemon_reload()
+        service_enable(timer_service_file, "--now")
+        logger.info("Installed and enabled raft observer timer")
+
 
 def copy_environment() -> dict[str, str]:
     """Environment variables to pass to a script."""
@@ -159,28 +160,3 @@ def copy_environment() -> dict[str, str]:
             new_env["PYTHONPATH"] = f"{venv_path.resolve()}:{new_env['PYTHONPATH']}"
             break
     return {var: val for var, val in new_env.items() if "JUJU" in var or "PATH" in var}
-
-
-def start_raft_observer() -> None:
-    """Render systemd units and start the observer."""
-    timer_service_file = "/etc/systemd/system/raft-observer.timer"
-    oneshot_service_file = "/etc/systemd/system/raft-observer.service"
-
-    with open("templates/vm/raft-observer.service.j2") as file:
-        template = Template(file.read())
-
-    rendered = template.render(
-        envvars=copy_environment(), script=f"{os.getcwd()}/scripts/raft_observer.py"
-    )
-    render_file(Substrates.VM, oneshot_service_file, rendered, 0o644, change_owner=False)
-
-    with open("templates/raft-observer.timer.j2") as file:
-        template = Template(file.read())
-
-    rendered = template.render()
-    render_file(Substrates.VM, timer_service_file, rendered, 0o644, change_owner=False)
-
-    # Reload systemd to pick up the new service
-    daemon_reload()
-    service_enable(timer_service_file, "--now")
-    logger.info("Installed and enabled raft observer timer")
