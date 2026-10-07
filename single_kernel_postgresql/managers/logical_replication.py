@@ -625,12 +625,8 @@ class LogicalReplicationManager(BaseManager):
 
         Chains are rebuilt only when a publication is created or altered: upstream
         subscription changes do not refresh already-published chains until the
-        subscriber alters its request, and a publisher on an older version that does
-        not send replication-chains yet is treated as origin. Homogeneous deployments
-        (both sides on this library) converge; cross-version deployments understate
-        the chains until both sides are upgraded. Chain entries carry
-        ``model-uuid/app-name`` identity tokens; entries without a token were
-        inherited from older publishers and are matched by name only.
+        subscriber alters its request. Chain entries carry
+        ``model-uuid/app-name`` identity tokens.
 
         Args:
             database: The database name
