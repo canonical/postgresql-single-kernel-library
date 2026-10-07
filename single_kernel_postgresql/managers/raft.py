@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING
 
 import psutil
 from ops import BlockedStatus
-from pysyncobj.utility import TcpUtility, UtilityException
+
+with suppress(ImportError):
+    from pysyncobj.utility import TcpUtility, UtilityException
 from tenacity import Retrying, wait_fixed
 
 from single_kernel_postgresql.config.exceptions import (

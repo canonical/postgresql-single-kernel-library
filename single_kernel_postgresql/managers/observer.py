@@ -7,11 +7,13 @@ import logging
 import os
 import signal
 import subprocess
+from contextlib import suppress
 from pathlib import Path
 from sys import version_info
 from typing import TYPE_CHECKING
 
-from charmlibs.systemd import daemon_reload, service_enable
+with suppress(ImportError):
+    from charmlibs.systemd import daemon_reload, service_enable
 from jinja2 import Template
 from ops import ActiveStatus
 
