@@ -48,6 +48,11 @@ VALIDATION_STATUS_MESSAGE_KEY = "logical-replication-validation-status-message"
 # forever, keeping the unit blocked despite a healthy, replicating flow.
 LAST_BLOCK_MESSAGE_KEY = "logical-replication-last-block-message"
 
+# Both relation sides stamp this app-databag field with their (model UUID, app
+# name) identity so the circular guards can tell same-named apps in different
+# models apart; see _self_replication_identity.
+REPLICATION_IDENTITY_KEY = "replication-identity"
+
 # Publisher error prose for circular rejections, singular or plural:
 # "circular replication detected for table public.t1 in database db1"
 # "circular replication detected for tables public.t1, public.t2 in database db1"
@@ -291,6 +296,9 @@ class LogicalReplicationManager(BaseManager):
         logger.debug(
             f"Started processing offer for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation.id}"
         )
+        # Stamp our identity first so the subscriber-side guards can tell us
+        # apart from same-named apps in other models.
+        self._write_replication_identity(relation)
 
         subscriptions_request = json.loads(
             relation.data[relation.app].get("subscription-request", "{}")
@@ -436,6 +444,68 @@ class LogicalReplicationManager(BaseManager):
         }
         return None
 
+    def _self_replication_identity(self) -> dict[str, str]:
+        """The (model UUID, app name) pair identifying this application.
+
+        App names are unique within one model only, and Juju renames
+        cross-model relation remotes per side (``remote-<model-uuid>`` on the
+        offering side), so bare app names cannot identify an application
+        across models. The pair is deterministic, stable and exchanged through
+        the relation data.
+        """
+        return {"model-uuid": self.state.model.uuid, "app-name": self.state.model.app.name}
+
+    def _identity_token(self, identity: Mapping[str, str]) -> str:
+        """Serialize an identity as the chain token ``model-uuid/app-name``."""
+        return f"{identity['model-uuid']}/{identity['app-name']}"
+
+    def _write_replication_identity(self, relation: Relation) -> None:
+        """Stamp this app's identity into its side of the relation databag.
+
+        Every writer stamps its own side, so each relation converges to two
+        identities. Readers fall back to app names while a side has not
+        stamped yet (an older library version): names are exact within one
+        model, which is where the pre-identity guards were correct.
+        """
+        identity = json.dumps(self._self_replication_identity())
+        if relation.data[self.state.model.app].get(REPLICATION_IDENTITY_KEY) != identity:
+            relation.data[self.state.model.app][REPLICATION_IDENTITY_KEY] = identity
+
+    def _remote_replication_identity(self, relation: Relation) -> Mapping[str, str] | None:
+        """Read the remote app's identity stamp, or None when it hasn't stamped one."""
+        try:
+            parsed = json.loads(relation.data[relation.app].get(REPLICATION_IDENTITY_KEY) or "")
+        except json.JSONDecodeError:
+            return None
+        if isinstance(parsed, dict) and parsed.get("model-uuid") and parsed.get("app-name"):
+            return cast("Mapping[str, str]", parsed)
+        return None
+
+    def _same_remote_app(self, relation_a: Relation, relation_b: Relation) -> bool:
+        """True when both relations connect to the same remote application.
+
+        Identity stamps decide; without a stamp on either side (older peer),
+        fall back to the app name, which is exact within one model.
+        """
+        identity_a = self._remote_replication_identity(relation_a)
+        identity_b = self._remote_replication_identity(relation_b)
+        if identity_a is not None and identity_b is not None:
+            return dict(identity_a) == dict(identity_b)
+        return relation_a.app.name == relation_b.app.name
+
+    def _chain_contains_app(
+        self, chain: list[str], identity: Mapping[str, str] | None, app_name: str
+    ) -> bool:
+        """Check a replication chain for an app, by identity token when known.
+
+        Chains written by this version carry ``model-uuid/app-name`` tokens;
+        chains inherited from older publishers carry bare app names, which are
+        still matched by name (the pre-identity semantics).
+        """
+        if identity is not None and self._identity_token(identity) in chain:
+            return True
+        return app_name in chain
+
     def _check_publisher_circular_replication(
         self, offer_relation: Relation, database: str, tables: list[str]
     ) -> list[str]:
@@ -450,6 +520,9 @@ class LogicalReplicationManager(BaseManager):
         1. If we have an active subscription to the same app (direct circular)
         2. If we're subscribed to any table and the requester's app is in its replication
            chain (multi-hop circular)
+
+        Same-app matching uses the exchanged identity stamps when both sides
+        have them: bare app names are only an exact identity within one model.
 
         Args:
             offer_relation: The offer relation being processed
@@ -474,7 +547,7 @@ class LogicalReplicationManager(BaseManager):
         )
 
         # Check for direct circular replication (we're subscribed to the same app)
-        if subscription_relation.app.name == offer_relation.app.name:
+        if self._same_remote_app(subscription_relation, offer_relation):
             # We're subscribed to the same app that's trying to subscribe to us!
             # Check if we have active subscriptions to this database
             subscriptions = self._subscriptions_info()
@@ -532,7 +605,9 @@ class LogicalReplicationManager(BaseManager):
 
             # Check if the requester's app is in the replication chain
             chain = replication_chains[table]
-            if offer_relation.app.name in chain:
+            if self._chain_contains_app(
+                chain, self._remote_replication_identity(offer_relation), offer_relation.app.name
+            ):
                 circular_tables.append(table)
                 logger.warning(
                     f"Multi-hop circular replication detected: subscribed to {table} "
@@ -550,7 +625,12 @@ class LogicalReplicationManager(BaseManager):
 
         Chains are rebuilt only when a publication is created or altered: upstream
         subscription changes do not refresh already-published chains until the
-        subscriber alters its request.
+        subscriber alters its request, and a publisher on an older version that does
+        not send replication-chains yet is treated as origin. Homogeneous deployments
+        (both sides on this library) converge; cross-version deployments understate
+        the chains until both sides are upgraded. Chain entries carry
+        ``model-uuid/app-name`` identity tokens; entries without a token were
+        inherited from older publishers and are matched by name only.
 
         Args:
             database: The database name
@@ -560,6 +640,7 @@ class LogicalReplicationManager(BaseManager):
             Dictionary mapping table names to their replication chains
         """
         chains: dict[str, list[str]] = {}
+        self_token = self._identity_token(self._self_replication_identity())
 
         # Get our subscription relation (limit: 1, so only one relation possible)
         subscription_relation = self.state.model.get_relation(LOGICAL_REPLICATION_RELATION)
@@ -567,7 +648,7 @@ class LogicalReplicationManager(BaseManager):
         if not subscription_relation:
             # No subscription, we're the origin for all tables
             for table in tables:
-                chains[table] = [self.state.model.app.name]
+                chains[table] = [self_token]
             return chains
 
         # Get the remote publications we're subscribed to
@@ -578,7 +659,7 @@ class LogicalReplicationManager(BaseManager):
         if database not in remote_publications:
             # Not subscribed to this database, we're the origin
             for table in tables:
-                chains[table] = [self.state.model.app.name]
+                chains[table] = [self_token]
             return chains
 
         # Get the replication chains from our subscription
@@ -587,10 +668,10 @@ class LogicalReplicationManager(BaseManager):
         for table in tables:
             if table in remote_chains:
                 # Extend the chain - we're republishing data we subscribed to
-                chains[table] = remote_chains[table] + [self.state.model.app.name]
+                chains[table] = remote_chains[table] + [self_token]
             else:
                 # We're the origin for this table
-                chains[table] = [self.state.model.app.name]
+                chains[table] = [self_token]
 
         return chains
 
@@ -611,6 +692,7 @@ class LogicalReplicationManager(BaseManager):
         except json.JSONDecodeError as err:
             self._fail_validation(f"JSON decode error {err}")
             return
+        self._write_replication_identity(relation)
         relation.data[self.state.model.app]["subscription-request"] = json.dumps(parsed)
 
     def validate_subscription_request(
@@ -989,6 +1071,7 @@ class LogicalReplicationManager(BaseManager):
         relation.data[self.state.model.app]["subscription-request"] = (
             self.state.config.logical_replication_subscription_request or "{}"
         )
+        self._write_replication_identity(relation)
         for database, subscription in subscriptions.copy().items():
             if database in subscription_request_config:
                 continue
@@ -1232,9 +1315,11 @@ class LogicalReplicationManager(BaseManager):
         if table not in replication_chains:
             return False
 
-        # Check if our app name is in the chain
+        # Check if this app is in the chain, by identity token when known
         chain = replication_chains[table]
-        if self.state.model.app.name in chain:
+        if self._chain_contains_app(
+            chain, self._self_replication_identity(), self.state.model.app.name
+        ):
             logger.warning(
                 f"Circular replication detected: table {table} in database {database} "
                 f"has replication chain {chain} which includes this app ({self.state.model.app.name})"
@@ -1272,7 +1357,7 @@ class LogicalReplicationManager(BaseManager):
             return False
 
         # Check if the offer relation is to the same app we want to subscribe from
-        if offer_relation.app.name != relation.app.name:
+        if not self._same_remote_app(offer_relation, relation):
             return False
 
         # We have an offer relation to the same app! Check if we're publishing this table
