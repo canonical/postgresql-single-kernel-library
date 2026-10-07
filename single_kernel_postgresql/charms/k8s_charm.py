@@ -5,6 +5,7 @@
 """PostgreSQL Kubernetes Charm."""
 
 import logging
+from typing import cast
 
 from ops import StatusBase
 
@@ -21,13 +22,24 @@ logger = logging.getLogger(__name__)
 class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     """PostgreSQL K8s Charm."""
 
+    # Built by build_k8s_manager() while the abstract __init__ wires the
+    # async-replication subsystem; never None on the K8s substrate.
+    k8s_manager: K8sManager
+
     def __init__(self, *args):
         """Initialize the PostgreSQL Kubernetes Charm."""
         super().__init__(*args)
         assert isinstance(self.workload, K8sWorkload), (  # noqa: S101
             "Workload must be an instance of K8sWorkload"
         )
-        self.k8s_manager = K8sManager(self.state, self.workload)
+
+    def build_k8s_manager(self) -> K8sManager:
+        """Build the K8s API seam the async-replication subsystem consumes."""
+        self.k8s_manager = K8sManager(
+            self.state,
+            cast("K8sWorkload", self.workload),
+        )
+        return self.k8s_manager
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -87,6 +99,21 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def update_config(self) -> bool:
         """Re-render the Patroni configuration and apply it."""
         return self.config_manager.update_config(self.postgresql)
+
+    def set_app_status(self, status: StatusBase) -> None:
+        """Set the application status; the production charm gates this on its own state."""
+        self.app.status = status
+
+    def set_primary_status_message(self) -> None:
+        """Recompute the unit's primary/standby status message."""
+
+    def fix_leader_annotation(self) -> bool:
+        """Fix the leader annotation; the production charm owns the real implementation."""
+        return False
+
+    def create_pgdata(self) -> None:
+        """Create the PostgreSQL data directories (ported from the K8s charm)."""
+        self.workload.init_storage()
 
     @property
     def primary_endpoint(self) -> str | None:
