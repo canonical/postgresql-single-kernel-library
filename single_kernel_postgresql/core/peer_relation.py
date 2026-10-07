@@ -9,7 +9,7 @@ import json
 from collections.abc import MutableMapping
 from functools import cached_property
 
-from ops import ActiveStatus, Application, BlockedStatus, Relation, Unit
+from ops import ActiveStatus, Application, BlockedStatus, ModelError, Relation, Unit
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
@@ -27,22 +27,19 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
 )
 
 
-class PostgreSQLPeer(RelationState):
-    """State/Relation data collection for a PostgreSQL unit."""
+class PeerRelationState(RelationState):
+    """Common state for the unit and application sides of the peer relation."""
 
-    data_interface: DataPeerUnitData
-    unit: Unit
+    data_interface: DataPeerData
 
     def __init__(
         self,
         relation: Relation | None,
-        data_interface: DataPeerUnitData,
-        component: Unit,
+        data_interface: DataPeerData,
+        component: Unit | Application,
     ):
-        """Initialize the PostgreSQLPeer object."""
         super().__init__(relation, data_interface, component)
         self.data_interface = data_interface
-        self.unit = component
 
     def get_secret(self, key: str) -> str | None:
         """Get the secret value for 'key' from the peer relation data."""
@@ -61,6 +58,23 @@ class PostgreSQLPeer(RelationState):
         if not self.relation:
             return
         self.data_interface.delete_relation_data(self.relation.id, [key])
+
+
+class PostgreSQLPeer(PeerRelationState):
+    """State/Relation data collection for a PostgreSQL unit."""
+
+    data_interface: DataPeerUnitData
+    unit: Unit
+
+    def __init__(
+        self,
+        relation: Relation | None,
+        data_interface: DataPeerUnitData,
+        component: Unit,
+    ):
+        """Initialize the PostgreSQLPeer object."""
+        super().__init__(relation, data_interface, component)
+        self.unit = component
 
     @property
     def is_app_leader(self) -> bool:
@@ -86,6 +100,24 @@ class PostgreSQLPeer(RelationState):
         if not self.relation:
             return
         self.relation.data[self.unit]["rotate-logs-pid"] = str(value) if value else ""
+
+    @property
+    def observer_pid(self) -> int | None:
+        """Get the observer PID from the unit peer relation data."""
+        if not self.relation:
+            return None
+        stored = self.relation.data[self.unit].get("observer-pid")
+        try:
+            return int(stored) if stored else None
+        except ValueError:
+            return None
+
+    @observer_pid.setter
+    def observer_pid(self, value: int | None) -> None:
+        """Set or clear the observer PID in the unit peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["observer-pid"] = str(value) if value else ""
 
     @property
     def is_blocked_status(self) -> bool:
@@ -384,7 +416,7 @@ class PostgreSQLPeer(RelationState):
         return peer_addrs
 
 
-class PostgreSQLApplication(RelationState):
+class PostgreSQLApplication(PeerRelationState):
     """An PostgreSQL Application is the peer application state.
 
     This class defines state/relation data for a single PostgreSQL application.
@@ -403,7 +435,6 @@ class PostgreSQLApplication(RelationState):
         """Initialize the PostgreSQLApplication object."""
         super().__init__(relation, data_interface, component)
         self.app = component
-        self.data_interface = data_interface
         self.substrate = substrate
 
     @property
@@ -498,8 +529,17 @@ class PostgreSQLApplication(RelationState):
 
     @cached_property
     def planned_units(self) -> int:
-        """Get the number of planned units for the application."""
-        return self.app.planned_units()
+        """Get the number of planned units for the application.
+
+        ops implements ``Application.planned_units()`` via ``goal-state``, which fails
+        ("saas application ... not found") while a cross-model SAAS force-removed during a
+        dead-DC teardown still lingers in goal-state. Fall back to the count of currently
+        known units so the hook reconciles instead of crashing every caller (DPE-10203).
+        """
+        try:
+            return self.app.planned_units()
+        except ModelError:
+            return len(self.relation.units) + 1 if self.relation else 1
 
     @property
     def members_ips(self) -> set[str]:
@@ -673,24 +713,6 @@ class PostgreSQLApplication(RelationState):
         if not self.relation:
             return
         self.relation.data[self.app]["restore-to-time"] = value
-
-    def get_secret(self, key: str) -> str | None:
-        """Get the secret value for 'key' from the peer relation data."""
-        if not self.relation:
-            return None
-        return self.data_interface.get_secret(self.relation.id, key)
-
-    def set_secret(self, key: str, value: str) -> None:
-        """Set the secret value for 'key' in the peer relation data."""
-        if not self.relation:
-            return
-        self.data_interface.set_secret(self.relation.id, key, value)
-
-    def remove_secret(self, key: str) -> None:
-        """Remove the secret value for 'key' from the peer relation data."""
-        if not self.relation:
-            return
-        self.data_interface.delete_relation_data(self.relation.id, [key])
 
     @cached_property
     def data(self) -> MutableMapping[str, str]:

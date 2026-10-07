@@ -36,7 +36,7 @@ jobs:
 
       - name: Install additional dependencies for TICS
         run: |
-          uv sync --active --all-groups
+          uv sync --active --all-groups --all-extras
           # Install after otherwise sync will remove
           uv pip install flake8 pylint
 

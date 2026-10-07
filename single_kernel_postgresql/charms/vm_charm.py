@@ -79,6 +79,13 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         """Re-render the Patroni configuration and apply it."""
         return self.config_manager.update_config(self.postgresql)
 
+    def set_app_status(self, status: StatusBase) -> None:
+        """Set the application status; the production charm gates this on its own state."""
+        self.app.status = status
+
+    def set_primary_status_message(self) -> None:
+        """Recompute the unit's primary/standby status message."""
+
     @property
     def primary_endpoint(self) -> str | None:
         """Address of the cluster primary, or None when there is not one."""
