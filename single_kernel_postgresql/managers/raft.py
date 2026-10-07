@@ -2,7 +2,7 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-"""Helper class used to manage cluster lifecycle."""
+"""Raft manager for VM substrate."""
 
 import logging
 import shutil
@@ -27,20 +27,10 @@ from single_kernel_postgresql.config.exceptions import (
 from single_kernel_postgresql.config.literals import (
     PATRONI_CONF_PATH,
     PEER_RELATION,
-    POSTGRESQL_CONF_PATH,
     RAFT_PARTNER_PREFIX,
     RAFT_PORT,
 )
 from single_kernel_postgresql.managers.base import BaseManager
-
-logger = logging.getLogger(__name__)
-
-PG_BASE_CONF_PATH = f"{POSTGRESQL_CONF_PATH}/postgresql.conf"
-
-STARTED_STATES = ["running", "streaming"]
-RUNNING_STATES = [*STARTED_STATES, "starting"]
-
-PATRONI_TIMEOUT = 10
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -52,6 +42,8 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.managers.patroni import PatroniManager
     from single_kernel_postgresql.workload.base import BaseWorkload
 
+logger = logging.getLogger(__name__)
+
 
 class RaftManager(BaseManager):
     """RAFT manager for VM substrate."""
@@ -61,6 +53,7 @@ class RaftManager(BaseManager):
         state: "CharmState",
         workload: "BaseWorkload",
         patroni_manager: "PatroniManager",
+        # TODO split off into a manager
         watcher_handler: "WatcherEventsHandler",
         update_config,
         set_unit_status: "Callable[[StatusBase], None]",
