@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.events.watcher import WatcherEventsHandler
     from single_kernel_postgresql.managers.async_replication import AsyncReplicationManager
     from single_kernel_postgresql.managers.database import DatabaseManager
+    from single_kernel_postgresql.managers.raft import RaftManager
     from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class ObserverEventsHandler(Object):
         state: "CharmState",
         async_replication_manager: "AsyncReplicationManager",
         database_manager: "DatabaseManager",
+        raft_manager: "RaftManager",
         watcher_handler: "WatcherEventsHandler",
     ):
         super().__init__(charm, "observer")
@@ -64,6 +66,7 @@ class ObserverEventsHandler(Object):
         self.watcher_handler = watcher_handler
         self.async_replication_manager = async_replication_manager
         self.database_manager = database_manager
+        self.raft_manager = raft_manager
 
         if self.state.substrate == Substrates.VM:
             self.framework.observe(
@@ -91,7 +94,7 @@ class ObserverEventsHandler(Object):
             self.async_replication_manager.update_async_replication_data()
 
     def _on_raft_reconnect(self, _) -> None:
-        raft_status = self._patroni.get_raft_status()
+        raft_status = self.raft_manager.get_raft_status()
         logger.debug(f"Local raft status: {raft_status}")
         if (
             not raft_status
@@ -123,14 +126,14 @@ class ObserverEventsHandler(Object):
             else f"{next(member for member in self.state.application.members_ips if member != self.state.unit_ip)}:{RAFT_PORT}"
         )
         try:
-            self._patroni.remove_raft_member(
+            self.raft_manager.remove_raft_member(
                 local_addr, remote_address=remote_addr, set_raft_flags=False
             )
         except Exception:
             logger.exception("Unable to remove Raft member")
             return
         try:
-            self._patroni.add_raft_member(local_addr, remote_address=remote_addr)
+            self.raft_manager.add_raft_member(local_addr, remote_address=remote_addr)
         except Exception:
             logger.exception("Unable to add Raft member")
             return

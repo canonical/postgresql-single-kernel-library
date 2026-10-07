@@ -582,3 +582,16 @@ class CharmState(Object):
                 return True
 
         return any(key.startswith("raft_") for key in self.peer.data)
+
+    @property
+    def units_ips(self) -> set[str]:
+        """Fetch current list of peers IPs."""
+        addresses = set()
+
+        if self.unit_ip:
+            addresses.add(self.unit_ip)
+        if self.peer_relation:
+            for unit in self.peer_relation.units:
+                if ip := self.peer_relation.data[unit].get(f"{PEER_RELATION}-address"):
+                    addresses.add(ip)
+        return addresses
