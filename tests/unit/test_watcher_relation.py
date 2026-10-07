@@ -191,7 +191,7 @@ class TestWatcherRelation:
             pytest.skip("Test only applicable for VM substrate")
 
         mock_charm = create_mock_charm()
-        mock_charm._units_ips = ["10.0.0.1", "10.0.0.2"]  # Mock PostgreSQL endpoints
+        mock_charm.state.units_ips = ["10.0.0.1", "10.0.0.2"]  # Mock PostgreSQL endpoints
         mock_charm.state.unit_ip = "10.0.0.1"
         mock_relation = MagicMock()
         mock_relation.data = {

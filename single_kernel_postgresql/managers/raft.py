@@ -10,11 +10,10 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import psutil
-from ops import BlockedStatus
-
 with suppress(ImportError):
+    import psutil
     from pysyncobj.utility import TcpUtility, UtilityException
+from ops import BlockedStatus
 from tenacity import Retrying, wait_fixed
 
 from single_kernel_postgresql.config.exceptions import (
