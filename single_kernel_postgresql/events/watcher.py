@@ -424,7 +424,7 @@ class WatcherEventsHandler(Object):
         # Collect PostgreSQL unit endpoints using fresh IPs from unit relation data.
         # _units_ips reads directly from unit relation data (always fresh), while
         # _peer_members_ips reads from app peer data (may be stale after network disruptions).
-        pg_endpoints: list[str] = sorted(self.state.units_ips)
+        pg_endpoints: list[str] = sorted(self.charm._units_ips)
         if not pg_endpoints:
             logger.warning("No PostgreSQL endpoints available")
             return

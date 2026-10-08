@@ -120,6 +120,26 @@ class PostgreSQLPeer(PeerRelationState):
         self.relation.data[self.unit]["observer-pid"] = str(value) if value else ""
 
     @property
+    def authorisation_rules_observer_pid(self) -> int | None:
+        """Get the observer PID from the unit peer relation data."""
+        if not self.relation:
+            return None
+        stored = self.relation.data[self.unit].get("authorisation-rules-observer-pid")
+        try:
+            return int(stored) if stored else None
+        except ValueError:
+            return None
+
+    @authorisation_rules_observer_pid.setter
+    def authorisation_rules_observer_pid(self, value: int | None) -> None:
+        """Set or clear the observer PID in the unit peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.unit]["authorisation-rules-observer-pid"] = (
+            str(value) if value else ""
+        )
+
+    @property
     def is_blocked_status(self) -> bool:
         """Returns whether the unit is in a blocked state."""
         return isinstance(self.unit.status, BlockedStatus)

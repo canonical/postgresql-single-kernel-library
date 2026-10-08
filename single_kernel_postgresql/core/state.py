@@ -574,24 +574,3 @@ class CharmState(Object):
     def replicas_endpoint(self) -> str:
         """Returns the endpoint of the replicas instances' service."""
         return self._build_service_name("replicas")
-
-    def has_raft_keys(self):
-        """Checks for the presence of raft recovery keys in peer data."""
-        for key in self.application.data:
-            if key.startswith("raft_"):
-                return True
-
-        return any(key.startswith("raft_") for key in self.peer.data)
-
-    @property
-    def units_ips(self) -> set[str]:
-        """Fetch current list of peers IPs."""
-        addresses = set()
-
-        if self.unit_ip:
-            addresses.add(self.unit_ip)
-        if self.peer_relation:
-            for unit in self.peer_relation.units:
-                if ip := self.peer_relation.data[unit].get(f"{PEER_RELATION}-address"):
-                    addresses.add(ip)
-        return addresses
