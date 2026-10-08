@@ -45,18 +45,18 @@ files = [
 
 [[package]]
 name = "boto3"
-version = "1.43.103"
+version = "1.43.108"
 description = "The AWS SDK for Python (Boto3)"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "boto3-1.43.103-py3-none-any.whl", hash = "sha256:574796187eb4e4fcaaf5c1b88c1724a1ba5a95bc27aeae5573676178666acc71"},
-    {file = "boto3-1.43.103.tar.gz", hash = "sha256:524821052527f6446d249bf710847b032d9b12135e346c9751777a0a2811cf04"},
+    {file = "boto3-1.43.108-py3-none-any.whl", hash = "sha256:19e9da95ef0c494e27052049a42137550e66730509bb613e76eaa30ddf9a7170"},
+    {file = "boto3-1.43.108.tar.gz", hash = "sha256:03341f089158368acf83e921aca98b706095322ca52bc4c039a616940aa5ad41"},
 ]
 
 [package.dependencies]
-botocore = ">=1.43.103,<1.44.0"
+botocore = ">=1.43.108,<1.44.0"
 jmespath = ">=0.7.1,<2.0.0"
 s3transfer = ">=0.19.0,<0.20.0"
 
@@ -65,14 +65,14 @@ crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
 
 [[package]]
 name = "botocore"
-version = "1.43.103"
+version = "1.43.108"
 description = "Low-level, data-driven core of boto 3."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "botocore-1.43.103-py3-none-any.whl", hash = "sha256:6a6a561a6de43845ae42bc7ff7e2c798742bfa277f5215398f9c15ed9b1bd67c"},
-    {file = "botocore-1.43.103.tar.gz", hash = "sha256:8c7f220e09f3b7ec99c59c716aa66cf6f5b2b57fd8731544054f3778aa744c6a"},
+    {file = "botocore-1.43.108-py3-none-any.whl", hash = "sha256:ab9d16c6b4350aaa54ed28202dfa2998b2d735fdbf3247eb60af469d8d48a5b8"},
+    {file = "botocore-1.43.108.tar.gz", hash = "sha256:ee4f75cf3bdbb0da7912e089950e8112f692016539d939312c771499958e6cfd"},
 ]
 
 [package.dependencies]
@@ -260,14 +260,14 @@ tomli = ">=2.0.1"
 
 [[package]]
 name = "charmlibs-interfaces-tls-certificates"
-version = "1.10.1"
+version = "1.12.0"
 description = "The charmlibs.interfaces.tls_certificates package."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "charmlibs_interfaces_tls_certificates-1.10.1-py3-none-any.whl", hash = "sha256:3cf970aaccdbc052e991c517621cc093c07e753640f58e4cc8b3ab9ef9480605"},
-    {file = "charmlibs_interfaces_tls_certificates-1.10.1.tar.gz", hash = "sha256:df6aebd28586366d721971459f25eb896ea854edded9cd21311d998bc83abc08"},
+    {file = "charmlibs_interfaces_tls_certificates-1.12.0-py3-none-any.whl", hash = "sha256:6fcae560314aab1190e722fcb907bea15a01444c9755ed18ada18f23625814b1"},
+    {file = "charmlibs_interfaces_tls_certificates-1.12.0.tar.gz", hash = "sha256:30ea1ca8cc69c7817415ec82612e519810b271d28314e43a4da416dd2c4570ff"},
 ]
 
 [package.dependencies]
@@ -489,14 +489,14 @@ files = [
 
 [[package]]
 name = "cosl"
-version = "1.10.3"
+version = "1.11.2"
 description = "Utils for COS Lite charms"
 optional = false
 python-versions = ">=3.8"
 groups = ["charm-libs"]
 files = [
-    {file = "cosl-1.10.3-py3-none-any.whl", hash = "sha256:7e514b161ca3d227a23c88377138176e16f23aff92bf218837bc3551dba1ebf7"},
-    {file = "cosl-1.10.3.tar.gz", hash = "sha256:95ac498d3820a7d1f4096e6662b22de639911d7f77e1a25b0cfad963f83836bc"},
+    {file = "cosl-1.11.2-py3-none-any.whl", hash = "sha256:e9d3418715e10d15690263efaca578506d142b2520bca21c01d973818e5b7ae2"},
+    {file = "cosl-1.11.2.tar.gz", hash = "sha256:dc8144cbe0992bdd80567251f4a65ef5507a6245507e7129f3411f369ec69576"},
 ]
 
 [package.dependencies]
@@ -508,7 +508,7 @@ tenacity = "*"
 typing-extensions = "*"
 
 [package.extras]
-dev = ["black", "codespell", "deepdiff", "fs", "ops[testing]", "orderly-set (==5.3.0)", "pyright", "pytest", "pytest-cov", "ruff", "setuptools (<82)"]
+dev = ["black", "codespell", "deepdiff", "fs", "ops[testing]", "orderly-set (==5.3.0)", "pyright", "pytest", "pytest-bdd (<8)", "pytest-cov", "ruff", "setuptools (<82)"]
 
 [[package]]
 name = "cryptography"
@@ -1136,42 +1136,42 @@ typing-extensions = ">=4.5.0"
 
 [[package]]
 name = "ops"
-version = "3.8.2"
+version = "3.8.3"
 description = "The Python library behind great charms"
 optional = false
 python-versions = ">=3.10"
 groups = ["main", "charm-libs"]
 files = [
-    {file = "ops-3.8.2-py3-none-any.whl", hash = "sha256:dcead2241d17921441123425072dd6adddf5f337dc6d6fd2b3ba1fd60a0af822"},
-    {file = "ops-3.8.2.tar.gz", hash = "sha256:a516e76a76fdfd4a37f26f2b9956c332b56bda72014c8565ceb4f6deb137407f"},
+    {file = "ops-3.8.3-py3-none-any.whl", hash = "sha256:037feb823874da6d700852e1a5c06927077311c939276daaa1b925fd16cbf15b"},
+    {file = "ops-3.8.3.tar.gz", hash = "sha256:fd0c474f0c650bc9decfa613578a800931e6cf1ea948c7a59f55aeacfd8e6d4e"},
 ]
 
 [package.dependencies]
 opentelemetry-api = ">=1.0,<2.0"
-ops-tracing = {version = "3.8.2", optional = true, markers = "extra == \"tracing\""}
+ops-tracing = {version = "3.8.3", optional = true, markers = "extra == \"tracing\""}
 PyYAML = "==6.*"
 websocket-client = "==1.*"
 
 [package.extras]
-testing = ["ops-scenario (==8.8.2)"]
-tracing = ["ops-tracing (==3.8.2)"]
+testing = ["ops-scenario (==8.8.3)"]
+tracing = ["ops-tracing (==3.8.3)"]
 
 [[package]]
 name = "ops-tracing"
-version = "3.8.2"
+version = "3.8.3"
 description = "The tracing facility for the Ops library."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "ops_tracing-3.8.2-py3-none-any.whl", hash = "sha256:5809909692210aa3d782cad93a631fa69653b304d2abdc185922cca76e59621a"},
-    {file = "ops_tracing-3.8.2.tar.gz", hash = "sha256:30049c9a28688dad4f34653b983daf9a7904ebc7d56203639ae2e99fdf7c388f"},
+    {file = "ops_tracing-3.8.3-py3-none-any.whl", hash = "sha256:f68ec27fe65a4dd80f84eaa0895575ab4dc2f11971509a802df657e77eccc9e4"},
+    {file = "ops_tracing-3.8.3.tar.gz", hash = "sha256:0e97c1d8b209345cc8c3ea2f7ed1f254cd0e6868ac9cc2d9960d868ad5d1d017"},
 ]
 
 [package.dependencies]
 opentelemetry-api = ">=1.0,<2.0"
 opentelemetry-sdk = ">=1.30,<2.0"
-ops = "3.8.2"
+ops = "3.8.3"
 pydantic = "*"
 
 [[package]]
@@ -1922,4 +1922,4 @@ h11 = ">=0.16.0,<1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "f030bd5f404ea74b1da59a7b48fc16f6b10b1a6698afe5696b6d83a780da4da4"
+content-hash = "ebfb9d26de684f907affe9e06109fa0b8d50592c36611512853c4c2b447c69fc"

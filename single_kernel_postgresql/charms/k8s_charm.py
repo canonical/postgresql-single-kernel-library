@@ -5,8 +5,9 @@
 """PostgreSQL Kubernetes Charm."""
 
 import logging
+from typing import TYPE_CHECKING, cast
 
-from ops import StatusBase
+from ops import ActiveStatus, StatusBase
 
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
@@ -15,11 +16,18 @@ from single_kernel_postgresql.managers.k8s import K8sManager
 from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.k8s import K8sWorkload
 
+if TYPE_CHECKING:
+    import charm_refresh
+
 logger = logging.getLogger(__name__)
 
 
 class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     """PostgreSQL K8s Charm."""
+
+    # Built by build_k8s_manager() while the abstract __init__ wires the
+    # async-replication subsystem; never None on the K8s substrate.
+    k8s_manager: K8sManager
 
     def __init__(self, *args):
         """Initialize the PostgreSQL Kubernetes Charm."""
@@ -27,7 +35,14 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         assert isinstance(self.workload, K8sWorkload), (  # noqa: S101
             "Workload must be an instance of K8sWorkload"
         )
-        self.k8s_manager = K8sManager(self.state, self.workload)
+
+    def build_k8s_manager(self) -> K8sManager:
+        """Build the K8s API seam the async-replication subsystem consumes."""
+        self.k8s_manager = K8sManager(
+            self.state,
+            cast("K8sWorkload", self.workload),
+        )
+        return self.k8s_manager
 
     @property
     def postgresql(self) -> PostgreSQL:
@@ -68,8 +83,8 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         return Substrates.K8S
 
     # The concrete production charm owns these bridges (update_scrape_job_spec +
-    # acquire_lock, pebble metrics/ldap restarts, the refresh-aware status write and the
-    # config re-render), so they are minimal here.
+    # acquire_lock, pebble metrics/ldap restarts, the async app status and the config
+    # re-render), so they are minimal here.
     def get_resource_provider(self) -> K8sManager:
         """Return the substrate's (cpu_cores, memory_bytes) introspector."""
         return self.k8s_manager
@@ -80,15 +95,49 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def restart_services(self) -> None:
         """Restart the monitoring and LDAP-sync sidecar services."""
 
-    def set_unit_status(self, status: StatusBase) -> None:
+    def set_unit_status(
+        self,
+        status: StatusBase,
+        /,
+        *,
+        refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None,
+    ) -> None:
         """Set the unit status without overriding a higher-priority refresh status."""
-        self.unit.status = status
+        self.refresh_manager.set_unit_status(status, refresh=refresh)
 
-    def update_config(self) -> bool:
+    def set_default_unit_status(self) -> None:
+        """Set the unit status that applies when no refresh status is active."""
+        self.unit.status = ActiveStatus()
+
+    def update_config(
+        self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
+    ) -> bool:
         """Re-render the Patroni configuration and apply it."""
         return self.config_manager.update_config(self.postgresql)
+
+    def set_app_status(self, status: StatusBase) -> None:
+        """Set the application status; the production charm gates this on its own state."""
+        self.app.status = status
+
+    def set_primary_status_message(self) -> None:
+        """Recompute the unit's primary/standby status message."""
+
+    def fix_leader_annotation(self) -> bool:
+        """Fix the leader annotation; the production charm owns the real implementation."""
+        return False
+
+    def create_pgdata(self) -> None:
+        """Create the PostgreSQL data directories (ported from the K8s charm)."""
+        self.workload.init_storage()
 
     @property
     def primary_endpoint(self) -> str | None:
         """Address of the cluster primary's Service."""
         return self.state.primary_endpoint
+
+    def get_async_primary_cluster_endpoint(self) -> str | None:
+        """Endpoint of the primary cluster of the async replication partner, if any."""
+        return None
+
+    def update_relation_endpoints(self) -> None:
+        """Refresh the client and async relation endpoints after a switchover."""

@@ -97,6 +97,7 @@ def _base_context() -> dict:
         "maximum_lag_on_failover": 1048576,
         "instance_password_encryption": "scram-sha-256",
         "pg_parameters": None,
+        "pg_cron_database": "postgres",
         "primary_cluster_endpoint": None,
         # archiving / restore
         "enable_pgbackrest_archiving": False,
@@ -202,14 +203,22 @@ def test_merged_template_matches_original(substrate, overrides):
     context = _base_context()
     context.update(overrides)
 
-    expected = _ORIGINAL_TEMPLATES[substrate].render(**context)
+    expected = _yaml_load(_ORIGINAL_TEMPLATES[substrate].render(**context))
+    for section in [expected["bootstrap"]["dcs"]["postgresql"], expected["postgresql"]]:
+        parameters = section["parameters"]
+        parameters["shared_preload_libraries"] += ",pg_cron"
+        parameters.update({
+            "cron.database_name": "postgres",
+            "cron.use_background_workers": "on",
+            "cron.timezone": "GMT",
+        })
     actual = _MERGED_TEMPLATE.render(substrate=substrate, **context)
 
     # Compared as parsed documents rather than bytes: the merged template emits one field
     # order for both substrates instead of each charm's, and YAML mapping order carries no
     # meaning. Sequences still compare in order, so pg_hba - where PostgreSQL takes the
     # first matching rule - and partner_addrs stay pinned.
-    assert _yaml_load(actual) == _yaml_load(expected)
+    assert _yaml_load(actual) == expected
 
 
 def test_template_loads_via_importlib_resources():
