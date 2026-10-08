@@ -50,15 +50,19 @@ def test_pg_cron_patroni_configuration(manager, pg_config, enabled):
     rendered = yaml.safe_load(write.call_args.args[2])
     for section in [rendered["bootstrap"]["dcs"]["postgresql"], rendered["postgresql"]]:
         parameters = section["parameters"]
-        assert "pg_cron" in parameters["shared_preload_libraries"].split(",")
+        assert ("pg_cron" in parameters["shared_preload_libraries"].split(",")) is enabled
         cron_parameters = {
             key: value for key, value in parameters.items() if key.startswith("cron.")
         }
-        assert cron_parameters == {
-            "cron.database_name": "postgres",
-            "cron.use_background_workers": "on",
-            "cron.timezone": "GMT",
-        }
+        assert cron_parameters == (
+            {
+                "cron.database_name": "postgres",
+                "cron.use_background_workers": "on",
+                "cron.timezone": "GMT",
+            }
+            if enabled
+            else {}
+        )
 
 
 @pytest.fixture

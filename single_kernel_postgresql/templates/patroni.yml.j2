@@ -122,10 +122,12 @@ bootstrap:
         log_truncate_on_rotation: 'on'
         logging_collector: 'on'
         wal_level: logical
-        shared_preload_libraries: 'timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron'
+        shared_preload_libraries: 'timescaledb,pgaudit,set_user,pg_stat_statements{{ ",pg_cron" if plugin_pg_cron_enable else "" }}'
+{% if plugin_pg_cron_enable %}
         cron.database_name: '{{ pg_cron_database }}'
         cron.use_background_workers: 'on'
         cron.timezone: 'GMT'
+{% endif %}
         session_preload_libraries: 'login_hook'
         set_user.block_log_statement: 'on'
         set_user.exit_on_error: 'on'
@@ -188,10 +190,12 @@ postgresql:
   bin_dir: {{ pg_bin_dir }}
   data_dir: {{ data_dir }}
   parameters:
-    shared_preload_libraries: 'timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron'
+    shared_preload_libraries: 'timescaledb,pgaudit,set_user,pg_stat_statements{{ ",pg_cron" if plugin_pg_cron_enable else "" }}'
+{% if plugin_pg_cron_enable %}
     cron.database_name: '{{ pg_cron_database }}'
     cron.use_background_workers: 'on'
     cron.timezone: 'GMT'
+{% endif %}
     session_preload_libraries: 'login_hook'
     set_user.block_log_statement: 'on'
     set_user.exit_on_error: 'on'

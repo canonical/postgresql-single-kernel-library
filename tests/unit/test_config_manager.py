@@ -137,6 +137,7 @@ def test_render_patroni_yml_file(substrate, config):
     ):
         _files.return_value.joinpath.return_value.read_text.return_value = "template"
         _config.return_value.synchronous_node_count = 1
+        _config.return_value.plugin_pg_cron_enable = False
         _config.return_value.durability_maximum_lag_on_failover = (
             sentinel.durability_maximum_lag_on_failover
         )
@@ -172,6 +173,7 @@ def test_render_patroni_yml_file(substrate, config):
                 maximum_lag_on_failover=sentinel.durability_maximum_lag_on_failover,
                 pg_parameters=None,
                 pg_cron_database="postgres",
+                plugin_pg_cron_enable=False,
                 primary_cluster_endpoint=None,
                 ldap_parameters="",
                 patroni_password=sentinel.patroni_pass,
@@ -218,6 +220,7 @@ def test_render_patroni_yml_file(substrate, config):
                 maximum_lag_on_failover=sentinel.durability_maximum_lag_on_failover,
                 pg_parameters=None,
                 pg_cron_database="postgres",
+                plugin_pg_cron_enable=False,
                 primary_cluster_endpoint=None,
                 ldap_parameters="",
                 patroni_password=sentinel.patroni_pass,

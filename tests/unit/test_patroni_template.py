@@ -98,6 +98,7 @@ def _base_context() -> dict:
         "instance_password_encryption": "scram-sha-256",
         "pg_parameters": None,
         "pg_cron_database": "postgres",
+        "plugin_pg_cron_enable": True,
         "primary_cluster_endpoint": None,
         # archiving / restore
         "enable_pgbackrest_archiving": False,
@@ -206,12 +207,13 @@ def test_merged_template_matches_original(substrate, overrides):
     expected = _yaml_load(_ORIGINAL_TEMPLATES[substrate].render(**context))
     for section in [expected["bootstrap"]["dcs"]["postgresql"], expected["postgresql"]]:
         parameters = section["parameters"]
-        parameters["shared_preload_libraries"] += ",pg_cron"
-        parameters.update({
-            "cron.database_name": "postgres",
-            "cron.use_background_workers": "on",
-            "cron.timezone": "GMT",
-        })
+        if context["plugin_pg_cron_enable"]:
+            parameters["shared_preload_libraries"] += ",pg_cron"
+            parameters.update({
+                "cron.database_name": "postgres",
+                "cron.use_background_workers": "on",
+                "cron.timezone": "GMT",
+            })
     actual = _MERGED_TEMPLATE.render(substrate=substrate, **context)
 
     # Compared as parsed documents rather than bytes: the merged template emits one field
@@ -248,3 +250,32 @@ def test_k8s_paths_follow_the_workload_version(version):
         rendered["bootstrap"]["dcs"]["postgresql"]["parameters"]["log_directory"].split("/")[-3]
         == version
     )
+
+
+@pytest.mark.parametrize("substrate", ["vm", "k8s"])
+def test_pg_cron_preload_gated_on_enable_flag(substrate):
+    """The pg_cron preload and cron settings must render only when the extension is enabled.
+
+    The charmed-postgresql snap/rock does not ship pg_cron yet: a hardcoded preload makes
+    PostgreSQL exit at startup (FATAL: could not access file "pg_cron"), so Patroni never
+    comes up and every integration deployment fails. With the flag off the render must be
+    byte-equal (parsed) to the pre-merge charm template.
+    """
+    context = _base_context()
+    context["plugin_pg_cron_enable"] = False
+
+    expected = _yaml_load(_ORIGINAL_TEMPLATES[substrate].render(**context))
+    actual = _yaml_load(_MERGED_TEMPLATE.render(substrate=substrate, **context))
+
+    for section in [actual["bootstrap"]["dcs"]["postgresql"], actual["postgresql"]]:
+        preload = section["parameters"]["shared_preload_libraries"]
+        assert "pg_cron" not in preload
+        assert not [key for key in section["parameters"] if key.startswith("cron.")]
+
+    assert actual == expected
+
+    context["plugin_pg_cron_enable"] = True
+    enabled = _yaml_load(_MERGED_TEMPLATE.render(substrate=substrate, **context))
+    for section in [enabled["bootstrap"]["dcs"]["postgresql"], enabled["postgresql"]]:
+        assert section["parameters"]["shared_preload_libraries"].endswith(",pg_cron")
+        assert section["parameters"]["cron.database_name"] == context["pg_cron_database"]
