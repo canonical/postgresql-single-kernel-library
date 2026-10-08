@@ -4,23 +4,67 @@
 """Kubernetes Workload."""
 
 import logging
+import pathlib
+import shlex
+import signal
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
+from lightkube import Client
+from lightkube.resources.core_v1 import Endpoints
 from ops import Container, ModelError
-from ops.pebble import Plan, ServiceStatus
+from ops.pebble import (
+    ChangeError,
+    CheckDict,
+    ExecError,
+    FileInfo,
+    FileType,
+    Layer,
+    LayerDict,
+    Plan,
+    ServiceDict,
+    ServiceStatus,
+)
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     DIR_PERMISSIONS_READONLY,
+    K8S_ARCHIVE_PATH,
+    K8S_DATA_PATH,
+    K8S_DEBIAN_DATA_SYMLINK,
+    K8S_LDAP_SYNC_SERVICE_NAME,
+    K8S_LOGS_STORAGE_PATH,
+    K8S_METRICS_SERVER_SERVICE_NAME,
+    K8S_PATRONI_LOGS_PATH,
+    K8S_PATRONI_LOGS_SYMLINK_PATH,
+    K8S_PG_LOGS_PATH,
+    K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+    K8S_PGBACKREST_LOGS_PATH,
+    K8S_PGBACKREST_LOGS_SYMLINK_PATH,
+    K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
+    K8S_POSTGRESQL_LOGS_SYMLINK_PATH,
     K8S_POSTGRESQL_SERVICE_NAME,
+    K8S_ROTATE_LOGS_SERVICE_NAME,
+    K8S_TEMP_STORAGE_PATH,
+    K8S_TEMP_TABLESPACE_DIR,
+    K8S_WAL_DIR,
+    K8S_WORKLOAD_OS_GROUP,
+    K8S_WORKLOAD_OS_USER,
+    MONITORING_USER,
+    REPLICATION_USER,
+    USER,
 )
-from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.base import (
+    BackupConfig,
+    BaseWorkload,
+    CommandResult,
+    PebbleLayerSpec,
+)
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.k8s import K8sPaths
 
@@ -65,6 +109,110 @@ class K8sWorkload(BaseWorkload):
             self.container.add_layer(K8S_POSTGRESQL_SERVICE_NAME, new_layer, combine=True)
             logging.info("Updated health checks")
 
+    def update_pebble_layers(self, spec: PebbleLayerSpec, replan: bool = True) -> None:
+        """Rebuild the PostgreSQL pebble layer from the spec and reconcile it."""
+        new_layer = self._postgresql_layer(spec)
+        self.reconcile_pebble_layer(new_layer, replan)
+
+    def _postgresql_layer(self, spec: PebbleLayerSpec) -> Layer:
+        """Returns a Pebble configuration layer for PostgreSQL."""
+        layer_config = LayerDict({
+            "summary": "postgresql + patroni layer",
+            "description": "pebble config layer for postgresql + patroni",
+            "services": {
+                K8S_POSTGRESQL_SERVICE_NAME: ServiceDict({
+                    "override": "replace",
+                    "summary": "entrypoint of the postgresql + patroni image",
+                    "command": f"patroni {self.paths.patroni_config}",
+                    "startup": "enabled",
+                    "on-failure": spec.on_failure_condition,
+                    "user": K8S_WORKLOAD_OS_USER,
+                    "group": K8S_WORKLOAD_OS_GROUP,
+                    "environment": {
+                        "PATRONI_KUBERNETES_LABELS": (
+                            f"{{application: patroni, cluster-name: {spec.cluster_name}}}"
+                        ),
+                        "PATRONI_KUBERNETES_LEADER_LABEL_VALUE": "primary",
+                        "PATRONI_KUBERNETES_NAMESPACE": spec.model_name,
+                        "PATRONI_KUBERNETES_USE_ENDPOINTS": "true",
+                        "PATRONI_NAME": spec.pod_name,
+                        "PATRONI_SCOPE": spec.cluster_name,
+                        "PATRONI_REPLICATION_USERNAME": REPLICATION_USER,
+                        "PATRONI_SUPERUSER_USERNAME": USER,
+                    },
+                }),
+                K8S_PGBACK_REST_SERVER_SERVICE_NAME: ServiceDict({
+                    "override": "replace",
+                    "summary": "pgBackRest server",
+                    "command": K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+                    "startup": "disabled",
+                    "user": K8S_WORKLOAD_OS_USER,
+                    "group": K8S_WORKLOAD_OS_GROUP,
+                }),
+                K8S_LDAP_SYNC_SERVICE_NAME: ServiceDict({
+                    "override": "replace",
+                    "summary": "synchronize LDAP users",
+                    "command": "/start-ldap-synchronizer.sh",
+                    "startup": "disabled",
+                }),
+                K8S_METRICS_SERVER_SERVICE_NAME: self._generate_metrics_service(spec),
+                K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME: (
+                    self._generate_pgbackrest_metrics_service()
+                ),
+                K8S_ROTATE_LOGS_SERVICE_NAME: ServiceDict({
+                    "override": "replace",
+                    "summary": "rotate logs",
+                    "command": "python3 /home/postgres/rotate_logs.py",
+                    "startup": "disabled",
+                }),
+            },
+            "checks": {
+                K8S_POSTGRESQL_SERVICE_NAME: CheckDict({
+                    "override": "replace",
+                    "level": "ready",
+                    "exec": {
+                        "command": "python3 /scripts/self-signed-checker.py",
+                        "user": K8S_WORKLOAD_OS_USER,
+                        "environment": {
+                            "ENDPOINT": f"{spec.patroni_url}/health",
+                        },
+                    },
+                })
+            },
+        })
+        return Layer(layer_config)
+
+    def _generate_metrics_service(self, spec: PebbleLayerSpec) -> ServiceDict:
+        """Generate the metrics service definition."""
+        return {
+            "override": "replace",
+            "summary": "postgresql metrics exporter",
+            "command": "/start-exporter.sh",
+            "startup": "enabled" if spec.monitoring_password is not None else "disabled",
+            "after": [K8S_POSTGRESQL_SERVICE_NAME],
+            "user": K8S_WORKLOAD_OS_USER,
+            "group": K8S_WORKLOAD_OS_GROUP,
+            "environment": {
+                "DATA_SOURCE_NAME": (
+                    f"user={MONITORING_USER} "
+                    f"password={spec.monitoring_password} "
+                    "host=/var/run/postgresql port=5432 database=postgres"
+                ),
+            },
+        }
+
+    def _generate_pgbackrest_metrics_service(self) -> ServiceDict:
+        """Generate the pgbackrest metrics service definition."""
+        return {
+            "override": "replace",
+            "summary": "pgbackrest metrics exporter",
+            "command": "/usr/bin/pgbackrest_exporter",
+            "startup": "enabled",
+            "after": [K8S_POSTGRESQL_SERVICE_NAME],
+            "user": K8S_WORKLOAD_OS_USER,
+            "group": K8S_WORKLOAD_OS_GROUP,
+        }
+
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service is running.
 
@@ -93,9 +241,50 @@ class K8sWorkload(BaseWorkload):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
-    ) -> SimpleNamespace:
-        """Run Command in CLI."""
-        raise NotImplementedError
+        timeout: float | None = None,
+    ) -> CommandResult:
+        """Run a command in the workload container as the workload user and group."""
+        command_list = shlex.split(command)
+        if args:
+            command_list += shlex.split(args)
+        logger.debug("Running command %s", " ".join(command_list))
+        process = self.container.exec(
+            command_list,
+            user=self.user,
+            group=self.group,
+            timeout=timeout,
+            stdin=stdin,
+        )
+        try:
+            stdout, stderr = process.wait_output()
+        except ExecError as e:
+            if not use_errors_replace:
+                raise
+            return CommandResult(
+                return_code=e.exit_code,
+                stdout=e.stdout or "",
+                stderr=e.stderr or "",
+            )
+        return CommandResult(return_code=0, stdout=stdout, stderr=stderr)
+
+    @property
+    def backup_config(self) -> BackupConfig:
+        """Return the K8s pgBackRest invocation settings.
+
+        pgBackRest reads /etc/pgbackrest.conf by default, so no --config flag
+        is passed (conf_path None) and the config directory holds only the
+        default-location file the charm pushes.
+        """
+        return BackupConfig(
+            executable="pgbackrest",
+            conf_path=None,
+            logs_path=str(self.paths.pgbackrest_logs),
+            bin_path="/usr/lib/postgresql",
+            service=K8S_PGBACK_REST_SERVER_SERVICE_NAME,
+            storage_path=str(self.paths.tls),
+            tls_ca_chain_path=f"{self.paths.tls}/pgbackrest-tls-ca-chain.crt",
+            extra_args=(),
+        )
 
     def is_failed(self) -> bool:
         """Check if snap service failed."""
@@ -103,11 +292,321 @@ class K8sWorkload(BaseWorkload):
 
     def stop(self) -> None:
         """Stop the PostgreSQL service."""
-        ...
+        self.stop_service(K8S_POSTGRESQL_SERVICE_NAME)
 
-    def start_service(self):
-        """Start the PostgreSQL service."""
-        ...
+    def start_service(self, service: str) -> None:
+        """Start a named Pebble service."""
+        self.container.start(service)
+
+    def stop_service(self, service: str) -> None:
+        """Stop a named Pebble service."""
+        self.container.stop(service)
+
+    def restart_service(self, service: str) -> None:
+        """Restart a named Pebble service."""
+        self.container.restart(service)
+
+    def reload_service(self, service: str) -> None:
+        """Reload a named Pebble service.
+
+        Sends SIGHUP to the service when it is running; restarts it otherwise.
+        """
+        if self.service_is_running(service):
+            logger.debug("Sending SIGHUP to %s to reload configuration", service)
+            self.container.send_signal(signal.SIGHUP, service)
+        else:
+            self.container.restart(service)
+
+    def service_exists(self, service: str) -> bool:
+        """Whether the Pebble plan declares the named service."""
+        return self.container.can_connect() and (
+            len(self.container.pebble.get_services(names=[service])) > 0
+        )
+
+    def service_is_running(self, service: str) -> bool:
+        """Check whether a named Pebble service is running.
+
+        A layer revision predating the service omits it from the plan; and
+        Pebble cannot be asked before the container connects. Both read as
+        not running.
+        """
+        if not self.container.can_connect():
+            return False
+        services = self.container.pebble.get_services(names=[service])
+        if len(services) == 0:
+            return False
+        return services[0].current == ServiceStatus.ACTIVE
+
+    def empty_data_files(self) -> bool:
+        """Empty the PostgreSQL data directory in preparation of backup restore."""
+        # Clear all storage directories, not just data. The logs directory must be cleared
+        # so that when new replicas join after restore, pg_basebackup can use the --waldir
+        # option (which requires an empty directory).
+        for path in [
+            self.root / K8S_ARCHIVE_PATH,
+            self.paths.data,
+            self.root / K8S_LOGS_STORAGE_PATH,
+            self.root / K8S_TEMP_STORAGE_PATH,
+        ]:
+            try:
+                self.container.exec(["find", str(path), "-mindepth", "1", "-delete"]).wait_output()
+            except ExecError as e:
+                # If previous PITR restore was unsuccessful, there may be no such directory.
+                if "No such file or directory" not in str(e.stderr):
+                    logger.exception(
+                        f"Failed to empty {path} in prep for backup restore", exc_info=e
+                    )
+                    raise
+        return True
+
+    def remove_cluster_info(
+        self, cluster_name: str, namespace: str | None = None
+    ) -> CommandResult:
+        """Delete the K8s endpoints that track the cluster information, including its id.
+
+        This is the same as "patronictl remove patroni-<name>", but the latter doesn't
+        work after the database service is stopped on Pebble.
+
+        Args:
+            cluster_name: the Patroni cluster name ("patroni-<app>" on K8s).
+            namespace: the K8s namespace of the patroni Endpoints.
+        """
+        if namespace is None:
+            raise ValueError("the K8s cluster-info removal requires a namespace")
+        client = Client()
+        client.delete(Endpoints, name=cluster_name, namespace=namespace)
+        client.delete(Endpoints, name=f"{cluster_name}-config", namespace=namespace)
+        return CommandResult(return_code=0)
+
+    def init_storage(self) -> None:
+        """Create the PostgreSQL data directories, clearing stale data if needed.
+
+        Port of the K8s charm's _create_pgdata/_ensure_pgdata_dirs_and_symlinks
+        helpers. The stale-data clearing branch of the pebble-ready helper (replica
+        joins on an initialized cluster) does not apply here: the restore action only
+        runs on the leader unit.
+        """
+        logs_storage = self.root / K8S_LOGS_STORAGE_PATH
+        waldir_path = logs_storage / self.paths.versioned_path / K8S_WAL_DIR
+        temp_tablespace_path = (
+            self.root / K8S_TEMP_STORAGE_PATH / self.paths.versioned_path / K8S_TEMP_TABLESPACE_DIR
+        )
+        archive_path = self.root / K8S_ARCHIVE_PATH / self.paths.versioned_path
+        pgdata_path = self.paths.data
+
+        # Create the pgdata directory on the storage mount (e.g., /var/lib/pg/data/16/main)
+        if not self.container.exists(str(pgdata_path)):
+            self.container.make_dir(
+                str(pgdata_path),
+                permissions=0o700,
+                user=self.user,
+                group=self.group,
+                make_parents=True,
+            )
+        # Create the WAL directory (e.g., /var/lib/pg/logs/16/main/pg_wal)
+        if not self.container.exists(str(waldir_path)):
+            self.container.make_dir(
+                str(waldir_path),
+                permissions=0o700,
+                user=self.user,
+                group=self.group,
+                make_parents=True,
+            )
+        for path in [
+            logs_storage / K8S_PG_LOGS_PATH,
+            logs_storage / K8S_PATRONI_LOGS_PATH,
+            logs_storage / K8S_PGBACKREST_LOGS_PATH,
+        ]:
+            if not self.container.exists(str(path)):
+                self.container.make_dir(
+                    str(path),
+                    permissions=0o755,
+                    user=self.user,
+                    group=self.group,
+                    make_parents=True,
+                )
+            self.container.exec(["chmod", "755", str(path)]).wait()
+            self.container.exec(["chown", f"{self.user}:{self.group}", str(path)]).wait()
+        # Create the temp tablespace directory (e.g., /var/lib/pg/temp/16/main/pgsql_tmp)
+        if not self.container.exists(str(temp_tablespace_path)):
+            self.container.make_dir(
+                str(temp_tablespace_path),
+                permissions=0o700,
+                user=self.user,
+                group=self.group,
+                make_parents=True,
+            )
+        # Create the archive directory (e.g., /var/lib/pg/archive/16/main)
+        if not self.container.exists(str(archive_path)):
+            self.container.make_dir(
+                str(archive_path),
+                permissions=0o700,
+                user=self.user,
+                group=self.group,
+                make_parents=True,
+            )
+        # Create a debian-style symlink at the version level:
+        # /var/lib/postgresql/16 -> /var/lib/pg/data/16
+        # This keeps /var/lib/postgresql/16/main as a valid alias for the real pgdata
+        # directory for any tools that rely on the traditional Debian path layout.
+        # Note: This symlink is on ephemeral storage and may not persist across container
+        # restarts. It gets recreated on each pebble-ready event.
+        # /var/lib/postgresql is created by the postgresql Debian package and exists in
+        # the container image, so no make_dir is needed before creating the symlink.
+        self.container.exec([
+            "ln",
+            "-sfn",
+            str(self.root / K8S_DATA_PATH / "16"),
+            str(self.root / K8S_DEBIAN_DATA_SYMLINK),
+        ]).wait()
+        self.container.exec([
+            "chown",
+            "-h",
+            f"{self.user}:{self.group}",
+            str(self.root / K8S_DEBIAN_DATA_SYMLINK),
+        ]).wait()
+        self._ensure_log_symlink(K8S_PG_LOGS_PATH, self.root / K8S_POSTGRESQL_LOGS_SYMLINK_PATH)
+        self._ensure_log_symlink(K8S_PATRONI_LOGS_PATH, self.root / K8S_PATRONI_LOGS_SYMLINK_PATH)
+        self._ensure_log_symlink(
+            K8S_PGBACKREST_LOGS_PATH, self.root / K8S_PGBACKREST_LOGS_SYMLINK_PATH
+        )
+        # Also, fix the permissions from the parent directory.
+        for path in [
+            self.root / K8S_ARCHIVE_PATH,
+            self.root / K8S_DATA_PATH,
+            logs_storage,
+            self.root / K8S_TEMP_STORAGE_PATH,
+        ]:
+            self.container.exec(["chown", f"{self.user}:{self.group}", str(path)]).wait()
+
+    def _ensure_log_symlink(self, target_name: str, symlink_path: PathProtocol) -> None:
+        """Ensure symlink_path points to target in the logs storage."""
+        path_info = self._get_container_path_info(str(symlink_path))
+        if path_info is not None:
+            if path_info.type == FileType.DIRECTORY:
+                self._remove_empty_log_directory(str(symlink_path))
+            elif path_info.type != FileType.SYMLINK:
+                logger.error(
+                    "error: %s exists but is neither a symlink nor a directory and cannot"
+                    " be replaced with a symlink to the logs storage - remove it manually"
+                    " and run 'juju resolve' on each unit to recover.",
+                    symlink_path,
+                )
+                raise RuntimeError from None
+
+        logs_storage = self.root / K8S_LOGS_STORAGE_PATH
+        self.container.exec([
+            "ln",
+            "-sfn",
+            str(logs_storage / self.paths.versioned_path / target_name),
+            str(symlink_path),
+        ]).wait()
+        self.container.exec([
+            "chown",
+            "-h",
+            f"{self.user}:{self.group}",
+            str(symlink_path),
+        ]).wait()
+
+    def _get_container_path_info(self, path: str) -> FileInfo | None:
+        """Return file info for a specific container path without dereferencing symlinks."""
+        path_obj = pathlib.PurePosixPath(path)
+        path_infos = self.container.list_files(str(path_obj.parent), pattern=path_obj.name)
+        if not path_infos:
+            return None
+        return path_infos[0]
+
+    def _remove_empty_log_directory(self, symlink_path: str) -> None:
+        """Remove a log directory at symlink_path only when it is empty."""
+        if self.container.list_files(symlink_path):
+            logger.error(
+                "error: %s is a non-empty directory and cannot be replaced with a"
+                " symlink to the logs storage - move or remove its contents manually"
+                " and run 'juju resolve' on each unit to recover.",
+                symlink_path,
+            )
+            raise RuntimeError from None
+
+        self.container.remove_path(symlink_path)
+
+    def pitr_bootstrap_failure_logs(self) -> tuple[str, bool]:
+        """Fetch the postgresql pebble service logs for PITR bootstrap-failure scanning.
+
+        Falls back to concatenating the patroni log files when the pebble logs client
+        is unavailable (Juju 2).
+        """
+        try:
+            log_exec = self.container.pebble.exec(
+                ["pebble", "logs", K8S_POSTGRESQL_SERVICE_NAME, "-n", "all"],
+                combine_stderr=True,
+            )
+            return log_exec.wait_output()[0], False
+        except ExecError:  # For Juju 2.
+            patroni_logs_dir = self.root / K8S_LOGS_STORAGE_PATH / K8S_PATRONI_LOGS_PATH
+            current = self.container.exec([
+                "cat",
+                str(patroni_logs_dir / "patroni.log"),
+            ]).wait_output()[0]
+            older = self.container.exec([
+                "find",
+                str(patroni_logs_dir) + "/",
+                "-name",
+                "patroni.log.*",
+                "-exec",
+                "cat",
+                "{}",
+                "+",
+            ]).wait_output()[0]
+            return f"{current}\n{older}", True
+
+    def postgresql_service_registered(self) -> bool:
+        """Whether the container is connected and the postgresql service exists."""
+        return self.service_exists(K8S_POSTGRESQL_SERVICE_NAME)
+
+    def get_unit_ip_from_hosts(self) -> str:
+        """Reads some files to quickly figure out its own pod IP.
+
+        It should work for any Ubuntu-based image
+        """
+        with open("/etc/hosts") as f:
+            hosts = f.read()
+        with open("/etc/hostname") as f:
+            hostname = f.read().replace("\n", "")
+        line = next(ln for ln in hosts.split("\n") if ln.find(hostname) >= 0)
+        return line.split("\t")[0]
+
+    def get_system_identifier(self) -> tuple[str | None, str | None]:
+        """Returns the PostgreSQL system identifier from this instance."""
+        major_version = self.get_postgresql_version().split(".")[0]
+        try:
+            system_identifier, error = self.container.exec(
+                [
+                    f"/usr/lib/postgresql/{major_version}/bin/pg_controldata",
+                    str(self.paths.data),
+                ],
+                user=K8S_WORKLOAD_OS_USER,
+                group=K8S_WORKLOAD_OS_GROUP,
+            ).wait_output()
+        except ChangeError as e:
+            return None, str(e)
+        if error != "":
+            return None, error
+        system_identifier = next(
+            line for line in system_identifier.splitlines() if "Database system identifier" in line
+        ).split(" ")[-1]
+        return system_identifier, None
+
+    def create_data_backup_tarball(self) -> str:
+        """Store the current pgdata folder in a tar.gz file and return its name."""
+        filename = (
+            f"{self.paths.data}-{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.gz"
+        )
+        self.container.exec(f"tar -zcf {filename} {self.paths.data}".split()).wait_output()
+        return filename
+
+    def clear_data_directories(self) -> None:
+        """Remove the contents of the data directories to enable replication."""
+        self.empty_data_files()
 
     def get_workload_version(self) -> str:
         """Get the workload version."""

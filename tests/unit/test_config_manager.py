@@ -21,13 +21,14 @@ def config(substrate):
         return_value="16.6",
     ):
         config = ConfigManager(
-            state=CharmState(charm=mock_charm, substrate=substrate),
+            state=CharmState(charm=mock_charm, substrate=substrate, s3_requirer=Mock()),
             workload=workload,
             tls_manager=Mock(),
             patroni_manager=Mock(),
             resource_provider=Mock(),
             request_restart=Mock(),
             database_manager=Mock(),
+            ldap_handler=Mock(),
             restart_services=Mock(),
         )
     yield config
@@ -170,6 +171,7 @@ def test_render_patroni_yml_file(substrate, config):
                 synchronous_node_count=0,
                 maximum_lag_on_failover=sentinel.durability_maximum_lag_on_failover,
                 pg_parameters=None,
+                pg_cron_database="postgres",
                 primary_cluster_endpoint=None,
                 ldap_parameters="",
                 patroni_password=sentinel.patroni_pass,
@@ -215,6 +217,7 @@ def test_render_patroni_yml_file(substrate, config):
                 synchronous_node_count=0,
                 maximum_lag_on_failover=sentinel.durability_maximum_lag_on_failover,
                 pg_parameters=None,
+                pg_cron_database="postgres",
                 primary_cluster_endpoint=None,
                 ldap_parameters="",
                 patroni_password=sentinel.patroni_pass,
@@ -553,6 +556,7 @@ def restart_engine(config):
             "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.tls",
             new_callable=PropertyMock,
         ) as _peer_tls,
+        patch("single_kernel_postgresql.managers.config.wait_fixed", lambda _: wait_fixed(0)),
     ):
         _is_tls.return_value = False
         _can_connect.return_value = True
@@ -797,6 +801,15 @@ def test_update_config_threads_tls_flag_into_render(orchestrate, postgresql_clie
     orchestrate._is_tls.return_value = False
     orchestrate.update_config(postgresql_client, no_peers=True)
     assert orchestrate.render_patroni_yml_file.call_args.kwargs["enable_tls"] is False
+
+
+def test_update_config_sources_ldap_parameters_from_handler(orchestrate, postgresql_client):
+    """update_config pulls the LDAP auth parameters from the LDAP events handler."""
+    orchestrate.update_config(postgresql_client, no_peers=True)
+    assert (
+        orchestrate.render_patroni_yml_file.call_args.kwargs["ldap_parameters"]
+        == orchestrate.ldap_handler.get_ldap_parameters.return_value
+    )
 
 
 def test_update_config_workload_not_running_persists_tls_and_refreshes(

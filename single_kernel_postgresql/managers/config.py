@@ -24,6 +24,7 @@ from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay,
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import PostgreSQLCannotConnectError
 from single_kernel_postgresql.config.literals import (
+    PG_CRON_DATABASE,
     PGBACKREST_CONF_FILE,
     POSTGRESQL_STORAGE_PERMISSIONS,
     REWIND_USER,
@@ -40,6 +41,7 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 
 if TYPE_CHECKING:
     # Import-time only: the VM workload pulls the snap charm lib, which K8s does not ship.
+    from single_kernel_postgresql.events.ldap import LDAP
     from single_kernel_postgresql.managers.database import DatabaseManager
     from single_kernel_postgresql.workload.vm import VMWorkload
 
@@ -59,6 +61,7 @@ class ConfigManager(BaseManager):
         tls_manager: TLSManager,
         patroni_manager: PatroniManager,
         database_manager: "DatabaseManager",
+        ldap_handler: "LDAP",
         resource_provider: Callable[[], ResourceProvider],
         request_restart: Callable[[], None],
         restart_services: Callable[[], None],
@@ -66,6 +69,7 @@ class ConfigManager(BaseManager):
         super().__init__(state, workload, "config_manager")
         self.tls_manager = tls_manager
         self.patroni_manager = patroni_manager
+        self.ldap_handler = ldap_handler
         self.database_manager = database_manager
         # Resolved on use, not at construction: the K8s manager that provides it is built
         # after this manager in the charm's __init__.
@@ -470,8 +474,6 @@ class ConfigManager(BaseManager):
         # TODO add rel handler
         relations_user_databases_map: dict[str, Any] | None = None,
         # TODO add rel handler
-        ldap_parameters: dict[str, Any] | None = None,
-        # TODO add rel handler
         async_primary_cluster_endpoint: str | None = None,
         async_partner_addresses: list[str] | None = None,
         async_standby_endpoints: list[str] | None = None,
@@ -479,7 +481,7 @@ class ConfigManager(BaseManager):
         watcher_raft_address: str | None = None,
         no_peers: bool = False,
         *,
-        refresh: charm_refresh.Machines | None = None,
+        refresh: charm_refresh.Machines | charm_refresh.Kubernetes | None = None,
     ) -> bool:
         """Updates Patroni config file based on the existence of the TLS files.
 
@@ -520,7 +522,7 @@ class ConfigManager(BaseManager):
             parameters=pg_parameters,
             user_databases_map=relations_user_databases_map,
             slots=replication_slots,
-            ldap_parameters=ldap_parameters,
+            ldap_parameters=self.ldap_handler.get_ldap_parameters(),
             async_primary_cluster_endpoint=async_primary_cluster_endpoint,
             async_partner_addresses=async_partner_addresses,
             async_standby_endpoints=async_standby_endpoints,
@@ -578,7 +580,7 @@ class ConfigManager(BaseManager):
             self.state.substrate == Substrates.VM
             and refresh is not None
             and cast("VMWorkload", self.workload).get_snap_revision()
-            != refresh.pinned_snap_revision
+            != cast("charm_refresh.Machines", refresh).pinned_snap_revision
         ):
             logger.debug("Early exit: snap was not refreshed to the right version yet")
             return True
@@ -687,6 +689,7 @@ class ConfigManager(BaseManager):
             "synchronous_node_count": self.state.synchronous_node_count,
             "maximum_lag_on_failover": self.state.config.durability_maximum_lag_on_failover,
             "pg_parameters": parameters,
+            "pg_cron_database": PG_CRON_DATABASE,
             "primary_cluster_endpoint": async_primary_cluster_endpoint,
             "ldap_parameters": self._dict_to_hba_string(ldap_parameters),
             "patroni_password": self.state.application.patroni_password,

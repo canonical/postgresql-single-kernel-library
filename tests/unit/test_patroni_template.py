@@ -20,6 +20,16 @@ import pytest
 import yaml
 from jinja2 import Template
 
+
+def _yaml_load(text):
+    """Parse with the libyaml C loader.
+
+    ``yaml.safe_load`` always uses the pure-Python ``SafeLoader``, whose parsing cost
+    dominates this large golden matrix; the C loader avoids that cost.
+    """
+    return yaml.load(text, Loader=yaml.CSafeLoader)
+
+
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 ORIGINAL = {
     "vm": (FIXTURES / "patroni_vm_original.j2").read_text(),
@@ -87,6 +97,7 @@ def _base_context() -> dict:
         "maximum_lag_on_failover": 1048576,
         "instance_password_encryption": "scram-sha-256",
         "pg_parameters": None,
+        "pg_cron_database": "postgres",
         "primary_cluster_endpoint": None,
         # archiving / restore
         "enable_pgbackrest_archiving": False,
@@ -192,14 +203,22 @@ def test_merged_template_matches_original(substrate, overrides):
     context = _base_context()
     context.update(overrides)
 
-    expected = _ORIGINAL_TEMPLATES[substrate].render(**context)
+    expected = _yaml_load(_ORIGINAL_TEMPLATES[substrate].render(**context))
+    for section in [expected["bootstrap"]["dcs"]["postgresql"], expected["postgresql"]]:
+        parameters = section["parameters"]
+        parameters["shared_preload_libraries"] += ",pg_cron"
+        parameters.update({
+            "cron.database_name": "postgres",
+            "cron.use_background_workers": "on",
+            "cron.timezone": "GMT",
+        })
     actual = _MERGED_TEMPLATE.render(substrate=substrate, **context)
 
     # Compared as parsed documents rather than bytes: the merged template emits one field
     # order for both substrates instead of each charm's, and YAML mapping order carries no
     # meaning. Sequences still compare in order, so pg_hba - where PostgreSQL takes the
     # first matching rule - and partner_addrs stay pinned.
-    assert yaml.safe_load(actual) == yaml.safe_load(expected)
+    assert _yaml_load(actual) == expected
 
 
 def test_vm_pg_hba_matches_ipv6_clients():
@@ -263,7 +282,7 @@ def test_k8s_paths_follow_the_workload_version(version):
     """
     context = _base_context()
     context["version"] = version
-    rendered = yaml.safe_load(_MERGED_TEMPLATE.render(substrate="k8s", **context))
+    rendered = _yaml_load(_MERGED_TEMPLATE.render(substrate="k8s", **context))
 
     assert rendered["postgresql"]["bin_dir"] == f"/usr/lib/postgresql/{version}/bin"
     assert rendered["postgresql"]["basebackup"][0]["waldir"].split("/")[-3] == version

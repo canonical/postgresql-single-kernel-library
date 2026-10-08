@@ -31,16 +31,19 @@ from single_kernel_postgresql.config.literals import (
     PEER_RELATION,
     REPLICATION_CONSUMER_RELATION,
     REPLICATION_OFFER_RELATION,
+    S3_RELATION_NAME,
     SCOPES,
     STATUS_PEERS_RELATION,
 )
 from single_kernel_postgresql.core.config import CharmConfig
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication, PostgreSQLPeer
+from single_kernel_postgresql.core.s3 import S3ConnectionInfo
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DataPeerData,
     DataPeerUnitData,
 )
 from single_kernel_postgresql.utils import bracket_ipv6_host, unit_name_to_pod_name
+from single_kernel_postgresql.lib.charms.data_platform_libs.v0.s3 import S3Requirer
 from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
 from single_kernel_postgresql.utils.status import format_status
 
@@ -52,6 +55,7 @@ class CharmState(Object):
         self,
         charm: CharmBase,
         substrate: Substrates,
+        s3_requirer: S3Requirer,
     ) -> None:
         """Initialize the CharmState object."""
         super().__init__(charm, "charm_state")
@@ -60,6 +64,7 @@ class CharmState(Object):
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
 
         self.statuses = StatusesState(self, STATUS_PEERS_RELATION)
+        self.s3_requirer = s3_requirer
 
     # -- Charm Config
     @cached_property
@@ -92,6 +97,11 @@ class CharmState(Object):
     def status_peers_relation(self) -> Relation | None:
         """Get status peers relation."""
         return self.model.get_relation(STATUS_PEERS_RELATION)
+
+    @property
+    def s3_relation(self) -> Relation | None:
+        """Get the S3 parameters relation."""
+        return self.model.get_relation(S3_RELATION_NAME)
 
     # -- Core State Components
 
@@ -132,6 +142,11 @@ class CharmState(Object):
             component=self.model.app,
             substrate=self.substrate,
         )
+
+    @property
+    def s3_connection_info(self) -> S3ConnectionInfo:
+        """Get the S3 connection info state."""
+        return S3ConnectionInfo(self.s3_requirer)
 
     # -- Cluster state utilities
     def _get_hostname_from_unit(self, member: str) -> str:
@@ -215,6 +230,11 @@ class CharmState(Object):
     def model_name(self) -> str:
         """Current model name."""
         return self.model.name
+
+    @property
+    def cluster_name(self) -> str:
+        """Patroni cluster name, substrate-conditional (delegates to the app peer state)."""
+        return self.application.cluster_name
 
     @cached_property
     def patroni_url(self) -> str:
@@ -324,6 +344,22 @@ class CharmState(Object):
         if self.replication_consumer_ip and self.replication_consumer_ip not in ips:
             ips.append(self.replication_consumer_ip)
         return ips
+
+    @property
+    def cluster_stanza(self) -> str | None:
+        """Return the pgBackRest stanza of the cluster, whichever unit published it.
+
+        The stanza is written by the primary into its unit databag during S3
+        initialization and only later adopted by the leader into app data, so
+        while a cluster is mid-initialization (or mid-restore) the authoritative
+        copy may still live on a unit. Fetched live on every access.
+        """
+        if stanza := self.application.stanza:
+            return stanza
+        for peer in self.application_peers:
+            if stanza := peer.stanza:
+                return stanza
+        return None
 
     # -- Secrets
     # TODO: This is temporary till data interfaces v1 is integrated

@@ -10,9 +10,13 @@ from typing import Literal
 # Permissions.
 POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 
+# Snap
+POSTGRESQL_SNAP_NAME = "charmed-postgresql"
+
 # Relations
 PEER_RELATION = "database-peers"
 STATUS_PEERS_RELATION = "status-peers"
+S3_RELATION_NAME = "s3-parameters"
 
 # Users.
 BACKUP_USER = "backup"
@@ -23,20 +27,27 @@ SNAP_USER = "_daemon_"
 USER = "operator"
 SYSTEM_USERS = [BACKUP_USER, MONITORING_USER, REPLICATION_USER, REWIND_USER, USER]
 
+# Extensions
+PG_CRON_DATABASE = "postgres"
+
 # Paths
 ## VM Paths
-BASE_SNAP_DIR = "/var/snap/charmed-postgresql"
+BASE_SNAP_DIR = f"/var/snap/{POSTGRESQL_SNAP_NAME}"
 SNAP_DATA = "current"
 SNAP_COMMON = "common"
-SNAP = "/snap/charmed-postgresql/current"
+SNAP = f"/snap/{POSTGRESQL_SNAP_NAME}/current"
 VM_LOGS_PATH = "var/log/postgresql"
 VM_DATA_PATH = "var/lib/postgresql"
 VM_ARCHIVE_PATH = "data/archive"
 VM_DATA_LOGS_PATH = "data/logs"
 VM_TEMP_PATH = "data/temp"
+VM_PGBACKREST_LOGS_PATH = "var/log/pgbackrest"
 
 ## K8s Paths
 K8S_DATA_PATH = "var/lib/pg/data"
+K8S_ARCHIVE_PATH = "var/lib/pg/archive"
+K8S_TEMP_STORAGE_PATH = "var/lib/pg/temp"
+K8S_PGBACKREST_LOGS_PATH = "16/main/pgbackrest_logs"
 
 ## Shared Paths
 # NOTE: The paths don't have leading slahes since pathops
@@ -55,6 +66,9 @@ TLS_CA_BUNDLE_FILE = "peer_ca_bundle.pem"
 # TLS relation names
 TLS_CLIENT_RELATION = "client-certificates"
 TLS_PEER_RELATION = "peer-certificates"
+
+# LDAP relation names
+LDAP_RELATION = "ldap"
 
 # Scopes
 SCOPES = Literal["app", "unit"]
@@ -125,6 +139,10 @@ ALL_CLIENT_RELATIONS = [DATABASE]
 REPLICATION_CONSUMER_RELATION = "replication"
 REPLICATION_OFFER_RELATION = "replication-offer"
 
+# Async replication peer-data key holding the id of the labelless shared cluster-credentials
+# secret the owner persists: referenced by id everywhere, never by label (DPE-10203).
+ASYNC_SHARED_SECRET_ID_KEY = "async-replication-secret-id"  # noqa: S105 — a databag key name, not a credential
+
 # TLS files
 TLS_KEY_FILE = "key.pem"
 TLS_CA_FILE = "ca.pem"
@@ -176,5 +194,33 @@ RAFT_PORT = 2222
 RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 
 # VM services
-VM_PATRONI_SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
+VM_PATRONI_SERVICE_NAME = f"snap.{POSTGRESQL_SNAP_NAME}.patroni.service"
 VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"
+VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
+VM_ROTATE_LOGS_LOG_FILE = "/var/log/rotate_logs.log"
+
+## K8s restore storage paths (must match the metadata.yaml storage locations)
+K8S_LOGS_STORAGE_PATH = "var/lib/pg/logs"
+K8S_WAL_DIR = "pg_wal"
+K8S_TEMP_TABLESPACE_DIR = "pgsql_tmp"
+K8S_PG_LOGS_PATH = "16/main/pg_logs"
+K8S_PATRONI_LOGS_PATH = "16/main/patroni_logs"
+K8S_DEBIAN_DATA_SYMLINK = "var/lib/postgresql/16"
+K8S_POSTGRESQL_LOGS_SYMLINK_PATH = "var/log/postgresql"
+K8S_PATRONI_LOGS_SYMLINK_PATH = "var/log/patroni"
+K8S_PGBACKREST_LOGS_SYMLINK_PATH = "var/log/pgbackrest"
+
+## Restore
+VM_PATRONICTL_EXECUTABLE = "charmed-postgresql.patronictl"
+PATRONICTL_REMOVE_CONFIRMATION = "Yes I am aware"
+RESTORE_REPEAT_CAUSE = "restore-backup"
+
+# Watcher relation
+RAFT_PORT = 2222
+RAFT_PARTNER_PREFIX = "partner_node_status_server_"
+# Refresh (charm_refresh integration)
+WORKLOAD_NAME = "PostgreSQL"
+VM_CHARM_NAME = "postgresql"
+K8S_CHARM_NAME = "postgresql-k8s"
+K8S_OCI_RESOURCE_NAME = "postgresql-image"
+LAST_REFRESH_UNIT_STATUS_FILE = ".last_refresh_unit_status.json"

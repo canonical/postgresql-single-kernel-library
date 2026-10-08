@@ -3,27 +3,82 @@
 
 """Machine Workload."""
 
+import importlib.resources
 import logging
 import os
 import pathlib
 import platform
+import pwd
+import re
+import shlex
+import shutil
 import subprocess
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
-from types import SimpleNamespace
+from signal import SIGHUP, SIGINT
+from subprocess import run
 
 import charm_refresh
+import psutil
 import tomli
 from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
-from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
+from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
+from single_kernel_postgresql.config.literals import (
+    PATRONICTL_REMOVE_CONFIRMATION,
+    POSTGRESQL_SNAP_NAME,
+    SNAP,
+    SNAP_USER,
+    VM_ARCHIVE_PATH,
+    VM_PATRONICTL_EXECUTABLE,
+    VM_PGBACKREST_SERVICE_NAME,
+    VM_ROTATE_LOGS_LOG_FILE,
+)
+from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
 from single_kernel_postgresql.workload.paths.vm import VMPaths
 
 logger = logging.getLogger(__name__)
+
+# Snap services run through a wrapper script (e.g. start-patroni.sh), so the
+# systemd main process is the wrapper, not the daemon. The reload targets the
+# daemon process itself, discovered by command line, with the same patterns
+# the PostgreSQL VM charm uses for Patroni. $SNAP resolves to the revisioned
+# mount (e.g. /snap/charmed-postgresql/416), hence the x?[0-9]+ revision part.
+_PATRONI_BINARY_PATTERN = re.compile(rf"/snap/{POSTGRESQL_SNAP_NAME}/x?[0-9]+/usr/bin/patroni")
+_PATRONI_CONFIG_PATTERN = re.compile(
+    rf"/var/snap/{POSTGRESQL_SNAP_NAME}/x?[0-9]+/etc/patroni/patroni.yaml"
+)
+_PGBACKREST_SERVER_PATTERN = re.compile(
+    rf"/snap/{POSTGRESQL_SNAP_NAME}/x?[0-9]+/usr/bin/pgbackrest"
+)
+
+
+def _find_service_pid(service: str) -> int | None:
+    """Find the daemon process of a named snap service via its command line."""
+    for process in psutil.process_iter():
+        try:
+            cmdline = process.cmdline()
+        except psutil.Error:  # the process vanished mid-iteration
+            continue
+        if service == "patroni" and (
+            len(cmdline) == 3
+            and cmdline[0] == "python3"
+            and _PATRONI_BINARY_PATTERN.match(cmdline[1])
+            and _PATRONI_CONFIG_PATTERN.match(cmdline[2])
+        ):
+            return process.pid
+        if service == VM_PGBACKREST_SERVICE_NAME and (
+            cmdline
+            and _PGBACKREST_SERVER_PATTERN.match(cmdline[0])
+            and len(cmdline) > 1
+            and cmdline[1] == "server"
+        ):
+            return process.pid
+    return None
 
 
 class VMWorkload(BaseWorkload):
@@ -102,7 +157,7 @@ class VMWorkload(BaseWorkload):
         try:
             logger.debug("Starting Patroni...")
             cache = snap.SnapCache()
-            selected_snap = cache["charmed-postgresql"]
+            selected_snap = cache[POSTGRESQL_SNAP_NAME]
             selected_snap.start(services=["patroni"])
             return selected_snap.services["patroni"]["active"]
         except snap.SnapError as e:
@@ -114,10 +169,66 @@ class VMWorkload(BaseWorkload):
         """Check if the Patroni service is running."""
         try:
             cache = snap.SnapCache()
-            selected_snap = cache["charmed-postgresql"]
+            selected_snap = cache[POSTGRESQL_SNAP_NAME]
             return selected_snap.services["patroni"]["active"]
         except snap.SnapError as e:
             logger.debug(f"Failed to check Patroni service: {e}")
+            return False
+
+    @property
+    def backup_config(self) -> BackupConfig:
+        """Return the VM pgBackRest invocation settings."""
+        return BackupConfig(
+            executable="charmed-postgresql.pgbackrest",
+            conf_path=str(self.paths.pgbackrest_conf),
+            # Matches the VM charm: the versioned PostgreSQL binaries live under the
+            # snap's /snap mount point, not the writable /var/snap tree.
+            bin_path="/snap/charmed-postgresql/current/usr/lib/postgresql",
+            logs_path=str(self.paths.pgbackrest_logs),
+            service=VM_PGBACKREST_SERVICE_NAME,
+            storage_path=str(self.paths.snap_common),
+            tls_ca_chain_path=str(self.paths.pgbackrest_conf / "pgbackrest-tls-ca-chain.crt"),
+            extra_args=(),
+        )
+
+    # -- Rotate-logs loop (VM) ------------------------------------------------------
+
+    def process_alive(self, pid: int) -> bool:
+        """Whether a process with the given PID is alive."""
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    def start_rotate_logs_loop(self) -> int:
+        """Spawn the packaged rotate-logs loop detached and return its PID.
+
+        as_file yields a real path for directory installs (all we ship); the
+        spawned rotate-logs process outlives the context manager on purpose.
+        """
+        script = importlib.resources.as_file(
+            importlib.resources.files("single_kernel_postgresql.scripts").joinpath(
+                "rotate_logs.py"
+            )
+        )
+        with (
+            script as script_path,
+            open(VM_ROTATE_LOGS_LOG_FILE, "a") as output,
+        ):
+            process = subprocess.Popen(  # noqa: S603
+                ["/usr/bin/python3", str(script_path)],
+                stdout=output,
+                stderr=subprocess.STDOUT,
+            )
+        return process.pid
+
+    def stop_rotate_logs_loop(self, pid: int) -> bool:
+        """Send SIGINT to the rotate-logs loop; False when the PID is gone."""
+        try:
+            os.kill(pid, SIGINT)
+            return True
+        except OSError:
             return False
 
     def is_service_started(self, paused: bool | None = False) -> bool:
@@ -137,9 +248,37 @@ class VMWorkload(BaseWorkload):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
-    ) -> SimpleNamespace:
-        """Run Command in CLI."""
-        raise NotImplementedError
+        timeout: float | None = None,
+    ) -> CommandResult:
+        """Run a command on the machine via subprocess.
+
+        The charm runs as root on VM, so the command is not executed as a
+        specific user or group.
+        """
+        cmd = shlex.split(command)
+        if args:
+            cmd += shlex.split(args)
+        try:
+            process = subprocess.run(  # noqa: S603
+                cmd,
+                input=stdin.encode() if stdin else None,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            if not use_errors_replace:
+                raise
+            return CommandResult(
+                return_code=124,
+                stdout=(e.stdout or b"").decode(errors="replace"),
+                stderr=(e.stderr or b"").decode(errors="replace"),
+            )
+        decode_errors = "replace" if use_errors_replace else "strict"
+        return CommandResult(
+            return_code=process.returncode,
+            stdout=process.stdout.decode(errors=decode_errors),
+            stderr=process.stderr.decode(errors=decode_errors),
+        )
 
     def is_failed(self) -> bool:
         """Check if snap service failed."""
@@ -149,9 +288,177 @@ class VMWorkload(BaseWorkload):
         """Stop the PostgreSQL service."""
         ...
 
-    def start_service(self):
-        """Start the PostgreSQL service."""
-        ...
+    def start_service(self, service: str) -> None:
+        """Start a named snap service."""
+        snap.SnapCache()[POSTGRESQL_SNAP_NAME].start(services=[service])
+
+    def stop_service(self, service: str) -> None:
+        """Stop a named snap service."""
+        snap.SnapCache()[POSTGRESQL_SNAP_NAME].stop(services=[service])
+
+    def restart_service(self, service: str) -> None:
+        """Restart a named snap service."""
+        snap.SnapCache()[POSTGRESQL_SNAP_NAME].restart(services=[service])
+
+    def reload_service(self, service: str) -> None:
+        """Reload a named snap service.
+
+        Snap services run through a wrapper script, so the systemd main
+        process is the wrapper, not the daemon; the reload finds the
+        service's daemon process by its command line and sends SIGHUP to it
+        directly, like the PostgreSQL VM charm does for Patroni. A service
+        that is not running is restarted instead.
+        """
+        if not self.service_is_running(service):
+            self.restart_service(service)
+            return
+        if pid := _find_service_pid(service):
+            logger.debug(f"Sending SIGHUP to {service} (pid {pid}) to reload configuration")
+            os.kill(pid, SIGHUP)
+            return
+        logger.warning(f"Unable to find {service} pid. Skipping reload")
+
+    def service_exists(self, service: str) -> bool:
+        """Whether the snap declares the named service."""
+        try:
+            services = snap.SnapCache()[POSTGRESQL_SNAP_NAME].services
+        except snap.SnapError:
+            return False
+        return service in services
+
+    def service_is_running(self, service: str) -> bool:
+        """Check whether a named snap service is running.
+
+        A snap revision predating the service omits it from the services
+        mapping; that reads as not running.
+        """
+        try:
+            services = snap.SnapCache()[POSTGRESQL_SNAP_NAME].services
+        except (snap.SnapError, snap.SnapNotFoundError):
+            return False
+        return services.get(service, {}).get("active", False)
+
+    def empty_data_files(self) -> bool:
+        """Empty the PostgreSQL data directory in preparation of backup restore."""
+        paths = [
+            self.paths.snap_common / VM_ARCHIVE_PATH / self.paths.versioned_path,
+            self.paths.data,
+            self.paths.wal,
+            self.paths.temp,
+        ]
+        path = None
+        try:
+            for path in paths:
+                path_object = Path(str(path))
+                if path_object.exists() and path_object.is_dir():
+                    for item in os.listdir(str(path)):
+                        item_path = os.path.join(str(path), item)
+                        if os.path.isfile(item_path) or os.path.islink(item_path):
+                            os.remove(item_path)
+                        elif os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+        except OSError as e:
+            logger.warning(f"Failed to remove contents from {path} with error: {e!s}")
+            return False
+
+        return True
+
+    def remove_cluster_info(
+        self, cluster_name: str, namespace: str | None = None
+    ) -> CommandResult:
+        """Remove previous cluster information to make it possible to initialise a new cluster.
+
+        Args:
+            cluster_name: the Patroni cluster name.
+            namespace: unused on VM (the cluster is removed via patronictl).
+        """
+        return self.run_cmd(
+            shlex.join([
+                VM_PATRONICTL_EXECUTABLE,
+                "-c",
+                str(self.paths.patroni_config),
+                "remove",
+                cluster_name,
+            ]),
+            stdin=f"{cluster_name}\n{PATRONICTL_REMOVE_CONFIRMATION}",
+            timeout=10,
+        )
+
+    def get_system_identifier(self) -> tuple[str | None, str | None]:
+        """Returns the PostgreSQL system identifier from this instance."""
+
+        def demote():
+            pw_record = pwd.getpwnam(SNAP_USER)
+
+            def result():
+                os.setgid(pw_record.pw_gid)
+                os.setuid(pw_record.pw_uid)
+
+            return result
+
+        major_version = self.get_postgresql_version().split(".")[0]
+        # Input is hardcoded
+        process = run(  # noqa: S603
+            [
+                f"{SNAP}/usr/lib/postgresql/{major_version}/bin/pg_controldata",
+                str(self.paths.data),
+            ],
+            capture_output=True,
+            preexec_fn=demote(),
+        )
+        if process.returncode != 0:
+            return None, process.stderr.decode()
+        system_identifier = next(
+            line
+            for line in process.stdout.decode().splitlines()
+            if "Database system identifier" in line
+        ).split(" ")[-1]
+        return system_identifier, None
+
+    def create_data_backup_tarball(self) -> str:
+        """Store the current data folder in a tar.gz file and return its name."""
+        filename = (
+            f"{self.paths.data.parent}-"
+            f"{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.gz"
+        )
+        # Input is hardcoded
+        subprocess.check_call(f"tar -zcf {filename} {self.paths.data}".split())  # noqa: S603
+        return filename
+
+    def clear_data_directories(self) -> None:
+        """Remove the contents of the data directories to initialise a new cluster."""
+        paths = [
+            self.paths.archive,
+            self.paths.data,
+            self.paths.wal,
+            self.paths.temp,
+        ]
+        path = None
+        try:
+            for path in paths:
+                path_object = Path(str(path))
+                if path_object.exists() and path_object.is_dir():
+                    for item in os.listdir(path_object):
+                        item_path = os.path.join(path_object, item)
+                        if os.path.isfile(item_path) or os.path.islink(item_path):
+                            os.remove(item_path)
+                        elif os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+        except OSError as e:
+            raise PostgreSQLFileOperationError(
+                f"Failed to remove contents from {path} with error: {e!s}"
+            ) from e
+
+    def remove_raft_state(self) -> None:
+        """Remove previous cluster information to make it possible to initialise a new cluster."""
+        try:
+            path = Path(f"{self.paths.patroni_conf}/raft")
+            if path.exists() and path.is_dir():
+                shutil.rmtree(path)
+        except OSError as e:
+            raise PostgreSQLFileOperationError(
+                f"Failed to remove previous cluster information with error: {e!s}"
+            ) from e
 
     def get_workload_version(self) -> str:
         """Get the workload version."""
@@ -207,7 +514,7 @@ class VMWorkload(BaseWorkload):
         return "_daemon_"
 
     @property
-    def paths(self) -> BasePaths:
+    def paths(self) -> VMPaths:
         """Return Workload's paths."""
         return VMPaths(self.root, self.get_postgresql_version().split(".")[0])
 

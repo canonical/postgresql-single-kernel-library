@@ -8,9 +8,9 @@ import pathlib
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import tomli
 from charmlibs import pathops
@@ -19,8 +19,110 @@ from ops import ModelError
 from ops.pebble import Error as PebbleError
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
-from single_kernel_postgresql.config.literals import DIR_PERMISSIONS_READONLY
+from single_kernel_postgresql.config.literals import (
+    DIR_PERMISSIONS_READONLY,
+    ORIGINAL_PATRONI_ON_FAILURE_CONDITION,
+)
+from single_kernel_postgresql.utils import unit_name_to_pod_name
 from single_kernel_postgresql.workload.paths.base import Paths
+
+if TYPE_CHECKING:
+    from single_kernel_postgresql.core.state import CharmState
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    """Normalized result of a workload command execution."""
+
+    return_code: int
+    stdout: str = ""
+    stderr: str = ""
+
+    @property
+    def ok(self) -> bool:
+        """Whether the command succeeded (return code 0)."""
+        return self.return_code == 0
+
+    def __repr__(self) -> str:
+        """Return a compact representation, truncating long streams."""
+        stdout = repr(self.stdout[:50]) if len(self.stdout) > 50 else repr(self.stdout)
+        stderr = repr(self.stderr[:50]) if len(self.stderr) > 50 else repr(self.stderr)
+        return f"CommandResult(return_code={self.return_code}, stdout={stdout}, stderr={stderr})"
+
+
+@dataclass(frozen=True)
+class PebbleLayerSpec:
+    """State-derived inputs for the K8s PostgreSQL pebble layer.
+
+    Substrate-shared code (managers, event handlers) reads the charm state and
+    hands the values over; the K8s workload owns the pebble layer construction.
+    """
+
+    on_failure_condition: str
+    cluster_name: str
+    model_name: str
+    pod_name: str
+    patroni_url: str
+    monitoring_password: str | None
+
+    @classmethod
+    def from_state(cls, state: "CharmState") -> "PebbleLayerSpec":
+        """Build the spec from the charm state."""
+        return cls(
+            on_failure_condition=(
+                state.peer.patroni_on_failure_condition_override
+                or ORIGINAL_PATRONI_ON_FAILURE_CONDITION
+            ),
+            cluster_name=state.application.cluster_name,
+            model_name=state.model_name,
+            pod_name=unit_name_to_pod_name(state.peer.unit_name),
+            patroni_url=state.patroni_url,
+            monitoring_password=state.application.monitoring_password,
+        )
+
+
+@dataclass(frozen=True)
+class BackupConfig:
+    """Substrate-specific pgBackRest invocation and service settings.
+
+    The backup manager is substrate-neutral; everything that differs between
+    the machine charm and the Kubernetes charm when invoking pgBackRest lives
+    here and is built by the concrete workload.
+
+    Args:
+        executable: pgBackRest entrypoint (snap alias on VM, bare binary on K8s).
+        conf_path: directory holding pgbackrest.conf, passed as --config; None
+            means pgBackRest reads its default location (K8s: /etc/pgbackrest.conf).
+        logs_path: path to the pgBackRest logs, used for error extraction hints.
+        bin_path: root of the versioned PostgreSQL binaries (pg_controldata).
+        service: name of the pgBackRest TLS server service.
+        storage_path: workload storage root where TLS material lives.
+        tls_ca_chain_path: where the S3 TLS CA chain file is written.
+        extra_args: substrate-specific arguments always passed to pgBackRest.
+    """
+
+    executable: str
+    conf_path: str | None
+    logs_path: str
+    bin_path: str
+    service: str
+    storage_path: str
+    tls_ca_chain_path: str
+    extra_args: tuple[str, ...] = ()
+
+    @property
+    def configuration_file(self) -> str:
+        """Full path of the pgBackRest configuration file."""
+        # K8s renders to the pgBackRest default location (its pgbackrest reads
+        # /etc/pgbackrest.conf; no --config flag is passed); a None conf_path
+        # must not leak into the path.
+        if self.conf_path is None:
+            return "/etc/pgbackrest.conf"
+        return f"{self.conf_path}/pgbackrest.conf"
+
+    def pg_controldata(self, major_version: str) -> str:
+        """Path of the pg_controldata binary for the given major version."""
+        return f"{self.bin_path}/{major_version}/bin/pg_controldata"
 
 
 class ResourceProvider(Protocol):
@@ -80,6 +182,12 @@ class BaseWorkload(ABC):
     @abstractmethod
     def paths(self) -> Paths:
         """Return the Workload's paths."""
+        pass
+
+    @property
+    @abstractmethod
+    def backup_config(self) -> BackupConfig:
+        """Return the substrate pgBackRest invocation settings."""
         pass
 
     @property
@@ -249,8 +357,21 @@ class BaseWorkload(ABC):
         args: str | None = None,
         use_errors_replace: bool = False,
         stdin: str | None = None,
-    ) -> SimpleNamespace:
-        """Run Command in CLI."""
+        timeout: float | None = None,
+    ) -> CommandResult:
+        """Run a command on the workload.
+
+        Args:
+            command: the command to run.
+            args: optional space-separated arguments for the command.
+            use_errors_replace: return a result instead of raising when the
+                command fails (non-zero exit code or unrecoverable error).
+            stdin: optional input to feed the command's standard input.
+            timeout: optional timeout in seconds.
+
+        Returns:
+            A CommandResult carrying return_code, stdout, and stderr.
+        """
         pass
 
     @abstractmethod
@@ -264,13 +385,114 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
-    def start_service(self):
-        """Start the PostgreSQL service."""
+    def start_service(self, service: str) -> None:
+        """Start a named service on the workload."""
+        pass
+
+    @abstractmethod
+    def stop_service(self, service: str) -> None:
+        """Stop a named service on the workload."""
+        pass
+
+    @abstractmethod
+    def restart_service(self, service: str) -> None:
+        """Restart a named service on the workload."""
+        pass
+
+    @abstractmethod
+    def reload_service(self, service: str) -> None:
+        """Reload a named service on the workload.
+
+        Sends SIGHUP where the substrate supports it; restarts otherwise.
+        """
+        pass
+
+    @abstractmethod
+    def service_exists(self, service: str) -> bool:
+        """Whether the workload layer declares the named service at all."""
+        pass
+
+    @abstractmethod
+    def service_is_running(self, service: str) -> bool:
+        """Check whether a named service is running on the workload.
+
+        Missing services read as not running; this never raises.
+        """
+        pass
+
+    @abstractmethod
+    def get_system_identifier(self) -> tuple[str | None, str | None]:
+        """Return the PostgreSQL system identifier of this instance, or an error."""
+        pass
+
+    @abstractmethod
+    def create_data_backup_tarball(self) -> str:
+        """Store the current data folder in a tar.gz file and return its name."""
+        pass
+
+    @abstractmethod
+    def clear_data_directories(self) -> None:
+        """Empty the data, archive, logs and temp directories."""
         pass
 
     @abstractmethod
     def get_workload_version(self) -> str:
         """Get the workload version."""
+        raise NotImplementedError
+
+    # -- Backup restore seams (ports of the charms' restore-side workload I/O) -----
+
+    @abstractmethod
+    def empty_data_files(self) -> bool:
+        """Empty the PostgreSQL data directory in preparation of backup restore."""
+        pass
+
+    @abstractmethod
+    def remove_cluster_info(
+        self, cluster_name: str, namespace: str | None = None
+    ) -> CommandResult:
+        """Remove previous cluster information to make it possible to initialise a new cluster.
+
+        Args:
+            cluster_name: the Patroni cluster name.
+            namespace: the K8s namespace (ignored on VM).
+        """
+        pass
+
+    def init_storage(self) -> None:
+        """Create the PostgreSQL data directories (K8s-only seam)."""
+        raise NotImplementedError
+
+    def pitr_bootstrap_failure_logs(self) -> tuple[str, bool]:
+        """Fetch the workload logs scanned for PITR bootstrap failures (K8s-only seam).
+
+        Returns:
+            (logs, juju2): juju2 is True when the pebble logs client was unavailable
+            and the patroni log files were read instead.
+        """
+        raise NotImplementedError
+
+    def update_pebble_layers(self, spec: PebbleLayerSpec, replan: bool = True) -> None:
+        """Rebuild and reconcile the PostgreSQL pebble layer (K8s-only seam).
+
+        Args:
+            spec: the state-derived layer inputs.
+            replan: whether to replan (restart) the services after the update.
+        """
+        raise NotImplementedError
+
+    # -- Rotate-logs loop seams (VM-only; the manager gates on substrate) ---------
+
+    def process_alive(self, pid: int) -> bool:
+        """Whether a process with the given PID is alive (VM-only seam)."""
+        raise NotImplementedError
+
+    def start_rotate_logs_loop(self) -> int:
+        """Spawn the packaged rotate-logs loop detached and return its PID (VM-only seam)."""
+        raise NotImplementedError
+
+    def stop_rotate_logs_loop(self, pid: int) -> bool:
+        """Send SIGINT to the rotate-logs loop; False when the PID is gone (VM-only seam)."""
         raise NotImplementedError
 
     def get_postgresql_version(self) -> str:
