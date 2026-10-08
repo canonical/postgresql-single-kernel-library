@@ -66,9 +66,9 @@ class ObserverEventsHandler(Object):
 
         if self.state.substrate == Substrates.VM:
             self.framework.observe(
-                self.on.cluster_topology_change, self._on_cluster_topology_change
+                self.charm.on.cluster_topology_change, self._on_cluster_topology_change
             )
-            self.framework.observe(self.on.databases_change, self._on_databases_change)
+            self.framework.observe(self.charm.on.databases_change, self._on_databases_change)
         else:
             pass
 
