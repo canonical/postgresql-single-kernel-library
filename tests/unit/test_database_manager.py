@@ -560,6 +560,34 @@ def test_update_endpoints_falls_back_to_the_primary_without_replicas(manager, ha
     assert data["read-only-endpoints"] == "1.1.1.1:5432"
 
 
+def test_update_endpoints_brackets_ipv6_addresses(manager, harness, substrate):
+    if substrate == "k8s":
+        pytest.skip("K8s endpoints are DNS names, not bare IPv6 literals")
+    rel_id = harness.model.get_relation(RELATION_NAME).id
+    peer_rel_id = harness.model.get_relation(PEER_RELATION).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(rel_id, "application", {"database": "test_db"})
+        harness.update_relation_data(
+            peer_rel_id,
+            "postgresql-single-kernel/0",
+            {f"{RELATION_NAME}-address": "fd42:a615:ea50:2a68:216:3eff:fef1:6b2"},
+        )
+
+    with (
+        patch.object(
+            manager.database_provides,
+            "fetch_my_relation_data",
+            return_value={rel_id: {"username": "u", "password": "pw"}},
+        ),
+    ):
+        manager.update_endpoints(rel_id, online_members=CLUSTER_STATUS[:1])
+
+    data = harness.get_relation_data(rel_id, harness.charm.app.name)
+    assert data["endpoints"] == "[fd42:a615:ea50:2a68:216:3eff:fef1:6b2]:5432"
+    assert data["read-only-endpoints"] == "[fd42:a615:ea50:2a68:216:3eff:fef1:6b2]:5432"
+    assert data["uris"] == "postgresql://u:pw@[fd42:a615:ea50:2a68:216:3eff:fef1:6b2]:5432/test_db"
+
+
 def test_update_endpoints_publishes_the_primary_ip_verbatim(manager, harness, substrate):
     """A leader unit without a peer address publishes "None:5432", exactly as the charm did."""
     if substrate == "k8s":
