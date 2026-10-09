@@ -68,9 +68,7 @@ class ObserverEventsHandler(Object):
             self.framework.observe(
                 self.charm.on.cluster_topology_change, self._on_cluster_topology_change
             )
-            self.framework.observe(self.charm.on.databases_change, self._on_databases_change)
-        else:
-            pass
+        self.framework.observe(self.charm.on.databases_change, self._on_databases_change)
 
     def _on_databases_change(self, _):
         """Handle databases change event."""
