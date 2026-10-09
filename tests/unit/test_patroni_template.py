@@ -98,6 +98,8 @@ def _base_context() -> dict:
         "instance_password_encryption": "scram-sha-256",
         "pg_parameters": None,
         "pg_cron_database": "postgres",
+        "pg_cron_available": True,
+        "shared_preload_libraries": "timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron",
         "primary_cluster_endpoint": None,
         # archiving / restore
         "enable_pgbackrest_archiving": False,
@@ -178,6 +180,18 @@ _DIMENSIONS = {
         {},
         {"is_creating_backup": True, "is_no_sync_member": True},
     ],
+    # Capability gate: what the charm computes from the installed snap (VM) or the
+    # version-locked image (K8s). Gated = an older snap without pg_cron.so.
+    "pg_cron": [
+        {
+            "pg_cron_available": True,
+            "shared_preload_libraries": "timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron",
+        },
+        {
+            "pg_cron_available": False,
+            "shared_preload_libraries": "timescaledb,pgaudit,set_user,pg_stat_statements",
+        },
+    ],
 }
 
 
@@ -206,12 +220,13 @@ def test_merged_template_matches_original(substrate, overrides):
     expected = _yaml_load(_ORIGINAL_TEMPLATES[substrate].render(**context))
     for section in [expected["bootstrap"]["dcs"]["postgresql"], expected["postgresql"]]:
         parameters = section["parameters"]
-        parameters["shared_preload_libraries"] += ",pg_cron"
-        parameters.update({
-            "cron.database_name": "postgres",
-            "cron.use_background_workers": "on",
-            "cron.timezone": "GMT",
-        })
+        if context["pg_cron_available"]:
+            parameters["shared_preload_libraries"] += ",pg_cron"
+            parameters.update({
+                "cron.database_name": "postgres",
+                "cron.use_background_workers": "on",
+                "cron.timezone": "GMT",
+            })
     actual = _MERGED_TEMPLATE.render(substrate=substrate, **context)
 
     # Compared as parsed documents rather than bytes: the merged template emits one field
