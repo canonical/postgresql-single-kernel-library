@@ -9,6 +9,7 @@ Responsible for managing the configuration of the PostgreSQL instance.
 
 import importlib.resources
 import logging
+import pathlib
 from collections.abc import Callable
 from functools import cached_property
 from hashlib import shake_128
@@ -26,8 +27,10 @@ from single_kernel_postgresql.config.exceptions import PostgreSQLCannotConnectEr
 from single_kernel_postgresql.config.literals import (
     PG_CRON_DATABASE,
     PGBACKREST_CONF_FILE,
+    POSTGRESQL_SNAP_NAME,
     POSTGRESQL_STORAGE_PERMISSIONS,
     REWIND_USER,
+    SHARED_PRELOAD_LIBRARIES,
     USER,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
@@ -46,6 +49,16 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
+
+
+def _snap_provided_libraries() -> set[str]:
+    """Libraries shipped by the currently installed PostgreSQL snap."""
+    return {
+        path.stem
+        for path in pathlib.Path(f"/snap/{POSTGRESQL_SNAP_NAME}/current/usr/lib/postgresql").glob(
+            "*/lib/*.so"
+        )
+    }
 
 
 class ConfigManager(BaseManager):
@@ -699,6 +712,9 @@ class ConfigManager(BaseManager):
             "extra_replication_endpoints": async_standby_endpoints,
         }
         if self.state.substrate == Substrates.VM:
+            # The installed snap may predate a library the charm pins (e.g.
+            # pg_cron); only preload what the snap actually ships.
+            snap_libraries = _snap_provided_libraries()
             confs.update({
                 "conf_path": str(self.workload.paths.patroni_conf),
                 "log_path": str(self.workload.paths.patroni_logs),
@@ -713,6 +729,10 @@ class ConfigManager(BaseManager):
                 "listen_ips": self.state.listen_ips,
                 "raft_password": self.state.application.raft_password,
                 "watcher": watcher_raft_address,
+                "pg_cron_available": "pg_cron" in snap_libraries,
+                "shared_preload_libraries": ",".join(
+                    library for library in SHARED_PRELOAD_LIBRARIES if library in snap_libraries
+                ),
             })
             perms = 0o600
         else:
@@ -725,6 +745,8 @@ class ConfigManager(BaseManager):
                 "logs_storage_path": str(self.workload.paths.logs),
                 "pgdata_path": str(self.workload.paths.data),
                 "restoring_backup": backup_id is not None or pitr_target is not None,
+                "pg_cron_available": True,
+                "shared_preload_libraries": ",".join(SHARED_PRELOAD_LIBRARIES),
             })
             perms = 0o644
         rendered = template.render(**confs)

@@ -33,6 +33,17 @@ SYSTEM_USERS = [BACKUP_USER, MONITORING_USER, REPLICATION_USER, REWIND_USER, USE
 # Extensions
 PG_CRON_DATABASE = "postgres"
 
+# Libraries the charm pins into `shared_preload_libraries`, in load order.
+# ConfigManager renders only the libraries the installed snap actually ships,
+# so an older snap never receives a preload entry it cannot load.
+SHARED_PRELOAD_LIBRARIES = (
+    "timescaledb",
+    "pgaudit",
+    "set_user",
+    "pg_stat_statements",
+    "pg_cron",
+)
+
 # Paths
 ## VM Paths
 BASE_SNAP_DIR = f"/var/snap/{POSTGRESQL_SNAP_NAME}"
