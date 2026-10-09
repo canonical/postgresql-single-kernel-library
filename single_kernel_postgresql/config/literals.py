@@ -227,3 +227,8 @@ VM_CHARM_NAME = "postgresql"
 K8S_CHARM_NAME = "postgresql-k8s"
 K8S_OCI_RESOURCE_NAME = "postgresql-image"
 LAST_REFRESH_UNIT_STATUS_FILE = ".last_refresh_unit_status.json"
+
+# Observers log path
+OBSERVER_K8S_LOG_FILE_PATH = "/var/log/authorisation_rules_observer.log"
+OBSERVER_VM_LOG_FILE_PATH = "/var/log/cluster_topology_observer.log"
+JUJU_RUN_CMD = "/usr/bin/juju-exec"
