@@ -32,11 +32,9 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         """Return a PostgreSQL client."""
         return PostgreSQL(
             substrate=Substrates.VM,
-            # Test-charm-only bridge: mirrors the real charm's construction — the
-            # unit-test hardcoded credentials ("localhost"/"test-password") cannot
-            # authenticate against a real cluster. The primary endpoint comes from
-            # Patroni and the operator password from the app secret, exactly as in
-            # the real VM charm.
+            # Test-charm-only bridge mirroring the real charm's construction: the unit-test
+            # hardcoded credentials cannot authenticate against a real cluster; the primary
+            # endpoint comes from Patroni and the operator password from the app secret.
             primary_host=self.primary_endpoint,
             # The snap's own runtime tmp dir (not a tempfile): bandit's S108
             # shared-temp-dir rule doesn't model snap runtime dirs.
@@ -108,9 +106,8 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         if refresh is None:
             refresh = self.refresh_manager.refresh
         return self.config_manager.update_config(self.postgresql, refresh=refresh)
-        # The real charm collects the per-user hba map in its composition root
-        # (charm.py relations_user_databases_map) and passes it on every render;
-        # the rel-handler wiring is an un-ported TODO in the library.
+        # NOTE: unreachable while the early return above exists — this is the per-user
+        # hba map wiring (the real charm passes the map on every render).
         return self.config_manager.update_config(
             self.postgresql,
             relations_user_databases_map=self.relations_user_databases_map(),
