@@ -412,11 +412,10 @@ class LogicalReplicationManager(BaseManager):
             subscriptions = self._subscriptions_info()
 
             if database not in subscriptions or database not in publications:
-                # Fresh mutual setups race: our own bookkeeping or the remote's
+                # Fresh mutual setups race: our bookkeeping or the remote's
                 # publications can lag while both sides configure each other. Fall back
-                # to our own outgoing subscription-request: if we already asked this app
-                # for any of the same tables, accepting their mirror request would close
-                # the direct cycle.
+                # to our own outgoing request: if we already asked for the same tables,
+                # accepting their mirror request would close the direct cycle.
                 outgoing_request = json.loads(
                     subscription_relation.data[self.state.model.app].get(
                         "subscription-request", "{}"
@@ -447,9 +446,8 @@ class LogicalReplicationManager(BaseManager):
 
             return circular_tables
 
-        # Check for multi-hop circular replication
-        # If we're subscribed to any table in this database, check if the requester's
-        # app is in the replication chain for that table
+        # Multi-hop circular detection: if we're subscribed to any table in this
+        # database, check whether the requester's app is in its replication chain.
         if database not in publications:
             # Not subscribed to this database, can't have multi-hop circular replication
             return circular_tables
