@@ -119,16 +119,14 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
         )
 
-        # Logical replication: retry pending validations on the update-status
-        # heartbeat. StatusHandler must be constructed AFTER this observer so its
-        # own update-status listener runs later (charm-side checks first, then the
-        # status recompute).
+        # Retry pending logical-replication validations on the update-status heartbeat;
+        # observed BEFORE StatusHandler so the charm-side checks run before the status
+        # recompute.
         self.framework.observe(self.on.update_status, self._on_logical_replication_update_status)
 
-        # Logical replication: the manager owns the two logical-replication
-        # relations' data plane; the events handler owns the observers and the
-        # event-flow guards. The config manager reads the manager's published
-        # slots for the Patroni render and API sync.
+        # The manager owns the two logical-replication relations' data plane; the events
+        # handler owns the observers and event-flow guards. The config manager reads the
+        # manager's published slots for the Patroni render and API sync.
         self.logical_replication_manager = LogicalReplicationManager(
             state=self.state,
             workload=self.workload,
