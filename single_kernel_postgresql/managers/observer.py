@@ -3,14 +3,20 @@
 
 """Observer scripts manager."""
 
+import importlib.resources
 import logging
 import os
 import signal
 import subprocess
+from contextlib import suppress
 from pathlib import Path
 from sys import version_info
 from typing import TYPE_CHECKING
 
+# Platform specific imports
+with suppress(ImportError):
+    from charmlibs.systemd import daemon_reload, service_enable
+import jinja2
 from ops import ActiveStatus
 
 from single_kernel_postgresql.config.enums import Substrates
@@ -20,6 +26,7 @@ from single_kernel_postgresql.config.literals import (
     OBSERVER_VM_LOG_FILE_PATH,
 )
 from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.utils import render_file
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.core.state import CharmState
@@ -128,6 +135,51 @@ class ObserverManager(BaseManager):
                 self.state.peer.observer_pid = None
             except OSError:
                 pass
+
+    def start_raft_observer(self) -> None:
+        """Render the raft observer systemd units and enable the timer (VM).
+
+        Port of the VM charm's ``start_raft_observer`` (the cluster-topology
+        observer residual after the observer-manager adoption): the oneshot
+        service runs the packaged raft_observer script with the charm
+        environment; the timer pokes it every 10s.
+        """
+        if self.state.substrate != Substrates.VM:
+            return
+        service_template = jinja2.Template(
+            importlib.resources
+            .files("single_kernel_postgresql.templates")
+            .joinpath("vm", "raft-observer.service.j2")
+            .read_text()
+        )
+        rendered = service_template.render(
+            envvars=copy_environment(),
+            script="-m single_kernel_postgresql.scripts.raft_observer",
+        )
+        render_file(
+            Substrates.VM,
+            "/etc/systemd/system/raft-observer.service",
+            rendered,
+            0o644,
+            change_owner=False,
+        )
+        timer_template = jinja2.Template(
+            importlib.resources
+            .files("single_kernel_postgresql.templates")
+            .joinpath("vm", "raft-observer.timer.j2")
+            .read_text()
+        )
+        render_file(
+            Substrates.VM,
+            "/etc/systemd/system/raft-observer.timer",
+            timer_template.render(),
+            0o644,
+            change_owner=False,
+        )
+        # Reload systemd to pick up the new service
+        daemon_reload()
+        service_enable("/etc/systemd/system/raft-observer.timer", "--now")
+        logger.info("Installed and enabled raft observer timer")
 
 
 def copy_environment() -> dict[str, str]:
