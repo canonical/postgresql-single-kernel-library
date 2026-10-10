@@ -19,15 +19,33 @@ import psycopg2
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from jinja2 import Template
+from ops.model import (
+    ActiveStatus,
+    BlockedStatus,
+    MaintenanceStatus,
+    Relation,
+    StatusBase,
+    WaitingStatus,
+)
+from psycopg2.errors import DependentObjectsStillExist  # ty: ignore[unresolved-import]
 from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
+from single_kernel_postgresql.compat.postgresql import PostgreSQLUndefinedHostError
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.exceptions import PostgreSQLCannotConnectError
+from single_kernel_postgresql.config.exceptions import (
+    PostgreSQLBaseError,
+    PostgreSQLCannotConnectError,
+)
 from single_kernel_postgresql.config.literals import (
+    EXTENSION_OBJECT_MESSAGE,
+    EXTENSIONS_DEPENDENCY_MESSAGE,
     PG_CRON_DATABASE,
     PGBACKREST_CONF_FILE,
+    PLUGIN_OVERRIDES,
     POSTGRESQL_STORAGE_PERMISSIONS,
+    REPLICATION_USER,
     REWIND_USER,
+    SPI_MODULE,
     USER,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
@@ -36,7 +54,14 @@ from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import _change_owner, render_file
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
+from single_kernel_postgresql.utils.postgresql import (
+    ACCESS_GROUPS,
+    REQUIRED_PLUGINS,
+    PostgreSQLEnableDisableExtensionError,
+)
+from single_kernel_postgresql.utils.postgresql import (
+    PostgreSQL as PostgreSQLClient,
+)
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
 if TYPE_CHECKING:
@@ -65,6 +90,7 @@ class ConfigManager(BaseManager):
         resource_provider: Callable[[], ResourceProvider],
         request_restart: Callable[[], None],
         restart_services: Callable[[], None],
+        set_unit_status: Callable[[StatusBase], None],
         logical_replication_slots: Callable[[], dict[str, str]] | None = None,
     ):
         super().__init__(state, workload, "config_manager")
@@ -79,6 +105,9 @@ class ConfigManager(BaseManager):
         # service restarts stay in the charm until their own migration phases.
         self.request_restart = request_restart
         self.restart_services = restart_services
+        # Unit-status bridge: the config-driven flows juggle unit statuses
+        # (the extensions blocked/waiting dance) through the charm's seam.
+        self.set_unit_status = set_unit_status
         # Publishes the managed logical replication slots for the Patroni render and API
         # sync; the callable is wired from the logical replication manager at the
         # composition root and defaults to an empty mapping when absent.
@@ -740,6 +769,201 @@ class ConfigManager(BaseManager):
             rendered,
             perms,
         )
+
+    @property
+    def is_blocked(self) -> bool:
+        """Whether the unit is in a blocked state (port of the charm's is_blocked)."""
+        return isinstance(self.state.peer.unit.status, BlockedStatus)
+
+    def _restore_unit_status(self, status: StatusBase) -> None:
+        """Restore a previously cached unit status (port of the charm's helper).
+
+        The status getter can return statuses that the setter rejects (e.g. an
+        "error" status left over from a previously failed hook). Skip restoring
+        any status juju does not allow us to set, to avoid an InvalidStatusError
+        that would deadlock the unit.
+        """
+        if isinstance(status, ActiveStatus | BlockedStatus | MaintenanceStatus | WaitingStatus):
+            self.set_unit_status(status)
+
+    def get_plugins(self) -> list[str]:
+        """Return the list of enabled plugins (port of the charm's get_plugins)."""
+        plugins = [
+            "_".join(plugin.split("_")[1:-1])
+            for plugin in self.state.config.plugin_keys()
+            if self.state.config[plugin]
+        ]
+        plugins = [PLUGIN_OVERRIDES.get(plugin, plugin) for plugin in plugins]
+        if "spi" in plugins:
+            plugins.remove("spi")
+            for ext in SPI_MODULE:
+                plugins.append(ext)
+        return plugins
+
+    def reconcile_extensions(
+        self, postgresql_client: PostgreSQLClient, database: str | None = None
+    ) -> None:
+        """Enable/disable PostgreSQL extensions set through config options.
+
+        Port of the charm's ``enable_disable_extensions`` (renamed here so it
+        does not shadow the client's SQL executor of the same name).
+        """
+        if self.patroni_manager.get_primary() is None:
+            logger.debug("Early exit reconcile_extensions: standby cluster")
+            return
+        original_status = self.state.peer.unit.status
+        extensions: dict[str, bool] = {}
+        # Collect extensions.
+        for plugin in self.state.config.plugin_keys():
+            enable = self.state.config[plugin]
+            extension = "_".join(plugin.split("_")[1:-1])
+            if extension == "spi":
+                for ext in SPI_MODULE:
+                    extensions[ext] = enable
+                continue
+            extension = PLUGIN_OVERRIDES.get(extension, extension)
+            if self._check_extension_dependencies(extension, enable):
+                self.set_unit_status(BlockedStatus(EXTENSIONS_DEPENDENCY_MESSAGE))
+                return
+            extensions[extension] = enable
+        if (
+            self.is_blocked
+            and self.state.peer.unit.status.message == EXTENSIONS_DEPENDENCY_MESSAGE
+        ):
+            self.set_unit_status(ActiveStatus())
+            original_status = self.state.peer.unit.status
+        self.set_unit_status(WaitingStatus("Updating extensions"))
+        try:
+            postgresql_client.enable_disable_extensions(extensions, database)
+        except DependentObjectsStillExist as e:
+            logger.error(
+                "Failed to disable plugin: %s\n"
+                "Was the plugin enabled manually? If so, update charm config with "
+                "`juju config postgresql plugin-<plugin_name>-enable=True`",
+                str(e),
+            )
+            self.set_unit_status(BlockedStatus(EXTENSION_OBJECT_MESSAGE))
+            return
+        except (PostgreSQLEnableDisableExtensionError, PostgreSQLUndefinedHostError) as e:
+            logger.exception("failed to change plugins: %s", str(e))
+        if original_status.message == EXTENSION_OBJECT_MESSAGE:
+            self.set_unit_status(ActiveStatus())
+            return
+        self._restore_unit_status(original_status)
+
+    def _check_extension_dependencies(self, extension: str, enable: bool) -> bool:
+        """Whether enabling the extension needs other plugins enabled first (port)."""
+        skip = False
+        if enable and extension in REQUIRED_PLUGINS:
+            for ext in REQUIRED_PLUGINS[extension]:
+                if not self.state.config[f"plugin_{ext}_enable"]:
+                    skip = True
+                    logger.exception(
+                        "cannot enable %s, extension required %s to be enabled before",
+                        extension,
+                        ext,
+                    )
+        return skip
+
+    def validate_config_options(self, postgresql_client: PostgreSQLClient) -> None:
+        """Validate config options that need access to the database (port)."""
+        if (
+            self.state.config.instance_default_text_search_config
+            not in postgresql_client.get_postgresql_text_search_configs()
+        ):
+            raise ValueError(
+                "instance_default_text_search_config config option has an invalid value"
+            )
+
+        if not postgresql_client.validate_group_map(self.state.config.ldap_map):
+            raise ValueError("ldap_map config option has an invalid value")
+
+        if self.state.config.request_date_style and not postgresql_client.validate_date_style(
+            self.state.config.request_date_style
+        ):
+            raise ValueError("request_date_style config option has an invalid value")
+
+        if self.state.config.request_time_zone not in postgresql_client.get_postgresql_timezones():
+            raise ValueError("request_time_zone config option has an invalid value")
+
+        if (
+            self.state.config.storage_default_table_access_method
+            not in postgresql_client.get_postgresql_default_table_access_methods()
+        ):
+            raise ValueError(
+                "storage_default_table_access_method config option has an invalid value"
+            )
+
+    def build_relations_user_databases_map(
+        self, postgresql_client: PostgreSQLClient, client_relations: list[Relation]
+    ) -> dict:
+        """Build the user->databases map for all relations (port).
+
+        The Patroni render turns the map into per-user pg_hba rules.
+        """
+        # Copy relations users directly instead of waiting for them to be created.
+        user_database_map = self.database_manager.collect_user_relations()
+
+        if (
+            not self.state.application.is_cluster_initialised
+            or not self.patroni_manager.member_started
+        ):
+            user_database_map.update({
+                USER: "all",
+                REPLICATION_USER: "all",
+                REWIND_USER: "all",
+            })
+            return user_database_map
+        hosts = (
+            [True, False]
+            if self.state.peer.is_connectivity_enabled and self.state.primary_endpoint
+            else [self.state.peer.is_connectivity_enabled]
+        )
+        for current_host in hosts:
+            try:
+                for user in postgresql_client.list_users(current_host=current_host):
+                    if user in (
+                        "backup",
+                        "monitoring",
+                        "operator",
+                        "postgres",
+                        "replication",
+                        "rewind",
+                        "charmed_databases_owner",
+                    ):
+                        continue
+                    if databases := ",".join(
+                        sorted(
+                            postgresql_client.list_accessible_databases_for_user(
+                                user, current_host=current_host
+                            )
+                        )
+                    ):
+                        user_database_map[user] = databases
+                    else:
+                        logger.debug(f"User {user} has no databases to connect to")
+                    # Add "landscape" superuser by default when a "db-admin" relation exists.
+                    if any(True for relation in client_relations if relation.name == "db-admin"):
+                        user_database_map["landscape"] = "all"
+                if postgresql_client.list_access_groups(current_host=current_host) != set(
+                    ACCESS_GROUPS
+                ):
+                    user_database_map.update({
+                        USER: "all",
+                        REPLICATION_USER: "all",
+                        REWIND_USER: "all",
+                    })
+                return user_database_map
+            except PostgreSQLBaseError as e:
+                logger.debug(f"Failing to get users with {e}")
+                continue
+        logger.debug("build_relations_user_databases_map: Unable to get users")
+        user_database_map.update({
+            USER: "all",
+            REPLICATION_USER: "all",
+            REWIND_USER: "all",
+        })
+        return user_database_map
 
     @property
     def _are_passwords_set(self) -> bool:
