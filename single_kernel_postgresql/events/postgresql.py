@@ -187,10 +187,9 @@ class PostgreSQLEventsHandler(Object):
 
         self.tls_manager.configure_internal_peer_ca()
 
-        # Render the Patroni configuration (the real charm renders on leader-elected;
-        # the ported flow left it commented with a TODO — required for bootstrap).
-        # Route through the charm bridge so the composition root can supply the
-        # per-user pg_hba map (relations_user_databases_map) the real charm passes.
+        # Render the Patroni configuration — required for bootstrap (the real charm
+        # renders on leader-elected); route through the charm bridge for the per-user
+        # pg_hba map the real charm passes.
         if self.charm.substrate == Substrates.VM:
             self.charm.update_config()
 
@@ -225,11 +224,10 @@ class PostgreSQLEventsHandler(Object):
             )
             return
 
-        # The real charm sets this in _start_primary after _setup_users succeeds
-        # (charm.py: self.app_peer_data["cluster_initialised"] = "True"); the users
-        # setup flow is not migrated yet, but the flag gates every client-relation
-        # request, so set it right after the cluster bootstraps. Must be the peer
-        # APP databag: PostgreSQLPeer.update() writes the unit scope.
+        # The real charm sets this in _start_primary after _setup_users (not migrated
+        # yet); the flag gates every client-relation request, so set it right after
+        # bootstrap. Must be the peer APP databag: PostgreSQLPeer.update() writes the
+        # unit scope.
         self.state.application.data["cluster_initialised"] = "True"
 
         # TODO: Assert the member is up and running before marking it as initialised.

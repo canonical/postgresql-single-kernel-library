@@ -68,9 +68,8 @@ class TLSManager(BaseManager):
         """Configure TLS internal peer certificate."""
         if not self.state.peer.internal_cert:
             self.generate_internal_peer_cert()
-            # The real charm's _regenerate_internal_cert pushes the generated
-            # material to the workload immediately (charm.py); the config subsystem
-            # that the NOTE below defers to is not migrated yet, so push here or
+            # The real charm pushes the generated material to the workload immediately;
+            # the config subsystem that defers this is not migrated yet, so push here or
             # Patroni crashes at bootstrap on the missing restapi cafile.
             self.push_tls_files()
 
