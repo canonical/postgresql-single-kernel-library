@@ -24,9 +24,16 @@ from single_kernel_postgresql.config.exceptions import (
     SettingSystemPasswordError,
     StorageUnavailableError,
 )
+from single_kernel_postgresql.config.literals import PEER_RELATION
 from single_kernel_postgresql.config.statuses import GeneralStatuses, PatroniStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.cluster import ClusterManager
+from single_kernel_postgresql.managers.cluster_membership import (
+    COMPLETED,
+    DEFER,
+    SKIPPED,
+    ClusterMembershipManager,
+)
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.refresh import RefreshManager
@@ -35,6 +42,8 @@ from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
 from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
+    from ops import EventBase, HookEvent, RelationDepartedEvent, RelationEvent
+
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
 
 logger = logging.getLogger(__name__)
@@ -53,6 +62,7 @@ class PostgreSQLEventsHandler(Object):
         config_manager: ConfigManager,
         patroni_manager: PatroniManager,
         refresh_manager: RefreshManager,
+        membership_manager: "ClusterMembershipManager | None" = None,
     ) -> None:
         super().__init__(charm, key="postgresql_events")
         self.charm = charm
@@ -63,6 +73,7 @@ class PostgreSQLEventsHandler(Object):
         self.tls_manager = tls_manager
         self.patroni_manager = patroni_manager
         self.refresh_manager = refresh_manager
+        self.membership_manager = membership_manager
 
         # Charm events
         self.framework.observe(self.charm.on.install, self._on_install)
@@ -72,6 +83,15 @@ class PostgreSQLEventsHandler(Object):
             self.framework.observe(
                 self.charm.on.postgresql_pebble_ready, self._on_postgresql_pebble_ready
             )
+        if self.state.substrate == Substrates.VM and self.membership_manager:
+            self.framework.observe(
+                getattr(
+                    self.charm.on,
+                    f"{PEER_RELATION.replace('-', '_')}_relation_departed",
+                ),
+                self._on_peer_relation_departed,
+            )
+            self.framework.observe(self.charm.on.raft_reconnect, self._on_raft_reconnect)
 
     def _on_install(self, event: InstallEvent) -> None:
         """Install prerequisites for the application."""
@@ -251,3 +271,60 @@ class PostgreSQLEventsHandler(Object):
                     self.charm.unit.status = WaitingStatus("Data directory not attached")
                     raise StorageUnavailableError()
         self.charm.unit.status = cached_status
+
+    # -- VM peer-relation membership flows (ported from the VM charm) ----------------
+
+    def _on_peer_relation_departed(self, event: "RelationDepartedEvent") -> None:
+        """The leader removes the departing units from the cluster members (port)."""
+        if not self.membership_manager:
+            return
+        if self.membership_manager.departed_early_exit(event):
+            return
+        # Remove the departing member from the raft cluster.
+        outcome = self.membership_manager.remove_departing_raft_member(event)
+        if outcome == DEFER:
+            event.defer()
+            return
+        if outcome == SKIPPED:
+            return
+        result = self.membership_manager.remove_departed_members()
+        if result == DEFER:
+            event.defer()
+            return
+        if result == COMPLETED:
+            self.membership_manager.async_replication_manager.update_async_replication_data()
+
+    def _peer_relation_changed_checks(self, event: "HookEvent") -> bool:
+        """Early-exit checks for the peer-relation-changed flow (port)."""
+        if not self.membership_manager:
+            return False
+        membership = self.membership_manager
+        # Prevents the cluster from being reconfigured before it's bootstrapped in the leader.
+        if not membership.state.application.is_cluster_initialised:
+            logger.debug("Early exit on_peer_relation_changed: cluster not initialized")
+            return False
+        # Check whether raft is stuck.
+        if membership.has_raft_keys():
+            membership.raft_reinitialisation()
+            logger.debug("Early exit on_peer_relation_changed: stuck raft recovery")
+            return False
+        # If the unit is the leader, it can reconfigure the cluster.
+        if membership.state.model.unit.is_leader() and not membership.reconfigure_cluster(event):
+            event.defer()
+            return False
+        # Don't update this member before it's part of the members list.
+        if membership.state.unit_ip not in membership.state.application.members_ips:
+            logger.debug("Early exit on_peer_relation_changed: Unit not in the members list")
+            return False
+        return True
+
+    def _reconfigure_cluster(self, event: "RelationEvent") -> bool:
+        """Reconfigure the cluster via the membership manager (port)."""
+        if not self.membership_manager:
+            return False
+        return self.membership_manager.reconfigure_cluster(event)
+
+    def _on_raft_reconnect(self, event: "EventBase") -> None:
+        """Re-add this unit's raft member after a stuck connection (port)."""
+        if self.membership_manager:
+            self.membership_manager.raft_reconnect(event)
