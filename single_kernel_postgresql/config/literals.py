@@ -209,6 +209,7 @@ VM_PGBACKREST_METRICS_SERVICE_NAME = "pgbackrest-exporter"
 UPDATE_CERTS_BIN_PATH = "/usr/sbin/update-ca-certificates"
 EXTENSIONS_DEPENDENCY_MESSAGE = "Unsatisfied plugin dependencies. Please check the logs"
 EXTENSION_OBJECT_MESSAGE = "Cannot disable plugins: Existing objects depend on it. See logs"
+PRIMARY_NOT_REACHABLE_MESSAGE = "waiting for primary to be reachable from this unit"
 VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
 VM_ROTATE_LOGS_LOG_FILE = "/var/log/rotate_logs.log"
 

@@ -27,7 +27,6 @@ from ops.model import (
     StatusBase,
     WaitingStatus,
 )
-from psycopg2.errors import DependentObjectsStillExist  # ty: ignore[unresolved-import]
 from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
 from single_kernel_postgresql.compat.postgresql import PostgreSQLUndefinedHostError
@@ -835,7 +834,7 @@ class ConfigManager(BaseManager):
         self.set_unit_status(WaitingStatus("Updating extensions"))
         try:
             postgresql_client.enable_disable_extensions(extensions, database)
-        except DependentObjectsStillExist as e:
+        except psycopg2.errors.DependentObjectsStillExist as e:  # ty: ignore[possibly-missing-submodule]
             logger.error(
                 "Failed to disable plugin: %s\n"
                 "Was the plugin enabled manually? If so, update charm config with "

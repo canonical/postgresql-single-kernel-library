@@ -20,6 +20,7 @@ from single_kernel_postgresql.events.async_replication import PostgreSQLAsyncRep
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.ldap import LDAP
 from single_kernel_postgresql.events.logical_replication import PostgreSQLLogicalReplication
+from single_kernel_postgresql.events.observer import ClusterTopologyChangeCharmEvents
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.events.watcher import WatcherEventsHandler
@@ -31,10 +32,12 @@ from single_kernel_postgresql.managers.async_replication import (
     AsyncReplicationManager,
 )
 from single_kernel_postgresql.managers.cluster import ClusterManager
+from single_kernel_postgresql.managers.cluster_membership import ClusterMembershipManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
 from single_kernel_postgresql.managers.logical_replication import LogicalReplicationManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
+from single_kernel_postgresql.managers.raft import RaftManager
 from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
@@ -46,6 +49,10 @@ from ..utils.postgresql import PostgreSQL
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
     """An abstract PostgreSQL charm."""
+
+    # Custom charm events dispatched by the observer scripts (cluster topology
+    # changes and raft reconnection).
+    on = ClusterTopologyChangeCharmEvents()
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -165,6 +172,37 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             set_default_status=self.set_default_unit_status,
         )
 
+        # The watcher handler feeds the membership subsystem (endpoints, raft addresses).
+        self.watcher_handler = WatcherEventsHandler(self, self.workload, self.state)
+
+        # The RAFT manager owns the low-level raft operations; the membership
+        # manager owns the VM peer-relation orchestration and the raft
+        # recovery state machine (late-bound bridges as callables).
+        self.raft_manager = RaftManager(
+            state=self.state,
+            workload=self.workload,
+            patroni_manager=self.patroni_manager,
+            watcher_handler=self.watcher_handler,
+            update_config=self.update_config,
+            set_unit_status=self.set_unit_status,
+            peer_relation_changed=lambda event: (
+                self.postgresql_events_handler._on_peer_relation_changed(event)  # ty: ignore[unresolved-attribute]
+            ),
+            remove_from_members_ips=lambda ip: self.membership_manager.remove_member_ip(ip),
+        )
+        self.membership_manager = ClusterMembershipManager(
+            state=self.state,
+            workload=self.workload,
+            patroni_manager=self.patroni_manager,
+            update_config=self.update_config,
+            set_unit_status=self.set_unit_status,
+            watcher_handler=self.watcher_handler,
+            async_replication_manager=self.async_replication_manager,
+            update_relation_endpoints=self.update_relation_endpoints,
+            raft_manager=self.raft_manager,
+            set_primary_status_message=self.set_primary_status_message,
+        )
+
         # Events Handler
         self.postgresql_events_handler = PostgreSQLEventsHandler(
             self,
@@ -175,8 +213,8 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.config_manager,
             self.patroni_manager,
             self.refresh_manager,
+            membership_manager=self.membership_manager,
         )
-        self.watcher_handler = WatcherEventsHandler(self, self.workload, self.state)
 
         # Resume or prepare the refresh (the charms' post-construction resume block).
         self.refresh_manager.on_init()
