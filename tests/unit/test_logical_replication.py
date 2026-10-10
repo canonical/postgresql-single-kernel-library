@@ -163,6 +163,53 @@ def test_would_create_circular_replication_different_table_ok(harness):
     )
 
 
+def test_would_create_circular_replication_identity_token(harness):
+    """A chain carrying this app's identity token makes the subscription circular."""
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    relation = harness.model.get_relation("logical-replication", rel_id)
+    self_token = f"{harness.model.uuid}/{harness.charm.app.name}"
+    publications = {
+        TESTING_DATABASE: {
+            "publication-name": "test_pub",
+            "replication-chains": {"public.test_table": [self_token]},
+        }
+    }
+    harness.update_relation_data(rel_id, "remote-app", {"publications": json.dumps(publications)})
+
+    assert (
+        harness.charm.logical_replication_manager._would_create_circular_replication(
+            relation, TESTING_DATABASE, "public.test_table"
+        )
+        is True
+    )
+
+
+def test_would_create_circular_replication_same_name_other_model_ok(harness):
+    """A same-named app in another model in the chain does NOT make it circular.
+
+    The chain token carries the origin's model UUID; a same-named app here has
+    a different token, so the subscription is legitimate (the cross-model
+    false positive the name-based check had).
+    """
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    relation = harness.model.get_relation("logical-replication", rel_id)
+    other_model_token = f"00000000-0000-0000-0000-000000000001/{harness.charm.app.name}"
+    publications = {
+        TESTING_DATABASE: {
+            "publication-name": "test_pub",
+            "replication-chains": {"public.test_table": [other_model_token]},
+        }
+    }
+    harness.update_relation_data(rel_id, "remote-app", {"publications": json.dumps(publications)})
+
+    assert (
+        harness.charm.logical_replication_manager._would_create_circular_replication(
+            relation, TESTING_DATABASE, "public.test_table"
+        )
+        is False
+    )
+
+
 def test_check_publisher_circular_replication_no_subscription(harness):
     """The publisher check returns no circular tables without a subscription relation."""
     offer_rel_id = _add_logical_relation(harness, "logical-replication-offer", "remote-app")
@@ -231,15 +278,142 @@ def test_check_publisher_circular_replication_detects_cycle(harness):
     ) == ["public.test_table"]
 
 
+def test_check_publisher_circular_replication_identity_cycle(harness):
+    """Matching identity stamps on both remotes detect the direct cycle."""
+    identity = json.dumps({"model-uuid": "uuid-b", "app-name": "remote-app"})
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    harness.update_relation_data(
+        rel_id,
+        "remote-app",
+        {
+            "publications": json.dumps({
+                TESTING_DATABASE: {"tables": ["public.test_table", "public.other_table"]}
+            }),
+            "replication-identity": identity,
+        },
+    )
+    _set_peer_data(
+        harness,
+        {
+            "logical-replication-subscriptions": json.dumps({
+                str(rel_id): {TESTING_DATABASE: "subscription_name"}
+            })
+        },
+    )
+    offer_rel_id = _add_logical_relation(harness, "logical-replication-offer", "remote-app")
+    harness.update_relation_data(offer_rel_id, "remote-app", {"replication-identity": identity})
+    offer_relation = harness.model.get_relation("logical-replication-offer", offer_rel_id)
+
+    assert harness.charm.logical_replication_manager._check_publisher_circular_replication(
+        offer_relation, TESTING_DATABASE, ["public.test_table"]
+    ) == ["public.test_table"]
+
+
+def test_check_publisher_circular_replication_same_name_other_models_no_cycle(harness):
+    """Same-named apps with different model UUIDs are NOT the same app.
+
+    Regression test for the name-based direct check: two same-named apps in
+    different models must not be treated as a direct circular replication.
+    """
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    harness.update_relation_data(
+        rel_id,
+        "remote-app",
+        {
+            "publications": json.dumps({
+                TESTING_DATABASE: {"tables": ["public.test_table", "public.other_table"]}
+            }),
+            "replication-identity": json.dumps({
+                "model-uuid": "uuid-model-1",
+                "app-name": "remote-app",
+            }),
+        },
+    )
+    _set_peer_data(
+        harness,
+        {
+            "logical-replication-subscriptions": json.dumps({
+                str(rel_id): {TESTING_DATABASE: "subscription_name"}
+            })
+        },
+    )
+    offer_rel_id = _add_logical_relation(harness, "logical-replication-offer", "remote-app")
+    harness.update_relation_data(
+        offer_rel_id,
+        "remote-app",
+        {
+            "replication-identity": json.dumps({
+                "model-uuid": "uuid-model-2",
+                "app-name": "remote-app",
+            })
+        },
+    )
+    offer_relation = harness.model.get_relation("logical-replication-offer", offer_rel_id)
+
+    assert (
+        harness.charm.logical_replication_manager._check_publisher_circular_replication(
+            offer_relation, TESTING_DATABASE, ["public.test_table"]
+        )
+        == []
+    )
+
+
+def test_check_publisher_circular_replication_multihop_identity_chain(harness):
+    """The requester's identity token in the inherited chain blocks the offer."""
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    harness.update_relation_data(
+        rel_id,
+        "remote-app",
+        {
+            "publications": json.dumps({
+                TESTING_DATABASE: {
+                    "replication-chains": {
+                        "public.test_table": ["uuid-model-1/remote-app"],
+                    }
+                }
+            }),
+            "replication-identity": json.dumps({
+                "model-uuid": "uuid-model-b",
+                "app-name": "remote-app",
+            }),
+        },
+    )
+    _set_peer_data(
+        harness,
+        {
+            "logical-replication-subscriptions": json.dumps({
+                str(rel_id): {TESTING_DATABASE: "subscription_name"}
+            })
+        },
+    )
+    offer_rel_id = _add_logical_relation(harness, "logical-replication-offer", "remote-app")
+    harness.update_relation_data(
+        offer_rel_id,
+        "remote-app",
+        {
+            "replication-identity": json.dumps({
+                "model-uuid": "uuid-model-1",
+                "app-name": "remote-app",
+            })
+        },
+    )
+    offer_relation = harness.model.get_relation("logical-replication-offer", offer_rel_id)
+
+    assert harness.charm.logical_replication_manager._check_publisher_circular_replication(
+        offer_relation, TESTING_DATABASE, ["public.test_table"]
+    ) == ["public.test_table"]
+
+
 def test_build_replication_chains_no_subscription(harness):
     """Without a subscription, this app is the origin for every published table."""
     chains = harness.charm.logical_replication_manager._build_replication_chains(
         TESTING_DATABASE, ["public.table1", "public.table2"]
     )
 
+    self_token = f"{harness.model.uuid}/{harness.charm.app.name}"
     assert chains == {
-        "public.table1": [harness.charm.app.name],
-        "public.table2": [harness.charm.app.name],
+        "public.table1": [self_token],
+        "public.table2": [self_token],
     }
 
 
@@ -265,11 +439,73 @@ def test_build_replication_chains_extends_chain(harness):
         TESTING_DATABASE, ["public.table1", "public.table2", "public.table3"]
     )
 
+    self_token = f"{harness.model.uuid}/{harness.charm.app.name}"
     assert chains == {
-        "public.table1": ["cluster-a", "cluster-b", harness.charm.app.name],
-        "public.table2": ["cluster-b", harness.charm.app.name],
-        "public.table3": [harness.charm.app.name],
+        "public.table1": ["cluster-a", "cluster-b", self_token],
+        "public.table2": ["cluster-b", self_token],
+        "public.table3": [self_token],
     }
+
+
+def test_check_subscriber_circular_replication_same_name_other_models_ok(harness):
+    """Same-named apps in different models must not count as the same app.
+
+    Regression test for the name-based same-app check on the subscriber side:
+    a same-named publisher in another model is a different application, so
+    publishing to it must not block subscribing from it.
+    """
+    sub_rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    harness.update_relation_data(
+        sub_rel_id,
+        "remote-app",
+        {
+            "replication-identity": json.dumps({
+                "model-uuid": "uuid-model-1",
+                "app-name": "remote-app",
+            })
+        },
+    )
+    offer_rel_id = _add_logical_relation(harness, "logical-replication-offer", "remote-app")
+    harness.update_relation_data(
+        offer_rel_id,
+        "remote-app",
+        {
+            "replication-identity": json.dumps({
+                "model-uuid": "uuid-model-2",
+                "app-name": "remote-app",
+            })
+        },
+    )
+    relation = harness.model.get_relation("logical-replication", sub_rel_id)
+
+    assert (
+        harness.charm.logical_replication_manager._check_subscriber_circular_replication(
+            relation, TESTING_DATABASE, "public.test_table"
+        )
+        is False
+    )
+
+
+def test_check_subscriber_circular_replication_identity_same_app(harness):
+    """Matching identity stamps on both relations keep the mutual-setup block."""
+    identity = json.dumps({"model-uuid": "uuid-b", "app-name": "remote-app"})
+    sub_rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    harness.update_relation_data(sub_rel_id, "remote-app", {"replication-identity": identity})
+    offer_rel_id = _add_logical_relation(harness, "logical-replication-offer", "remote-app")
+    harness.update_relation_data(offer_rel_id, "remote-app", {"replication-identity": identity})
+    harness.update_relation_data(
+        offer_rel_id,
+        harness.charm.app.name,
+        {"publications": json.dumps({TESTING_DATABASE: {"tables": ["public.test_table"]}})},
+    )
+    relation = harness.model.get_relation("logical-replication", sub_rel_id)
+
+    assert (
+        harness.charm.logical_replication_manager._check_subscriber_circular_replication(
+            relation, TESTING_DATABASE, "public.test_table"
+        )
+        is True
+    )
 
 
 def test_validate_subscription_request_blocks_circular(harness):
