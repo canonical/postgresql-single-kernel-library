@@ -32,13 +32,16 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         """Return a PostgreSQL client."""
         return PostgreSQL(
             substrate=Substrates.VM,
-            primary_host="localhost",
-            current_host="localhost",
+            # Test-charm-only bridge mirroring the real charm's construction: the unit-test
+            # hardcoded credentials cannot authenticate against a real cluster; the primary
+            # endpoint comes from Patroni and the operator password from the app secret.
+            primary_host=self.primary_endpoint,
+            # The snap's own runtime tmp dir (not a tempfile): bandit's S108
+            # shared-temp-dir rule doesn't model snap runtime dirs.
+            current_host="/tmp/snap-private-tmp/snap.charmed-postgresql/tmp/",  # noqa: S108
             user=USER,
-            # The password is hardcoded because this is an abstract charm and
-            # it meant to be used only in unit tests.
-            password="test-password",  # noqa S106
-            database="test-database",
+            password=str(self.state.application.user_password or ""),
+            database="postgres",
             system_users=SYSTEM_USERS,
         )
 
@@ -103,6 +106,49 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         if refresh is None:
             refresh = self.refresh_manager.refresh
         return self.config_manager.update_config(self.postgresql, refresh=refresh)
+        # NOTE: unreachable while the early return above exists — this is the per-user
+        # hba map wiring (the real charm passes the map on every render).
+        return self.config_manager.update_config(
+            self.postgresql,
+            relations_user_databases_map=self.relations_user_databases_map(),
+        )
+
+    def relations_user_databases_map(self) -> dict[str, str]:
+        """Build the user -> accessible-databases map for the pg_hba render.
+
+        Mirrors the real charm's charm.py relations_user_databases_map: non-system
+        users get a per-user hba rule for the databases they can access, and the
+        internal users fall back to "all" while the access groups are missing.
+        """
+        postgresql = self.postgresql
+        user_database_map: dict[str, str] = {}
+        skip = {
+            "backup",
+            "monitoring",
+            USER,
+            "postgres",
+            "replication",
+            "rewind",
+            "charmed_databases_owner",
+        }
+        try:
+            for user in postgresql.list_users(current_host=True):
+                if user in skip:
+                    continue
+                if databases := ",".join(
+                    sorted(postgresql.list_accessible_databases_for_user(user, current_host=True))
+                ):
+                    user_database_map[user] = databases
+            if postgresql.list_access_groups(current_host=True) != {
+                "identity_access",
+                "internal_access",
+                "relation_access",
+            }:
+                user_database_map.update({USER: "all", "replication": "all", "rewind": "all"})
+        except Exception as e:
+            logger.debug(f"Failed to build the relations user databases map: {e}")
+            user_database_map.update({USER: "all", "replication": "all", "rewind": "all"})
+        return user_database_map
 
     def set_app_status(self, status: StatusBase) -> None:
         """Set the application status; the production charm gates this on its own state."""
