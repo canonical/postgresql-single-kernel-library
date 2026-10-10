@@ -30,10 +30,9 @@ from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
 
-# The charm-side hooks the data plane needs; the composition root injects them (the
-# manager never touches the charm directly). The PostgreSQL client is constructed
-# fresh per access (Patroni primary lookup + app secret), per the events
-# handlers' convention.
+# Charm-side hooks the data plane needs, injected by the composition root (the manager
+# never touches the charm directly); the PostgreSQL client is built fresh per access,
+# per the events handlers' convention.
 type PostgreSQLClientFunction = Callable[[], PostgreSQL]
 type PrimaryEndpointFunction = Callable[[], str | None]
 type UpdateConfigFunction = Callable[..., bool]
@@ -166,11 +165,10 @@ class LogicalReplicationManager(BaseManager):
             for relation in self.state.model.relations.get(LOGICAL_REPLICATION_OFFER_RELATION, ())
         ]
 
-        # Deterministic slot cleanup independent of published-resources state: the
-        # slot name is derived from the relation id and database, so a slot left
-        # behind by a subscriber whose bookkeeping entry was lost (or whose app
-        # was removed) is dropped by name — Patroni never auto-removes permanent
-        # slots when their config entry disappears.
+        # Deterministic slot cleanup, independent of published-resources state: the slot
+        # name derives from the relation id and database, so slots orphaned by lost
+        # bookkeeping (or a removed app) are still dropped by name — Patroni never
+        # auto-removes permanent slots.
         candidate_databases = set(
             json.loads(self.state.config.logical_replication_subscription_request or "{}")
         ) | {
