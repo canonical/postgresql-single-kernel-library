@@ -1,10 +1,12 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 # ruff: noqa: I001
-from unittest.mock import call, patch, sentinel
+from unittest.mock import call, patch, sentinel, PropertyMock
 from datetime import datetime, timezone, UTC
 
 import psycopg2
+from contextlib import ExitStack
+
 import pytest
 from ops.testing import Harness
 from psycopg2.sql import Composed, Identifier, Literal, SQL
@@ -51,8 +53,47 @@ def harness(substrate, test_charm_path):
     wl_patch.start()
     peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
-    harness.begin()
-    yield harness
+    patroni = "single_kernel_postgresql.managers.patroni.PatroniManager"
+    with ExitStack() as stack:
+        # The migrated VM charm class walks the Patroni REST surface at
+        # construction (primary_endpoint, observers); unit tests never do.
+        stack.enter_context(patch(f"{patroni}.get_primary", return_value=None))
+        stack.enter_context(patch(f"{patroni}.get_standby_leader", return_value=None))
+        stack.enter_context(patch(f"{patroni}.get_member_ip", return_value=None))
+        stack.enter_context(
+            patch(f"{patroni}.cluster_members", new_callable=PropertyMock, return_value=set())
+        )
+        stack.enter_context(
+            patch(f"{patroni}.member_started", new_callable=PropertyMock, return_value=True)
+        )
+        stack.enter_context(patch(f"{patroni}.are_all_members_ready", return_value=True))
+        stack.enter_context(patch(f"{patroni}.update_synchronous_node_count", return_value=None))
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.managers.observer.ObserverManager.start_observer",
+                return_value=None,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.managers.backup.BackupManager.start_log_rotation",
+                return_value=None,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.charms.vm_charm.PostgreSQLVMCharm.update_config",
+                return_value=True,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.charms.k8s_charm.PostgreSQLK8sCharm.update_config",
+                return_value=True,
+            )
+        )
+        harness.begin()
+        yield harness
     harness.cleanup()
     wl_patch.stop()
 

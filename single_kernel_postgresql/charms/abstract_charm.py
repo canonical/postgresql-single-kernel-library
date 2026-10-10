@@ -357,7 +357,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
 
     @abstractmethod
     def update_config(
-        self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
+        self,
+        is_creating_backup: bool = False,
+        no_peers: bool = False,
+        *,
+        refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None,
     ) -> bool:
         """Re-render the Patroni configuration and apply it."""
         pass
