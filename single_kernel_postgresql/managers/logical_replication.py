@@ -67,10 +67,9 @@ def safe_databag_json(databag: Mapping[str, str], key: str, default: Any) -> Any
         return json.loads(default)
 
 
-# The charm-side hooks the data plane needs; the composition root injects them (the
-# manager never touches the charm directly). The PostgreSQL client is constructed
-# fresh per access (Patroni primary lookup + app secret), per the events
-# handlers' convention.
+# Charm-side hooks the data plane needs, injected by the composition root (the manager
+# never touches the charm directly); the PostgreSQL client is built fresh per access,
+# per the events handlers' convention.
 type PostgreSQLClientFunction = Callable[[], PostgreSQL]
 type PrimaryEndpointFunction = Callable[[], str | None]
 type UpdateConfigFunction = Callable[..., bool]
@@ -226,10 +225,9 @@ class LogicalReplicationManager(BaseManager):
             f"Creating new user {user} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation_id}"
         )
         self.postgresql().create_user(user, password, replication=True)
-        # The real charm renders per-relation-user pg_hba rules from
-        # relations_user_databases_map (an un-ported TODO here); grant the internal
-        # access group so the subscriber's replication worker matches the
-        # `host all +internal_access` rule on the publisher.
+        # The real charm renders per-relation-user pg_hba rules (an un-ported TODO
+        # here); grant the internal access group so the replication worker matches the
+        # publisher's `host all +internal_access` rule.
         self.postgresql().grant_internal_access_group_membership(user)
         return user, password
 
@@ -243,11 +241,10 @@ class LogicalReplicationManager(BaseManager):
             for relation in self.state.model.relations.get(LOGICAL_REPLICATION_OFFER_RELATION, ())
         ]
 
-        # Deterministic slot cleanup independent of published-resources state: the
-        # slot name is derived from the relation id and database, so a slot left
-        # behind by a subscriber whose bookkeeping entry was lost (or whose app
-        # was removed) is dropped by name — Patroni never auto-removes permanent
-        # slots when their config entry disappears.
+        # Deterministic slot cleanup, independent of published-resources state: the slot
+        # name derives from the relation id and database, so slots orphaned by lost
+        # bookkeeping (or a removed app) are still dropped by name — Patroni never
+        # auto-removes permanent slots.
         candidate_databases = set(
             json.loads(self.state.config.logical_replication_subscription_request or "{}")
         ) | {
@@ -479,11 +476,10 @@ class LogicalReplicationManager(BaseManager):
             subscriptions = self._subscriptions_info()
 
             if database not in subscriptions or database not in publications:
-                # Fresh mutual setups race: our own bookkeeping or the remote's
+                # Fresh mutual setups race: our bookkeeping or the remote's
                 # publications can lag while both sides configure each other. Fall back
-                # to our own outgoing subscription-request: if we already asked this app
-                # for any of the same tables, accepting their mirror request would close
-                # the direct cycle.
+                # to our own outgoing request: if we already asked for the same tables,
+                # accepting their mirror request would close the direct cycle.
                 outgoing_request = safe_databag_json(
                     subscription_relation.data[self.state.model.app],
                     "subscription-request",
@@ -514,9 +510,8 @@ class LogicalReplicationManager(BaseManager):
 
             return circular_tables
 
-        # Check for multi-hop circular replication
-        # If we're subscribed to any table in this database, check if the requester's
-        # app is in the replication chain for that table
+        # Multi-hop circular detection: if we're subscribed to any table in this
+        # database, check whether the requester's app is in its replication chain.
         if database not in publications:
             # Not subscribed to this database, can't have multi-hop circular replication
             return circular_tables
@@ -682,10 +677,9 @@ class LogicalReplicationManager(BaseManager):
                 f"table {schematable} in database {database} doesn't exist"
             )
 
-        # Check for circular replication FIRST before checking if table is empty
-        # This is important because:
-        # 1. If we're already publishing to the remote app, we can't subscribe from them
-        # 2. The table might not be empty because of existing data (not from replication)
+        # Check circular replication before the empty-table check: we can't subscribe
+        # from an app we already publish to, and a non-empty table may hold
+        # pre-existing data (not replicated rows).
         if relation and self._check_subscriber_circular_replication(
             relation, database, schematable
         ):
@@ -1071,12 +1065,10 @@ class LogicalReplicationManager(BaseManager):
         subscription_request_config = self._configured_subscription_request()
         publications = json.loads(relation.data[relation.app].get("publications", "{}"))
 
-        # The publisher may create publications for a request that failed our local
-        # validation (apply_changed_config pushes the request before validating).
-        # Creating a subscription here would bypass the empty-table guard and
-        # re-subscribe with copy_data=true, duplicating rows
-        # (canonical/postgresql-k8s-operator#982 comment 3019811325). Existing
-        # subscriptions keep refreshing; only NEW subscriptions are gated.
+        # The publisher may create publications for a request that failed local
+        # validation (the request is pushed before validating). Creating a subscription
+        # here would bypass the empty-table guard and duplicate rows via copy_data
+        # (canonical/postgresql-k8s-operator#982). Only NEW subscriptions are gated.
         # The gate is the LIVE creation-time validation below — NOT the persisted
         # VALIDATION_KEY flag: the flag clears only on the update-status retry, so a
         # flag-gated skip would deadlock the resolve path. The re-validation re-checks
