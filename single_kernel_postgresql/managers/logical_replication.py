@@ -59,8 +59,8 @@ _CIRCULAR_ERROR_PATTERN = re.compile(
 def safe_databag_json(databag: Mapping[str, str], key: str, default: Any) -> Any:
     """Read a JSON databag field, treating unreadable content as the default.
 
-    Foreign or older writers may leave malformed (e.g. empty) values behind;
-    readers must behave as if the field were absent instead of crashing the hook.
+    Foreign writers may leave malformed (e.g. empty) values behind; readers
+    must behave as if the field were absent instead of crashing the hook.
     """
     try:
         return json.loads(databag.get(key) or default)
