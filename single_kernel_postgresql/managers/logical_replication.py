@@ -464,8 +464,7 @@ class LogicalReplicationManager(BaseManager):
 
         Every writer stamps its own side, so each relation converges to two
         identities. Readers fall back to app names while a side has not
-        stamped yet (an older library version): names are exact within one
-        model, which is where the pre-identity guards were correct.
+        stamped yet: names are exact within one model.
         """
         identity = json.dumps(self._self_replication_identity())
         if relation.data[self.state.model.app].get(REPLICATION_IDENTITY_KEY) != identity:
@@ -484,8 +483,8 @@ class LogicalReplicationManager(BaseManager):
     def _same_remote_app(self, relation_a: Relation, relation_b: Relation) -> bool:
         """True when both relations connect to the same remote application.
 
-        Identity stamps decide; without a stamp on either side (older peer),
-        fall back to the app name, which is exact within one model.
+        Identity stamps decide; without a stamp on either side, fall back to
+        the app name, which is exact within one model.
         """
         identity_a = self._remote_replication_identity(relation_a)
         identity_b = self._remote_replication_identity(relation_b)
@@ -498,9 +497,8 @@ class LogicalReplicationManager(BaseManager):
     ) -> bool:
         """Check a replication chain for an app, by identity token when known.
 
-        Chains written by this version carry ``model-uuid/app-name`` tokens;
-        chains inherited from older publishers carry bare app names, which are
-        still matched by name (the pre-identity semantics).
+        Chains carry ``model-uuid/app-name`` identity tokens; a bare app-name
+        entry is still matched by name.
         """
         if identity is not None and self._identity_token(identity) in chain:
             return True
