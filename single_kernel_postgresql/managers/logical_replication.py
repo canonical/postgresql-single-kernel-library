@@ -55,10 +55,9 @@ def safe_databag_json(databag: Mapping[str, str], key: str, default: Any) -> Any
         return json.loads(default)
 
 
-# The charm-side hooks the data plane needs; the composition root injects them (the
-# manager never touches the charm directly). The PostgreSQL client is constructed
-# fresh per access (Patroni primary lookup + app secret), per the events
-# handlers' convention.
+# Charm-side hooks the data plane needs, injected by the composition root (the manager
+# never touches the charm directly); the PostgreSQL client is built fresh per access,
+# per the events handlers' convention.
 type PostgreSQLClientFunction = Callable[[], PostgreSQL]
 type PrimaryEndpointFunction = Callable[[], str | None]
 type UpdateConfigFunction = Callable[..., bool]
@@ -200,11 +199,10 @@ class LogicalReplicationManager(BaseManager):
             for relation in self.state.model.relations.get(LOGICAL_REPLICATION_OFFER_RELATION, ())
         ]
 
-        # Deterministic slot cleanup independent of published-resources state: the
-        # slot name is derived from the relation id and database, so a slot left
-        # behind by a subscriber whose bookkeeping entry was lost (or whose app
-        # was removed) is dropped by name — Patroni never auto-removes permanent
-        # slots when their config entry disappears.
+        # Deterministic slot cleanup, independent of published-resources state: the slot
+        # name derives from the relation id and database, so slots orphaned by lost
+        # bookkeeping (or a removed app) are still dropped by name — Patroni never
+        # auto-removes permanent slots.
         candidate_databases = set(
             json.loads(self.state.config.logical_replication_subscription_request or "{}")
         ) | {
@@ -438,11 +436,10 @@ class LogicalReplicationManager(BaseManager):
             subscriptions = self._subscriptions_info()
 
             if database not in subscriptions or database not in publications:
-                # Fresh mutual setups race: our own bookkeeping or the remote's
+                # Fresh mutual setups race: our bookkeeping or the remote's
                 # publications can lag while both sides configure each other. Fall back
-                # to our own outgoing subscription-request: if we already asked this app
-                # for any of the same tables, accepting their mirror request would close
-                # the direct cycle.
+                # to our own outgoing request: if we already asked for the same tables,
+                # accepting their mirror request would close the direct cycle.
                 outgoing_request = json.loads(
                     subscription_relation.data[self.state.model.app].get(
                         "subscription-request", "{}"
@@ -473,9 +470,8 @@ class LogicalReplicationManager(BaseManager):
 
             return circular_tables
 
-        # Check for multi-hop circular replication
-        # If we're subscribed to any table in this database, check if the requester's
-        # app is in the replication chain for that table
+        # Multi-hop circular detection: if we're subscribed to any table in this
+        # database, check whether the requester's app is in its replication chain.
         if database not in publications:
             # Not subscribed to this database, can't have multi-hop circular replication
             return circular_tables
