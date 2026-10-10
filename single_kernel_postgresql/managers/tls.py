@@ -68,6 +68,10 @@ class TLSManager(BaseManager):
         """Configure TLS internal peer certificate."""
         if not self.state.peer.internal_cert:
             self.generate_internal_peer_cert()
+            # The real charm pushes the generated material to the workload immediately;
+            # the config subsystem that defers this is not migrated yet, so push here or
+            # Patroni crashes at bootstrap on the missing restapi cafile.
+            self.push_tls_files()
 
     def generate_internal_peer_cert(self) -> None:
         """Generate internal peer certificate using the tls lib."""
