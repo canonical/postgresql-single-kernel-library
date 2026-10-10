@@ -184,10 +184,9 @@ class LogicalReplicationManager(BaseManager):
             f"Creating new user {user} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation_id}"
         )
         self.postgresql().create_user(user, password, replication=True)
-        # The real charm renders per-relation-user pg_hba rules from
-        # relations_user_databases_map (an un-ported TODO here); grant the internal
-        # access group so the subscriber's replication worker matches the
-        # `host all +internal_access` rule on the publisher.
+        # The real charm renders per-relation-user pg_hba rules (an un-ported TODO
+        # here); grant the internal access group so the replication worker matches the
+        # publisher's `host all +internal_access` rule.
         self.postgresql().grant_internal_access_group_membership(user)
         return user, password
 
@@ -623,10 +622,9 @@ class LogicalReplicationManager(BaseManager):
                 f"table {schematable} in database {database} doesn't exist"
             )
 
-        # Check for circular replication FIRST before checking if table is empty
-        # This is important because:
-        # 1. If we're already publishing to the remote app, we can't subscribe from them
-        # 2. The table might not be empty because of existing data (not from replication)
+        # Check circular replication before the empty-table check: we can't subscribe
+        # from an app we already publish to, and a non-empty table may hold
+        # pre-existing data (not replicated rows).
         if relation and self._check_subscriber_circular_replication(
             relation, database, schematable
         ):
@@ -839,12 +837,10 @@ class LogicalReplicationManager(BaseManager):
         subscriptions = self._subscriptions_info()
         publications = json.loads(relation.data[relation.app].get("publications", "{}"))
 
-        # The publisher may create publications for a request that failed our local
-        # validation (apply_changed_config pushes the request before validating).
-        # Creating a subscription here would bypass the empty-table guard and
-        # re-subscribe with copy_data=true, duplicating rows
-        # (canonical/postgresql-k8s-operator#982 comment 3019811325). Existing
-        # subscriptions keep refreshing; only NEW subscriptions are gated.
+        # The publisher may create publications for a request that failed local
+        # validation (the request is pushed before validating). Creating a subscription
+        # here would bypass the empty-table guard and duplicate rows via copy_data
+        # (canonical/postgresql-k8s-operator#982). Only NEW subscriptions are gated.
         validation_error = (
             self.state.application.data.get("logical-replication-validation") == "error"
         )
