@@ -495,6 +495,10 @@ class BaseWorkload(ABC):
         """Send SIGINT to the rotate-logs loop; False when the PID is gone (VM-only seam)."""
         raise NotImplementedError
 
+    def ensure_storage_layout(self) -> None:
+        """Recreate the versioned temp dir and chown the versioned parents (VM-only seam)."""
+        raise NotImplementedError
+
     def get_postgresql_version(self) -> str:
         """Return the PostgreSQL version from the system."""
         with pathlib.Path("refresh_versions.toml").open("rb") as file:

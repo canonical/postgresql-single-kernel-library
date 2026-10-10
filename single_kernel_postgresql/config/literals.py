@@ -204,6 +204,9 @@ RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 # VM services
 VM_PATRONI_SERVICE_NAME = f"snap.{POSTGRESQL_SNAP_NAME}.patroni.service"
 VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"
+VM_METRICS_SERVICE_NAME = "prometheus-postgres-exporter"
+VM_PGBACKREST_METRICS_SERVICE_NAME = "pgbackrest-exporter"
+UPDATE_CERTS_BIN_PATH = "/usr/sbin/update-ca-certificates"
 VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
 VM_ROTATE_LOGS_LOG_FILE = "/var/log/rotate_logs.log"
 
