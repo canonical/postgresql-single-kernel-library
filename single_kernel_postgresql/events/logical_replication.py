@@ -123,36 +123,26 @@ class PostgreSQLLogicalReplication(Object):
         # This prevents retry_validations() from validating stale config
         self.state.application.data[VALIDATION_KEY] = "ongoing"
 
-        # Capture the PREVIOUSLY APPLIED request from the peer data: the empty-table
-        # check must fire for tables being NEWLY added to the subscription (their
-        # local data is stale or absent), while tables already being replicated
-        # keep skipping it (canonical/postgresql-k8s-operator#1052;
-        # test_pg2_dynamic_error vs test_pg3_extend_subscription).
+        # Capture the PREVIOUSLY APPLIED request from the peer data: the empty-table check
+        # must fire for tables being NEWLY added, while already-replicated tables keep
+        # skipping it (canonical/postgresql-k8s-operator#1052).
         previous_request = json.loads(self.state.application.data.get(APPLIED_REQUEST_KEY, "{}"))
 
-        # Push the request to the relation BEFORE validating: the publisher's
-        # replication-chain checks read this request, and the multi-hop circular
-        # detection only works after the round-trip (the chain data lives in the
-        # publisher's publications, which don't exist until it sees a request).
-        # Only syntactically valid JSON is ever pushed (push_subscription_request),
-        # so a malformed config cannot crash the remote publisher's hook. A local
-        # validation failure below leaves the request pushed: the publisher may
-        # create publications, but the subscriber's validation gate and the
-        # creation-time check keep the empty-table guard intact
-        # (canonical/postgresql-operator#1085 exact order).
+        # Push the request to the relation BEFORE validating: the publisher's chain
+        # checks read this request, and multi-hop circular detection only works after
+        # the round-trip (canonical/postgresql-operator#1085 exact order). Pushes are
+        # always syntactically valid JSON; a local validation failure leaves the request
+        # in place — the creation-time check still enforces the empty-table guard.
         if relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION):
             self.manager.push_subscription_request(relation)
 
         if self.manager.validate_subscription_request(previous_request, empty_tables="auto"):
             self.manager.apply_updated_subscription_request()
-            # The baseline means "replicated by a LIVE subscription". A
-            # newly-added database has no subscription yet (creation is
-            # deferred to the relation-changed handler); persisting its tables
-            # here would make the creation gate see them as already-subscribed
-            # (previous=None re-derives from this peer key), skip the
-            # empty-table guard and re-subscribe with copy_data=true over a
-            # non-empty table (the config-cycle duplication;
-            # canonical/postgresql-k8s-operator#982 comment 3019811325).
+            # The baseline means "replicated by a LIVE subscription": a newly-added
+            # database has no subscription yet (creation is deferred to relation-changed),
+            # so persisting its tables here would skip the empty-table guard and
+            # re-subscribe with copy_data=true over a non-empty table
+            # (canonical/postgresql-k8s-operator#982).
             self.manager.persist_applied_request_baseline()
             # Clear any previous blocked status from validation errors
             self.charm.set_unit_status(ActiveStatus())
