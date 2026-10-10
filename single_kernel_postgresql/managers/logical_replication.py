@@ -41,11 +41,10 @@ SUBSCRIPTIONS_KEY = "logical-replication-subscriptions"
 APPLIED_REQUEST_KEY = "logical-replication-applied-request"
 VALIDATION_KEY = "logical-replication-validation"
 VALIDATION_STATUS_MESSAGE_KEY = "logical-replication-validation-status-message"
-# Never cleared: the charm's update-status allowlist gate compares the unit's
-# (frozen) Blocked message against this field, so the marker must survive the
-# healing validation that clears VALIDATION_KEY/VALIDATION_STATUS_MESSAGE_KEY --
-# otherwise the stale blocked message matches nothing and the gate early-exits
-# forever, keeping the unit blocked despite a healthy, replicating flow.
+# Never cleared: the charm's update-status gate compares the unit's (frozen) Blocked
+# message against this field, so it must survive the healing validation that clears
+# VALIDATION_KEY/VALIDATION_STATUS_MESSAGE_KEY — otherwise the gate matches nothing
+# and the unit stays blocked forever.
 LAST_BLOCK_MESSAGE_KEY = "logical-replication-last-block-message"
 
 # Publisher error prose for circular rejections, singular or plural:
@@ -68,10 +67,9 @@ def safe_databag_json(databag: Mapping[str, str], key: str, default: Any) -> Any
         return json.loads(default)
 
 
-# The charm-side hooks the data plane needs; the composition root injects them (the
-# manager never touches the charm directly). The PostgreSQL client is constructed
-# fresh per access (Patroni primary lookup + app secret), per the events
-# handlers' convention.
+# Charm-side hooks the data plane needs, injected by the composition root (the manager
+# never touches the charm directly); the PostgreSQL client is built fresh per access,
+# per the events handlers' convention.
 type PostgreSQLClientFunction = Callable[[], PostgreSQL]
 type PrimaryEndpointFunction = Callable[[], str | None]
 type UpdateConfigFunction = Callable[..., bool]
@@ -227,10 +225,9 @@ class LogicalReplicationManager(BaseManager):
             f"Creating new user {user} for {LOGICAL_REPLICATION_OFFER_RELATION} #{relation_id}"
         )
         self.postgresql().create_user(user, password, replication=True)
-        # The real charm renders per-relation-user pg_hba rules from
-        # relations_user_databases_map (an un-ported TODO here); grant the internal
-        # access group so the subscriber's replication worker matches the
-        # `host all +internal_access` rule on the publisher.
+        # The real charm renders per-relation-user pg_hba rules (an un-ported TODO
+        # here); grant the internal access group so the replication worker matches the
+        # publisher's `host all +internal_access` rule.
         self.postgresql().grant_internal_access_group_membership(user)
         return user, password
 
@@ -244,11 +241,10 @@ class LogicalReplicationManager(BaseManager):
             for relation in self.state.model.relations.get(LOGICAL_REPLICATION_OFFER_RELATION, ())
         ]
 
-        # Deterministic slot cleanup independent of published-resources state: the
-        # slot name is derived from the relation id and database, so a slot left
-        # behind by a subscriber whose bookkeeping entry was lost (or whose app
-        # was removed) is dropped by name — Patroni never auto-removes permanent
-        # slots when their config entry disappears.
+        # Deterministic slot cleanup, independent of published-resources state: the slot
+        # name derives from the relation id and database, so slots orphaned by lost
+        # bookkeeping (or a removed app) are still dropped by name — Patroni never
+        # auto-removes permanent slots.
         candidate_databases = set(
             json.loads(self.state.config.logical_replication_subscription_request or "{}")
         ) | {
@@ -480,11 +476,10 @@ class LogicalReplicationManager(BaseManager):
             subscriptions = self._subscriptions_info()
 
             if database not in subscriptions or database not in publications:
-                # Fresh mutual setups race: our own bookkeeping or the remote's
+                # Fresh mutual setups race: our bookkeeping or the remote's
                 # publications can lag while both sides configure each other. Fall back
-                # to our own outgoing subscription-request: if we already asked this app
-                # for any of the same tables, accepting their mirror request would close
-                # the direct cycle.
+                # to our own outgoing request: if we already asked for the same tables,
+                # accepting their mirror request would close the direct cycle.
                 outgoing_request = safe_databag_json(
                     subscription_relation.data[self.state.model.app],
                     "subscription-request",
@@ -515,9 +510,8 @@ class LogicalReplicationManager(BaseManager):
 
             return circular_tables
 
-        # Check for multi-hop circular replication
-        # If we're subscribed to any table in this database, check if the requester's
-        # app is in the replication chain for that table
+        # Multi-hop circular detection: if we're subscribed to any table in this
+        # database, check whether the requester's app is in its replication chain.
         if database not in publications:
             # Not subscribed to this database, can't have multi-hop circular replication
             return circular_tables
@@ -632,10 +626,9 @@ class LogicalReplicationManager(BaseManager):
         if self._check_publisher_errors(relation, subscription_request_config):
             return False
 
-        # The applied baseline lives in the peer data: the relation data holds the
-        # just-pushed request (pushes happen before validating so the publisher's
-        # chain checks can run), so deriving from it would mark every table as
-        # already subscribed and skip the empty-table guard.
+        # The applied baseline lives in peer data: relation data holds the just-pushed
+        # request (pushes happen before validating), so deriving from it would mark
+        # every table as already subscribed and skip the empty-table guard.
         if previous_request is None:
             previous_request = json.loads(
                 self.state.application.data.get(APPLIED_REQUEST_KEY, "{}")
@@ -684,10 +677,9 @@ class LogicalReplicationManager(BaseManager):
                 f"table {schematable} in database {database} doesn't exist"
             )
 
-        # Check for circular replication FIRST before checking if table is empty
-        # This is important because:
-        # 1. If we're already publishing to the remote app, we can't subscribe from them
-        # 2. The table might not be empty because of existing data (not from replication)
+        # Check circular replication before the empty-table check: we can't subscribe
+        # from an app we already publish to, and a non-empty table may hold
+        # pre-existing data (not replicated rows).
         if relation and self._check_subscriber_circular_replication(
             relation, database, schematable
         ):
@@ -718,22 +710,15 @@ class LogicalReplicationManager(BaseManager):
     ) -> bool:
         """Enforce the empty-table guard for a table about to be replicated.
 
-        The empty-table check must be skipped only for tables ALREADY being
-        replicated by this subscription; it must fire for tables being NEWLY
-        added (their local data is stale or absent, and copy_data would
-        duplicate it). The comparison baseline is the PREVIOUSLY APPLIED
-        request -- captured before the push in apply_changed_config -- which
-        restores the original #982 semantics
-        (canonical/postgresql-k8s-operator#982 comment 3019811325;
+        The guard fires for tables not already replicated by a LIVE subscription;
+        the truthful baseline is the subscription's actual table set
+        (pg_publication_tables, via subscription_table_set, per TABLE) — the
+        database-level bookkeeping cannot see tables added to an
+        already-subscribed database, which re-subscribed with copy_data over
+        non-empty tables (canonical/postgresql-k8s-operator#982;
         test_pg2_dynamic_error vs test_pg3_extend_subscription).
-        The truthful "already replicated" test: the LIVE subscription's actual
-        table set (pg_publication_tables, via subscription_table_set), per
-        TABLE — the database-level bookkeeping cannot see tables added to an
-        already-subscribed database, which silently passed the guard and
-        re-subscribed with copy_data over non-empty tables
-        (test_pg2_dynamic_error; the #982 comment 3019811325 duplication).
-        `previous_request` stays as the secondary signal for bookkeeping-only
-        states (no live subscription yet).
+        `previous_request` (captured before the push in apply_changed_config)
+        stays as the secondary signal for bookkeeping-only states.
 
         Args:
             database: The database name
@@ -759,14 +744,11 @@ class LogicalReplicationManager(BaseManager):
             return False
         if self.postgresql().is_table_empty(database, schema, table):
             return False
-        # "auto" (config-changed validation): the guard only fires for
-        # EXTENSIONS of an already-subscribed database -- the local block
-        # must not preempt the request round-trip the multi-hop circular
-        # detection needs (canonical/postgresql-operator#1085). For NEW
-        # databases the guard is enforced at subscription-creation time
-        # (_on_relation_changed), which still blocks the copy_data
-        # duplication. "enforce" (creation gate, retries, publisher-error
-        # re-validation) always guards.
+        # "auto" (config-changed validation): the guard fires only for EXTENSIONS of an
+        # already-subscribed database — the local block must not preempt the request
+        # round-trip the circular detection needs (#1085); NEW databases are guarded at
+        # subscription-creation time. "enforce" (creation gate, retries, re-validation)
+        # always guards.
         if empty_tables == "enforce" or database in self._subscriptions_info():
             self._fail_validation(f"table {schematable} in database {database} isn't empty")
             # True = validation failed: _validate_table_for_subscription flips this
@@ -1008,23 +990,17 @@ class LogicalReplicationManager(BaseManager):
         if self.state.application.data.get(
             VALIDATION_KEY
         ) == "error" and self.validate_subscription_request(
-            # Re-validate against the CURRENT config: the blocked request
-            # was already pushed (push-before-validate), so every
-            # configured table counts as in-flight and the empty-table
-            # guard must not re-fire on the retry -- otherwise a mid-flight
-            # blocked extend can never unblock once the local blocker is
-            # fixed (the refresh copies nothing for already-replicated
-            # tables, so no duplication either).
+            # Re-validate against the CURRENT config: the blocked request was already
+            # pushed, so every configured table counts as in-flight and the empty-table
+            # guard must not re-fire on the retry — otherwise a blocked extend can never
+            # unblock once the local blocker is fixed (the refresh copies nothing anyway).
             self._configured_subscription_request()
         ):
             self.apply_updated_subscription_request()
-            # NOTE: no applied-request baseline update here. The retry
-            # re-validates against the configured (in-flight) request;
-            # persisting it would mark never-replicated tables as already
-            # subscribed and silence the creation gate's empty-table guard on
-            # the next relation (the remove/re-integrate duplication). The
-            # baseline only advances in apply_changed_config, where the
-            # previously applied request was captured before the push.
+            # NOTE: no applied-request baseline update here. Persisting the configured
+            # (in-flight) request would mark never-replicated tables as subscribed and
+            # silence the creation gate's empty-table guard; the baseline only advances
+            # in apply_changed_config.
             # Clear any previous blocked status from validation errors
             self.set_unit_status(ActiveStatus())
         for relation in self.state.model.relations.get(LOGICAL_REPLICATION_OFFER_RELATION, ()):
@@ -1082,36 +1058,27 @@ class LogicalReplicationManager(BaseManager):
         secret_content = self.state.model.get_secret(
             id=relation.data[relation.app]["secret-id"]
         ).get_content(refresh=True)
-        # Capture the PostgreSQL client once: the bridge is freshly
-        # constructed per access (Patroni primary lookup + app secret), and
-        # this loop performs several calls per subscribed database — the
-        # same per-event capture events/database.py uses.
+        # Capture the PostgreSQL client once: the bridge is rebuilt per access, and this
+        # loop makes several calls per subscribed database (the events/database.py convention).
         postgresql = self.postgresql()
         subscriptions = self._subscriptions_info()
         subscription_request_config = self._configured_subscription_request()
         publications = json.loads(relation.data[relation.app].get("publications", "{}"))
 
-        # The publisher may create publications for a request that failed our local
-        # validation (apply_changed_config pushes the request before validating).
-        # Creating a subscription here would bypass the empty-table guard and
-        # re-subscribe with copy_data=true, duplicating rows
-        # (canonical/postgresql-k8s-operator#982 comment 3019811325). Existing
-        # subscriptions keep refreshing; only NEW subscriptions are gated.
-        # The gate is the LIVE creation-time validation below -- NOT the
-        # persisted VALIDATION_KEY flag: the flag is only cleared by the
-        # update-status retry, and the publisher may clear its errors and
-        # publish in between, so a flag-gated skip deadlocks the resolve path
-        # (the relation-changed arrives while the flag is still "error" and
-        # nothing ever creates the subscription). The creation-time
-        # validation re-checks the publisher's CURRENT errors, the local
-        # tables and the empty-table guard, so the #982 protection is
-        # unchanged; on success it also clears the stale flag.
+        # The publisher may create publications for a request that failed local
+        # validation (the request is pushed before validating). Creating a subscription
+        # here would bypass the empty-table guard and duplicate rows via copy_data
+        # (canonical/postgresql-k8s-operator#982). Only NEW subscriptions are gated.
+        # The gate is the LIVE creation-time validation below — NOT the persisted
+        # VALIDATION_KEY flag: the flag clears only on the update-status retry, so a
+        # flag-gated skip would deadlock the resolve path. The re-validation re-checks
+        # the publisher's current errors, the local tables and the empty-table guard
+        # (#982), and clears the stale flag on success.
         for database, publication in publications.items():
             subscription_name = self._subscription_name(relation.id, database)
             if database in subscriptions:
-                # The REFRESH path must respect the same empty-table guard as
-                # the creation path; block on any newly-requested, locally
-                # non-empty table (the #982 duplication).
+                # The REFRESH path respects the same empty-table guard as creation;
+                # block on any newly-requested, locally non-empty table (#982).
                 if not self._guard_subscription_refresh(
                     database, subscription_name, subscription_request_config
                 ):
@@ -1121,12 +1088,10 @@ class LogicalReplicationManager(BaseManager):
                     f"Refreshed subscription {subscription_name} in database {database} due to relation change"
                 )
                 continue
-            # Re-validate at creation time: the validations that ran on
-            # config-changed predate the publisher's publication, and with both
-            # relations established first (canonical/postgresql-k8s-operator#1052
-            # exact order) a cycle can form in between. The guards read the
-            # CURRENT relation data, so a re-run sees the publications that now
-            # exist and blocks the subscribe.
+            # Re-validate at creation time: the config-changed validations predate the
+            # publisher's publication, and with both relations established first
+            # (canonical/postgresql-k8s-operator#1052) a cycle can form in between; the
+            # guards read the current relation data, so a re-run blocks the subscribe.
             if not self.validate_subscription_request():
                 logger.debug(
                     f"Skipping subscription {subscription_name}: validation failed at creation time"
@@ -1165,11 +1130,9 @@ class LogicalReplicationManager(BaseManager):
         self.state.application.data[SUBSCRIPTIONS_KEY] = json.dumps({
             str(relation.id): subscriptions
         })
-        # Live replication state changed here: a database got a subscription
-        # (creation loop above) or lost one (drop loop above). Re-derive the
-        # baseline so the empty-table guard stays armed exactly for tables not
-        # replicated by a live subscription; this advances the baseline for
-        # databases subscribed via the creation gate.
+        # Live replication state changed (a subscription was created or dropped above):
+        # re-derive the baseline so the empty-table guard stays armed exactly for tables
+        # not replicated by a live subscription.
         self.persist_applied_request_baseline()
 
     def drop_subscriptions(self) -> None:
@@ -1180,11 +1143,10 @@ class LogicalReplicationManager(BaseManager):
                 f"Dropped subscription {subscription} from database {database} due to relation break"
             )
         self.state.application.data[SUBSCRIPTIONS_KEY] = "{}"
-        # Clear the applied-request baseline too: nothing is being replicated
-        # anymore, so the next validation must treat every configured table as
-        # newly added -- the empty-table guard then blocks re-subscribing onto
-        # a non-empty table (the original remove/re-integrate semantics;
-        # canonical/postgresql-k8s-operator#982 comment 3019811325).
+        # Clear the applied-request baseline too: nothing is replicated anymore, so the
+        # next validation treats every configured table as newly added — the empty-table
+        # guard then blocks re-subscribing onto a non-empty table
+        # (canonical/postgresql-k8s-operator#982).
         self.state.application.data[APPLIED_REQUEST_KEY] = "{}"
 
     def update_subscriptions_from_secret(self, relation: Relation) -> None:
@@ -1298,14 +1260,10 @@ class LogicalReplicationManager(BaseManager):
         if message:
             logger.error(f"Logical replication validation: {message}")
         self.state.application.data[VALIDATION_KEY] = "error"
-        # Persist the specific reason so the composition-root status gate can
-        # re-surface it after any later transient status write: the gate's
-        # allowlist compares the unit status message against THIS field (or
-        # the generic literal), so it must mirror what the unit actually
-        # shows -- the update-status retry is the path that clears
-        # VALIDATION_KEY while the unit stays blocked, and an empty/stale
-        # message here makes the gate early-exit forever (the resolve
-        # deadlock).
+        # Persist the specific reason for the composition-root status gate, whose
+        # allowlist compares the unit status message against THIS field: an empty or
+        # stale message makes the gate early-exit forever, keeping the unit blocked
+        # (the resolve deadlock).
         self.state.application.data[VALIDATION_STATUS_MESSAGE_KEY] = status_msg or message or ""
         # Persistent marker for the charm's update-status allowlist gate (see
         # the literal's comment): written at every failure, NEVER cleared.
