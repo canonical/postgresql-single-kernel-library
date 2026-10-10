@@ -207,6 +207,8 @@ VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME
 VM_METRICS_SERVICE_NAME = "prometheus-postgres-exporter"
 VM_PGBACKREST_METRICS_SERVICE_NAME = "pgbackrest-exporter"
 UPDATE_CERTS_BIN_PATH = "/usr/sbin/update-ca-certificates"
+EXTENSIONS_DEPENDENCY_MESSAGE = "Unsatisfied plugin dependencies. Please check the logs"
+EXTENSION_OBJECT_MESSAGE = "Cannot disable plugins: Existing objects depend on it. See logs"
 VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
 VM_ROTATE_LOGS_LOG_FILE = "/var/log/rotate_logs.log"
 

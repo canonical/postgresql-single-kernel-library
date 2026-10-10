@@ -1,11 +1,15 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
+import logging
 from unittest.mock import ANY, MagicMock, Mock, PropertyMock, patch, sentinel
 
+import psycopg2
 import pytest
+from ops.model import ActiveStatus, BlockedStatus, ErrorStatus, UnknownStatus
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.config import ConfigManager
+from single_kernel_postgresql.utils.postgresql import PostgreSQLEnableDisableExtensionError
 from single_kernel_postgresql.workload.k8s import K8sWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
 from tenacity import stop_after_attempt, wait_fixed
@@ -30,6 +34,7 @@ def config(substrate):
             database_manager=Mock(),
             ldap_handler=Mock(),
             restart_services=Mock(),
+            set_unit_status=Mock(),
         )
     yield config
 
@@ -964,3 +969,175 @@ def test_synchronous_mode_strict_requires_initialised_cluster(
         synchronous_configuration = state.synchronous_configuration
     assert synchronous_configuration["synchronous_node_count"] == 2
     assert synchronous_configuration["synchronous_mode_strict"] is expected_strict
+
+
+# -- vm-2 ports (VM charm flows: extensions, validation, relations map) --------------
+
+
+@pytest.fixture
+def harness_config(harness, substrate):
+    """A ConfigManager on the harness state with mock collaborators."""
+    return ConfigManager(
+        state=harness.charm.state,
+        workload=VMWorkload(".") if substrate == Substrates.VM else K8sWorkload(".", Mock()),
+        tls_manager=Mock(),
+        patroni_manager=Mock(),
+        database_manager=Mock(),
+        ldap_handler=Mock(),
+        resource_provider=Mock(),
+        request_restart=Mock(),
+        restart_services=Mock(),
+        set_unit_status=lambda status: setattr(harness.charm.unit, "status", status),
+    )
+
+
+def test_reconcile_extensions(harness_config, harness, caplog):
+    client = Mock()
+    with patch("single_kernel_postgresql.managers.patroni.PatroniManager.get_primary") as _primary:
+        _primary.return_value = "postgresql-0"
+
+        # Success.
+        harness_config.reconcile_extensions(client)
+        client.enable_disable_extensions.assert_called_once()
+
+        # Failure logs.
+        client.reset_mock()
+        client.enable_disable_extensions.side_effect = PostgreSQLEnableDisableExtensionError
+        with caplog.at_level(logging.ERROR):
+            harness_config.reconcile_extensions(client)
+            assert "failed to change plugins: " in caplog.text
+
+        # Extension-dependent objects block the unit, and the next pass resolves it.
+        client.reset_mock()
+        client.enable_disable_extensions.side_effect = [
+            psycopg2.errors.DependentObjectsStillExist,
+            None,
+        ]
+        harness_config.reconcile_extensions(client)
+        assert isinstance(harness.charm.unit.status, BlockedStatus)
+        harness_config.reconcile_extensions(client)
+        assert isinstance(harness.charm.unit.status, ActiveStatus)
+
+
+@pytest.mark.parametrize("unsettable_status", [ErrorStatus(), UnknownStatus()])
+def test_reconcile_extensions_does_not_restore_unsettable_status(
+    harness_config, harness, unsettable_status
+):
+    client = Mock()
+    with patch("single_kernel_postgresql.managers.patroni.PatroniManager.get_primary") as _primary:
+        _primary.return_value = "postgresql-0"
+        # Cache an unsettable status that must not be restored verbatim.
+        harness.charm.unit._status = unsettable_status
+        harness_config.reconcile_extensions(client)
+        assert not isinstance(harness.charm.unit.status, ErrorStatus | UnknownStatus)
+
+
+def test_validate_config_options(harness_config, harness, substrate):
+    if substrate != Substrates.VM:
+        pytest.skip("the K8s test charm does not declare the VM config options")
+
+    def refresh_config():
+        harness.charm.state.__dict__.pop("config", None)
+
+    client = Mock()
+    client.get_postgresql_text_search_configs.return_value = []
+    client.validate_date_style.return_value = False
+    client.validate_group_map.return_value = False
+    client.get_postgresql_timezones.return_value = []
+    client.get_postgresql_default_table_access_methods.return_value = []
+
+    with harness.hooks_disabled():
+        harness.update_config({"instance_default_text_search_config": "pg_catalog.test"})
+    refresh_config()
+    with pytest.raises(ValueError) as e:
+        harness_config.validate_config_options(client)
+    assert str(e.value) == "instance_default_text_search_config config option has an invalid value"
+
+    client.get_postgresql_text_search_configs.return_value = ["pg_catalog.test"]
+    with harness.hooks_disabled():
+        harness.update_config({"ldap_map": "ldap_group="})
+    refresh_config()
+    with pytest.raises(ValueError) as e:
+        harness_config.validate_config_options(client)
+    assert str(e.value) == "ldap_map config option has an invalid value"
+    client.validate_group_map.assert_called_once_with("ldap_group=")
+    client.validate_group_map.return_value = True
+
+    with harness.hooks_disabled():
+        harness.update_config({"request_date_style": "ISO, TEST"})
+    refresh_config()
+    with pytest.raises(ValueError) as e:
+        harness_config.validate_config_options(client)
+    assert str(e.value) == "request_date_style config option has an invalid value"
+    client.validate_date_style.return_value = True
+
+    with harness.hooks_disabled():
+        harness.update_config({"request_time_zone": "Blah/Blah"})
+    refresh_config()
+    with pytest.raises(ValueError) as e:
+        harness_config.validate_config_options(client)
+    assert str(e.value) == "request_time_zone config option has an invalid value"
+    client.get_postgresql_timezones.return_value = {"Blah/Blah"}
+
+    with harness.hooks_disabled():
+        harness.update_config({"storage_default_table_access_method": "heap"})
+    refresh_config()
+    with pytest.raises(ValueError) as e:
+        harness_config.validate_config_options(client)
+    assert str(e.value) == "storage_default_table_access_method config option has an invalid value"
+
+
+def test_build_relations_user_databases_map(harness_config, harness):
+    client = Mock()
+    harness_config.database_manager.collect_user_relations.side_effect = lambda: {}
+    client.list_users_from_relation.return_value = set()
+    client.list_accessible_databases_for_user.return_value = set()
+    client.list_access_groups.return_value = {
+        "identity_access",
+        "internal_access",
+        "relation_access",
+    }
+    client.list_users.return_value = set()
+    harness_config.patroni_manager = Mock()
+    with patch(
+        "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.is_cluster_initialised",
+        new_callable=PropertyMock,
+    ) as _initialised:
+        # Not initialised yet: the system users get "all" regardless of the member.
+        _initialised.return_value = False
+        harness_config.patroni_manager.member_started = True
+        assert harness_config.build_relations_user_databases_map(client, []) == {
+            "operator": "all",
+            "replication": "all",
+            "rewind": "all",
+        }
+        _initialised.return_value = True
+        harness_config.patroni_manager.member_started = False
+        assert harness_config.build_relations_user_databases_map(client, []) == {
+            "operator": "all",
+            "replication": "all",
+            "rewind": "all",
+        }
+
+        # Initialised and started, but no relation users in the database.
+        harness_config.patroni_manager.member_started = True
+        assert harness_config.build_relations_user_databases_map(client, []) == {}
+
+        # Relation users present.
+        client.list_users.return_value = ["user1", "user2"]
+        client.list_accessible_databases_for_user.side_effect = [["db1", "db2"], ["db3"]]
+        assert harness_config.build_relations_user_databases_map(client, []) == {
+            "user1": "db1,db2",
+            "user2": "db3",
+        }
+
+        # Access groups not created yet: fall back to "all" for the system users.
+        client.list_accessible_databases_for_user.side_effect = [["db1", "db2"], ["db3"]]
+        client.list_access_groups.return_value = set()
+        assert harness_config.build_relations_user_databases_map(client, []) == {
+            "user1": "db1,db2",
+            "user2": "db3",
+            "operator": "all",
+            "replication": "all",
+            "rewind": "all",
+        }
