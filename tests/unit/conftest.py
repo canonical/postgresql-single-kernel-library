@@ -5,9 +5,11 @@ import importlib.util
 import pathlib
 import shutil
 import sys
-from unittest.mock import patch, sentinel
+from contextlib import ExitStack
+from unittest.mock import MagicMock, PropertyMock, patch, sentinel
 
 import pytest
+import requests
 from ops.testing import Harness
 from single_kernel_postgresql.config.literals import PEER_RELATION
 
@@ -124,6 +126,64 @@ def harness(substrate, test_charm_path):
         "single_kernel_postgresql.workload.base.BaseWorkload.get_postgresql_version",
         return_value="16.0",
     ):
-        harness.begin()
-        yield harness
+        # Unit tests never talk to REST APIs or the host's systemd: the migrated
+        # VM flows walk the Patroni/raft REST surface and drive systemd services
+        # (snap start/stop/enable, daemon-reload), so fail REST instantly and
+        # no-op every systemd call (a real systemctl call blocks ~25s on D-Bus
+        # in the test container).
+        systemd_names = (
+            "daemon_reload",
+            "service_disable",
+            "service_enable",
+            "service_failed",
+            "service_pause",
+            "service_reload",
+            "service_restart",
+            "service_resume",
+            "service_running",
+            "service_start",
+            "service_stop",
+        )
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch(
+                    "requests.get",
+                    side_effect=requests.ConnectionError("no REST in unit tests"),
+                )
+            )
+            patroni = "single_kernel_postgresql.managers.patroni.PatroniManager"
+            stack.enter_context(
+                patch(f"{patroni}.update_synchronous_node_count", return_value=None)
+            )
+            stack.enter_context(
+                patch(f"{patroni}.cluster_members", new_callable=PropertyMock, return_value=set())
+            )
+            stack.enter_context(patch(f"{patroni}.are_all_members_ready", return_value=True))
+            stack.enter_context(
+                patch(f"{patroni}.member_started", new_callable=PropertyMock, return_value=True)
+            )
+            stack.enter_context(
+                patch(f"{patroni}.member_inactive", new_callable=PropertyMock, return_value=False)
+            )
+            stack.enter_context(patch(f"{patroni}.get_member_ip", return_value=None))
+            stack.enter_context(patch(f"{patroni}.get_member_status", return_value="running"))
+            stack.enter_context(patch(f"{patroni}.get_primary", return_value=None))
+            stack.enter_context(patch(f"{patroni}.get_patroni_health", return_value={}))
+            stack.enter_context(patch(f"{patroni}.is_member_isolated", return_value=False))
+            stack.enter_context(
+                patch(f"{patroni}.is_member_registered_in_cluster", return_value=False)
+            )
+            stack.enter_context(
+                patch(
+                    "single_kernel_postgresql.managers.raft.RaftManager.get_raft_status",
+                    return_value={},
+                )
+            )
+            systemd_mock = MagicMock()
+            for name in systemd_names:
+                stack.enter_context(
+                    patch(f"charmlibs.systemd.{name}", getattr(systemd_mock, name))
+                )
+            harness.begin()
+            yield harness
     harness.cleanup()
