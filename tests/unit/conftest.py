@@ -121,10 +121,10 @@ def patch_crypto():
 def _update_config_is_a_noop(request, substrate):
     """The charm suites always patched charm.update_config.
 
-    The real body needs a live database; the vm_charm bridge tests opt out and
-    exercise the real body.
+    The real body needs a live database; the vm_charm/k8s_charm bridge tests opt
+    out and exercise the real body.
     """
-    if request.module.__name__.endswith("test_vm_charm"):
+    if request.module.__name__.endswith(("test_vm_charm", "test_k8s_charm")):
         yield
         return
     target = (
@@ -157,6 +157,15 @@ def harness(substrate, test_charm_path):
             meta=meta,
             actions=actions,
         )
+        # The K8s reload bridge writes the charm-local Patroni CA bundle to /tmp on
+        # every tls_files_pushed; PatroniManager reads the same path for its REST
+        # verify= in OTHER tests' k8s legs, and non-PEM sentinels break httpx there.
+        # Point the bundle at a throwaway path for the unit suite.
+        patcher = patch(
+            "single_kernel_postgresql.charms.k8s_charm.TLS_CA_BUNDLE_FILE",
+            "peer_ca_bundle.unit-test.pem",
+        )
+        patcher.start()
     peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
     # The status machinery (DPH StatusesState) persists component statuses in
@@ -244,4 +253,6 @@ def harness(substrate, test_charm_path):
                 )
             harness.begin()
             yield harness
+    if substrate == "k8s":
+        patcher.stop()
     harness.cleanup()

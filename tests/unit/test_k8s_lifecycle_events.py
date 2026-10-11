@@ -57,6 +57,7 @@ from single_kernel_postgresql.config.literals import (  # noqa: E402
 )
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication  # noqa: E402
 from single_kernel_postgresql.events.tls_transfer import TLSTransfer  # noqa: E402
+from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR  # noqa: E402
 from single_kernel_postgresql.utils.postgresql import (  # noqa: E402
     PostgreSQLCreatePredefinedRolesError,
     PostgreSQLCreateUserError,
@@ -81,6 +82,8 @@ def handler(harness):
     handler.backup_manager = Mock()
     handler.restore_manager = Mock()
     handler.k8s_manager = Mock()
+    handler.charm.tls_transfer = MagicMock()
+    handler.charm.tls_transfer.get_ca_secret_names.return_value = iter(())
     return handler
 
 
@@ -156,7 +159,6 @@ def test_pebble_ready_generates_internal_cert_chain(handler, harness, container)
             new_callable=PropertyMock,
             return_value=False,
         ),
-        patch.object(TLSTransfer, "get_ca_secret_names", return_value=iter(())),
         patch.object(type(handler.tls_manager), "generate_internal_peer_cert") as gen_cert,
         patch.object(type(handler.tls_manager), "push_tls_files") as push_tls,
         patch.object(type(handler.charm), "sync_tls_trust_store_and_bundle") as sync_tls,
@@ -173,6 +175,7 @@ def test_pebble_ready_defers_when_ca_push_fails(handler, harness, container):
     harness.set_leader(False)
     event = Mock(workload=container, defer=Mock())
     container.can_connect.return_value = True
+    handler.charm.tls_transfer.get_ca_secret_names.return_value = iter(["ca-secret"])
     with (
         patch.object(type(handler.charm), "create_pgdata"),
         patch.object(handler, "_replica_can_start", return_value=True),
@@ -180,7 +183,6 @@ def test_pebble_ready_defers_when_ca_push_fails(handler, harness, container):
         patch.object(
             type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
         ),
-        patch.object(TLSTransfer, "get_ca_secret_names", return_value=["ca-secret"]),
         patch.object(
             type(handler.charm),
             "push_ca_file_into_workload",
@@ -202,7 +204,6 @@ def test_pebble_ready_member_gate_and_leader_bootstrap(handler, harness, contain
         patch.object(
             type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
         ),
-        patch.object(TLSTransfer, "get_ca_secret_names", return_value=iter(())),
         patch.object(
             type(handler.patroni_manager),
             "member_started",
@@ -223,7 +224,6 @@ def test_pebble_ready_member_gate_and_leader_bootstrap(handler, harness, contain
         patch.object(
             type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
         ),
-        patch.object(TLSTransfer, "get_ca_secret_names", return_value=iter(())),
         patch.object(
             type(handler.patroni_manager),
             "member_started",
