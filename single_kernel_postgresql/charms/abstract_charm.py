@@ -517,6 +517,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         pass
 
     @abstractmethod
+    def clean_ca_file_from_workload(self, secret_name: str) -> bool:
+        """Remove one transferred CA certificate from the workload (substrate-specific)."""
+        pass
+
+    @abstractmethod
     def ensure_pgdata_dirs_and_symlinks(self) -> None:
         """Create the storage directories and symlinks for the PostgreSQL data paths (K8s)."""
         pass
