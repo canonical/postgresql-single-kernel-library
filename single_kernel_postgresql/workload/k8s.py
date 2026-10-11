@@ -3,6 +3,7 @@
 
 """Kubernetes Workload."""
 
+import json
 import logging
 import pathlib
 import shlex
@@ -12,6 +13,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
@@ -33,6 +35,8 @@ from ops.pebble import (
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
+    DATABASE_DEFAULT_NAME,
+    DATABASE_PORT,
     DIR_PERMISSIONS_READONLY,
     K8S_ARCHIVE_PATH,
     K8S_DATA_PATH,
@@ -59,6 +63,7 @@ from single_kernel_postgresql.config.literals import (
     REPLICATION_USER,
     USER,
 )
+from single_kernel_postgresql.utils.postgresql import ACCESS_GROUP_IDENTITY
 from single_kernel_postgresql.workload.base import (
     BackupConfig,
     BaseWorkload,
@@ -720,3 +725,70 @@ class K8sWorkload(BaseWorkload):
             return container.can_connect()
         except (RuntimeError, ModelError):
             return False
+
+    # -- K8s container seams (port of the K8s charm's file/trust-store helpers) -------
+
+    def push_file(self, file_path: str, file_data: str) -> None:
+        """Upload a file into the workload container (port of _push_file_to_workload)."""
+        self.container.push(
+            file_path,
+            file_data,
+            make_dirs=True,
+            permissions=0o400,
+            user=self.user,
+            group=self.group,
+        )
+
+    def sync_tls_trust_store(self, ca: str | None, certs_path: str) -> None:
+        """Push the operator CA into the container system trust store (port).
+
+        The charm-local peer CA bundle lives on the unit filesystem, not in the
+        container: the Patroni REST client (requests, verify=) runs on the unit.
+        """
+        if ca is not None and self.container.can_connect():
+            self.push_file(f"{certs_path}/ca.crt", ca)
+            self.container.exec(["update-ca-certificates"]).wait()
+
+    def generate_ldap_service(
+        self,
+        ldap_params: dict,
+        group_mappings: dict,
+        operator_password: str,
+        postgresql_service: str,
+    ) -> dict:
+        """Generate the LDAP synchronizer service definition (port)."""
+        ldap_url = urlparse(ldap_params["ldapurl"])
+        return {
+            "override": "replace",
+            "summary": "synchronize LDAP users",
+            "command": "/start-ldap-synchronizer.sh",
+            "startup": "enabled",
+            "environment": {
+                "LDAP_HOST": ldap_url.hostname,
+                "LDAP_PORT": ldap_url.port,
+                "LDAP_BASE_DN": ldap_params["ldapbasedn"],
+                "LDAP_BIND_USERNAME": ldap_params["ldapbinddn"],
+                "LDAP_BIND_PASSWORD": ldap_params["ldapbindpasswd"],
+                "LDAP_GROUP_IDENTITY": json.dumps(ACCESS_GROUP_IDENTITY),
+                "LDAP_GROUP_MAPPINGS": json.dumps(group_mappings),
+                "POSTGRES_HOST": "127.0.0.1",
+                "POSTGRES_PORT": DATABASE_PORT,
+                "POSTGRES_DATABASE": DATABASE_DEFAULT_NAME,
+                "POSTGRES_USERNAME": USER,
+                "POSTGRES_PASSWORD": operator_password,
+            },
+        }
+
+    def generate_metrics_service(
+        self, monitoring_password: str | None, postgresql_service: str
+    ) -> dict:
+        """Generate the metrics exporter service definition (port)."""
+        return {
+            "override": "replace",
+            "summary": "postgresql metrics exporter",
+            "command": "/usr/bin/prometheus-postgres-exporter",
+            "startup": ("enabled" if monitoring_password is not None else "disabled"),
+            "after": [postgresql_service],
+            "user": self.user,
+            "group": self.group,
+        }
