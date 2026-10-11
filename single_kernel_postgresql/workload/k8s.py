@@ -503,7 +503,7 @@ class K8sWorkload(BaseWorkload):
         self.container.exec([
             "ln",
             "-sfn",
-            str(logs_storage / self.paths.versioned_path / target_name),
+            str(logs_storage / target_name),
             str(symlink_path),
         ]).wait()
         self.container.exec([
