@@ -791,4 +791,9 @@ class K8sWorkload(BaseWorkload):
             "after": [postgresql_service],
             "user": self.user,
             "group": self.group,
+            "environment": {
+                "DATA_SOURCE_URI": ":5432/postgres?host=/var/run/postgresql",
+                "DATA_SOURCE_USER": MONITORING_USER,
+                "DATA_SOURCE_PASS": str(monitoring_password),
+            },
         }
