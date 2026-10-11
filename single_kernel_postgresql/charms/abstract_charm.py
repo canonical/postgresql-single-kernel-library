@@ -12,6 +12,7 @@ from ops.charm import CharmBase, UpdateStatusEvent
 if TYPE_CHECKING:
     import charm_refresh
 
+    from single_kernel_postgresql.events.tls_transfer import TLSTransfer
     from single_kernel_postgresql.managers.k8s import K8sManager
 
 
@@ -62,6 +63,9 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     # Custom charm events dispatched by the observer scripts (cluster topology
     # changes and raft reconnection).
     on = ClusterTopologyChangeCharmEvents()
+
+    # TLS-transfer requirer; the substrate charm classes construct it (K8s today).
+    tls_transfer: "TLSTransfer"
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -195,7 +199,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             update_config=self.update_config,
             set_unit_status=self.set_unit_status,
             peer_relation_changed=lambda event: (
-                self.postgresql_events_handler._on_peer_relation_changed(event)  # ty: ignore[unresolved-attribute]
+                self.postgresql_events_handler._on_peer_relation_changed(event)
             ),
             remove_from_members_ips=lambda ip: self.membership_manager.remove_member_ip(ip),
         )
@@ -210,6 +214,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             update_relation_endpoints=self.update_relation_endpoints,
             raft_manager=self.raft_manager,
             set_primary_status_message=self.set_primary_status_message,
+            k8s_manager=k8s_manager,
         )
 
         # The backup subsystem (port of the VM charm's composition wiring): the
@@ -253,6 +258,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             async_replication_manager=self.async_replication_manager,
             database_manager=self.database_manager,
             postgresql=lambda: self.postgresql,
+            k8s_manager=k8s_manager,
         )
 
         # Resume or prepare the refresh (the charms' post-construction resume block).
@@ -421,6 +427,14 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         """Fix the leader annotation (K8s only; overridden there)."""
         return False
 
+    def fix_pod(self) -> None:
+        """Recreate the K8s resources and replication labels (K8s only; overridden there)."""
+        return None
+
+    def sync_tls_trust_store_and_bundle(self) -> None:
+        """Sync the K8s CA trust store and charm-local CA bundle (K8s only; overridden there)."""
+        return None
+
     @property
     @abstractmethod
     def primary_endpoint(self) -> str | None:
@@ -439,6 +453,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     @abstractmethod
     def update_pebble_layers(self) -> None:
         """Reconcile the workload's Pebble layers (K8s)."""
+        pass
+
+    @abstractmethod
+    def push_ca_file_into_workload(self, secret_name: str) -> bool:
+        """Upload one transferred CA certificate into the workload (substrate-specific)."""
         pass
 
     @abstractmethod

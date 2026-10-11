@@ -7,11 +7,22 @@
 import logging
 from typing import TYPE_CHECKING, cast
 
-from ops import ActiveStatus, StatusBase
+from lightkube.core.exceptions import ApiError
+from ops import ActiveStatus, BlockedStatus, StatusBase
 
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import CONTAINER_NAME, SYSTEM_USERS, USER
+from single_kernel_postgresql.config.literals import (
+    APP_SCOPE,
+    CERTS_PATH,
+    CONTAINER_NAME,
+    PEER_RELATION,
+    SYSTEM_USERS,
+    TLS_CA_BUNDLE_FILE,
+    UNIT_SCOPE,
+    USER,
+)
+from single_kernel_postgresql.events.tls_transfer import TLSTransfer
 from single_kernel_postgresql.managers.k8s import K8sManager
 from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
 from single_kernel_postgresql.workload.k8s import K8sWorkload
@@ -35,6 +46,8 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         assert isinstance(self.workload, K8sWorkload), (  # noqa: S101
             "Workload must be an instance of K8sWorkload"
         )
+        # TLS-transfer requirer: feeds get_ca_secret_names() during TLS bootstrap.
+        self.tls_transfer = TLSTransfer(self, PEER_RELATION)
 
     def build_k8s_manager(self) -> K8sManager:
         """Build the K8s API seam the async-replication subsystem consumes."""
@@ -160,3 +173,54 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def ensure_pgdata_dirs_and_symlinks(self) -> None:
         """Create the storage directories and symlinks for the PostgreSQL data paths."""
         self.workload.init_storage()
+
+    def push_ca_file_into_workload(self, secret_name: str) -> bool:
+        """Upload one transferred CA certificate into the workload container (port)."""
+        certificates = self.state.get_secret(UNIT_SCOPE, secret_name)
+        if certificates is not None:
+            workload = cast("K8sWorkload", self.workload)
+            workload.push_file(f"{CERTS_PATH}/{secret_name}.crt", certificates)
+            workload.container.exec(["update-ca-certificates"]).wait()
+        return self.update_config()
+
+    def fix_pod(self) -> None:
+        """Recreate the k8s resources and replication labels after a pod loss (port)."""
+        if self.state.get_secret(APP_SCOPE, "internal-ca"):
+            self.tls_manager.push_tls_files()
+            self.sync_tls_trust_store_and_bundle()
+        self.update_config()
+
+        if (
+            self.refresh_manager.refresh is not None
+            and not self.refresh_manager.refresh.in_progress
+        ):
+            try:
+                self.k8s_manager.create_services()
+            except ApiError:
+                logger.exception("failed to create k8s services")
+                self.set_unit_status(BlockedStatus("failed to create k8s services"))
+                return
+
+        try:
+            self.k8s_manager.patch_pod_labels(self.unit.name)
+        except ApiError as e:
+            logger.error("failed to patch pod")
+            self.set_unit_status(BlockedStatus(f"failed to patch pod with error {e}"))
+            return
+
+        # Update the sync-standby endpoint in the async replication data.
+        self.async_replication_manager.update_async_replication_data()
+
+    def sync_tls_trust_store_and_bundle(self) -> None:
+        """Sync the K8s CA trust store and the charm-local CA bundle (port).
+
+        The Patroni REST client runs on the unit, so its verify= bundle lives
+        charm-local; the in-container pem files are written by TLSManager.push_tls_files.
+        """
+        _, ca, _ = self.tls_manager.get_client_tls_files()
+        if ca is not None:
+            cast("K8sWorkload", self.workload).sync_tls_trust_store(ca, CERTS_PATH)
+
+        # CA bundle is not secret; it backs the unit-local Patroni REST client.
+        with open(f"/tmp/{TLS_CA_BUNDLE_FILE}", "w") as fp:  # noqa: S108
+            fp.write(self.tls_manager.get_peer_ca_bundle())

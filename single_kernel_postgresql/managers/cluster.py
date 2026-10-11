@@ -232,6 +232,37 @@ class ClusterManager(BaseManager):
             postgresql_client.create_access_groups()
             postgresql_client.grant_internal_access_group_memberships()
 
+    def setup_instance_users_k8s(self, postgresql_client: PostgreSQLClient) -> None:
+        """Provision the predefined roles and system users on the K8s leader (port).
+
+        K8s differs from the VM variant: the backup user is created with admin
+        privileges, the monitoring user gets the pg_monitor role, and the temp
+        location points at the pgsql_tmp dir under the K8s temp storage.
+        """
+        postgresql_client.create_predefined_instance_roles()
+
+        users = postgresql_client.list_users()
+        # Create the backup user.
+        if BACKUP_USER not in users:
+            postgresql_client.create_user(BACKUP_USER, new_password(), admin=True)
+        # Create the monitoring user.
+        if MONITORING_USER not in users:
+            postgresql_client.create_user(
+                MONITORING_USER,
+                self.state.get_secret(APP_SCOPE, MONITORING_PASSWORD_KEY),
+                extra_user_roles=["pg_monitor"],
+            )
+
+        postgresql_client.set_up_database(
+            temp_location=f"{self.workload.paths.temp_storage}/"
+            f"{self.workload.paths.versioned_path}/pgsql_tmp"
+        )
+
+        access_groups = postgresql_client.list_access_groups()
+        if access_groups != set(ACCESS_GROUPS):
+            postgresql_client.create_access_groups()
+            postgresql_client.grant_internal_access_group_memberships()
+
     def rotate_system_user_passwords(
         self, postgresql_client: PostgreSQLClient, admin_secret_id: str
     ) -> None:
