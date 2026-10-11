@@ -19,6 +19,7 @@ import charm_refresh
 from charmlibs import snap
 from ops import ActiveStatus, BlockedStatus, StatusBase
 from ops.log import JujuLogHandler
+from tenacity import RetryError
 
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
@@ -134,13 +135,29 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         if not self._peers:
             logger.debug("primary endpoint early exit: Peer relation not joined yet.")
             return None
-        primary = self.patroni_manager.get_primary() or self.patroni_manager.get_standby_leader()
-        primary_endpoint = self.patroni_manager.get_member_ip(primary) if primary else None
-        # Force a retry if there is no primary or the member that was returned is
-        # not in the list of the current cluster members (like when the cluster
-        # was not updated yet after a failed switchover).
-        if not primary_endpoint:
-            logger.warning(f"Missing primary IP for {primary}")
+        try:
+            primary = (
+                self.patroni_manager.get_primary() or self.patroni_manager.get_standby_leader()
+            )
+            primary_endpoint = self.patroni_manager.get_member_ip(primary) if primary else None
+            # Force a retry if there is no primary or the member that was
+            # returned is not in the list of the current cluster members
+            # (like when the cluster was not updated yet after a failed switchover).
+            if not primary_endpoint:
+                logger.warning(f"Missing primary IP for {primary}")
+                primary_endpoint = None
+            elif primary_endpoint not in self.membership_manager.units_ips():
+                if len(self._peers.units) == 0:
+                    logger.info(
+                        f"The unit didn't join {PEER_RELATION} relation? Using {primary_endpoint}"
+                    )
+                elif len(self.membership_manager.units_ips()) == 1 and len(self._peers.units) > 1:
+                    logger.warning(f"Possibly incomplete peer data, keep using {primary_endpoint}")
+                else:
+                    logger.debug("Early exit primary_endpoint: Primary IP not in cached peer list")
+                    primary_endpoint = None
+        except RetryError:
+            return None
         return primary_endpoint
 
     @property
