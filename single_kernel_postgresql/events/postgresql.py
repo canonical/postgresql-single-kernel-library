@@ -6,10 +6,12 @@
 
 import logging
 import os
+import shutil
 import subprocess
 from contextlib import suppress
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import charm_refresh
 import psycopg2
@@ -31,6 +33,8 @@ from ops import (
     WaitingStatus,
     WorkloadEvent,
 )
+from ops.pebble import ChangeError, PathError, ProtocolError, ServiceStatus
+from requests import ConnectionError as RequestsConnectionError
 from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
@@ -46,6 +50,8 @@ from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
     CONFIGURATION_ERROR_MESSAGE,
     EXTENSION_OBJECT_MESSAGE,
+    INSUFFICIENT_SIZE_WARNING,
+    K8S_POSTGRESQL_SERVICE_NAME,
     LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS,
     MONITORING_PASSWORD_KEY,
     PATRONI_PASSWORD_KEY,
@@ -54,9 +60,10 @@ from single_kernel_postgresql.config.literals import (
     RAFT_PASSWORD_KEY,
     REPLICATION_PASSWORD_KEY,
     REWIND_PASSWORD_KEY,
+    TLS_CA_BUNDLE_FILE,
     USER_PASSWORD_KEY,
 )
-from single_kernel_postgresql.config.statuses import GeneralStatuses, PatroniStatuses
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.cluster_membership import (
@@ -82,7 +89,7 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLListUsersError,
     PostgreSQLUpdateUserPasswordError,
 )
-from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
+from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
@@ -99,9 +106,11 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.managers.async_replication import AsyncReplicationManager
     from single_kernel_postgresql.managers.backup import BackupManager
     from single_kernel_postgresql.managers.database import DatabaseManager
+    from single_kernel_postgresql.managers.k8s import K8sManager
     from single_kernel_postgresql.managers.observer import ObserverManager
     from single_kernel_postgresql.managers.restore import RestoreManager
     from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
+    from single_kernel_postgresql.workload.k8s import K8sWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +135,7 @@ class PostgreSQLEventsHandler(Object):
         async_replication_manager: "AsyncReplicationManager",
         database_manager: "DatabaseManager",
         postgresql: "Callable[[], PostgreSQLClient]",
+        k8s_manager: "K8sManager | None" = None,
     ) -> None:
         super().__init__(charm, key="postgresql_events")
         self.charm = charm
@@ -143,6 +153,7 @@ class PostgreSQLEventsHandler(Object):
         self.async_replication_manager = async_replication_manager
         self.database_manager = database_manager
         self.postgresql = postgresql
+        self.k8s_manager = k8s_manager
 
         # Charm events
         self.framework.observe(self.charm.on.install, self._on_install)
@@ -166,7 +177,21 @@ class PostgreSQLEventsHandler(Object):
             self.framework.observe(
                 self.charm.on.postgresql_pebble_ready, self._on_postgresql_pebble_ready
             )
+            self.framework.observe(
+                self.charm.on[PEER_RELATION].relation_changed, self._on_peer_relation_changed
+            )
+            # The charm re-runs the full peer-relation flow on secret changes too.
+            self.framework.observe(self.charm.on.secret_changed, self._on_peer_relation_changed)
+            self.framework.observe(
+                self.charm.on[PEER_RELATION].relation_departed, self._on_peer_relation_departed
+            )
+            self.framework.observe(
+                self.charm.on.data_storage_detaching, self._on_pgdata_storage_detaching
+            )
+            self.framework.observe(self.charm.on.upgrade_charm, self._on_upgrade_charm)
+            self.framework.observe(self.charm.on.stop, self._on_stop)
         if self.state.substrate == Substrates.VM:
+            self.framework.observe(self.charm.on.secret_changed, self._on_secret_changed)
             self.framework.observe(
                 getattr(
                     self.charm.on,
@@ -180,6 +205,13 @@ class PostgreSQLEventsHandler(Object):
                     self.charm.on[storage_name].storage_detaching, self._on_storage_detaching
                 )
             self.framework.observe(self.charm.on.remove, self._on_remove)
+
+    @property
+    def _k8s_manager(self) -> "K8sManager":
+        """The K8s API seam; the VM substrate never reaches the K8s flows."""
+        if self.k8s_manager is None:
+            raise RuntimeError("k8s_manager is not wired")
+        return self.k8s_manager
 
     def _on_install(self, event: InstallEvent) -> None:
         """Install prerequisites for the application."""
@@ -205,36 +237,66 @@ class PostgreSQLEventsHandler(Object):
             component=self.cluster_manager.name,
         )
 
-    def _on_start(self, event: StartEvent) -> None:
-        """Event handler for start event."""
-        if not self._can_start(event):
+    def _on_postgresql_pebble_ready(self, event: WorkloadEvent) -> None:
+        """Event handler for PostgreSQL container on PebbleReadyEvent."""
+        if not self._k8s_pebble_ready_refresh_gate(event):
             return
 
-        try:
-            postgres_password = self.state.application.user_password
-        except ModelError:
-            logger.debug("_on_start: secrets not yet available")
-            postgres_password = None
-        # If the leader was not elected (and the needed passwords were not generated yet),
-        # the cluster cannot be bootstrapped yet.
-        if not postgres_password or not self.state.application.replication_password:
-            logger.info("leader not elected and/or passwords not yet generated")
+        if self.state.endpoint in self.state.endpoints:
+            self.charm.fix_pod()
+
+        container = event.workload
+        if not container.can_connect():
+            logger.debug(
+                "Defer on_postgresql_pebble_ready: Waiting for container to become available"
+            )
             event.defer()
             return
 
-        if not self.state.application.internal_ca:
+        # Create the PostgreSQL data directory. This is needed on cloud environments
+        # where the volume is mounted with more restrictive permissions.
+        self.charm.create_pgdata()
+
+        # Defer replica bootstrap until the leader added this unit's endpoint: without
+        # the pg_hba replication entry pg_basebackup is rejected and Patroni wipes pgdata.
+        if not self.state.model.unit.is_leader() and not self._replica_can_start():
+            event.defer()
+            return
+
+        if not self.state.get_secret(APP_SCOPE, "internal-ca"):
             logger.info("leader not elected and/or internal CA not yet generated")
             event.defer()
             return
-        self.tls_manager.configure_internal_peer_cert()
+        if not self.state.peer.internal_cert:
+            self._k8s_render_internal_tls()
 
-        self.cluster_manager.expose_ip_and_port()
+        if not self._push_transferred_ca_files(event):
+            return
 
-        self._start_primary(event)
+        self.charm.update_pebble_layers()
 
-    def _on_postgresql_pebble_ready(self, event: WorkloadEvent) -> None:
-        """Event handler for PostgreSQL container on PebbleReadyEvent."""
-        # Safeguard against starting while refreshing.
+        # Ensure the member is up and running before marking the cluster as initialised.
+        if not self.patroni_manager.member_started:
+            logger.debug("Deferring on_postgresql_pebble_ready: Waiting for cluster to start")
+            self.membership_manager.set_unit_status(WaitingStatus("awaiting for cluster to start"))
+            event.defer()
+            return
+
+        if self.state.model.unit.is_leader() and not self._initialize_cluster(event):
+            return
+
+        # Update the archive command and replication configurations.
+        self.charm.update_config()
+
+        # Enable/disable PostgreSQL extensions set before the cluster was fully initialised.
+        self.config_manager.reconcile_extensions(self.postgresql())
+
+        self.backup_manager.start_stop_pgbackrest_service()
+
+        self._set_active_status()
+
+    def _k8s_pebble_ready_refresh_gate(self, event) -> bool:
+        """Safeguard against starting while refreshing (port); False skips the flow."""
         if self.refresh_manager.refresh is None:
             logger.warning("Warning on_postgresql_pebble_ready: Refresh could be in progress")
         elif (
@@ -243,40 +305,34 @@ class PostgreSQLEventsHandler(Object):
         ):
             logger.debug("Defer on_postgresql_pebble_ready: Refresh in progress")
             event.defer()
-            return
-        if self.state.endpoint in self.state.endpoints:
-            # TODO: Fix pod by adding services
-            pass
+            return False
+        return True
 
-        # TODO: move this code to an "_update_layer" method in order to also utilize it in
-        # config-changed hook.
-        # Get the postgresql container so we can configure/manipulate it.
-        container = event.workload
-        if not container.can_connect():
-            logger.debug(
-                "Defer on_postgresql_pebble_ready: Waiting for container to become available"
+    def _k8s_render_internal_tls(self) -> None:
+        """First-bootstrap TLS: generate, push, sync the CA artifacts, re-render (port).
+
+        The charm renders the Patroni config with ssl:on immediately on this path,
+        so the first Patroni start picks up TLS rather than waiting for member_started.
+        """
+        self.tls_manager.generate_internal_peer_cert()
+        # The lib generate does not push; push the in-container TLS files and
+        # sync the K8s-specific CA artifacts.
+        self.tls_manager.push_tls_files()
+        self.charm.sync_tls_trust_store_and_bundle()
+        self.charm.update_config()
+
+    def _push_transferred_ca_files(self, event) -> bool:
+        """Push each transferred CA into the workload; False (deferred) on failure."""
+        try:
+            for ca_secret_name in self.charm.tls_transfer.get_ca_secret_names():
+                self.charm.push_ca_file_into_workload(ca_secret_name)
+        except (PathError, ProtocolError) as e:
+            logger.error(
+                "Deferring on_postgresql_pebble_ready: Cannot push TLS certificates: %r", e
             )
             event.defer()
-            return
-        # Create the PostgreSQL data directory. This is needed on cloud environments
-        # where the volume is mounted with more restrictive permissions.
-        # TODO: Create pgdata
-
-        if not self.state.application.internal_ca:
-            logger.info("leader not elected and/or internal CA not yet generated")
-            event.defer()
-            return
-        if not self.state.peer.internal_cert:
-            self.tls_manager.configure_internal_peer_cert()
-
-        # Start the database service
-        self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state))
-
-        # Assert the member is up and running before marking it as initialised.
-        if not self.patroni_manager.member_started:
-            logger.debug("Deferring on_pebble_ready: awaiting for member to start")
-            event.defer()
-            return
+            return False
+        return True
 
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
         """Event handler for leader elected event (port of the VM charm's flow)."""
@@ -426,8 +482,8 @@ class PostgreSQLEventsHandler(Object):
     def _on_start(self, event: StartEvent) -> None:
         """Handle the start event (port of the VM charm's flow)."""
         if self.state.substrate == Substrates.K8S:
-            # The K8s start flow is ported by the K8s slice.
-            self._start_primary(event)
+            # Make sure the CA bundle file exists; the bundle is not secret.
+            Path(f"/tmp/{TLS_CA_BUNDLE_FILE}").touch()  # noqa: S108
             return
         if not self._can_start(event):
             return
@@ -475,17 +531,6 @@ class PostgreSQLEventsHandler(Object):
 
     def _start_primary(self, event: StartEvent) -> None:
         """Bootstrap the cluster (port of the VM charm's flow)."""
-        if self.state.substrate == Substrates.K8S:
-            # The K8s bootstrap flow is ported by the K8s slice.
-            self.config_manager.configure_patroni_on_unit()
-            if not self.patroni_manager.start_patroni():
-                self.state.add_status_if_not_present(
-                    PatroniStatuses.FAILLED_STARTING_PATRONI.value,
-                    scope="unit",
-                    component=self.patroni_manager.name,
-                )
-            self.state.application.data["cluster_initialised"] = "True"
-            return
         # Set some information needed by Patroni to bootstrap the cluster.
         if not self.patroni_manager.bootstrap_cluster():
             self.membership_manager.set_unit_status(BlockedStatus("failed to start Patroni"))
@@ -591,7 +636,7 @@ class PostgreSQLEventsHandler(Object):
     def _on_update_status(self, event) -> None:
         """Update the unit status message and users list in the database."""
         if self.state.substrate == Substrates.K8S:
-            # The K8s update-status flow is ported by the K8s slice.
+            self._on_update_status_k8s()
             return
         if not self._can_run_on_update_status():
             return
@@ -764,6 +809,225 @@ class PostgreSQLEventsHandler(Object):
             })
         return True
 
+    # -- K8s update-status family (ported from the K8s charm) -------------------------
+
+    def _on_update_status_k8s(self) -> None:
+        """Update the unit status message (port of the K8s charm's flow)."""
+        container = cast("K8sWorkload", self.workload).container
+        if not self._on_update_status_early_exit_checks(container):
+            return
+
+        self._k8s_manager.check_headless_service()
+
+        services = container.pebble.get_services(names=[K8S_POSTGRESQL_SERVICE_NAME])
+        if len(services) == 0:
+            # Service has not been added nor started yet, so don't try to check Patroni API.
+            logger.debug("on_update_status early exit: Service has not been added nor started yet")
+            return
+
+        if (
+            not self.state.application.is_cluster_restoring_backup
+            and not self.state.application.is_cluster_restoring_to_time
+            and not self.state.peer.is_unit_stopped
+            and services[0].current != ServiceStatus.ACTIVE
+        ):
+            logger.warning(f"{K8S_POSTGRESQL_SERVICE_NAME} pebble service inactive, restarting")
+            try:
+                self.charm.ensure_pgdata_dirs_and_symlinks()
+                container.restart(K8S_POSTGRESQL_SERVICE_NAME)
+            except ChangeError:
+                logger.exception("Failed to restart patroni")
+            # If service doesn't recover fast, exit and wait for next hook run to re-check
+            if not self.patroni_manager.member_started:
+                self.membership_manager.set_unit_status(
+                    MaintenanceStatus("Database service inactive, restarting")
+                )
+                return
+
+        if (
+            self.state.application.is_cluster_restoring_backup
+            or self.state.application.is_cluster_restoring_to_time
+        ) and not self._was_restore_successful_k8s(container, services[0]):
+            return
+
+        self.async_replication_manager.update_async_replication_data()
+
+        # Clear a promoted-cluster-counter orphaned by a dead-DC teardown whose
+        # relation-broken never fired (Juju CMR limitation); otherwise a
+        # newly-formed async relation re-counts it and create-replication wrongly
+        # reports "There is already a replication set up.".
+        self.async_replication_manager.clear_stale_promotion()
+        self.backup_manager.coordinate_stanza_fields()
+
+        # self.logical_replication.retry_validations()
+
+        self._set_active_status()
+
+    def _on_update_status_early_exit_checks(self, container) -> bool:
+        """Gate the K8s update-status work (port)."""
+        if self.refresh_manager.refresh is None:
+            logger.debug("Early exit on_update_status: Refresh could be in progress")
+            return False
+        if self.refresh_manager.refresh.in_progress:
+            logger.debug("Early exit on_update_status: Refresh in progress")
+            return False
+
+        if not container.can_connect():
+            logger.debug("on_update_status early exit: Cannot connect to container")
+            return False
+
+        self._check_pgdata_storage_size()
+
+        unit_status = self.state.peer.unit.status
+        if (isinstance(unit_status, BlockedStatus) and unit_status not in S3_BLOCK_MESSAGES) or (
+            isinstance(unit_status, WaitingStatus)
+            and not self.state.application.is_cluster_restoring_backup
+            and not self.state.application.is_cluster_restoring_to_time
+        ):
+            # If charm was failing to disable plugin, try again and continue
+            # (user may have removed the objects)
+            if unit_status.message == EXTENSION_OBJECT_MESSAGE:
+                self.config_manager.reconcile_extensions(self.postgresql())
+                return True
+
+            logger.debug("Attempting to fix leader annotation")
+            self.charm.fix_leader_annotation()
+
+            logger.debug("on_update_status early exit: Unit is in Blocked/Waiting status")
+            return False
+        return True
+
+    def _check_pgdata_storage_size(self) -> None:
+        """Assert the pgdata volume has at least 10% free space and block if not (port)."""
+        pgdata_path = self.workload.paths.data
+        try:
+            total_size, _, free_size = shutil.disk_usage(str(pgdata_path))
+        except FileNotFoundError:
+            logger.error("pgdata folder not found in %s", pgdata_path)
+            return
+
+        logger.debug(
+            "pgdata free disk space: %s out of %s, ratio of %s",
+            free_size,
+            total_size,
+            free_size / total_size,
+        )
+        if free_size / total_size < 0.1:
+            self.membership_manager.set_unit_status(BlockedStatus(INSUFFICIENT_SIZE_WARNING))
+        elif self.state.peer.unit.status.message == INSUFFICIENT_SIZE_WARNING:
+            self.membership_manager.set_unit_status(ActiveStatus())
+            self._set_active_status()
+
+    def _set_active_status(self) -> None:
+        """Recompute the K8s unit status (port)."""
+        # The charm should not override this status outside of the disk-space check.
+        if self.state.peer.unit.status.message == INSUFFICIENT_SIZE_WARNING:
+            return
+        try:
+            app_data = self.state.application.data
+            if self.state.model.unit.is_leader() and "s3-initialization-block-message" in app_data:
+                self.membership_manager.set_unit_status(
+                    BlockedStatus(app_data["s3-initialization-block-message"])
+                )
+                return
+            # if self.unit.is_leader() and (
+            #     self.app_peer_data.get("logical-replication-validation") == "error"
+            #     or self.logical_replication.has_remote_publisher_errors()
+            # ):
+            #     self.set_unit_status(BlockedStatus(LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS))
+            #     return
+            unit_name = self.state.model.unit.name
+            is_standby_leader = (
+                self.patroni_manager.get_standby_leader(unit_name_pattern=True) == unit_name
+            )
+            if (
+                self.patroni_manager.get_primary(unit_name_pattern=True) == unit_name
+                or is_standby_leader
+            ):
+                danger_state = ""
+                if (
+                    len(self.patroni_manager.get_running_cluster_members())
+                    < self.state.application.planned_units
+                ):
+                    danger_state = " (degraded)"
+                self.membership_manager.set_unit_status(
+                    ActiveStatus(f"{'Standby' if is_standby_leader else 'Primary'}{danger_state}")
+                )
+            elif self.patroni_manager.member_started:
+                self.membership_manager.set_unit_status(ActiveStatus())
+        except (RetryError, RequestsConnectionError) as e:
+            logger.error(f"failed to get primary with error {e}")
+
+    def _was_restore_successful_k8s(self, container, service) -> bool:
+        """Complete a restore: verify, clean the flags, and revalidate S3 (K8s port)."""
+        if self.state.application.is_cluster_restoring_to_time and all(
+            self.restore_manager.is_pitr_failed()
+        ):
+            logger.error(
+                "Restore failed: database service failed to reach point-in-time-recovery target. "
+                "You can launch another restore with different parameters"
+            )
+            self.restore_manager.log_pitr_last_transaction_time()
+            self.membership_manager.set_unit_status(BlockedStatus(CANNOT_RESTORE_PITR))
+            return False
+
+        if (
+            service.current != ServiceStatus.ACTIVE
+            and self.state.peer.unit.status.message != CANNOT_RESTORE_PITR
+        ):
+            logger.error("Restore failed: database service failed to start")
+            self.membership_manager.set_unit_status(BlockedStatus("Failed to restore backup"))
+            return False
+
+        if not self.patroni_manager.member_started:
+            logger.debug("Restore check early exit: Patroni has not started yet")
+            return False
+
+        try:
+            self.cluster_manager.setup_instance_users_k8s(self.postgresql())
+        except Exception as e:
+            logger.exception(e)
+            logger.error("Failed to set up users after restore")
+            return False
+
+        restoring_backup = self.state.application.data.get("restoring-backup")
+        restore_timeline = self.state.application.data.get("restore-timeline")
+        restore_to_time = self.state.application.data.get("restore-to-time")
+        try:
+            current_timeline = self.postgresql().get_current_timeline()
+        except PostgreSQLGetCurrentTimelineError:
+            logger.debug("Restore check early exit: can't get current wal timeline")
+            return False
+
+        # Remove the restoring backup flag and the restore stanza name.
+        self.state.application.data.update({
+            "restoring-backup": "",
+            "restore-stanza": "",
+            "restore-to-time": "",
+            "restore-timeline": "",
+        })
+        self.charm.update_config()
+        self.restore_manager.restore_patroni_restart_condition()
+
+        logger.info(
+            "Restored"
+            f"{f' to {restore_to_time}' if restore_to_time else ''}"
+            f"{f' from timeline {restore_timeline}' if restore_timeline and not restoring_backup else ''}"
+            f"{f' from backup {parse_backup_id(restoring_backup)[0]}' if restoring_backup else ''}"
+            f". Currently tracking the newly created timeline {current_timeline}."
+        )
+
+        can_use_s3_repository, validation_message = self.backup_manager.can_use_s3_repository()
+        if not can_use_s3_repository:
+            self.state.application.data.update({
+                "stanza": "",
+                "s3-initialization-start": "",
+                "s3-initialization-done": "",
+                "s3-initialization-block-message": validation_message,
+            })
+
+        return True
+
     def _handle_processes_failures(self) -> bool:
         """Handle Patroni and PostgreSQL OS process failures (port).
 
@@ -895,7 +1159,12 @@ class PostgreSQLEventsHandler(Object):
     def _on_promote_to_primary(self, event) -> None:
         """Promote this unit or cluster to primary (port)."""
         if self.state.substrate == Substrates.K8S:
-            # The K8s promote flow is ported by the K8s slice.
+            if event.params.get("scope") == "cluster":
+                self.async_replication_manager.promote_to_primary(event)
+            elif event.params.get("scope") == "unit":
+                self._promote_primary_unit(event)
+            else:
+                event.fail("Scope should be either cluster or unit")
             return
         if event.params.get("scope") == "cluster":
             self.async_replication_manager.promote_to_primary(event)
@@ -906,6 +1175,9 @@ class PostgreSQLEventsHandler(Object):
 
     def _promote_primary_unit(self, event) -> None:
         """Handle promote-to-primary for the unit scope (port)."""
+        if self.state.substrate == Substrates.K8S:
+            self._promote_primary_unit_k8s(event)
+            return
         if event.params.get("force"):
             if self.state.has_raft_keys():
                 self.state.peer.data.update({"raft_candidate": "True"})
@@ -932,6 +1204,19 @@ class PostgreSQLEventsHandler(Object):
                 event.fail("Unit is not sync standby")
             except SwitchoverFailedError:
                 event.fail("Switchover failed or timed out, check the logs for details")
+
+    def _promote_primary_unit_k8s(self, event) -> None:
+        """K8s promote-to-primary for the unit scope (port)."""
+        # The raft-recovery force path is VM-only; a stray force flag is an error.
+        if event.params.get("force"):
+            event.fail("Suprerfluous force flag with unit scope")
+            return
+        try:
+            self.patroni_manager.switchover(self.state.model.unit.name, wait=False)
+        except SwitchoverNotSyncError:
+            event.fail("Unit is not sync standby")
+        except SwitchoverFailedError:
+            event.fail("Switchover failed or timed out, check the logs for details")
 
     def _client_endpoint_inputs(self) -> dict:
         """Gather the update_endpoints inputs the manager takes caller-side (port)."""
@@ -997,6 +1282,9 @@ class PostgreSQLEventsHandler(Object):
 
     def _on_peer_relation_departed(self, event: "RelationDepartedEvent") -> None:
         """The leader removes the departing units from the cluster members (port)."""
+        if self.state.substrate == Substrates.K8S:
+            self._k8s_on_peer_relation_departed(event)
+            return
         if self.membership_manager.departed_early_exit(event):
             return
         # Remove the departing member from the raft cluster.
@@ -1042,7 +1330,7 @@ class PostgreSQLEventsHandler(Object):
     def _on_peer_relation_changed(self, event: "HookEvent") -> None:
         """Reconfigure cluster members when something changes (substrate-branched)."""
         if self.state.substrate == Substrates.K8S:
-            # The K8s flow lands with the K8s slices (their ctor observes this event too).
+            self._k8s_peer_relation_changed(event)
             return
         if not self._peer_relation_changed_checks(event):
             return
@@ -1295,3 +1583,337 @@ class PostgreSQLEventsHandler(Object):
                     "the retry budget; deferring"
                 )
                 event.defer()
+
+    # -- K8s lifecycle flows (ported from the K8s charm) ------------------------------
+
+    def _k8s_peer_relation_changed(self, event: "HookEvent") -> None:  # noqa: C901
+        """Reconfigure cluster members on K8s (the K8s branch of the peer flow)."""
+        # The cluster must be initialized first in the leader unit
+        # before any other member joins the cluster.
+        if not self.state.application.is_cluster_initialised:
+            if self.state.model.unit.is_leader():
+                if self._initialize_cluster(event):
+                    logger.debug("Deferring on_peer_relation_changed: Leader initialized cluster")
+                    event.defer()
+                else:
+                    logger.debug("_initialized_cluster failed on _peer_relation_changed")
+                    return
+            else:
+                logger.debug(
+                    "Early exit on_peer_relation_changed: Cluster must be initialized before"
+                    " members can join"
+                )
+            return
+
+        # If the leader is the one receiving the event, it adds the new members, one at a time.
+        if self.state.model.unit.is_leader():
+            self.membership_manager.add_members_k8s(event)
+
+        # Don't update this member before it's part of the members list.
+        if self.state.endpoint not in self.state.endpoints:
+            if not self.state.model.unit.is_leader():
+                self.state.add_status_if_not_present(
+                    GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value,
+                    scope="unit",
+                    component=self.cluster_manager.name,
+                )
+            return
+        if not self.state.model.unit.is_leader():
+            self.state.remove_status_if_present(
+                GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value,
+                scope="unit",
+                component=self.cluster_manager.name,
+            )
+
+        if not cast("K8sWorkload", self.workload).container.can_connect():
+            logger.debug(
+                "Early exit on_peer_relation_changed: Waiting for container to become available"
+            )
+            return
+        try:
+            self.charm.update_config()
+        except ValueError as e:
+            self.config_manager.block_on_configuration_error()
+            self.membership_manager.set_unit_status(
+                BlockedStatus("Configuration Error. Please check the logs")
+            )
+            logger.error("Invalid configuration: %s", str(e))
+            return
+
+        # Config validates: clear any persisted config-error state (self-heal).
+        self.config_manager.clear_configuration_error()
+
+        # Should not override a blocked status
+        if isinstance(self.state.peer.unit.status, BlockedStatus):
+            logger.debug("on_peer_relation_changed early exit: Unit in blocked status")
+            return
+
+        services = cast("K8sWorkload", self.workload).container.pebble.get_services(
+            names=[K8S_POSTGRESQL_SERVICE_NAME]
+        )
+        if (
+            (
+                self.state.application.is_cluster_restoring_backup
+                or self.state.application.is_cluster_restoring_to_time
+            )
+            and len(services) > 0
+            and not self._was_restore_successful_k8s(
+                cast("K8sWorkload", self.workload).container, services[0]
+            )
+        ):
+            logger.debug("on_peer_relation_changed early exit: Backup restore check failed")
+            return
+
+        self._k8s_manager.check_headless_service()
+
+        # Validate the status of the member before setting an ActiveStatus.
+        if not self.patroni_manager.member_started:
+            logger.debug("Deferring on_peer_relation_changed: Waiting for member to start")
+            self.membership_manager.set_unit_status(WaitingStatus("awaiting for member to start"))
+            event.defer()
+            return
+
+        try:
+            self.database_manager.update_endpoints(
+                client_tls_files=self.tls_manager.get_client_tls_files()
+            )
+        except ModelError as e:
+            logger.warning("Cannot update read_only endpoints: %s", str(e))
+
+        # Start or stop the pgBackRest TLS server service when TLS certificate change.
+        if not self.backup_manager.start_stop_pgbackrest_service():
+            # Ping primary to start its TLS server.
+            self.state.peer.data.update({"start-tls-server": "True"})
+            logger.debug(
+                "Deferring on_peer_relation_changed: awaiting for TLS server service to start"
+                " on primary"
+            )
+            event.defer()
+            return
+        self.state.peer.data.pop("start-tls-server", None)
+
+        self.backup_manager.coordinate_stanza_fields()
+
+        # This is intended to be executed only when leader is reinitializing S3 connection
+        # due to the leader change.
+        if (
+            "s3-initialization-start" in self.state.application.data
+            and "s3-initialization-done" not in self.state.peer.data
+            and self.patroni_manager.get_primary(unit_name_pattern=True)
+            == self.state.model.unit.name
+            and not self.backup_manager.initialise_s3_repository()
+        ):
+            return
+
+        # Clean-up unit initialization data after successful sync to the leader.
+        if "s3-initialization-done" in self.state.application.data and not (
+            self.state.model.unit.is_leader()
+        ):
+            self.state.peer.data.update({
+                "stanza": "",
+                "s3-initialization-block-message": "",
+                "s3-initialization-done": "",
+                "s3-initialization-start": "",
+            })
+
+        self.charm.async_replication.handle_read_only_mode()
+
+    def _k8s_on_peer_relation_departed(self, event: "RelationDepartedEvent") -> None:
+        """The leader removes the departing units from the cluster members (K8s port)."""
+        # Allow leader to update endpoints if it isn't leaving.
+        if not self.state.model.unit.is_leader() or event.departing_unit == self.state.model.unit:
+            return
+
+        if not self.state.application.is_cluster_initialised or not (
+            self.membership_manager.updated_synchronous_node_count()
+        ):
+            logger.debug(
+                "Deferring on_peer_relation_departed: Cluster must be initialized before"
+                " members can leave"
+            )
+            event.defer()
+            return
+
+        endpoints_to_remove = self.membership_manager.get_endpoints_to_remove()
+        self.database_manager.update_endpoints(
+            client_tls_files=self.tls_manager.get_client_tls_files()
+        )
+        for endpoint in endpoints_to_remove:
+            self.membership_manager.remove_endpoint(endpoint)
+
+        self.async_replication_manager.update_async_replication_data()
+
+    def _on_pgdata_storage_detaching(self, _) -> None:
+        """Change the primary if it's the unit that is being removed (K8s port)."""
+        try:
+            primary = self.patroni_manager.get_primary(unit_name_pattern=True)
+        except RetryError:
+            # Ignore the event if the primary couldn't be retrieved. If a switchover is
+            # needed, an automatic failover will be triggered when the unit is removed.
+            logger.debug("Early exit on_pgdata_storage_detaching: primary cannot be retrieved")
+            return
+
+        if not primary or self.state.model.unit.name != primary:
+            return
+
+        if not self.patroni_manager.are_all_members_ready():
+            logger.warning(
+                "could not switchover because not all members are ready"
+                " - an automatic failover will be triggered"
+            )
+            return
+
+        # Try to switchover to another member; Patroni fail-overs automatically if late.
+        try:
+            self.patroni_manager.switchover()
+            self.patroni_manager.primary_changed(primary)
+            logger.info("successful switchover")
+        except (RetryError, SwitchoverFailedError) as e:
+            logger.warning(
+                f"switchover failed with reason: {e} - an automatic failover will be triggered"
+            )
+            return
+
+        # Only update the connection endpoints if there is a primary: a cluster can have
+        # all members as replicas for some time after a failed switchover.
+        endpoints_to_remove = self.membership_manager.get_endpoints_to_remove()
+        self.database_manager.update_endpoints(
+            client_tls_files=self.tls_manager.get_client_tls_files()
+        )
+        for endpoint in endpoints_to_remove:
+            self.membership_manager.remove_endpoint(endpoint)
+
+    def _initialize_cluster(self, event: "HookEvent") -> bool:
+        """Bootstrap the cluster on the K8s leader unit (port)."""
+        from lightkube.core.exceptions import ApiError
+
+        # Add the labels needed for replication in this pod; this also enables the
+        # member as part of the cluster.
+        try:
+            self._k8s_manager.patch_pod_labels(self.state.model.unit.name)
+        except ApiError as e:
+            logger.error("failed to patch pod")
+            self.membership_manager.set_unit_status(
+                BlockedStatus(f"failed to patch pod with error {e}")
+            )
+            return False
+
+        # Create resources and add labels needed for replication
+        if (
+            self.refresh_manager.refresh is not None
+            and not self.refresh_manager.refresh.in_progress
+        ):
+            try:
+                self._k8s_manager.create_services()
+            except ApiError:
+                logger.exception("failed to create k8s services")
+                self.membership_manager.set_unit_status(
+                    BlockedStatus("failed to create k8s services")
+                )
+                return False
+
+        async_replication_primary_cluster = self.async_replication_manager.get_primary_cluster()
+        if (
+            async_replication_primary_cluster is not None
+            and async_replication_primary_cluster != self.state.model.app
+        ):
+            logger.debug(
+                "Early exit _initialize_cluster: not the primary cluster in async replication"
+            )
+            return True
+
+        if not self.patroni_manager.primary_endpoint_ready:
+            logger.debug(
+                "Deferring on_postgresql_pebble_ready: Waiting for primary endpoint to be ready"
+            )
+            self.membership_manager.set_unit_status(
+                WaitingStatus("awaiting for primary endpoint to be ready")
+            )
+            event.defer()
+            return False
+
+        return self._setup_bootstrap_users(event)
+
+    def _setup_bootstrap_users(self, event: "HookEvent") -> bool:
+        """Run the K8s bootstrap user setup with the charm's error statuses (port)."""
+        try:
+            self.cluster_manager.setup_instance_users_k8s(self.postgresql())
+        except psycopg2.OperationalError as e:
+            # The workload may still be coming up after a pod replacement; retry the
+            # whole bootstrap on the next hook instead of blocking the unit.
+            logger.warning(f"Defer on_start: cannot connect to PostgreSQL yet: {e}")
+            self.membership_manager.set_unit_status(WaitingStatus("awaiting for cluster to start"))
+            event.defer()
+            return False
+        except PostgreSQLCreatePredefinedRolesError:
+            message = "Failed to create pre-defined roles"
+            logger.exception(message)
+            self.membership_manager.set_unit_status(BlockedStatus(message))
+            return False
+        except PostgreSQLGrantDatabasePrivilegesToUserError:
+            message = "Failed to grant database privileges to user"
+            logger.exception(message)
+            self.membership_manager.set_unit_status(BlockedStatus(message))
+            return False
+        except PostgreSQLCreateUserError:
+            message = "Failed to create postgres user"
+            logger.exception(message)
+            self.membership_manager.set_unit_status(BlockedStatus(message))
+            return False
+        except PostgreSQLListUsersError:
+            logger.warning("Deferring on_start: Unable to list users")
+            event.defer()
+            return False
+
+        # Mark the cluster as initialised.
+        self.state.application.data["cluster_initialised"] = "True"
+        return True
+
+    def _replica_can_start(self) -> bool:
+        """Check whether this replica is ready to start Patroni (port).
+
+        Returns False if the cluster hasn't been bootstrapped yet, if the leader hasn't
+        added this unit's endpoint to the members list (which controls the pg_hba
+        replication entries on the primary), or if the primary's Patroni hasn't yet
+        reloaded pg_hba with this unit's replication entry (which would cause
+        pg_basebackup to be rejected, triggering Patroni's remove_data_directory()).
+        """
+        if not self.state.application.is_cluster_initialised:
+            logger.debug("Replica not ready: cluster not initialized")
+            return False
+        if self.state.endpoint not in self.state.endpoints:
+            logger.debug("Replica not ready: endpoint not yet in members list")
+            return False
+
+        hba_endpoint = self.charm.primary_endpoint
+        if self.async_replication_manager.async_relation and not (
+            self.async_replication_manager.is_primary_cluster()
+        ):
+            if standby_leader := self.patroni_manager.get_standby_leader():
+                hba_endpoint = self.membership_manager.get_hostname_from_member(standby_leader)
+            else:
+                logger.debug("Replica not ready: no standby leader")
+                return False
+
+        if not self.patroni_manager.is_replication_hba_ready(hba_endpoint):
+            logger.debug("Replica not ready: pg_hba not yet reloaded with replication entry")
+            return False
+        return True
+
+    def _on_upgrade_charm(self, event) -> None:
+        """Fix the pod resources after a charm upgrade (K8s port)."""
+        try:
+            self.charm.fix_pod()
+        except Exception as e:
+            logger.debug(f"Defer _on_upgrade charm: failed to fix pod: {e}")
+            event.defer()
+
+    def _on_stop(self, _) -> None:
+        """Release the unit's K8s resources at scale-down/teardown (K8s port)."""
+        # Remove data from the drive when scaling down to zero to prevent the cluster
+        # from getting stuck when scaling back up.
+        if self.state.application.planned_units == 0:
+            self.state.peer.data.clear()
+
+        # Patch the services to remove them when the StatefulSet is deleted.
+        self._k8s_manager.reparent_services_on_stop()

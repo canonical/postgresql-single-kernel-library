@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     import charm_refresh
     from ops import EventBase
 
+    from single_kernel_postgresql.events.tls_transfer import TLSTransfer
     from single_kernel_postgresql.managers.k8s import K8sManager
 
 
@@ -73,6 +74,8 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     # vm_charm/k8s_charm guarded reads safe during __init__ — charm_refresh
     # runs its state machine at construction time and may call request_restart.
     restart_lock_acquire: Callable[[], None] | None = None
+    # TLS-transfer requirer; the substrate charm classes construct it (K8s today).
+    tls_transfer: "TLSTransfer"
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -228,6 +231,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             set_primary_status_message=self.set_primary_status_message,
             primary_endpoint=lambda: self.primary_endpoint,
             update_certificate=self._update_certificate,
+            k8s_manager=k8s_manager,
         )
 
         # The backup subsystem (port of the VM charm's composition wiring): the
@@ -299,6 +303,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             async_replication_manager=self.async_replication_manager,
             database_manager=self.database_manager,
             postgresql=lambda: self.postgresql,
+            k8s_manager=k8s_manager,
         )
 
         # Resume or prepare the refresh (the charms' post-construction resume block).
@@ -524,6 +529,14 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         """Set up the pgbackrest exporter snap service (VM only; overridden there)."""
         return None
 
+    def fix_pod(self) -> None:
+        """Recreate the K8s resources and replication labels (K8s only; overridden there)."""
+        return None
+
+    def sync_tls_trust_store_and_bundle(self) -> None:
+        """Sync the K8s CA trust store and charm-local CA bundle (K8s only; overridden there)."""
+        return None
+
     @property
     @abstractmethod
     def primary_endpoint(self) -> str | None:
@@ -542,6 +555,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     @abstractmethod
     def update_pebble_layers(self) -> None:
         """Reconcile the workload's Pebble layers (K8s)."""
+        pass
+
+    @abstractmethod
+    def push_ca_file_into_workload(self, secret_name: str) -> bool:
+        """Upload one transferred CA certificate into the workload (substrate-specific)."""
         pass
 
     @abstractmethod
