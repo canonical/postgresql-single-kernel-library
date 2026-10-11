@@ -862,8 +862,6 @@ class PostgreSQLEventsHandler(Object):
 
     def _on_secret_changed(self, event) -> None:
         """Rotate system-user passwords when their secret changes (port)."""
-        if self.state.substrate == Substrates.K8S:
-            return
         if not self.state.model.unit.is_leader() or not self.membership_manager:
             return
         if (
