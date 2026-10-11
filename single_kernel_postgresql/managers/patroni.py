@@ -70,6 +70,8 @@ from single_kernel_postgresql.utils import (
 )
 from single_kernel_postgresql.workload.base import BaseWorkload
 
+ORIGINAL_PATRONI_ON_FAILURE_CONDITION = "always"  # the Patroni default on-failure action
+
 logger = logging.getLogger(__name__)
 
 
@@ -1011,3 +1013,53 @@ class PatroniManager(BaseManager):
         # if self.workload.workload_present and self.state.substrate == Substrates.VM and not self.member_started:
         #    return [PatroniStatuses.WAITING_MEMBER_START.value]
         return [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def override_on_failure_condition(self, new_condition: str, repeat_cause: str | None) -> bool:
+        """Temporarily override the Patroni pebble service on-failure condition (port).
+
+        Executes only on the current unit. The repeat-cause guard blocks repeated
+        overrides with a distinct or absent cause while an override is active.
+        """
+        if "patroni-on-failure-condition-override" in self.state.peer.data:
+            current_condition = self.state.peer.data["patroni-on-failure-condition-override"]
+            if repeat_cause is None:
+                logger.error(
+                    f"failure trying to override patroni on-failure condition to {new_condition}"
+                    f"as it already overridden from {ORIGINAL_PATRONI_ON_FAILURE_CONDITION} to {current_condition}"
+                )
+                return False
+            previous_repeat_cause = self.state.peer.data.get(
+                "overridden-patroni-on-failure-condition-repeat-cause", None
+            )
+            if previous_repeat_cause != repeat_cause:
+                logger.error(
+                    f"failure trying to override patroni on-failure condition to {new_condition}"
+                    f"as it already overridden from {ORIGINAL_PATRONI_ON_FAILURE_CONDITION} to {current_condition}"
+                    f"and repeat cause is not equal: {previous_repeat_cause} != {repeat_cause}"
+                )
+                return False
+            self.state.peer.data["patroni-on-failure-condition-override"] = new_condition
+            self.update_pebble_layers(replan=False)
+            logger.debug(
+                f"Patroni on-failure condition re-overridden to {new_condition} within repeat cause {repeat_cause}"
+                f"(original on-failure condition reference is untouched and is {ORIGINAL_PATRONI_ON_FAILURE_CONDITION})"
+            )
+            return True
+
+        self.state.peer.data["patroni-on-failure-condition-override"] = new_condition
+        if repeat_cause:
+            self.state.peer.data["overridden-patroni-on-failure-condition-repeat-cause"] = (
+                repeat_cause
+            )
+        self.update_pebble_layers(replan=False)
+        logger.debug(
+            f"Patroni on-failure condition overridden from {ORIGINAL_PATRONI_ON_FAILURE_CONDITION} to {new_condition}"
+            f"{' with repeat cause ' + repeat_cause if repeat_cause is not None else ''}"
+        )
+        return True
+
+    def update_pebble_layers(self, replan: bool = True) -> None:
+        """Re-layer the workload from the current state (the K8s charm bridge)."""
+        from single_kernel_postgresql.workload.base import PebbleLayerSpec
+
+        self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state), replan=replan)
