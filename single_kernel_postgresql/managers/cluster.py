@@ -179,10 +179,17 @@ class ClusterManager(BaseManager):
         """Compute the manager's statuses."""
         if not self.workload.workload_present:
             return [GeneralStatuses.MAINTAINENANCE_INSTALLING.value]
-        if (
-            not self.state.application.user_password
-            or not self.state.application.replication_password
-        ):
+        try:
+            user_password = self.state.application.user_password
+            replication_password = self.state.application.replication_password
+        except (ModelError, SecretNotFoundError):
+            # The status handler evaluates this on every hook, including on
+            # non-leader units: the app-scope peer secret reads raise
+            # permission-denied there until the leader creates the secrets.
+            # The charms treat an unreadable password as "not yet generated".
+            logger.debug("get_statuses: peer secrets not readable yet")
+            return [GeneralStatuses.WAITING_PASSWORDS_GENERATION.value]
+        if not user_password or not replication_password:
             return [GeneralStatuses.WAITING_PASSWORDS_GENERATION.value]
 
         return [GeneralStatuses.ACTIVE_IDLE.value]
