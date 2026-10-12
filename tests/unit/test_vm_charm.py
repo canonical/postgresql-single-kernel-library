@@ -7,6 +7,7 @@ from unittest.mock import Mock, PropertyMock, patch
 import pytest
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus
 from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 
 
 @pytest.fixture(autouse=True)
@@ -108,3 +109,30 @@ def test_collect_unit_status_reconciles_the_refresh_status(charm):
     ):
         charm.on.collect_unit_status.emit()
     reconcile.assert_called_once()
+
+
+def test_cluster_get_statuses_survives_unreadable_peer_secrets(charm):
+    """The status handler evaluates get_statuses on every hook, on every unit.
+
+    Real Juju answers ``secret-get --label`` with permission denied on units
+    that do not own the app-scope peer secrets (until the leader creates
+    them); the charms treat an unreadable password as "not yet generated".
+    """
+    from ops import ModelError
+
+    with (
+        patch.object(
+            charm.model._backend,
+            "secret_get",
+            side_effect=ModelError("ERROR permission denied"),
+        ),
+        patch.object(
+            type(charm.cluster_manager.workload),
+            "workload_present",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+    ):
+        statuses = charm.cluster_manager.get_statuses("unit")
+
+    assert statuses == [GeneralStatuses.WAITING_PASSWORDS_GENERATION.value]
