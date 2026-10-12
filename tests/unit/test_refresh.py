@@ -413,6 +413,39 @@ def test_get_statuses_persists_active_idle_for_unsettled_unit_status(refresh_man
     )
 
 
+def test_get_statuses_does_not_snapshot_a_non_refresh_unit_status(refresh_manager, charm):
+    """The machinery record must not snapshot statuses the refresh did not set.
+
+    A snapshot of an unrelated status (e.g. the cluster manager's "awaiting
+    passwords generation") would be re-fed through the collect handler forever:
+    waiting outranks active there, so the record would never clear even after
+    the underlying condition resolved.
+    """
+    refresh_manager.refresh.unit_status_higher_priority = None
+    charm.unit.status = WaitingStatus("awaiting passwords generation")
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_called_once_with(
+        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
+    )
+
+
+def test_get_statuses_snapshots_a_refresh_set_status(refresh_manager, charm):
+    """A status the refresh itself set keeps being snapshotted."""
+    higher = WaitingStatus("refresh queued")
+    refresh_manager.refresh.unit_status_higher_priority = higher
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    record = StatusObject(status="waiting", message="refresh queued")
+    assert statuses == [record]
+    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+
+
 def test_get_statuses_returns_cached_active_idle_for_app_scope_without_recompute(
     refresh_manager,
 ):
