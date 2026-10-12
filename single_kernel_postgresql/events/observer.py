@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.managers.async_replication import AsyncReplicationManager
     from single_kernel_postgresql.managers.database import DatabaseManager
     from single_kernel_postgresql.managers.patroni import PatroniManager
+    from single_kernel_postgresql.managers.tls import TLSManager
     from single_kernel_postgresql.workload.base import BaseWorkload
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class ObserverEventsHandler(Object):
         async_replication_manager: "AsyncReplicationManager",
         database_manager: "DatabaseManager",
         patroni_manager: "PatroniManager",
+        tls_manager: "TLSManager",
         watcher_handler: "WatcherEventsHandler",
     ):
         super().__init__(charm, "observer")
@@ -66,6 +68,7 @@ class ObserverEventsHandler(Object):
         self.async_replication_manager = async_replication_manager
         self.database_manager = database_manager
         self.patroni_manager = patroni_manager
+        self.tls_manager = tls_manager
 
         if self.state.substrate == Substrates.VM:
             self.framework.observe(
@@ -88,7 +91,8 @@ class ObserverEventsHandler(Object):
             self.database_manager.update_endpoints(
                 online_members=self.patroni_manager.online_cluster_members()
                 if self.state.peer.is_app_leader
-                else None
+                else None,
+                client_tls_files=self.tls_manager.get_client_tls_files(),
             )
             self.charm.set_primary_status_message()
             self.async_replication_manager.update_async_replication_data()
