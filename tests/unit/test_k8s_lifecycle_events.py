@@ -47,6 +47,7 @@ modules["charms.certificate_transfer_interface.v0.certificate_transfer"] = _cert
 
 from single_kernel_postgresql.config.enums import Substrates  # noqa: E402
 from single_kernel_postgresql.config.exceptions import (  # noqa: E402
+    DeployedWithoutTrustError,
     SwitchoverFailedError,
     SwitchoverNotSyncError,
 )
@@ -962,3 +963,15 @@ def test_restart_k8s_reconciles_the_pebble_layers(handler):
     handler.workload.update_pebble_layers.assert_called_once()
     assert handler.state.peer.data.get("postgresql_restarted") is None
     event.defer.assert_not_called()
+
+
+def test_leader_elected_k8s_blocks_without_trust_and_continues(handler, harness):
+    """A 403 during the resource cleanup blocks the unit; the flow still proceeds."""
+    _seed_leader(handler, harness)
+    handler.k8s_manager.cleanup_old_cluster_resources.side_effect = DeployedWithoutTrustError()
+    on_deployed = patch.object(handler.charm, "on_deployed_without_trust").start()
+    with patch.object(handler.membership_manager, "add_members_k8s") as add_members:
+        handler._on_leader_elected(Mock())
+    on_deployed.assert_called_once()
+    handler.k8s_manager.create_services.assert_called_once()
+    add_members.assert_called_once()

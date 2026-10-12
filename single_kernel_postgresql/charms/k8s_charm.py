@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -130,6 +129,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         self.k8s_manager = K8sManager(
             self.state,
             cast("K8sWorkload", self.workload),
+            on_deployed_without_trust=self.on_deployed_without_trust,
         )
         return self.k8s_manager
 
@@ -403,14 +403,6 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
                 {}, {"standby_cluster": None}
             )
         return result
-
-    def _on_databases_change(self, _) -> None:
-        """Handle databases change event (port)."""
-        self.update_config()
-        logger.debug("databases changed")
-        timestamp = datetime.now()
-        self.state.peer.data.update({"pg_hba_needs_update_timestamp": str(timestamp)})
-        logger.debug(f"authorisation rules changed at {timestamp}")
 
     def _on_config_changed(self, event) -> None:
         """Handle configuration changes, like enabling plugins (port)."""

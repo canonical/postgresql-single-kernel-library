@@ -40,6 +40,7 @@ from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay,
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import (
     CannotConnectError,
+    DeployedWithoutTrustError,
     RaftRecoveryTimeoutError,
     SettingSystemPasswordError,
     StorageUnavailableError,
@@ -157,7 +158,6 @@ class PostgreSQLEventsHandler(Object):
         self.k8s_manager = k8s_manager
 
         # Charm events
-        self.framework.observe(self.charm.on.install, self._on_install)
         self.framework.observe(self.charm.on.start, self._on_start)
         self.framework.observe(self.charm.on.leader_elected, self._on_leader_elected)
         self.framework.observe(self.charm.on.config_changed, self._on_config_changed)
@@ -187,6 +187,7 @@ class PostgreSQLEventsHandler(Object):
             self.framework.observe(self.charm.on.upgrade_charm, self._on_upgrade_charm)
             self.framework.observe(self.charm.on.stop, self._on_stop)
         if self.state.substrate == Substrates.VM:
+            self.framework.observe(self.charm.on.install, self._on_install)
             self.framework.observe(
                 getattr(
                     self.charm.on,
@@ -391,8 +392,6 @@ class PostgreSQLEventsHandler(Object):
 
     def _k8s_leader_elected(self, event: LeaderElectedEvent) -> None:
         """Leader-elected on K8s (port)."""
-        from lightkube.core.exceptions import ApiError
-
         # Consider configured system user passwords, then set the needed
         # passwords if they weren't set before (the K8s charm has no raft).
         system_user_passwords = self._ensure_system_passwords(event)
@@ -422,29 +421,46 @@ class PostgreSQLEventsHandler(Object):
         if not self.state.get_secret(APP_SCOPE, "internal-ca"):
             self.tls_manager.generate_internal_peer_ca()
 
-        # Delete kubernetes services and endpoints from previous deployments.
-        self._k8s_manager.cleanup_old_cluster_resources()
+        # Delete kubernetes services and endpoints from previous deployments; a
+        # 403 blocks the unit and the flow continues (union order).
+        try:
+            self._k8s_manager.cleanup_old_cluster_resources()
+        except DeployedWithoutTrustError:
+            self.charm.on_deployed_without_trust()
 
         if not self.charm.fix_leader_annotation():
             return
 
         # Create resources and add labels needed for replication.
-        if (
-            self.refresh_manager.refresh is not None
-            and not self.refresh_manager.refresh.in_progress
-        ):
-            try:
-                self._k8s_manager.create_services()
-            except ApiError:
-                logger.exception("failed to create k8s services")
-                self.charm.set_unit_status(BlockedStatus("failed to create k8s services"))
-                return
+        if not self._k8s_create_services():
+            return
 
         # Remove departing units when the leader changes.
         for endpoint in self.membership_manager.get_endpoints_to_remove():
             self.membership_manager.remove_endpoint(endpoint)
 
         self.membership_manager.add_members_k8s(event)
+
+    def _k8s_create_services(self) -> bool:
+        """Create the K8s services unless a refresh is in progress (port).
+
+        Returns:
+            False when the services failed to create (the unit was blocked).
+        """
+        from lightkube.core.exceptions import ApiError
+
+        if not (
+            self.refresh_manager.refresh is not None
+            and not self.refresh_manager.refresh.in_progress
+        ):
+            return True
+        try:
+            self._k8s_manager.create_services()
+        except ApiError:
+            logger.exception("failed to create k8s services")
+            self.charm.set_unit_status(BlockedStatus("failed to create k8s services"))
+            return False
+        return True
 
     def _update_leader_endpoints(self) -> None:
         """Generate the internal CA, render, and refresh the endpoints (port)."""
@@ -911,8 +927,6 @@ class PostgreSQLEventsHandler(Object):
         # reports "There is already a replication set up.".
         self.async_replication_manager.clear_stale_promotion()
         self.backup_manager.coordinate_stanza_fields()
-
-        # self.logical_replication.retry_validations()
 
         self._set_active_status()
 

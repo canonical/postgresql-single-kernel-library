@@ -233,8 +233,9 @@ def test_restart_services_stops_ldap_on_replica(charm, container):
 
 
 def test_on_databases_change_updates_config_and_records_timestamp(charm):
+    """The shared observer handler records the K8s pg-hba timestamp key."""
     with patch.object(type(charm), "update_config", return_value=True) as update:
-        charm._on_databases_change(Mock())
+        charm.on.databases_change.emit()
     update.assert_called_once_with()
     assert "pg_hba_needs_update_timestamp" in charm.state.peer.data
 
@@ -311,3 +312,10 @@ def test_reload_tls_after_push_syncs_then_reloads(charm):
     ):
         charm._reload_tls_after_push(event)
     event.defer.assert_called_once_with()
+
+
+def test_install_is_not_observed_on_k8s(charm):
+    """The K8s charm has no install hook; the observe is VM-only."""
+    with patch.object(charm.cluster_manager, "install_workload") as install:
+        charm.on.install.emit()
+    install.assert_not_called()

@@ -80,11 +80,18 @@ class ObserverEventsHandler(Object):
         self.framework.observe(self.charm.on.databases_change, self._on_databases_change)
 
     def _on_databases_change(self, _):
-        """Handle databases change event."""
+        """Handle databases change event (the K8s charm keys on pg_hba_needs_update)."""
         self.charm.update_config()
         logger.debug("databases changed")
         timestamp = datetime.now()
-        self.state.peer.data.update({"timestamp": str(timestamp)})
+        # The K8s charm's authorisation-rules flow keys on pg_hba_needs_update_timestamp;
+        # the VM charm keys on timestamp.
+        key = (
+            "pg_hba_needs_update_timestamp"
+            if self.state.substrate == Substrates.K8S
+            else "timestamp"
+        )
+        self.state.peer.data.update({key: str(timestamp)})
         logger.debug(f"authorisation rules changed at {timestamp}")
 
     def _on_cluster_topology_change(self, _):

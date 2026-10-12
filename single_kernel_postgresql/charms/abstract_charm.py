@@ -493,6 +493,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         """Fix the leader annotation (K8s only; overridden there)."""
         return False
 
+    def on_deployed_without_trust(self) -> None:
+        """Block the application for deployments made without --trust (K8s only; overridden there)."""
+        return None
+
     def _update_certificate(self) -> None:
         """Re-request the TLS certificates after an IP change (VM only; overridden there)."""
         return None
