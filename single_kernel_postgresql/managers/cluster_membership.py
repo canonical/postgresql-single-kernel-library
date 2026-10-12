@@ -376,6 +376,8 @@ class ClusterMembershipManager(BaseManager):
 
     def stuck_cluster_stopped_check(self) -> None:
         """Check that the cluster is stopped."""
+        if not self.state.peer:
+            return
         if "raft_followers_stopped" in self.state.application.data:
             return
         for peer in self.state.application_peers:

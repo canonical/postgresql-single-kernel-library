@@ -70,7 +70,7 @@ class ClusterManager(BaseManager):
         workload: BaseWorkload,
         patroni_manager: "PatroniManager | None" = None,
         async_replication_manager: "AsyncReplicationManager | None" = None,
-        update_config: Callable[[], None] | None = None,
+        update_config: Callable[[], bool] | None = None,
         set_unit_status: Callable[[StatusBase], None] | None = None,
         is_standby_cluster: Callable[[], bool] | None = None,
     ):

@@ -80,7 +80,11 @@ def test_rotate_system_user_passwords_updates_changed_users(cluster):
         patch.object(
             CharmState,
             "get_secret_from_id",
-            return_value={"operator": "new", "backup": "changed", "attacker": "nope"},
+            side_effect=lambda *args, **kwargs: {
+                "operator": "new",
+                "backup": "changed",
+                "attacker": "nope",
+            },
         ),
         patch.object(
             CharmState,

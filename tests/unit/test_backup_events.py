@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from ops.pebble import ExecError
-from single_kernel_postgresql.events.backup import BackupEventsHandler
 from tenacity import RetryError
 
 
@@ -25,7 +24,10 @@ def restore_manager():
 
 @pytest.fixture
 def handler(harness, backup_manager, restore_manager):
-    return BackupEventsHandler(harness.charm, harness.charm.state, backup_manager, restore_manager)
+    handler = harness.charm.backup_events_handler
+    handler.backup_manager = backup_manager
+    handler.restore_manager = restore_manager
+    return handler
 
 
 def make_action_event(params=None):

@@ -32,8 +32,11 @@ from single_kernel_postgresql.config.literals import (
     REPLICATION_PASSWORD_KEY,
     SYSTEM_USERS,
     UNIT_SCOPE,
+    UPDATE_CERTS_BIN_PATH,
     USER,
     USER_PASSWORD_KEY,
+    VM_METRICS_SERVICE_NAME,
+    VM_PGBACKREST_METRICS_SERVICE_NAME,
 )
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_IDENTITY,
@@ -141,11 +144,6 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         return primary_endpoint
 
     @property
-    def is_primary(self) -> bool:
-        """Whether this unit is the primary instance (port)."""
-        return self.unit.name == self.patroni_manager.get_primary(unit_name_pattern=True)
-
-    @property
     def is_standby_leader(self) -> bool:
         """Whether this unit is the standby leader instance (port)."""
         return self.unit.name == self.patroni_manager.get_standby_leader(unit_name_pattern=True)
@@ -233,10 +231,10 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
             "exporter.password": self.state.get_secret(APP_SCOPE, MONITORING_PASSWORD_KEY),
         })
 
-        if postgres_snap.services["prometheus-postgres-exporter"]["active"] is False:
-            postgres_snap.start(services=["prometheus-postgres-exporter"], enable=True)
+        if postgres_snap.services[VM_METRICS_SERVICE_NAME]["active"] is False:
+            postgres_snap.start(services=[VM_METRICS_SERVICE_NAME], enable=True)
         else:
-            postgres_snap.restart(services=["prometheus-postgres-exporter"])
+            postgres_snap.restart(services=[VM_METRICS_SERVICE_NAME])
 
         self.state.peer.data.update({"exporter-started": "True"})
 
@@ -246,10 +244,10 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
             cache = snap.SnapCache()
             postgres_snap = cache[charm_refresh.snap_name()]
 
-        if postgres_snap.services["pgbackrest-exporter"]["active"] is False:
-            postgres_snap.start(services=["pgbackrest-exporter"], enable=True)
+        if postgres_snap.services[VM_PGBACKREST_METRICS_SERVICE_NAME]["active"] is False:
+            postgres_snap.start(services=[VM_PGBACKREST_METRICS_SERVICE_NAME], enable=True)
         else:
-            postgres_snap.restart(services=["pgbackrest-exporter"])
+            postgres_snap.restart(services=[VM_PGBACKREST_METRICS_SERVICE_NAME])
 
         self.state.peer.data.update({"pgbackrest-exporter-started": "True"})
 
@@ -319,7 +317,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
 
     def set_default_unit_status(self) -> None:
         """Set the unit status that applies when no refresh status is active (port)."""
-        self.set_unit_status(ActiveStatus())
+        self.set_primary_status_message()
 
     def set_primary_status_message(self) -> None:
         """Display 'Primary' in the unit status message if this unit is the primary (port)."""
@@ -402,8 +400,8 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
     def post_refresh_side_effects(self) -> None:
         """Post-refresh workload side effects (port): exporters, pgbackrest, watcher."""
         self._setup_exporter()
-        self._setup_pgbackrest_exporter()
         self.backup_manager.start_stop_pgbackrest_service()
+        self._setup_pgbackrest_exporter()
         self.watcher_handler.update_unit_address()
 
     def has_async_replication_relation(self) -> bool:
@@ -446,7 +444,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         if certs is not None:
             certs_file = pathlib.Path(CERTS_PATH, f"{secret_name}.crt")
             certs_file.write_text(certs)
-            subprocess.check_call(["/usr/sbin/update-ca-certificates"])
+            subprocess.check_call([UPDATE_CERTS_BIN_PATH])  # noqa: S603
 
         try:
             return self.update_config()
@@ -459,7 +457,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         certs_file = pathlib.Path(CERTS_PATH, f"{secret_name}.crt")
         certs_file.unlink()
 
-        subprocess.check_call(["/usr/sbin/update-ca-certificates"])
+        subprocess.check_call([UPDATE_CERTS_BIN_PATH])  # noqa: S603
 
         try:
             return self.update_config()
