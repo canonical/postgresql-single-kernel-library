@@ -315,6 +315,7 @@ class K8sManager(BaseManager):
                     name=resource.metadata.name,
                     namespace=resource.metadata.namespace,
                     force=True,
+                    field_manager=app_name,
                 )
             except ApiError:
                 logger.exception(
