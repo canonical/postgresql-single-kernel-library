@@ -326,12 +326,31 @@ class RefreshManager(BaseManager):
         return [self._persist_machinery_status()]
 
     def _persist_machinery_status(self) -> StatusObject:
-        """Persist the reconciled unit status as this manager's status record."""
+        """Persist the reconciled unit status as this manager's status record.
+
+        Only snapshot the unit status when the refresh itself set it: the
+        reconciliation records the refresh status message in
+        LAST_REFRESH_UNIT_STATUS_FILE, and a snapshot of an unrelated status
+        would be re-fed through the collect handler forever (waiting outranks
+        active there), self-perpetuating a stale status.
+        """
+        try:
+            refresh_status_message = json.loads(
+                pathlib.Path(LAST_REFRESH_UNIT_STATUS_FILE).read_text()
+            )
+        except FileNotFoundError:
+            refresh_status_message = None
         status = self._charm.unit.status
-        if status.name not in ("active", "blocked", "maintenance", "waiting") or not isinstance(
-            status, (ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus)
+        if (
+            status.name not in ("active", "blocked", "maintenance", "waiting")
+            or not isinstance(
+                status, (ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus)
+            )
+            or refresh_status_message != status.message
         ):
-            # Unknown/error unit statuses carry no refresh information.
+            # Unknown/error statuses carry no refresh information, and statuses
+            # the refresh did not set must not be snapshotted: the record would
+            # never clear once the underlying condition resolved.
             record = GeneralStatuses.ACTIVE_IDLE.value
         else:
             record = StatusObject(status=status.name, message=status.message)
