@@ -87,6 +87,21 @@ def test_on_peer_relation_changed_defers_until_member_started(handler):
     event.defer.assert_called_once()
 
 
+def test_on_peer_relation_changed_starts_patroni_before_the_member_gate(handler):
+    """The inline Patroni start runs BEFORE the member_started defer gate (union order)."""
+    membership = _mock_membership(handler)
+    handler.patroni_manager = Mock()
+    handler.patroni_manager.member_started = False
+    event = Mock()
+    with patch.object(handler.charm, "update_config"):
+        handler._on_peer_relation_changed(event)
+    handler.patroni_manager.start_patroni.assert_called_once()
+    membership.set_unit_status.assert_called_once_with(
+        WaitingStatus("awaiting for member to start")
+    )
+    event.defer.assert_called_once()
+
+
 def test_on_peer_relation_changed_leader_updates_endpoints(handler):
     _mock_membership(handler)
     handler.patroni_manager = Mock()
