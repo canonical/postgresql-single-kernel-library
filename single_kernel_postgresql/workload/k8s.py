@@ -383,13 +383,12 @@ class K8sWorkload(BaseWorkload):
         client.delete(Endpoints, name=f"{cluster_name}-config", namespace=namespace)
         return CommandResult(return_code=0)
 
-    def init_storage(self) -> None:
+    def init_storage(self, *, clear_stale_replica: bool = False) -> None:
         """Create the PostgreSQL data directories, clearing stale data if needed.
 
-        Port of the K8s charm's _create_pgdata/_ensure_pgdata_dirs_and_symlinks
-        helpers. The stale-data clearing branch of the pebble-ready helper (replica
-        joins on an initialized cluster) does not apply here: the restore action only
-        runs on the leader unit.
+        Port of the K8s charm's _ensure_pgdata_dirs_and_symlinks helper, plus the
+        replica stale-clear branch of _create_pgdata when the caller asks for it
+        (the charm owns the leader/cluster-initialised guards).
         """
         logs_storage = self.root / K8S_LOGS_STORAGE_PATH
         waldir_path = logs_storage / self.paths.versioned_path / K8S_WAL_DIR
@@ -398,6 +397,10 @@ class K8sWorkload(BaseWorkload):
         )
         archive_path = self.root / K8S_ARCHIVE_PATH / self.paths.versioned_path
         pgdata_path = self.paths.data
+
+        # Clear stale storage directories when a replica joins an initialized cluster.
+        if clear_stale_replica:
+            self._clear_stale_replica_paths(pgdata_path, waldir_path, temp_tablespace_path)
 
         # Create the pgdata directory on the storage mount (e.g., /var/lib/pg/data/16/main)
         if not self.container.exists(str(pgdata_path)):
@@ -483,6 +486,37 @@ class K8sWorkload(BaseWorkload):
             self.root / K8S_TEMP_STORAGE_PATH,
         ]:
             self.container.exec(["chown", f"{self.user}:{self.group}", str(path)]).wait()
+
+    def _clear_stale_replica_paths(
+        self,
+        pgdata_path: PathProtocol,
+        waldir_path: PathProtocol,
+        temp_tablespace_path: PathProtocol,
+    ) -> None:
+        """Clear the WAL and temp-tablespace paths left by a previous pod (port).
+
+        PersistentVolumes may retain data from previous pods, and pg_basebackup
+        requires empty --waldir and --tablespace directories. Clear on every call
+        until pgdata is populated (PG_VERSION exists), since pg_basebackup can fail
+        and leave stale files that prevent retries.
+        """
+        pgdata_populated = self.container.exists(str(pgdata_path / "PG_VERSION"))
+        if pgdata_populated:
+            return
+        for path in [waldir_path, temp_tablespace_path]:
+            if self.container.exists(str(path)):
+                try:
+                    self.container.exec([
+                        "find",
+                        str(path),
+                        "-mindepth",
+                        "1",
+                        "-delete",
+                    ]).wait_output()
+                    logger.info(f"Cleared stale content from {path} for replica initialization")
+                except ExecError as e:
+                    if "No such file or directory" not in str(e.stderr):
+                        logger.warning(f"Failed to clear {path}: {e}")
 
     def _ensure_log_symlink(self, target_name: str, symlink_path: PathProtocol) -> None:
         """Ensure symlink_path points to target in the logs storage."""

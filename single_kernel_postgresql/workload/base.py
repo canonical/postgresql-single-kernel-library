@@ -459,7 +459,7 @@ class BaseWorkload(ABC):
         """
         pass
 
-    def init_storage(self) -> None:
+    def init_storage(self, *, clear_stale_replica: bool = False) -> None:
         """Create the PostgreSQL data directories (K8s-only seam)."""
         raise NotImplementedError
 

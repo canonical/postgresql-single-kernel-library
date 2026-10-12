@@ -583,10 +583,6 @@ class ClusterMembershipManager(BaseManager):
 
         The event is deferred by the caller when one of the current units is
         copying data from the primary.
-
-        Raises:
-            NotReadyError: when a member is not ready (caller defers).
-            RetryError: when the cluster members could not be retrieved.
         """
         # Only the leader can reconfigure.
         if not self.state.model.unit.is_leader():
@@ -595,20 +591,27 @@ class ClusterMembershipManager(BaseManager):
         if not self.state.application.is_cluster_initialised:
             return
         host_endpoints = {self.get_hostname_from_member(member) for member in self.hosts()}
-        # Compare the Patroni cluster members and the Juju hosts to avoid an
-        # unnecessary reconfiguration.
-        if (
-            self.patroni_manager.cluster_members == self.hosts()
-            and set(self.state.application.endpoints) == host_endpoints
-        ):
-            return
-        logger.info("Reconfiguring cluster")
-        self.set_unit_status(MaintenanceStatus("reconfiguring cluster"))
-        missing_endpoints = host_endpoints - set(self.state.application.endpoints)
-        members_to_add = (self.hosts() - self.patroni_manager.cluster_members) | {
-            endpoint.split(".")[0] for endpoint in missing_endpoints
-        }
-        for member in members_to_add:
-            logger.debug("Adding %s to cluster", member)
-            self.add_cluster_member(member)
-        self.patroni_manager.update_synchronous_node_count()
+        try:
+            # Compare the Patroni cluster members and the Juju hosts to avoid an
+            # unnecessary reconfiguration.
+            if (
+                self.patroni_manager.cluster_members == self.hosts()
+                and set(self.state.application.endpoints) == host_endpoints
+            ):
+                return
+            logger.info("Reconfiguring cluster")
+            self.set_unit_status(MaintenanceStatus("reconfiguring cluster"))
+            missing_endpoints = host_endpoints - set(self.state.application.endpoints)
+            members_to_add = (self.hosts() - self.patroni_manager.cluster_members) | {
+                endpoint.split(".")[0] for endpoint in missing_endpoints
+            }
+            for member in members_to_add:
+                logger.debug("Adding %s to cluster", member)
+                self.add_cluster_member_k8s(member)
+            self.patroni_manager.update_synchronous_node_count()
+        except NotReadyError:
+            logger.info("Deferring reconfigure: another member doing sync right now")
+            event.defer()
+        except RetryError:
+            logger.info("Deferring reconfigure: failed to obtain cluster members from Patroni")
+            event.defer()
