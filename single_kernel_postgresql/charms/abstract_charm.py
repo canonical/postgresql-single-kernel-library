@@ -285,6 +285,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         # Resume or prepare the refresh (the charms' post-construction resume block).
         self.refresh_manager.on_init()
 
+        # ops only allows ops.Object methods as observers: the charm owns the
+        # collect-unit-status observe, the refresh manager owns the reconciliation.
+        self.framework.observe(self.on.collect_unit_status, self._reconcile_refresh_status)
+
         # Status Handler
         self.status_handler = StatusHandler(
             self,
@@ -295,6 +299,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.patroni_manager,
             self.logical_replication_manager,
         )
+
+    def _reconcile_refresh_status(self, event=None) -> None:
+        """Reconcile the unit status with the refresh status on collect-unit-status."""
+        self.refresh_manager.reconcile_refresh_status(event)
 
     def _is_standby_cluster(self) -> bool:
         """Whether this unit belongs to a standby (read-only) cluster (port)."""

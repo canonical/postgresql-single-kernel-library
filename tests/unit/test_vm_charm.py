@@ -97,3 +97,14 @@ def test_set_primary_status_message_blocked_by_s3(charm):
         charm.set_primary_status_message()
     assert isinstance(charm.unit.status, BlockedStatus)
     assert charm.unit.status.message == "S3 is not ready"
+
+
+def test_collect_unit_status_reconciles_the_refresh_status(charm):
+    # Patch the status collectors: the emit walks every manager's get_statuses,
+    # which would reach the snap/charm_refresh surface the unit env cannot build.
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status") as reconcile,
+    ):
+        charm.on.collect_unit_status.emit()
+    reconcile.assert_called_once()
