@@ -12,16 +12,21 @@ from ops.charm import CharmBase, UpdateStatusEvent
 
 if TYPE_CHECKING:
     import charm_refresh
+    from ops import EventBase
 
     from single_kernel_postgresql.managers.k8s import K8sManager
 
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.async_replication import PostgreSQLAsyncReplication
+from single_kernel_postgresql.events.backup import BackupEventsHandler
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.ldap import LDAP
 from single_kernel_postgresql.events.logical_replication import PostgreSQLLogicalReplication
-from single_kernel_postgresql.events.observer import ClusterTopologyChangeCharmEvents
+from single_kernel_postgresql.events.observer import (
+    ClusterTopologyChangeCharmEvents,
+    ObserverEventsHandler,
+)
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.events.watcher import WatcherEventsHandler
@@ -95,7 +100,6 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             peer_certificate=self.tls.peer_certificate,
         )
         self.patroni_manager = PatroniManager(state=self.state, workload=self.workload)
-        self.cluster_manager = ClusterManager(state=self.state, workload=self.workload)
 
         # Substrate-only K8s API seam: the K8s charm builds it by overriding
         # build_k8s_manager(); VM charms need no K8s API access. Built here so the
@@ -139,6 +143,17 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         )
         self.database = DatabaseEventsHandler(
             self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
+        )
+
+        # Built after the async subsystem so the rotation/standby bridges resolve.
+        self.cluster_manager = ClusterManager(
+            state=self.state,
+            workload=self.workload,
+            patroni_manager=self.patroni_manager,
+            async_replication_manager=self.async_replication_manager,
+            update_config=self.update_config,
+            set_unit_status=self.set_unit_status,
+            is_standby_cluster=self._is_standby_cluster,
         )
 
         # Retry pending logical-replication validations on the update-status heartbeat;
@@ -202,7 +217,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             update_config=self.update_config,
             set_unit_status=self.set_unit_status,
             peer_relation_changed=lambda event: (
-                self.postgresql_events_handler._on_peer_relation_changed(event)  # ty: ignore[unresolved-attribute]
+                self.postgresql_events_handler._on_peer_relation_changed(event)
             ),
             remove_from_members_ips=lambda ip: self.membership_manager.remove_member_ip(ip),
         )
@@ -218,6 +233,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             raft_manager=self.raft_manager,
             set_primary_status_message=self.set_primary_status_message,
             primary_endpoint=lambda: self.primary_endpoint,
+            update_certificate=self._update_certificate,
         )
 
         # The backup subsystem (port of the VM charm's composition wiring): the
@@ -243,6 +259,17 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             is_standby_cluster=self._is_standby_cluster,
         )
         self.observer_manager = ObserverManager(self.state, self.workload)
+        self.backup_events_handler = BackupEventsHandler(
+            self, self.state, self.backup_manager, self.restore_manager
+        )
+        self.observer_events_handler = ObserverEventsHandler(
+            self,
+            self.workload,
+            self.state,
+            self.async_replication_manager,
+            self.database_manager,
+            self.watcher_handler,
+        )
 
         # Events Handler
         self.postgresql_events_handler = PostgreSQLEventsHandler(
@@ -432,6 +459,27 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def fix_leader_annotation(self) -> bool:
         """Fix the leader annotation (K8s only; overridden there)."""
         return False
+
+    def _update_certificate(self) -> None:
+        """Re-request the TLS certificates after an IP change (VM only; overridden there)."""
+        return None
+
+    def _on_config_changed(self, event: "EventBase") -> None:
+        """Handle configuration changes (the K8s charm overrides; the VM flow lives in events)."""
+        return None
+
+    @property
+    def is_primary(self) -> bool:
+        """Whether this unit is the primary instance."""
+        return self.unit.name == self.patroni_manager.get_primary(unit_name_pattern=True)
+
+    def _setup_exporter(self) -> None:
+        """Set up the postgres exporter snap service (VM only; overridden there)."""
+        return None
+
+    def _setup_pgbackrest_exporter(self) -> None:
+        """Set up the pgbackrest exporter snap service (VM only; overridden there)."""
+        return None
 
     @property
     @abstractmethod

@@ -23,7 +23,6 @@ from single_kernel_postgresql.managers.cluster_membership import (
     DEFER,
     ClusterMembershipManager,
 )
-from single_kernel_postgresql.utils import new_password  # noqa: F401  (parity with charm utils)
 from tenacity import RetryError
 
 PEER_ADDRESS = f"{PEER_RELATION}-address"
@@ -102,8 +101,6 @@ def test_reconfigure_cluster(harness, membership):
     event.unit = harness.charm.unit
 
     # Cluster not initialised: cleanup is skipped, members are added.
-    with patch.object(harness.charm.state.application, "data", {}, create=True):
-        pass
     with (
         patch(
             "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.is_cluster_initialised",
@@ -317,7 +314,6 @@ def test_raft_reinitialisation(harness, membership):
     membership.raft_manager = Mock()
     with (
         patch.object(type(harness.charm.state), "has_raft_keys", Mock(return_value=False)),
-        patch("single_kernel_postgresql.utils.new_password", return_value="pw"),
     ):
         # No data: nothing happens.
         membership.raft_reinitialisation()

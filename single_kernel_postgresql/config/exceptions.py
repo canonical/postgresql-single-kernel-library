@@ -79,7 +79,7 @@ class UpdateSyncNodeCountError(PostgreSQLBaseError):
     """Raised when updating synchronous_node_count failed for some reason."""
 
 
-class CannotConnectError(Exception):
+class CannotConnectError(PostgreSQLBaseError):
     """Cannot run the connectivity check against the database."""
 
 
