@@ -12,6 +12,9 @@ POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 
 # Snap
 POSTGRESQL_SNAP_NAME = "charmed-postgresql"
+SNAP_OOM_SCORE_ADJUST_MIN = -900
+SNAP_VITALITY_HINT = "resilience.vitality-hint"
+SNAP_VITALITY_MAX_SNAPS = 100
 
 # Relations
 PEER_RELATION = "database-peers"
@@ -29,6 +32,17 @@ SYSTEM_USERS = [BACKUP_USER, MONITORING_USER, REPLICATION_USER, REWIND_USER, USE
 
 # Extensions
 PG_CRON_DATABASE = "postgres"
+
+# Libraries the charm pins into `shared_preload_libraries`, in load order.
+# ConfigManager renders only the libraries the installed snap actually ships,
+# so an older snap never receives a preload entry it cannot load.
+SHARED_PRELOAD_LIBRARIES = (
+    "timescaledb",
+    "pgaudit",
+    "set_user",
+    "pg_stat_statements",
+    "pg_cron",
+)
 
 # Paths
 ## VM Paths
