@@ -1006,6 +1006,13 @@ class PostgreSQLEventsHandler(Object):
         # the relation.
         self.patroni_manager.start_patroni()
 
+        # Assert the member is up and running before marking the unit as active.
+        if not self.patroni_manager.member_started:
+            logger.debug("Deferring on_peer_relation_changed: awaiting for member to start")
+            self.membership_manager.set_unit_status(WaitingStatus("awaiting for member to start"))
+            event.defer()
+            return
+
         # In Raft mode with a watcher, ensure this member is properly registered in
         # the DCS: a new member may be running but not registered if it was added to
         # Raft after starting.
@@ -1049,20 +1056,13 @@ class PostgreSQLEventsHandler(Object):
             logger.debug("on_peer_relation_changed early exit: Backup restore check failed")
             return False
 
-        # Assert the member is up and running before marking the unit as active.
-        if not self.patroni_manager.member_started:
-            logger.debug("Deferring on_peer_relation_changed: awaiting for member to start")
-            self.membership_manager.set_unit_status(WaitingStatus("awaiting for member to start"))
-            event.defer()
-            return False
-
         return True
 
     def _vm_start_stop_pgbackrest_service(self, event: "HookEvent") -> None:
         """Start or stop the pgBackRest TLS server service on a TLS change (port)."""
         if not self.backup_manager.start_stop_pgbackrest_service():
             logger.debug(
-                "Deferring on_peer_relation_changed: awaiting for TLS server service to start"
+                "Deferring on_peer_relation_changed: awaiting for TLS server service to start on primary"
             )
             event.defer()
             return
