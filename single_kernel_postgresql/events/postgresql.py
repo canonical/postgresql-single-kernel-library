@@ -90,7 +90,7 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLListUsersError,
     PostgreSQLUpdateUserPasswordError,
 )
-from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
 from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
@@ -179,11 +179,6 @@ class PostgreSQLEventsHandler(Object):
                 self.charm.on.postgresql_pebble_ready, self._on_postgresql_pebble_ready
             )
             self.framework.observe(
-                self.charm.on[PEER_RELATION].relation_changed, self._on_peer_relation_changed
-            )
-            # The charm re-runs the full peer-relation flow on secret changes too.
-            self.framework.observe(self.charm.on.secret_changed, self._on_peer_relation_changed)
-            self.framework.observe(
                 self.charm.on[PEER_RELATION].relation_departed, self._on_peer_relation_departed
             )
             self.framework.observe(
@@ -192,7 +187,6 @@ class PostgreSQLEventsHandler(Object):
             self.framework.observe(self.charm.on.upgrade_charm, self._on_upgrade_charm)
             self.framework.observe(self.charm.on.stop, self._on_stop)
         if self.state.substrate == Substrates.VM:
-            self.framework.observe(self.charm.on.secret_changed, self._on_secret_changed)
             self.framework.observe(
                 getattr(
                     self.charm.on,
@@ -358,26 +352,7 @@ class PostgreSQLEventsHandler(Object):
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
         """Event handler for leader elected event (port of the VM charm's flow)."""
         if self.state.substrate == Substrates.K8S:
-            # The K8s leader-elected flow is ported by the K8s slice; keep the
-            # previously-ported behavior until then.
-            try:
-                self.cluster_manager.configure_system_passwords()
-            except SettingSystemPasswordError:
-                self.state.add_status_if_not_present(
-                    GeneralStatuses.FAILED_SETTING_PASSWORDS.value,
-                    scope="unit",
-                    component=self.cluster_manager.name,
-                )
-                event.defer()
-                return
-
-            self.tls_manager.configure_internal_peer_ca()
-
-            # Render the Patroni configuration — required for bootstrap (the real charm
-            # renders on leader-elected); route through the charm bridge for the per-user
-            # pg_hba map the real charm passes.
-            if self.charm.substrate == Substrates.VM:
-                self.charm.update_config()
+            self._k8s_leader_elected(event)
             return
 
         # Consider configured system user passwords.
@@ -413,6 +388,63 @@ class PostgreSQLEventsHandler(Object):
         self._update_leader_cluster_members(event)
 
         self._update_leader_endpoints()
+
+    def _k8s_leader_elected(self, event: LeaderElectedEvent) -> None:
+        """Leader-elected on K8s (port)."""
+        from lightkube.core.exceptions import ApiError
+
+        # Consider configured system user passwords, then set the needed
+        # passwords if they weren't set before (the K8s charm has no raft).
+        system_user_passwords = self._ensure_system_passwords(event)
+        for key in (
+            USER_PASSWORD_KEY,
+            REPLICATION_PASSWORD_KEY,
+            REWIND_PASSWORD_KEY,
+            MONITORING_PASSWORD_KEY,
+            PATRONI_PASSWORD_KEY,
+        ):
+            if self.state.get_secret(APP_SCOPE, key) is None:
+                if key in system_user_passwords:
+                    # Use provided passwords for system-users if available.
+                    self.state.set_secret(APP_SCOPE, key, system_user_passwords[key])
+                    logger.info(f"Using configured password for {key}")
+                else:
+                    # Generate a password for this user if not provided.
+                    self.state.set_secret(APP_SCOPE, key, new_password())
+                    logger.info(f"Generated new password for {key}")
+
+        # Add this unit to the list of cluster members (the cluster should start
+        # with only this member).
+        endpoint = self.state.endpoint
+        if endpoint is not None and endpoint not in self.state.endpoints:
+            self.membership_manager.add_endpoint(endpoint)
+
+        if not self.state.get_secret(APP_SCOPE, "internal-ca"):
+            self.tls_manager.generate_internal_peer_ca()
+
+        # Delete kubernetes services and endpoints from previous deployments.
+        self._k8s_manager.cleanup_old_cluster_resources()
+
+        if not self.charm.fix_leader_annotation():
+            return
+
+        # Create resources and add labels needed for replication.
+        if (
+            self.refresh_manager.refresh is not None
+            and not self.refresh_manager.refresh.in_progress
+        ):
+            try:
+                self._k8s_manager.create_services()
+            except ApiError:
+                logger.exception("failed to create k8s services")
+                self.charm.set_unit_status(BlockedStatus("failed to create k8s services"))
+                return
+
+        # Remove departing units when the leader changes.
+        for endpoint in self.membership_manager.get_endpoints_to_remove():
+            self.membership_manager.remove_endpoint(endpoint)
+
+        self.membership_manager.add_members_k8s(event)
 
     def _update_leader_endpoints(self) -> None:
         """Generate the internal CA, render, and refresh the endpoints (port)."""
@@ -1152,8 +1184,10 @@ class PostgreSQLEventsHandler(Object):
             return
 
         try:
+            logger.debug("Restarting PostgreSQL")
             self.patroni_manager.restart_postgresql()
-            self.state.peer.data["postgresql_restarted"] = "True"
+            if self.state.substrate == Substrates.VM:
+                self.state.peer.data["postgresql_restarted"] = "True"
         except RetryError:
             error_message = "failed to restart PostgreSQL"
             logger.exception(error_message)

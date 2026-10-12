@@ -138,6 +138,25 @@ def _update_config_is_a_noop(request, substrate):
     patcher.stop()
 
 
+@pytest.fixture(autouse=True)
+def _fix_leader_annotation_is_a_stub(request, substrate):
+    """The K8s leader-elected flow calls the charm's fix_leader_annotation.
+
+    Its lightkube Client cannot be built in the unit env; the k8s_charm tests
+    opt out and exercise the real method.
+    """
+    if substrate != Substrates.K8S or request.module.__name__.endswith("test_k8s_charm"):
+        yield
+        return
+    patcher = patch(
+        "single_kernel_postgresql.charms.k8s_charm.PostgreSQLK8sCharm.fix_leader_annotation",
+        return_value=True,
+    )
+    patcher.start()
+    yield
+    patcher.stop()
+
+
 @pytest.fixture
 def harness(substrate, test_charm_path):
     """A begun Harness for the substrate's test charm, with the peer relation added."""
@@ -244,6 +263,15 @@ def harness(substrate, test_charm_path):
                 patch(
                     "single_kernel_postgresql.managers.raft.RaftManager.get_raft_status",
                     return_value={},
+                )
+            )
+            # Unit tests never talk to the K8s API: the leader-elected flow's
+            # resource cleanup and service creation run through the real manager.
+            # Client-class patches in the k8s manager tests override this guard.
+            stack.enter_context(
+                patch(
+                    "single_kernel_postgresql.managers.k8s.Client",
+                    return_value=MagicMock(),
                 )
             )
             systemd_mock = MagicMock()

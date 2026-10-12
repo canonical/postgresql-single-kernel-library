@@ -240,6 +240,12 @@ K8S_DEBIAN_DATA_SYMLINK = "var/lib/postgresql/16"
 K8S_POSTGRESQL_LOGS_SYMLINK_PATH = "var/log/postgresql"
 K8S_PATRONI_LOGS_SYMLINK_PATH = "var/log/patroni"
 K8S_PGBACKREST_LOGS_SYMLINK_PATH = "var/log/pgbackrest"
+# K8s LogProxyConsumer log-files scheme (the K8s charm's POSTGRES_LOG_FILES).
+K8S_POSTGRES_LOG_FILES = [
+    f"/{K8S_LOGS_STORAGE_PATH}/{K8S_PGBACKREST_LOGS_PATH}/*",
+    f"/{K8S_LOGS_STORAGE_PATH}/{K8S_PATRONI_LOGS_PATH}/patroni.log",
+    f"/{K8S_LOGS_STORAGE_PATH}/{K8S_PG_LOGS_PATH}/postgresql*.log",
+]
 
 ## Restore
 VM_PATRONICTL_EXECUTABLE = "charmed-postgresql.patronictl"

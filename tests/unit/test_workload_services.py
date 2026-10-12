@@ -29,6 +29,34 @@ def workload(substrate):
     return K8sWorkload(".", Mock(name="container"))
 
 
+# --- init_storage: the replica stale-clear branch (port of _create_pgdata)
+
+
+def test_init_storage_clears_stale_wal_and_temp_for_a_replica_join(substrate, workload):
+    if substrate == Substrates.VM:
+        pytest.skip("K8s only")
+        return
+    container = workload.container
+    # Everything "exists" except the PG_VERSION marker: the replica's pgdata is empty.
+    container.exists.side_effect = lambda path: "PG_VERSION" not in str(path)
+    container.list_files.return_value = []
+    workload.init_storage(clear_stale_replica=True)
+    deletes = [c.args[0] for c in container.exec.call_args_list if c.args[0][0] == "find"]
+    assert len(deletes) == 2
+    assert all(args[2:] == ["-mindepth", "1", "-delete"] for args in deletes)
+
+
+def test_init_storage_without_the_replica_gate_keeps_existing_paths(substrate, workload):
+    if substrate == Substrates.VM:
+        pytest.skip("K8s only")
+        return
+    container = workload.container
+    container.exists = Mock(return_value=False)
+    container.list_files.return_value = []
+    workload.init_storage()
+    assert not any(c.args[0][0] == "find" for c in container.exec.call_args_list if c.args)
+
+
 # --- run_cmd
 
 

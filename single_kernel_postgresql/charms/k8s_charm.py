@@ -538,7 +538,12 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
 
     def create_pgdata(self) -> None:
         """Create the PostgreSQL data directories (ported from the K8s charm)."""
-        self.workload.init_storage()
+        # The stale-clear applies when a replica joins an initialized cluster; the
+        # workload adds the pgdata-populated check.
+        clear_stale_replica = (
+            not self.state.model.unit.is_leader() and self.state.application.is_cluster_initialised
+        )
+        self.workload.init_storage(clear_stale_replica=clear_stale_replica)
 
     @property
     def primary_endpoint(self) -> str | None:

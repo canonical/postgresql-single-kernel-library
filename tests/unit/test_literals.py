@@ -25,6 +25,11 @@ def test_shared_collection_constants():
     }
     assert literals.PLUGIN_OVERRIDES == {"audit": "pgaudit", "uuid_ossp": '"uuid-ossp"'}
     assert literals.SPI_MODULE == ["refint", "autoinc", "insert_username", "moddatetime"]
+    assert literals.K8S_POSTGRES_LOG_FILES == [
+        "/var/lib/pg/logs/16/main/pgbackrest_logs/*",
+        "/var/lib/pg/logs/16/main/patroni_logs/patroni.log",
+        "/var/lib/pg/logs/16/main/pg_logs/postgresql*.log",
+    ]
 
 
 def test_metrics_ports_are_str():

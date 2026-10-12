@@ -138,7 +138,8 @@ def test_membership_hosts_are_pod_names(harness, membership):
 
 def test_membership_endpoints_writers_leader_gated(harness, membership):
     rel_id = _rel_id(harness)
-    harness.set_leader(True)
+    with harness.hooks_disabled():
+        harness.set_leader(True)
     membership.add_endpoint("host-0")
     membership.add_endpoint("host-0")
     assert json.loads(harness.get_relation_data(rel_id, harness.charm.app.name)["endpoints"]) == [
