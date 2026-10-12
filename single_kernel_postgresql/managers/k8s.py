@@ -10,6 +10,7 @@ such as interacting with the Kubernetes API for pod resources and trust.
 
 import itertools
 import logging
+from collections.abc import Callable
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
@@ -40,9 +41,17 @@ class K8sManager(BaseManager):
     This manager is responsible for handling operations related to Kubernetes.
     """
 
-    def __init__(self, state: CharmState, workload: K8sWorkload):
+    def __init__(
+        self,
+        state: CharmState,
+        workload: K8sWorkload,
+        on_deployed_without_trust: Callable[[], None] | None = None,
+    ):
         super().__init__(state, workload, "pebble_manager")
         self.workload: K8sWorkload = workload  # type: ignore[assignment]
+        # The trust-loss callback (set_unit_status lives on the charm); no-op when
+        # the composition root does not wire it (the lib suites).
+        self.on_deployed_without_trust = on_deployed_without_trust or (lambda: None)
 
     def _get_node_name_for_pod(self) -> str:
         """Return the node name for this unit's own pod."""
@@ -327,5 +336,11 @@ class K8sManager(BaseManager):
                     namespace=self.state.model.name,
                 )
                 logger.info(f"deleted {kind.__name__}/{self.state.model.app.name}{suffix}")
-            except ApiError:
+            except ApiError as e:
+                if e.status.code == 403:
+                    self.on_deployed_without_trust()
+                    return
+                # Ignore the error only when the resource doesn't exist.
+                if e.status.code != 404:
+                    raise e
                 logger.debug(f"{kind.__name__}/{self.state.model.app.name}{suffix} already absent")
