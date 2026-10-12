@@ -10,9 +10,30 @@ from unittest.mock import MagicMock, PropertyMock, patch, sentinel
 
 import pytest
 import requests
+from ops import EventBase, EventSource, Object, ObjectEvents
 from ops.testing import Harness
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PEER_RELATION
+
+
+class _FakeTransferEvents(ObjectEvents):
+    certificate_available = EventSource(EventBase)
+    certificate_removed = EventSource(EventBase)
+
+
+class _FakeCertificateTransferRequires(Object):
+    on = _FakeTransferEvents()
+
+    def __init__(self, charm, relation_name):
+        super().__init__(charm, "fake-certificate-transfer-requires")
+
+
+# The k8s charm imports the certificate-transfer charm-lib at module top; register
+# the stub before any test module imports the lib chain (conftest imports first).
+# The fake carries real ops BoundEvents so harness-based tests can observe.
+sys.modules["charms.certificate_transfer_interface.v0.certificate_transfer"] = MagicMock(
+    CertificateTransferRequires=_FakeCertificateTransferRequires,
+)
 
 
 def _test_charm_class(test_charm_path: str, module_name: str):
