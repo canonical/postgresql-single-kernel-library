@@ -58,7 +58,8 @@ def test_set_unit_status_respects_higher_refresh_priority(charm):
 
 
 def test_set_app_status_gates(charm, harness):
-    harness.set_leader(True)
+    with harness.hooks_disabled():
+        harness.set_leader(True)
     charm.refresh_manager.can_set_app_status = False
     charm.set_app_status(BlockedStatus("nope"))
     assert charm.app.status != BlockedStatus("nope")
