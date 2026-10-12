@@ -9,8 +9,7 @@ import re
 import secrets
 import string
 from asyncio import as_completed, create_task, run, wait
-from contextlib import suppress
-from ssl import CERT_NONE, create_default_context
+from ssl import CERT_NONE, SSLError, create_default_context
 from typing import Any
 
 from httpx import AsyncClient, BasicAuth, HTTPError
@@ -172,8 +171,15 @@ async def _httpx_get_request(
 ) -> dict[str, Any] | None:
     ssl_ctx = create_default_context()
     if verify:
-        with suppress(FileNotFoundError):
+        # A missing OR empty/corrupt CA bundle must not crash the caller:
+        # load_verify_locations raises FileNotFoundError when the file is
+        # absent, but ssl.SSLError (NO_CERTIFICATE_OR_CRL_FOUND) when it exists
+        # yet holds no certificates. Both mean "cannot verify this endpoint",
+        # so degrade to an unreachable request instead of propagating.
+        try:
             ssl_ctx.load_verify_locations(cafile=cafile)
+        except (FileNotFoundError, SSLError):
+            pass
     else:
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = CERT_NONE
