@@ -7,10 +7,15 @@ import logging
 import os
 import signal
 import subprocess
+from contextlib import suppress
+from importlib import resources
 from pathlib import Path
 from sys import version_info
 from typing import TYPE_CHECKING
 
+with suppress(ImportError):
+    from charmlibs.systemd import daemon_reload, service_enable
+from jinja2 import Template
 from ops import ActiveStatus
 
 from single_kernel_postgresql.config.enums import Substrates
@@ -20,6 +25,7 @@ from single_kernel_postgresql.config.literals import (
     OBSERVER_VM_LOG_FILE_PATH,
 )
 from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.utils import render_file
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.core.state import CharmState
@@ -128,6 +134,39 @@ class ObserverManager(BaseManager):
                 self.state.peer.observer_pid = None
             except OSError:
                 pass
+
+
+def start_raft_observer() -> None:
+    """Render systemd units and start the observer."""
+    timer_service_file = "/etc/systemd/system/raft-observer.timer"
+    oneshot_service_file = "/etc/systemd/system/raft-observer.service"
+
+    template = Template(
+        resources
+        .files("single_kernel_postgresql.templates.vm")
+        .joinpath("raft-observer.service.j2")
+        .read_text()
+    )
+
+    rendered = template.render(
+        envvars=copy_environment(),
+        script="-m single_kernel_postgresql.scripts.raft_observer",
+    )
+    render_file(Substrates.VM, oneshot_service_file, rendered, 0o644, change_owner=False)
+
+    template = Template(
+        resources
+        .files("single_kernel_postgresql.templates.vm")
+        .joinpath("raft-observer.timer.j2")
+        .read_text()
+    )
+    rendered = template.render()
+    render_file(Substrates.VM, timer_service_file, rendered, 0o644, change_owner=False)
+
+    # Reload systemd to pick up the new service
+    daemon_reload()
+    service_enable(timer_service_file, "--now")
+    logger.info("Installed and enabled raft observer timer")
 
 
 def copy_environment() -> dict[str, str]:
