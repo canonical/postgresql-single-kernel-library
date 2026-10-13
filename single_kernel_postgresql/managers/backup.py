@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING
 
 import jinja2
 from botocore.exceptions import ClientError, ParamValidationError, SSLError
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import ActiveStatus, BlockedStatus, JujuVersion, MaintenanceStatus
 from ops.pebble import ExecError
 from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
@@ -35,6 +37,7 @@ from single_kernel_postgresql.config.literals import (
     PGBACKREST_LOG_LEVEL_STDERR,
     PGBACKREST_LOGROTATE_FILE,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
@@ -233,6 +236,24 @@ class BackupManager(BaseManager):
         self.state.application.s3_initialization_start = time.asctime(time.gmtime())
         self.state.application.stanza = ""
         self.state.application.s3_initialization_done = ""
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses (the DPH component contract).
+
+        Replays the persisted s3-initialization block message so it survives
+        the collect (the direct write only lives until hook end).
+        """
+        if scope == "unit" and (
+            message := (
+                self.state.application.s3_initialization_block_message
+                if self.state.peer.is_app_leader
+                else self.state.peer.s3_initialization_block_message
+            )
+        ):
+            return [StatusObject(status="blocked", message=message)]
+        return [GeneralStatuses.ACTIVE_IDLE.value]
 
     # -- Stanza configuration rendering ----------------------------------------
 
