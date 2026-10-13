@@ -16,6 +16,8 @@ from functools import cached_property
 from hashlib import shake_128
 from typing import TypedDict
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import ActiveStatus, BlockedStatus, ModelError, Relation, StatusBase
 
 from single_kernel_postgresql.config.enums import Substrates
@@ -29,6 +31,7 @@ from single_kernel_postgresql.config.literals import (
     SYSTEM_USERS,
     USERNAME_MAPPING_LABEL,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseProvides,
@@ -57,6 +60,10 @@ logger = logging.getLogger(__name__)
 NO_ACCESS_TO_SECRET_MSG = "Missing grant to requested entity secret"  # noqa: S105
 FORBIDDEN_USER_MSG = "Requesting an existing username"
 PREFIX_TOO_SHORT_MSG = "Prefix too short"
+# Per-unit peer-databag flag: the durable blocked-message for client-relation request
+# errors, re-surfaced by get_statuses so the collect replay survives ops' hook-end
+# recompute (the LogicalReplicationManager pattern; see ConfigManager.get_statuses).
+DATABASE_REQUEST_ERROR_KEY = "database-request-error"
 
 # The shortest prefixed database request that is accepted: three characters plus the "*".
 MINIMUM_PREFIX_REQUEST_LENGTH = 4
@@ -298,7 +305,7 @@ class DatabaseManager(BaseManager):
         if requested_entities := request["requested_entity_secret_content"]:
             for key, val in requested_entities.items():
                 if key in SYSTEM_USERS or key in postgresql_client.list_users():
-                    self.set_unit_status(BlockedStatus(FORBIDDEN_USER_MSG))
+                    self.block_on_request_error(FORBIDDEN_USER_MSG)
                     return None
                 return key, val or new_password()
         return self.relation_username(request["relation_id"]), new_password()
@@ -310,7 +317,7 @@ class DatabaseManager(BaseManager):
         database = request["database"] or ""
         if database and database[-1] == "*":
             if len(database) < MINIMUM_PREFIX_REQUEST_LENGTH:
-                self.set_unit_status(BlockedStatus(PREFIX_TOO_SHORT_MSG))
+                self.block_on_request_error(PREFIX_TOO_SHORT_MSG)
                 return None
             prefix_matching = request["prefix_matching"]
             if prefix_matching and prefix_matching != "all":
@@ -605,12 +612,34 @@ class DatabaseManager(BaseManager):
                     return True
         return False
 
+    def block_on_request_error(self, message: str) -> None:
+        """Persist a client-relation blocking state and write the unit status.
+
+        The collect handler re-adds all-active on every hook, so a direct
+        unit.status write only lives until hook end; the durable peer-databag
+        flag is what the collect replay reads (see get_statuses).
+        """
+        self.state.peer.data[DATABASE_REQUEST_ERROR_KEY] = message
+        self.set_unit_status(BlockedStatus(message))
+
+    def clear_request_error(self) -> None:
+        """Clear the persisted client-relation blocking state."""
+        self.state.peer.data.pop(DATABASE_REQUEST_ERROR_KEY, None)
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses (the DPH component contract)."""
+        if scope == "unit" and (message := self.state.peer.data.get(DATABASE_REQUEST_ERROR_KEY)):
+            return [StatusObject(status="blocked", message=message)]
+        return [GeneralStatuses.ACTIVE_IDLE.value]
+
     def unblock_custom_user_errors(
         self, postgresql_client: PostgreSQLClient, relation: Relation
     ) -> None:
         """Clear a custom-user blocking status once no relation still requests one."""
         if self.check_for_invalid_extra_user_roles(postgresql_client, relation.id):
-            self.set_unit_status(BlockedStatus(INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE))
+            self.block_on_request_error(INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE)
             return
         existing_users = postgresql_client.list_users()
         for other in self.state.model.relations.get(self.relation_name, []):
@@ -629,12 +658,13 @@ class DatabaseManager(BaseManager):
                             logger.warning(
                                 f"Relation {other.id} is still requesting a forbidden user"
                             )
-                            self.set_unit_status(BlockedStatus(FORBIDDEN_USER_MSG))
+                            self.block_on_request_error(FORBIDDEN_USER_MSG)
                             return
             except ModelError:
                 logger.warning(f"Relation {other.id} still cannot access the set secret")
-                self.set_unit_status(BlockedStatus(NO_ACCESS_TO_SECRET_MSG))
+                self.block_on_request_error(NO_ACCESS_TO_SECRET_MSG)
                 return
+        self.clear_request_error()
         self.set_unit_status(ActiveStatus())
 
     def update_unit_status(self, postgresql_client: PostgreSQLClient, relation: Relation) -> None:
@@ -651,10 +681,12 @@ class DatabaseManager(BaseManager):
             and not self.check_for_invalid_extra_user_roles(postgresql_client, relation.id)
             and not self.check_for_invalid_database_name(relation.id)
         ):
+            self.clear_request_error()
             self.set_unit_status(ActiveStatus())
         # Matches the handler's failed-init message; the charms' longer substring never
         # matched their K8s wording, leaving the block unclearable there.
         if self.state.peer.is_blocked_status and "Failed to initialize" in unit.status.message:
+            self.clear_request_error()
             self.set_unit_status(ActiveStatus())
         if self.state.peer.is_blocked_status and unit.status.message == PREFIX_TOO_SHORT_MSG:
             for other in self.state.model.relations.get(self.relation_name, []):
@@ -665,6 +697,7 @@ class DatabaseManager(BaseManager):
                     and len(database) < MINIMUM_PREFIX_REQUEST_LENGTH
                 ):
                     return
+                self.clear_request_error()
                 self.set_unit_status(ActiveStatus())
                 return
         if self.state.peer.is_blocked_status and unit.status.message in [
