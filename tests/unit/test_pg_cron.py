@@ -44,6 +44,10 @@ def test_pg_cron_patroni_configuration(manager, pg_config, enabled):
     with (
         patch.object(type(manager.state), "config", PropertyMock(return_value=config)),
         patch.object(type(manager), "_are_passwords_set", PropertyMock(return_value=True)),
+        patch(
+            "single_kernel_postgresql.managers.config._snap_provided_libraries",
+            return_value={"timescaledb", "pgaudit", "set_user", "pg_stat_statements", "pg_cron"},
+        ),
         patch("single_kernel_postgresql.managers.config.render_file") as write,
     ):
         manager.render_patroni_yml_file()
@@ -59,6 +63,29 @@ def test_pg_cron_patroni_configuration(manager, pg_config, enabled):
             "cron.use_background_workers": "on",
             "cron.timezone": "GMT",
         }
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_pg_cron_gated_when_snap_does_not_ship_it(substrate, manager, pg_config, enabled):
+    """An older snap without pg_cron.so must not receive the preload entry or cron.* GUCs."""
+    if substrate == "k8s":
+        pytest.skip("the K8s image is version-locked to the charm, so no snap/probe skew exists")
+    config = pg_config.model_copy(update={"plugin_pg_cron_enable": enabled})
+    with (
+        patch.object(type(manager.state), "config", PropertyMock(return_value=config)),
+        patch.object(type(manager), "_are_passwords_set", PropertyMock(return_value=True)),
+        patch(
+            "single_kernel_postgresql.managers.config._snap_provided_libraries",
+            return_value={"timescaledb", "pgaudit", "set_user", "pg_stat_statements"},
+        ),
+        patch("single_kernel_postgresql.managers.config.render_file") as write,
+    ):
+        manager.render_patroni_yml_file()
+    rendered = yaml.safe_load(write.call_args.args[2])
+    for section in [rendered["bootstrap"]["dcs"]["postgresql"], rendered["postgresql"]]:
+        parameters = section["parameters"]
+        assert "pg_cron" not in parameters["shared_preload_libraries"].split(",")
+        assert not [key for key in parameters if key.startswith("cron.")]
 
 
 @pytest.fixture
