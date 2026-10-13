@@ -6,6 +6,7 @@ from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus
+from single_kernel_postgresql.compat.postgresql import PostgreSQLCreateDatabaseError
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 
@@ -261,3 +262,68 @@ def test_cluster_get_statuses_survives_unreadable_peer_secrets(charm):
         statuses = charm.cluster_manager.get_statuses("unit")
 
     assert statuses == [GeneralStatuses.WAITING_PASSWORDS_GENERATION.value]
+
+
+def test_database_request_error_survives_collect(charm, harness):
+    """The invalid-database blocked must survive the collect replay.
+
+    Live repro (2026-10-13): after relating data-integrator with an invalid
+    database-name, the charm raised PostgreSQLCreateDatabaseError and wrote the
+    blocked directly - which the collect handler's all-active recompute wiped at
+    hook end, so nothing polling juju status ever saw the block. The durable
+    peer-databag flag re-surfaces it via DatabaseManager.get_statuses.
+    """
+    charm.state.application.data["cluster_initialised"] = "True"
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    with (
+        patch.object(
+            type(charm.patroni_manager),
+            "member_started",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch.object(
+            type(charm), "primary_endpoint", new_callable=PropertyMock, return_value="10.1.1.1"
+        ),
+        patch.object(charm.database_manager, "get_username_mapping", return_value={}),
+        patch.object(charm.database_manager, "get_credentials", return_value=("relation-5", "pw")),
+        patch.object(
+            charm.database_manager,
+            "collect_databases",
+            return_value=("databases", ["databases"]),
+        ),
+        patch.object(charm.database_manager, "are_units_in_sync", return_value=True),
+        patch.object(type(charm), "postgresql", new_callable=PropertyMock, return_value=Mock()),
+        patch.object(charm.database_manager, "update_username_mapping"),
+        patch.object(charm.database_manager, "update_unit_status"),
+        patch.object(
+            charm.database_manager,
+            "create_relation_user_and_database",
+            side_effect=PostgreSQLCreateDatabaseError("invalid database name"),
+        ),
+        patch.object(charm, "update_config", return_value=True),
+    ):
+        charm.database._on_database_requested(
+            Mock(
+                relation=Mock(id=5),
+                database="databases",
+                extra_user_roles="",
+                prefix_matching=False,
+                requested_entity_secret_content=None,
+            )
+        )
+
+    assert charm.state.peer.data["database-request-error"] == "invalid database name"
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus("invalid database name")
+
+        # The update-status recompute wipes per-manager store records; the flag
+        # must bring the blocked back.
+        charm.status_handler._on_update_status(Mock())
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus("invalid database name")
