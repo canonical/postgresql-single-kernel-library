@@ -61,6 +61,10 @@ def test_render_patroni_yml_file(substrate, config):
         patch("single_kernel_postgresql.managers.config.render_file") as _render_file,
         patch("single_kernel_postgresql.managers.config.Template") as _template,
         patch(
+            "single_kernel_postgresql.managers.config._snap_provided_libraries",
+            return_value={"timescaledb", "pgaudit", "set_user", "pg_stat_statements", "pg_cron"},
+        ),
+        patch(
             "single_kernel_postgresql.core.state.CharmState.config", new_callable=PropertyMock
         ) as _config,
         patch(
@@ -182,6 +186,8 @@ def test_render_patroni_yml_file(substrate, config):
                 endpoint=sentinel.endpoint,
                 endpoints=["endpoint1", "endpoint2", "endpoint3"],
                 is_no_sync_member=False,
+                pg_cron_available=True,
+                shared_preload_libraries="timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron",
                 namespace=sentinel.model_name,
                 storage_path="/var/lib/pg/data",
                 logs_storage_path="/var/lib/pg/logs",
@@ -238,6 +244,8 @@ def test_render_patroni_yml_file(substrate, config):
                 listen_ips=sentinel.listen_ips,
                 raft_password=sentinel.raft_pass,
                 watcher=None,
+                pg_cron_available=True,
+                shared_preload_libraries="timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron",
             )
             _render_file.assert_called_once_with(
                 substrate,

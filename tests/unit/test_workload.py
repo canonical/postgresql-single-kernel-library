@@ -1,10 +1,11 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
-"""Tests for get_available_resources: substrate-specific resource discovery."""
+"""Tests for the workload classes: resource discovery and snap installation."""
 
-from unittest.mock import Mock, mock_open, patch
+from unittest.mock import Mock, call, mock_open, patch
 
 import pytest
+from charmlibs import snap
 from lightkube.core.exceptions import ApiError
 from single_kernel_postgresql.config.exceptions import DeployedWithoutTrustError
 from single_kernel_postgresql.managers.k8s import K8sManager
@@ -136,3 +137,138 @@ def test_k8s_get_available_resources_reraises_non_403_api_errors(k8s_manager):
         pytest.raises(ApiError),
     ):
         k8s_manager.get_available_resources()
+
+
+@pytest.fixture
+def refresh_versions_dir(tmp_path, monkeypatch):
+    """A working directory with a minimal refresh_versions.toml for revision=None installs."""
+    (tmp_path / "refresh_versions.toml").write_text(
+        'workload = "16.15"\ncharm = "16/1.19.0"\n\n'
+        '[snap]\nname = "charmed-postgresql"\n\n[snap.revisions]\nx86_64 = "416"\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def test_install_snap_package(refresh_versions_dir):
+    workload = VMWorkload(".")
+    with (
+        patch("single_kernel_postgresql.workload.vm.snap.SnapCache") as _snap_cache,
+        patch("single_kernel_postgresql.workload.vm.ensure_snap_oom_protection"),
+    ):
+        _snap_package = _snap_cache.return_value.__getitem__.return_value
+        _snap_package.present = False
+        _revision = "416"
+
+        # Test for problem with snap update.
+        _snap_package.ensure.side_effect = snap.SnapError("update failed")
+        with pytest.raises(snap.SnapError):
+            workload.install_snap_package(revision=None)
+        _snap_cache.return_value.__getitem__.assert_called_once_with("charmed-postgresql")
+        _snap_cache.assert_called_once_with()
+        _snap_package.ensure.assert_called_once_with(snap.SnapState.Present, revision=_revision)
+
+        # Test for problem with snap missing.
+        _snap_cache.reset_mock()
+        _snap_package.reset_mock()
+        _snap_package.ensure.side_effect = snap.SnapNotFoundError
+        with pytest.raises(snap.SnapNotFoundError):
+            workload.install_snap_package(revision=None)
+        _snap_cache.return_value.__getitem__.assert_called_once_with("charmed-postgresql")
+        _snap_cache.assert_called_once_with()
+        _snap_package.ensure.assert_called_once_with(snap.SnapState.Present, revision=_revision)
+
+        # Test for correct install.
+        _snap_cache.reset_mock()
+        _snap_package.reset_mock()
+        _snap_package.ensure.side_effect = None
+        workload.install_snap_package(revision=None)
+        _snap_cache.assert_called_once_with()
+        _snap_cache.return_value.__getitem__.assert_called_once_with("charmed-postgresql")
+        _snap_package.ensure.assert_called_once_with(snap.SnapState.Present, revision=_revision)
+        _snap_package.hold.assert_called_once_with()
+
+        # Test with revision
+        _snap_cache.reset_mock()
+        _snap_package.reset_mock()
+        workload.install_snap_package(revision="42")
+        _snap_cache.assert_called_once_with()
+        _snap_cache.return_value.__getitem__.assert_called_once_with("charmed-postgresql")
+        _snap_package.ensure.assert_called_once_with(snap.SnapState.Present, revision="42")
+        _snap_package.hold.assert_called_once_with()
+
+        # Test with refresh
+        _snap_cache.reset_mock()
+        _snap_package.reset_mock()
+        _snap_package.present = True
+        _refresh = Mock()
+        workload.install_snap_package(revision="42", refresh=_refresh)
+        _snap_cache.assert_called_once_with()
+        _snap_cache.return_value.__getitem__.assert_called_once_with("charmed-postgresql")
+        _snap_package.ensure.assert_called_once_with(snap.SnapState.Present, revision="42")
+        _refresh.update_snap_revision.assert_called_once_with()
+        _snap_package.hold.assert_called_once_with()
+
+        # Test without refresh
+        _snap_cache.reset_mock()
+        _snap_package.reset_mock()
+        workload.install_snap_package(revision="42")
+        _snap_cache.assert_called_once_with()
+        _snap_cache.return_value.__getitem__.assert_called_once_with("charmed-postgresql")
+        _snap_package.ensure.assert_not_called()
+        _snap_package.hold.assert_not_called()
+        _refresh.update_snap_revision.assert_called_once_with()
+
+        # Test with invalid machine architecture
+        _snap_cache.reset_mock()
+        _snap_package.reset_mock()
+        with patch("platform.machine") as _machine:
+            _machine.return_value = "missingarch"
+            with pytest.raises(KeyError):
+                workload.install_snap_package(revision=None)
+        assert not _snap_package.ensure.called
+        assert not _snap_package.hold.called
+
+
+@pytest.mark.parametrize("present,refreshing", [(False, False), (True, False), (True, True)])
+def test_install_snap_package_configures_oom_before_install(
+    refresh_versions_dir, present, refreshing
+):
+    with (
+        patch("single_kernel_postgresql.workload.vm.snap.SnapCache") as cache,
+        patch(
+            "single_kernel_postgresql.workload.vm.ensure_snap_oom_protection",
+            return_value=-898,
+        ) as protect,
+    ):
+        calls = Mock()
+        calls.attach_mock(protect, "protect")
+        calls.attach_mock(cache, "cache")
+        package = cache.return_value.__getitem__.return_value
+        package.present = present
+        refresh = Mock() if refreshing else None
+
+        VMWorkload(".").install_snap_package(revision="416", refresh=refresh)
+
+        assert calls.mock_calls[:2] == [call.protect("charmed-postgresql"), call.cache()]
+        if not present or refreshing:
+            package.ensure.assert_called_once_with(snap.SnapState.Present, revision="416")
+        else:
+            package.ensure.assert_not_called()
+        package.start.assert_not_called()
+        package.restart.assert_not_called()
+        package.stop.assert_not_called()
+
+
+def test_install_snap_package_stops_on_oom_failure(refresh_versions_dir):
+    with (
+        patch("single_kernel_postgresql.workload.vm.snap.SnapCache") as cache,
+        patch(
+            "single_kernel_postgresql.workload.vm.ensure_snap_oom_protection",
+            side_effect=snap.SnapError("cannot protect"),
+        ),
+    ):
+        with pytest.raises(snap.SnapError, match="cannot protect"):
+            VMWorkload(".").install_snap_package(revision="416")
+
+        cache.assert_not_called()
