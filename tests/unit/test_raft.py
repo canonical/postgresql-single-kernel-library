@@ -9,7 +9,6 @@ from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PATRONI_CONF_PATH, RAFT_PARTNER_PREFIX
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.raft import RaftManager
-from single_kernel_postgresql.workload.k8s import K8sWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
 from tenacity import wait_fixed
 
