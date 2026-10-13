@@ -71,6 +71,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Per-unit peer-databag flag: the durable invalid-config signal behind the
+# collect replay (see ConfigManager.get_statuses).
+CONFIGURATION_ERROR_KEY = "configuration-error"
+
 
 class ConfigManager(BaseManager):
     """PostgreSQL Config Manager.
@@ -979,5 +983,28 @@ class ConfigManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
+        """Compute the manager's statuses.
+
+        The invalid-config blocked must be re-surfaced here on EVERY collect:
+        ops applies the collect result last, so a directly-written blocked
+        only lives until hook end, and the status store is wiped by the
+        update-status recompute. The durable signal is a per-unit peer-databag
+        flag (the LogicalReplicationManager pattern).
+        """
+        if scope == "unit" and self.state.peer.data.get(CONFIGURATION_ERROR_KEY) == "1":
+            return [GeneralStatuses.CONFIGURATION_ERROR.value]
         return [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def block_on_configuration_error(self) -> None:
+        """Persist the invalid-config state for the collect replay (unit scope)."""
+        self.state.peer.data[CONFIGURATION_ERROR_KEY] = "1"
+        self.state.add_status_if_not_present(
+            GeneralStatuses.CONFIGURATION_ERROR.value, scope="unit", component=self.name
+        )
+
+    def clear_configuration_error(self) -> None:
+        """Clear the persisted invalid-config state once the config validates."""
+        self.state.peer.data.pop(CONFIGURATION_ERROR_KEY, None)
+        self.state.remove_status_if_present(
+            GeneralStatuses.CONFIGURATION_ERROR.value, scope="unit", component=self.name
+        )
