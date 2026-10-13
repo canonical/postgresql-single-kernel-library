@@ -6,12 +6,14 @@ Ports the load-bearing cases of the VM charm's tests (password ensure,
 leader members bootstrap, update-status gates, teardown guards).
 """
 
+from types import SimpleNamespace
 from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
-from ops import ModelError
+from ops import BlockedStatus, ModelError
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PEER_RELATION
+from single_kernel_postgresql.utils.backup import S3_BLOCK_MESSAGES
 
 
 @pytest.fixture(autouse=True)
@@ -97,6 +99,26 @@ def test_update_status_gates_on_uninitialised_cluster(handler, harness):
 def test_update_status_gates_on_raft_recovery(handler, harness):
     with patch.object(type(handler.state), "has_raft_keys", Mock(return_value=True)):
         assert handler._can_run_on_update_status() is False
+
+
+def test_update_status_runs_for_s3_blocked_units(handler, harness):
+    """The s3-blocked exemption compares the status MESSAGE (trunk parity).
+
+    The port compared the StatusBase object against the message list, which
+    is always unequal: the exemption was dead and update-status early-exited
+    for s3-blocked units where trunk keeps running (the s3 self-heal path).
+    """
+    with (
+        patch.object(type(handler.state), "has_raft_keys", Mock(return_value=False)),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.is_cluster_initialised",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+    ):
+        handler.refresh_manager.refresh = Mock(in_progress=False)
+        handler.state.peer.unit = SimpleNamespace(status=BlockedStatus(S3_BLOCK_MESSAGES[0]))
+        assert handler._can_run_on_update_status() is True
 
 
 def test_storage_detaching_noop_on_scale_down(handler, harness):
