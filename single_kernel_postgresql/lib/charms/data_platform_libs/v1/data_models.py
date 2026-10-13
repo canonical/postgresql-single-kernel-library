@@ -221,9 +221,9 @@ def validate_params(cls: Type[T]):
         @wraps(f)
         def event_wrapper(self: CharmBase, event: ActionEvent):
             try:
-                params = cls(
-                    **{key.replace("-", "_"): value for key, value in event.params.items()}
-                )
+                params = cls(**{
+                    key.replace("-", "_"): value for key, value in event.params.items()
+                })
             except ValidationError as e:
                 params = e
             return f(self, event, params)
@@ -258,19 +258,17 @@ def read(relation_data: MutableMapping[str, str], obj: Type[T]) -> T:
         relation_data: pointer to the relation databag
         obj: pydantic class representing the model to be used for parsing
     """
-    return obj(
-        **{
-            field_name: (
-                relation_data[parsed_key]
-                if field_info.annotation in DataBagNativeTypes
-                else json.loads(relation_data[parsed_key])
-            )
-            for field_name, field_info in obj.model_fields.items()
-            # pyright: ignore[reportGeneralTypeIssues]
-            if (parsed_key := field_name.replace("_", "-")) in relation_data
-            if relation_data[parsed_key]
-        }
-    )
+    return obj(**{
+        field_name: (
+            relation_data[parsed_key]
+            if field_info.annotation in DataBagNativeTypes
+            else json.loads(relation_data[parsed_key])
+        )
+        for field_name, field_info in obj.model_fields.items()
+        # pyright: ignore[reportGeneralTypeIssues]
+        if (parsed_key := field_name.replace("_", "-")) in relation_data
+        if relation_data[parsed_key]
+    })
 
 
 def parse_relation_data(
