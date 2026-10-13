@@ -41,6 +41,11 @@ def raft(substrate):
 
 def test_cleanup_raft_cluster(raft):
     with (
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.raft_password",
+            new_callable=PropertyMock,
+            return_value="fake-raft-password",
+        ),
         patch("single_kernel_postgresql.managers.raft.TcpUtility") as _tcp_utility,
         patch(
             "single_kernel_postgresql.managers.raft.RaftManager.remove_raft_member",
