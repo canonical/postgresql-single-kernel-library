@@ -1067,10 +1067,12 @@ class ConfigManager(BaseManager):
         """Clear the persisted invalid-config state once its condition resolves.
 
         With a message, only clear when the stored message matches, so the
-        config-validation sites never lift a plugin/dependency block.
+        config-validation sites never lift a plugin/dependency block. The
+        legacy "1" sentinel counts as the generic message for that clear.
         """
         stored = self.state.peer.data.get(CONFIGURATION_ERROR_KEY)
-        if stored is None or (message is not None and stored != message):
+        legacy_generic = stored == "1" and message == CONFIGURATION_ERROR_MESSAGE
+        if stored is None or (message is not None and stored != message and not legacy_generic):
             return
         self.state.peer.data.pop(CONFIGURATION_ERROR_KEY, None)
         self.state.remove_status_if_present(
