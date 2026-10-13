@@ -59,7 +59,7 @@ class ObserverEventsHandler(Object):
         async_replication_manager: "AsyncReplicationManager",
         database_manager: "DatabaseManager",
         patroni_manager: "PatroniManager",
-        raft_manager: "RaftManager",
+        raft_manager: "RaftManager | None",
         tls_manager: "TLSManager",
         watcher_handler: "WatcherEventsHandler",
     ):
@@ -103,6 +103,9 @@ class ObserverEventsHandler(Object):
             self.async_replication_manager.update_async_replication_data()
 
     def _on_raft_reconnect(self, _) -> None:
+        if not self.raft_manager:
+            raise ValueError("No RAFT manager set.")
+
         raft_status = self.raft_manager.get_raft_status()
         logger.debug(f"Local raft status: {raft_status}")
         if (
