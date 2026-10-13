@@ -12,7 +12,7 @@ import pytest
 import requests
 from ops.testing import Harness
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import PEER_RELATION
+from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS_RELATION
 
 
 def _test_charm_class(test_charm_path: str, module_name: str):
@@ -138,6 +138,12 @@ def harness(substrate, test_charm_path):
         )
     peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
+    # The status machinery (DPH StatusesState) persists component statuses in
+    # the status-peers relation databag; without the relation every write is
+    # silently dropped ("No databag present for statuses").
+    if STATUS_PEERS_RELATION in meta:
+        status_rel_id = harness.add_relation(STATUS_PEERS_RELATION, "postgresql-single-kernel")
+        harness.add_relation_unit(status_rel_id, "postgresql-single-kernel/0")
     # Set before begin(): Model.name (K8s namespace) is read by substrate-aware
     # state accessors (e.g. common_hosts Service FQDNs).
     harness.set_model_name("test-model")
