@@ -190,16 +190,6 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             logical_replication_slots=self.logical_replication.replication_slots,
         )
 
-        # The refresh manager owns the charm_refresh integration and the priority gate
-        # every unit status write routes through. Constructed before the events handler
-        # so the K8s pebble-ready handler can consult the refresh state.
-        self.refresh_manager = RefreshManager(
-            state=self.state,
-            workload=self.workload,
-            charm=self,
-            set_default_status=self.set_default_unit_status,
-        )
-
         # The watcher handler feeds the membership subsystem (endpoints, raft addresses).
         self.watcher_handler = WatcherEventsHandler(self, self.workload, self.state)
 
@@ -242,7 +232,9 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             s3_client=self.s3_client,
             patroni_manager=self.patroni_manager,
             update_config=self.update_config,
-            resource_provider=cast("ResourceProvider", self.workload),
+            # K8s renders pgbackrest.conf from the K8s API (trunk passes the
+            # k8s_manager); the VM reads /proc and snap state via the workload.
+            resource_provider=cast("ResourceProvider", k8s_manager or self.workload),
             is_standby_cluster=self._is_standby_cluster,
             set_unit_status=self.set_unit_status,
             refresh_primary_status=self.set_primary_status_message,
@@ -269,6 +261,17 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.raft_manager,
             self.tls_manager,
             self.watcher_handler,
+        )
+
+        # The refresh manager owns the charm_refresh integration and the priority gate
+        # every unit status write routes through. Constructed after the managers the
+        # during-construction resume callbacks touch (they run inside this constructor),
+        # and before the events handler that consumes it.
+        self.refresh_manager = RefreshManager(
+            state=self.state,
+            workload=self.workload,
+            charm=self,
+            set_default_status=self.set_default_unit_status,
         )
 
         # Events Handler
@@ -308,6 +311,9 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.patroni_manager,
             self.logical_replication_manager,
             self.database_manager,
+            self.raft_manager,
+            self.backup_manager,
+            self.restore_manager,
         )
 
     def _reconcile_refresh_status(self, event=None) -> None:
@@ -352,6 +358,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def substrate(self) -> Substrates:
         """Access current substrate."""
         pass
+
+    @property
+    def refresh(self) -> "charm_refresh.Machines | charm_refresh.Kubernetes | None":
+        """The charm_refresh state machine, or None when refresh setup was skipped."""
+        return self.refresh_manager.refresh
 
     # Charm-side bridges the lib calls back into. request_restart/restart_services are
     # substrate-tangled and stay until their own migration phases; update_config still
