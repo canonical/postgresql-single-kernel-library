@@ -238,6 +238,7 @@ def test_render_patroni_yml_file(substrate, config):
                 listen_ips=sentinel.listen_ips,
                 raft_password=sentinel.raft_pass,
                 watcher=None,
+                watcher_addr=None,
             )
             _render_file.assert_called_once_with(
                 substrate,

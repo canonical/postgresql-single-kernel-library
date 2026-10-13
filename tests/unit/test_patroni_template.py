@@ -251,6 +251,38 @@ def test_vm_self_rule_uses_the_ipv6_prefix_length():
     )
 
 
+def test_vm_self_rule_renders_without_a_unit_ip():
+    """A unit with no bind address yet must still render (as it did before IPv6 support)."""
+    context = _base_context() | {"connectivity": False, "self_ip": None}
+    rendered = yaml.safe_load(_MERGED_TEMPLATE.render(substrate="vm", **context))
+    assert "host all all None/32 scram-sha-256" in rendered["postgresql"]["pg_hba"]
+
+
+@pytest.mark.parametrize("substrate", ["vm", "k8s"])
+def test_single_host_rules_use_the_ipv6_prefix_length(substrate):
+    """An IPv6 host rule with /32 would match a whole prefix instead of one host."""
+    context = _base_context() | {
+        "extra_replication_endpoints": ["fd42:1928:642::10", "10.9.9.9"],
+        "watcher": "fd42:1928:642::20:2222",
+        "watcher_addr": "fd42:1928:642::20",
+    }
+    rendered = yaml.safe_load(_MERGED_TEMPLATE.render(substrate=substrate, **context))
+    hba_lists = [rendered["postgresql"]["pg_hba"]]
+    if substrate == "k8s":
+        hba_lists.append(rendered["bootstrap"]["pg_hba"])
+    for hba in hba_lists:
+        assert "host replication replication fd42:1928:642::10/128 scram-sha-256" in hba
+        assert "host replication replication 10.9.9.9/32 scram-sha-256" in hba
+    if substrate == "vm":
+        assert "host postgres watcher fd42:1928:642::20/128 scram-sha-256" in hba_lists[0]
+
+
+def test_vm_listen_is_a_string_for_ipv6_addresses():
+    context = _base_context() | {"listen_ips": ["fd42:1928:642::1", "fd42:1928:642::2"]}
+    rendered = yaml.safe_load(_MERGED_TEMPLATE.render(substrate="vm", **context))
+    assert rendered["postgresql"]["listen"] == "fd42:1928:642::1,fd42:1928:642::2:5432"
+
+
 def test_k8s_listen_binds_all_interfaces():
     """K8s pods must accept connections on every address family.
 

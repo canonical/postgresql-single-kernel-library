@@ -112,7 +112,8 @@ def bracket_ipv6_host(host: str | None) -> str | None:
     """Quote an IPv6 literal so it is valid in a URL authority (RFC 3986).
 
     An IPv6 literal in a URL must be bracketed, otherwise the client parses
-    the address at the first colon. Other hosts (and None) pass through.
+    the address at the first colon. Other hosts (and None) pass through, as
+    does a literal that is already bracketed.
 
     Args:
         host: a bare host name or address, or None.
@@ -120,7 +121,7 @@ def bracket_ipv6_host(host: str | None) -> str | None:
     Returns:
         The host, bracketed when it is an IPv6 literal.
     """
-    return f"[{host}]" if host and ":" in host else host
+    return f"[{host}]" if host and ":" in host and not host.startswith("[") else host
 
 
 def render_file(

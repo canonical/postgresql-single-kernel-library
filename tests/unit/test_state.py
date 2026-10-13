@@ -14,7 +14,7 @@ def test_patroni_url_brackets_ipv6_endpoint():
     binding.network.bind_address = "fd42:a615:ea50:2a68:216:3eff:fef1:6b2"
     mock_charm.framework.model.get_binding.return_value = binding
 
-    state = CharmState(charm=mock_charm, substrate=Substrates.VM)
+    state = CharmState(charm=mock_charm, substrate=Substrates.VM, s3_requirer=Mock())
 
     assert state.patroni_url == "https://[fd42:a615:ea50:2a68:216:3eff:fef1:6b2]:8008"
 
@@ -25,6 +25,6 @@ def test_patroni_url_keeps_ipv4_endpoint_unbracketed():
     binding.network.bind_address = "192.0.2.10"
     mock_charm.framework.model.get_binding.return_value = binding
 
-    state = CharmState(charm=mock_charm, substrate=Substrates.VM)
+    state = CharmState(charm=mock_charm, substrate=Substrates.VM, s3_requirer=Mock())
 
     assert state.patroni_url == "https://192.0.2.10:8008"
