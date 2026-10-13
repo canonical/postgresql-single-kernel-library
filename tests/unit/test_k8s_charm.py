@@ -12,6 +12,7 @@ from ops.pebble import ChangeError
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import DeployedWithoutTrustError
 from single_kernel_postgresql.config.literals import (
+    CONFIGURATION_ERROR_MESSAGE,
     METRICS_PORT,
     PEER_RELATION,
     PGBACKREST_METRICS_PORT,
@@ -254,7 +255,7 @@ def test_on_config_changed_blocks_on_invalid_option(charm, harness):
     ):
         charm._on_config_changed(Mock(defer=Mock()))
     assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
-    assert charm.state.peer.data["configuration-error"] == "1"
+    assert charm.state.peer.data["configuration-error"] == CONFIGURATION_ERROR_MESSAGE
     records = charm.state.statuses.get("unit", charm.config_manager.name).root
     assert any(
         r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
