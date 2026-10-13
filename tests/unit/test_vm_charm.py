@@ -134,11 +134,52 @@ def test_config_error_persists_through_collect(charm):
     assert any(
         r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
     )
+    assert charm.state.peer.data["configuration-error"] == "1"
+
+
+def test_config_error_survives_collect_and_recompute(charm, harness):
+    """The config-error blocked must survive the collect AND the recompute.
+
+    Live repro (2026-10-13): the persisted record sat in the real
+    status-peers databag while the deployed collect kept reporting active -
+    ConfigManager.get_statuses returned ACTIVE_IDLE unconditionally, so ops
+    overwrote the direct write at hook end and nothing polling juju status
+    (test_config's blocked wait) ever saw the blocked state.
+    """
+    charm.state.application.data["cluster_initialised"] = "True"
+    with (
+        patch.object(charm.membership_manager, "update_member_ip", return_value=False),
+        patch.object(
+            charm.config_manager,
+            "validate_config_options",
+            side_effect=ValueError("instance_max_locks_per_transaction: -1 < 64"),
+        ),
+    ):
+        charm.postgresql_events_handler._vm_config_changed(Mock())
+
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
+
+        # The update-status recompute clears the store per manager and re-adds
+        # whatever get_statuses(recompute=True) returns; the durable flag must
+        # bring the blocked record back.
+        charm.status_handler._on_update_status(Mock())
+        records = charm.state.statuses.get("unit", charm.config_manager.name).root
+        assert any(
+            r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
+        )
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
 
 
 def test_config_error_clears_when_config_validates(charm):
     """The persisted config-error blocked is removed once config validates."""
     charm.state.application.data["cluster_initialised"] = "True"
+    charm.state.peer.data["configuration-error"] = "1"
     charm.state.add_status_if_not_present(
         GeneralStatuses.CONFIGURATION_ERROR.value,
         scope="unit",
@@ -155,6 +196,7 @@ def test_config_error_clears_when_config_validates(charm):
     assert not any(
         r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
     )
+    assert "configuration-error" not in charm.state.peer.data
 
 
 def test_start_primary_defers_without_a_patroni_primary(charm):
