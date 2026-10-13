@@ -10,6 +10,7 @@ from functools import partial
 from unittest.mock import MagicMock
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from lightkube.core.exceptions import ApiError
 from lightkube.models.meta_v1 import Status
 from ops import BlockedStatus
@@ -19,6 +20,7 @@ from single_kernel_postgresql.config.literals import (
     K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
     K8S_POSTGRESQL_SERVICE_NAME,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication
 from single_kernel_postgresql.managers.restore import RestoreManager
 from single_kernel_postgresql.utils.backup import (
@@ -453,3 +455,20 @@ def test_log_pitr_last_transaction_time_reports_missing_time(restore_manager, ca
     assert any(
         "Can't tell last completed transaction time" in record.message for record in caplog.records
     )
+
+
+def test_restoring_backup_holds_maintenance_through_collect(restore_manager):
+    """While a restore is in progress the unit must not report active.
+
+    test_backup_ceph (CI 2026-10-13): the collect re-added all-active right
+    after the restore action, the helper's wait_for_idle(active) unblocked
+    while Patroni was still re-forming, and get-primary found no primary. The
+    restoring_backup flag now replays the maintenance status until the
+    recovery path clears it.
+    """
+    restore_manager.state.application.restoring_backup = "20251013T120000Z"
+    assert restore_manager.get_statuses("unit") == [
+        StatusObject(status="maintenance", message="restoring backup")
+    ]
+    restore_manager.state.application.restoring_backup = ""
+    assert restore_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]

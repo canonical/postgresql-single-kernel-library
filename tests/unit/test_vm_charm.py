@@ -8,6 +8,11 @@ import pytest
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus
 from single_kernel_postgresql.compat.postgresql import PostgreSQLCreateDatabaseError
 from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.literals import (
+    CONFIGURATION_ERROR_MESSAGE,
+    EXTENSION_OBJECT_MESSAGE,
+    RAFT_MAJORITY_LOSS_MESSAGE,
+)
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 
 
@@ -135,7 +140,7 @@ def test_config_error_persists_through_collect(charm):
     assert any(
         r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
     )
-    assert charm.state.peer.data["configuration-error"] == "1"
+    assert charm.state.peer.data["configuration-error"] == CONFIGURATION_ERROR_MESSAGE
 
 
 def test_config_error_survives_collect_and_recompute(charm, harness):
@@ -180,7 +185,7 @@ def test_config_error_survives_collect_and_recompute(charm, harness):
 def test_config_error_clears_when_config_validates(charm):
     """The persisted config-error blocked is removed once config validates."""
     charm.state.application.data["cluster_initialised"] = "True"
-    charm.state.peer.data["configuration-error"] = "1"
+    charm.state.peer.data["configuration-error"] = CONFIGURATION_ERROR_MESSAGE
     charm.state.add_status_if_not_present(
         GeneralStatuses.CONFIGURATION_ERROR.value,
         scope="unit",
@@ -327,3 +332,100 @@ def test_database_request_error_survives_collect(charm, harness):
         charm.status_handler._on_update_status(Mock())
         harness.evaluate_status()
         assert charm.unit.status == BlockedStatus("invalid database name")
+
+
+@pytest.fixture
+def resuming_refresh(monkeypatch):
+    """Construct charm_refresh.Machines so its resume runs during charm init."""
+    seen = {"membership_manager_seen": False}
+
+    class ResumingMachines:
+        in_progress = True
+        next_unit_allowed_to_refresh = True
+        workload_allowed_to_start = True
+        pinned_snap_revision = "428"
+        app_status_higher_priority = None
+        unit_status_higher_priority = None
+
+        def __init__(self, charm_specific, /):
+            seen["membership_manager_seen"] = hasattr(charm_specific._charm, "membership_manager")
+
+        def unit_status_lower_priority(self, *, workload_is_running=True):
+            return None
+
+    monkeypatch.setattr("charm_refresh.Machines", ResumingMachines)
+    return seen
+
+
+def test_refresh_resume_during_init_sees_the_membership_manager(resuming_refresh, charm):
+    """charm_refresh resume callbacks run INSIDE RefreshManager.__init__.
+
+    A mid-refresh unit's force-refresh-start constructs the charm and the
+    resume chain walks update_config -> postgresql -> primary_endpoint ->
+    membership_manager.units_ips() (all five VM upgrade legs +
+    test_snap_refresh, CI 2026-10-13): the refresh manager must be
+    constructed after the membership manager, or the hook dies with
+    AttributeError.
+    """
+    assert resuming_refresh["membership_manager_seen"] is True
+
+
+def test_watcher_update_unit_address_writes_the_pinned_snap(charm, harness):
+    """watcher.update_unit_address dereferences charm.refresh (trunk parity)."""
+    charm.refresh_manager.refresh = Mock(pinned_snap_revision="428")
+    rel_id = harness.add_relation("watcher-offer", "external-watcher")
+    harness.add_relation_unit(rel_id, "external-watcher/0")
+    relation = charm.model.relations["watcher-offer"][0]
+    with patch.object(
+        type(charm.state), "unit_ip", new_callable=PropertyMock, return_value="10.1.1.1"
+    ):
+        charm.watcher_handler.update_unit_address(relation)
+    assert relation.data[charm.state.peer.unit]["snap"] == "428"
+
+
+def test_raft_stuck_block_survives_collect(charm, harness):
+    """The raft-majority-loss blocked must survive the collect.
+
+    test_removing_stereo_primary waits for blocked + "Raft majority loss"
+    (CI 2026-10-13): the direct write died at hook end, so the wait timed
+    out. The raft_stuck peer flag now replays through RaftManager.get_statuses.
+    """
+    charm.state.peer.data["raft_stuck"] = "True"
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE)
+
+        charm.status_handler._on_update_status(Mock())
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE)
+
+    # The promote-to-primary flow clears the flag and the unit unblocks.
+    charm.state.peer.data.pop("raft_stuck")
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+    assert charm.unit.status == ActiveStatus()
+
+
+def test_config_validation_clear_does_not_lift_a_plugin_block(charm, harness):
+    """The config-validation clear is message-scoped.
+
+    Non-leaders run the config-changed validation but never the extension
+    reconcile; an unscoped clear would silently lift a plugin-object block
+    that trunk keeps visible.
+    """
+    charm.state.peer.data["configuration-error"] = EXTENSION_OBJECT_MESSAGE
+    with harness.hooks_disabled():
+        harness.set_leader(False)
+    with (
+        patch.object(charm.membership_manager, "update_member_ip", return_value=False),
+        patch.object(charm.config_manager, "validate_config_options", return_value=None),
+        patch.object(charm, "update_config", return_value=True),
+    ):
+        charm.postgresql_events_handler._vm_config_changed(Mock())
+    assert charm.state.peer.data["configuration-error"] == EXTENSION_OBJECT_MESSAGE
