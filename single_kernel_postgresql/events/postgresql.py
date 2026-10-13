@@ -1598,11 +1598,15 @@ class PostgreSQLEventsHandler(Object):
         try:
             self.charm.update_config()
         except ValueError as e:
+            self.config_manager.block_on_configuration_error()
             self.membership_manager.set_unit_status(
                 BlockedStatus("Configuration Error. Please check the logs")
             )
             logger.error("Invalid configuration: %s", str(e))
             return
+
+        # Config validates: clear any persisted config-error state (self-heal).
+        self.config_manager.clear_configuration_error()
 
         # Should not override a blocked status
         if isinstance(self.state.peer.unit.status, BlockedStatus):
