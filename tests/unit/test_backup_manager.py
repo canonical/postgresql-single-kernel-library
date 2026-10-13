@@ -17,9 +17,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from ops import BlockedStatus
 from single_kernel_postgresql.config.exceptions import ListBackupsError
 from single_kernel_postgresql.config.literals import S3_RELATION_NAME
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.managers.backup import BackupManager
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
@@ -430,3 +432,33 @@ def test_clear_s3_state_clears_markers(backup_manager, substrate):
         backup_manager.workload.stop_service.assert_called_once_with("rotate-logs")
     else:
         backup_manager.workload.stop_service.assert_not_called()
+
+
+def test_s3_block_message_survives_collect(backup_manager, harness):
+    """The s3-initialization blocked must survive the collect.
+
+    test_restore_on_new_cluster (gcp arm64, CI 2026-10-13) waits for the
+    blocked "backups from another cluster" message after a restore; the
+    direct write died at hook end and the wait timed out. The persisted
+    peer-databag message now replays through BackupManager.get_statuses.
+    """
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    backup_manager._s3_initialization_set_failure(ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE)
+    assert backup_manager.get_statuses("unit") == [
+        StatusObject(status="blocked", message=ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE)
+    ]
+
+    # A non-leader stores the message in its unit databag; the replay reads it.
+    with harness.hooks_disabled():
+        harness.set_leader(False)
+    backup_manager._s3_initialization_set_failure(ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE)
+    assert backup_manager.get_statuses("unit") == [
+        StatusObject(status="blocked", message=ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE)
+    ]
+
+    # Resetting the markers clears the replay.
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    backup_manager.reset_s3_initialization_markers()
+    assert backup_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
