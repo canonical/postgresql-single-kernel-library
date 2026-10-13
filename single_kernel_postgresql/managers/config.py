@@ -38,6 +38,7 @@ from single_kernel_postgresql.config.exceptions import (
     PostgreSQLCannotConnectError,
 )
 from single_kernel_postgresql.config.literals import (
+    CONFIGURATION_ERROR_MESSAGE,
     EXTENSION_OBJECT_MESSAGE,
     EXTENSIONS_DEPENDENCY_MESSAGE,
     PG_CRON_DATABASE,
@@ -880,6 +881,7 @@ class ConfigManager(BaseManager):
                 continue
             extension = PLUGIN_OVERRIDES.get(extension, extension)
             if self._check_extension_dependencies(extension, enable):
+                self.block_on_configuration_error(EXTENSIONS_DEPENDENCY_MESSAGE)
                 self.set_unit_status(BlockedStatus(EXTENSIONS_DEPENDENCY_MESSAGE))
                 return
             extensions[extension] = enable
@@ -887,6 +889,7 @@ class ConfigManager(BaseManager):
             self.is_blocked
             and self.state.peer.unit.status.message == EXTENSIONS_DEPENDENCY_MESSAGE
         ):
+            self.clear_configuration_error()
             self.set_unit_status(ActiveStatus())
             original_status = self.state.peer.unit.status
         self.set_unit_status(WaitingStatus("Updating extensions"))
@@ -899,11 +902,13 @@ class ConfigManager(BaseManager):
                 "`juju config postgresql plugin-<plugin_name>-enable=True`",
                 str(e),
             )
+            self.block_on_configuration_error(EXTENSION_OBJECT_MESSAGE)
             self.set_unit_status(BlockedStatus(EXTENSION_OBJECT_MESSAGE))
             return
         except (PostgreSQLEnableDisableExtensionError, PostgreSQLUndefinedHostError) as e:
             logger.exception("failed to change plugins: %s", str(e))
         if original_status.message == EXTENSION_OBJECT_MESSAGE:
+            self.clear_configuration_error()
             self.set_unit_status(ActiveStatus())
             return
         self._restore_unit_status(original_status)
@@ -1045,20 +1050,32 @@ class ConfigManager(BaseManager):
         update-status recompute. The durable signal is a per-unit peer-databag
         flag (the LogicalReplicationManager pattern).
         """
-        if scope == "unit" and self.state.peer.data.get(CONFIGURATION_ERROR_KEY) == "1":
-            return [GeneralStatuses.CONFIGURATION_ERROR.value]
+        if scope == "unit" and (message := self.state.peer.data.get(CONFIGURATION_ERROR_KEY)):
+            if message == "1":  # legacy sentinel; fresh units never carry it
+                return [GeneralStatuses.CONFIGURATION_ERROR.value]
+            return [StatusObject(status="blocked", message=message)]
         return [GeneralStatuses.ACTIVE_IDLE.value]
 
-    def block_on_configuration_error(self) -> None:
-        """Persist the invalid-config state for the collect replay (unit scope)."""
-        self.state.peer.data[CONFIGURATION_ERROR_KEY] = "1"
+    def block_on_configuration_error(self, message: str = CONFIGURATION_ERROR_MESSAGE) -> None:
+        """Persist an invalid-config state (unit scope) for the collect replay."""
+        self.state.peer.data[CONFIGURATION_ERROR_KEY] = message
         self.state.add_status_if_not_present(
-            GeneralStatuses.CONFIGURATION_ERROR.value, scope="unit", component=self.name
+            StatusObject(status="blocked", message=message), scope="unit", component=self.name
         )
 
-    def clear_configuration_error(self) -> None:
-        """Clear the persisted invalid-config state once the config validates."""
+    def clear_configuration_error(self, message: str | None = None) -> None:
+        """Clear the persisted invalid-config state once its condition resolves.
+
+        With a message, only clear when the stored message matches, so the
+        config-validation sites never lift a plugin/dependency block.
+        """
+        stored = self.state.peer.data.get(CONFIGURATION_ERROR_KEY)
+        if stored is None or (message is not None and stored != message):
+            return
         self.state.peer.data.pop(CONFIGURATION_ERROR_KEY, None)
         self.state.remove_status_if_present(
+            StatusObject(status="blocked", message=stored), scope="unit", component=self.name
+        )
+        self.state.remove_status_if_present(  # legacy store record from the "1"-era helper
             GeneralStatuses.CONFIGURATION_ERROR.value, scope="unit", component=self.name
         )
