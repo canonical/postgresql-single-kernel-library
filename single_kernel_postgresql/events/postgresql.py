@@ -1850,7 +1850,7 @@ class PostgreSQLEventsHandler(Object):
             logger.debug("Replica not ready: endpoint not yet in members list")
             return False
 
-        hba_endpoint = self.membership_manager.build_service_name("primary")
+        hba_endpoint = self.charm.primary_endpoint
         if self.async_replication_manager.async_relation and not (
             self.async_replication_manager.is_primary_cluster()
         ):
