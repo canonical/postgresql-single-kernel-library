@@ -301,6 +301,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.config_manager,
             self.patroni_manager,
             self.logical_replication_manager,
+            self.database_manager,
         )
 
     def _reconcile_refresh_status(self, event=None) -> None:
