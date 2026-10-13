@@ -260,6 +260,9 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.state,
             self.async_replication_manager,
             self.database_manager,
+            self.patroni_manager,
+            self.raft_manager,
+            self.tls_manager,
             self.watcher_handler,
         )
 
