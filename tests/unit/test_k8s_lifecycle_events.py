@@ -867,3 +867,24 @@ def test_leader_elected_k8s_blocks_without_trust_and_continues(handler, harness)
     on_deployed.assert_called_once()
     handler.k8s_manager.create_services.assert_called_once()
     add_members.assert_called_once()
+
+
+# -- replica-can-start -------------------------------------------------------------
+
+
+def test_replica_can_start_probes_the_primary_endpoint(handler, harness):
+    """The HBA probe targets the primary's endpoint (trunk parity).
+
+    The port originally passed the primary Service DNS name; trunk probes the
+    primary member's endpoint, and the Service form wedged replica starts
+    during the scaled-up relation churn (test_new_relations_1, CI 2026-10-13).
+    """
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    _set_endpoints_with_self(harness, rel_id)
+    handler.patroni_manager = Mock()
+    handler.patroni_manager.is_replication_hba_ready.return_value = True
+    with patch.object(
+        type(handler.charm), "primary_endpoint", new_callable=PropertyMock, return_value="10.1.1.1"
+    ):
+        assert handler._replica_can_start() is True
+    handler.patroni_manager.is_replication_hba_ready.assert_called_once_with("10.1.1.1")
