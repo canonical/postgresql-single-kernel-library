@@ -2,22 +2,22 @@
 # See LICENSE file for licensing details.
 
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import PATRONI_CONF_PATH
+from single_kernel_postgresql.config.literals import PATRONI_CONF_PATH, RAFT_PARTNER_PREFIX
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.raft import RaftManager
-from single_kernel_postgresql.workload.k8s import K8sWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
 from tenacity import wait_fixed
 
 
 @pytest.fixture(autouse=True)
 def raft(substrate):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only test")
     mock_charm = Mock()
-    mock_container = Mock()
     mock_patroni_manager = Mock()
     mock_watcher_handler = Mock()
     mock_update_config = Mock()
@@ -25,7 +25,7 @@ def raft(substrate):
     mock_peer_relation_changed = Mock()
     mock_remove_from_members_ips = Mock()
 
-    workload = VMWorkload(".") if substrate == Substrates.VM else K8sWorkload(".", mock_container)
+    workload = VMWorkload(".")
     raft = RaftManager(
         state=CharmState(charm=mock_charm, substrate=substrate, s3_requirer=Mock()),
         workload=workload,
@@ -37,6 +37,66 @@ def raft(substrate):
         remove_from_members_ips=mock_remove_from_members_ips,
     )
     yield raft
+
+
+def test_cleanup_raft_cluster(raft):
+    with (
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.raft_password",
+            new_callable=PropertyMock,
+            return_value="fake-raft-password",
+        ),
+        patch("single_kernel_postgresql.managers.raft.TcpUtility") as _tcp_utility,
+        patch(
+            "single_kernel_postgresql.managers.raft.RaftManager.remove_raft_member",
+            return_value=True,
+        ) as _remove_raft_member,
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.units_ips",
+            new_callable=PropertyMock,
+            return_value={"1.1.1.1"},
+        ),
+        patch(
+            "single_kernel_postgresql.workload.vm.VMWorkload.is_patroni_running", return_value=True
+        ),
+    ):
+        # Error connecting to raft
+        _tcp_utility.side_effect = Exception
+
+        assert not raft.cleanup_raft_cluster()
+
+        _tcp_utility.assert_called_once_with(password="fake-raft-password", timeout=3)
+        _tcp_utility.reset_mock()
+
+        # No status
+        _tcp_utility.side_effect = None
+        _tcp_utility.return_value.executeCommand.return_value = {}
+
+        assert not raft.cleanup_raft_cluster()
+
+        _tcp_utility.return_value.executeCommand.assert_called_once_with(
+            "127.0.0.1:2222", ["status"]
+        )
+
+        # All members active
+        _tcp_utility.return_value.executeCommand.return_value = {
+            f"{RAFT_PARTNER_PREFIX}1.1.1.1:2222": 2
+        }
+
+        assert raft.cleanup_raft_cluster()
+
+        assert not _remove_raft_member.called
+
+        # Filter by unit ips
+        _tcp_utility.return_value.executeCommand.return_value = {
+            f"{RAFT_PARTNER_PREFIX}1.1.1.1:2222": 0,
+            f"{RAFT_PARTNER_PREFIX}2.2.2.2:2222": 0,
+        }
+
+        assert raft.cleanup_raft_cluster()
+
+        _remove_raft_member.assert_called_once_with("2.2.2.2:2222")
+        raft.remove_from_members_ips.assert_called_once_with("2.2.2.2")
 
 
 def test_remove_raft_data(raft):
