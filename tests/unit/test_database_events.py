@@ -326,10 +326,14 @@ def test_database_requested_blocks_when_the_requested_entity_secret_is_not_reada
 
 
 def test_the_unreadable_secret_block_routes_through_the_status_bridge(harness, events, postgresql):
-    """The missing-grant block goes through the charm's set_unit_status on both substrates."""
+    """The missing-grant block goes through the status bridge on both substrates.
+
+    The manager's set_unit_status is the charm's refresh-priority bridge,
+    injected at construction, so the patch targets the manager's reference.
+    """
     with (
         cluster_ready(harness, postgresql),
-        patch.object(type(harness.charm), "set_unit_status", Mock()) as _gated,
+        patch.object(harness.charm.database_manager, "set_unit_status", Mock()) as _gated,
         patch.object(
             DatabaseRequestedEvent,
             "requested_entity_secret_content",
@@ -341,7 +345,9 @@ def test_the_unreadable_secret_block_routes_through_the_status_bridge(harness, e
 
     _gated.assert_called_once()
     assert _gated.call_args.args[0] == BlockedStatus("Missing grant to requested entity secret")
-    assert not isinstance(harness.model.unit.status, BlockedStatus)
+    assert harness.charm.database_manager.state.peer.data["database-request-error"] == (
+        "Missing grant to requested entity secret"
+    )
     postgresql.create_database.assert_not_called()
 
 
