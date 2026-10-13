@@ -993,16 +993,15 @@ class PostgreSQLEventsHandler(Object):
             )
             return
         except ValueError as e:
-            self.state.add_status_if_not_present(
-                GeneralStatuses.CONFIGURATION_ERROR.value,
-                scope="unit",
-                component=self.config_manager.name,
-            )
+            self.config_manager.block_on_configuration_error()
             self.membership_manager.set_unit_status(
                 BlockedStatus("Configuration Error. Please check the logs")
             )
             logger.error("Invalid configuration: %s", str(e))
             return
+
+        # Config validates: clear any persisted config-error state (self-heal).
+        self.config_manager.clear_configuration_error()
 
         if not self._vm_peer_relation_changed_gates(event):
             return
@@ -1152,11 +1151,7 @@ class PostgreSQLEventsHandler(Object):
             # status is wiped by the collect handler's all-active recompute on
             # this same hook, so the "Configuration Error" message never
             # becomes observable to anything reading juju status.
-            self.state.add_status_if_not_present(
-                GeneralStatuses.CONFIGURATION_ERROR.value,
-                scope="unit",
-                component=self.config_manager.name,
-            )
+            self.config_manager.block_on_configuration_error()
             self.membership_manager.set_unit_status(
                 BlockedStatus("Configuration Error. Please check the logs")
             )
@@ -1164,11 +1159,7 @@ class PostgreSQLEventsHandler(Object):
             return
         # Config now validates cleanly: clear any persisted config-error
         # blocked (the collect recompute then reports active).
-        self.state.remove_status_if_present(
-            GeneralStatuses.CONFIGURATION_ERROR.value,
-            scope="unit",
-            component=self.config_manager.name,
-        )
+        self.config_manager.clear_configuration_error()
 
         if self.state.peer.is_blocked_status and (
             "Configuration Error" in self.state.peer.unit.status.message
