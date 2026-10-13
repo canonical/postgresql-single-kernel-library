@@ -403,7 +403,7 @@ class PostgreSQLEventsHandler(Object):
         # Only update the connection endpoints if there is a primary.
         # A cluster can have all members as replicas for some time after
         # a failed switchover, so wait until the primary is elected.
-        if self.state.primary_endpoint:
+        if self.charm.primary_endpoint:
             self.membership_manager.update_relation_endpoints()
             self.async_replication_manager.update_async_replication_data()
         else:
@@ -543,7 +543,7 @@ class PostgreSQLEventsHandler(Object):
             event.defer()
             return
 
-        if not self.state.primary_endpoint:
+        if not self.charm.primary_endpoint:
             logger.debug("Deferring on_start: awaiting start of the primary")
             self.membership_manager.set_unit_status(WaitingStatus("awaiting start of the primary"))
             event.defer()
@@ -618,7 +618,7 @@ class PostgreSQLEventsHandler(Object):
             return
 
         self.database_manager.oversee_users(self.postgresql())
-        if self.state.primary_endpoint:
+        if self.charm.primary_endpoint:
             self.membership_manager.update_relation_endpoints()
 
         if not self.patroni_manager.member_started and self.patroni_manager.is_member_isolated:
@@ -1283,6 +1283,11 @@ class PostgreSQLEventsHandler(Object):
             )
             return
         except ValueError as e:
+            self.state.add_status_if_not_present(
+                GeneralStatuses.CONFIGURATION_ERROR.value,
+                scope="unit",
+                component=self.config_manager.name,
+            )
             self.membership_manager.set_unit_status(
                 BlockedStatus("Configuration Error. Please check the logs")
             )
@@ -1433,14 +1438,28 @@ class PostgreSQLEventsHandler(Object):
             event.defer()
             return
         except ValueError as e:
+            # Persist through the status machinery: a directly-written blocked
+            # status is wiped by the collect handler's all-active recompute on
+            # this same hook, so the "Configuration Error" message never
+            # becomes observable to anything reading juju status.
+            self.state.add_status_if_not_present(
+                GeneralStatuses.CONFIGURATION_ERROR.value,
+                scope="unit",
+                component=self.config_manager.name,
+            )
             self.membership_manager.set_unit_status(
                 BlockedStatus("Configuration Error. Please check the logs")
             )
             logger.error("Invalid configuration: %s", str(e))
             return
+        # Config now validates cleanly: clear any persisted config-error
+        # blocked (the collect recompute then reports active).
+        self.state.remove_status_if_present(
+            GeneralStatuses.CONFIGURATION_ERROR.value,
+            scope="unit",
+            component=self.config_manager.name,
+        )
 
-        # A unit blocked with 'Configuration Error' that now validates cleanly
-        # returns to Active.
         if self.state.peer.is_blocked_status and (
             "Configuration Error" in self.state.peer.unit.status.message
         ):

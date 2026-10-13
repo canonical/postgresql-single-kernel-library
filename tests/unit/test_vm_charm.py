@@ -111,6 +111,89 @@ def test_collect_unit_status_reconciles_the_refresh_status(charm):
     reconcile.assert_called_once()
 
 
+def test_config_error_persists_through_collect(charm):
+    """The invalid-config blocked must come from the status machinery.
+
+    A directly-written blocked status is overwritten by the collect handler's
+    all-active recompute on the same hook, so the "Configuration Error"
+    message never reaches juju status; persisting it in the status-peers
+    databag makes collect replay blocked+message.
+    """
+    charm.state.application.data["cluster_initialised"] = "True"
+    with (
+        patch.object(charm.membership_manager, "update_member_ip", return_value=False),
+        patch.object(
+            charm.config_manager,
+            "validate_config_options",
+            side_effect=ValueError("instance_max_locks_per_transaction: -1 < 64"),
+        ),
+    ):
+        charm.postgresql_events_handler._vm_config_changed(Mock())
+
+    records = charm.state.statuses.get("unit", charm.config_manager.name).root
+    assert any(
+        r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
+    )
+
+
+def test_config_error_clears_when_config_validates(charm):
+    """The persisted config-error blocked is removed once config validates."""
+    charm.state.application.data["cluster_initialised"] = "True"
+    charm.state.add_status_if_not_present(
+        GeneralStatuses.CONFIGURATION_ERROR.value,
+        scope="unit",
+        component=charm.config_manager.name,
+    )
+    with (
+        patch.object(charm.membership_manager, "update_member_ip", return_value=False),
+        patch.object(charm.config_manager, "validate_config_options", return_value=None),
+        patch.object(charm, "update_config", return_value=True),
+    ):
+        charm.postgresql_events_handler._vm_config_changed(Mock())
+
+    records = charm.state.statuses.get("unit", charm.config_manager.name).root
+    assert not any(
+        r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
+    )
+
+
+def test_start_primary_defers_without_a_patroni_primary(charm):
+    """The bootstrap gate must use the Patroni-derived primary endpoint.
+
+    state.primary_endpoint is the K8s service DNS name and is always truthy;
+    the charm gates setup_instance_users on the Patroni-derived endpoint and
+    defers "awaiting start of the primary" until Patroni elects one.
+    """
+    charm.patroni_manager.bootstrap_cluster = Mock(return_value=True)
+    charm.patroni_manager.member_started = True
+    charm.cluster_manager.can_connect_to_postgresql = Mock(return_value=True)
+    charm.primary_endpoint = None
+    charm.cluster_manager.setup_instance_users = Mock()
+    charm.database_manager.oversee_users = Mock()
+    event = Mock()
+
+    charm.postgresql_events_handler._start_primary(event)
+
+    event.defer.assert_called_once()
+    charm.cluster_manager.setup_instance_users.assert_not_called()
+
+
+def test_start_primary_bootstraps_with_a_patroni_primary(charm):
+    """A Patroni-elected primary lets the bootstrap flow reach setup_instance_users."""
+    charm.patroni_manager.bootstrap_cluster = Mock(return_value=True)
+    charm.patroni_manager.member_started = True
+    charm.cluster_manager.can_connect_to_postgresql = Mock(return_value=True)
+    charm.primary_endpoint = "10.1.2.3"
+    charm.cluster_manager.setup_instance_users = Mock()
+    charm.database_manager.oversee_users = Mock()
+    event = Mock()
+
+    charm.postgresql_events_handler._start_primary(event)
+
+    event.defer.assert_not_called()
+    charm.cluster_manager.setup_instance_users.assert_called_once()
+
+
 def test_cluster_get_statuses_survives_unreadable_peer_secrets(charm):
     """The status handler evaluates get_statuses on every hook, on every unit.
 
