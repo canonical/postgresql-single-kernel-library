@@ -43,6 +43,7 @@ from single_kernel_postgresql.config.exceptions import (
 )
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
+    CONFIGURATION_ERROR_MESSAGE,
     EXTENSION_OBJECT_MESSAGE,
     LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS,
     MONITORING_PASSWORD_KEY,
@@ -1001,7 +1002,7 @@ class PostgreSQLEventsHandler(Object):
             return
 
         # Config validates: clear any persisted config-error state (self-heal).
-        self.config_manager.clear_configuration_error()
+        self.config_manager.clear_configuration_error(CONFIGURATION_ERROR_MESSAGE)
 
         if not self._vm_peer_relation_changed_gates(event):
             return
@@ -1159,7 +1160,7 @@ class PostgreSQLEventsHandler(Object):
             return
         # Config now validates cleanly: clear any persisted config-error
         # blocked (the collect recompute then reports active).
-        self.config_manager.clear_configuration_error()
+        self.config_manager.clear_configuration_error(CONFIGURATION_ERROR_MESSAGE)
 
         if self.state.peer.is_blocked_status and (
             "Configuration Error" in self.state.peer.unit.status.message
