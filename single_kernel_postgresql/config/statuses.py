@@ -22,6 +22,9 @@ class GeneralStatuses(Enum):
     FAILED_SETTING_PASSWORDS = StatusObject(
         status="blocked", message="Password setting for system users failed."
     )
+    CONFIGURATION_ERROR = StatusObject(
+        status="blocked", message="Configuration Error. Please check the logs"
+    )
     WAITING_PASSWORDS_GENERATION = StatusObject(
         status="waiting", message="awaiting passwords generation"
     )
