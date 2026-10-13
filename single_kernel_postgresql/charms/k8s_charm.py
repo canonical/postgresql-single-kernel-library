@@ -427,10 +427,13 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             event.defer()
             return
         except ValueError as e:
+            self.config_manager.block_on_configuration_error()
             self.set_unit_status(BlockedStatus("Configuration Error. Please check the logs"))
             logger.error("Invalid configuration: %s", str(e))
             return
 
+        # Config now validates cleanly: clear any persisted config-error state.
+        self.config_manager.clear_configuration_error()
         if self.config_manager.is_blocked and "Configuration Error" in self.unit.status.message:
             self.postgresql_events_handler._set_active_status()
 

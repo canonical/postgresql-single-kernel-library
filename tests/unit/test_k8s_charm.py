@@ -254,6 +254,42 @@ def test_on_config_changed_blocks_on_invalid_option(charm, harness):
     ):
         charm._on_config_changed(Mock(defer=Mock()))
     assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
+    assert charm.state.peer.data["configuration-error"] == "1"
+    records = charm.state.statuses.get("unit", charm.config_manager.name).root
+    assert any(
+        r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
+    )
+
+
+def test_config_error_survives_collect_and_recompute(charm, harness):
+    """The config-error blocked must survive the collect AND the recompute.
+
+    Mirror of the VM test: ops applies the collect result last, so the
+    durable peer-databag flag is what keeps the blocked visible in juju
+    status until the config validates.
+    """
+    _set_initialised(harness)
+    charm.refresh_manager.refresh = None
+    with patch.object(
+        type(charm.config_manager), "validate_config_options", side_effect=ValueError("bad")
+    ):
+        charm._on_config_changed(Mock(defer=Mock()))
+
+    # Patch the live collectors: the emit walks every manager's get_statuses,
+    # which would reach the snap/charm_refresh surface the unit env cannot build.
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
+
+        # The update-status recompute clears the store per manager and re-adds
+        # whatever get_statuses(recompute=True) returns; the durable flag must
+        # bring the blocked record back.
+        charm.status_handler._on_update_status(Mock())
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
 
 
 # -- leader annotation / pebble layers ---------------------------------------------
