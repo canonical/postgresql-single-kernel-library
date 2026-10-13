@@ -135,38 +135,37 @@ class ObserverManager(BaseManager):
             except OSError:
                 pass
 
+    def start_raft_observer(self) -> None:
+        """Render systemd units and start the observer."""
+        timer_service_file = "/etc/systemd/system/raft-observer.timer"
+        oneshot_service_file = "/etc/systemd/system/raft-observer.service"
 
-def start_raft_observer() -> None:
-    """Render systemd units and start the observer."""
-    timer_service_file = "/etc/systemd/system/raft-observer.timer"
-    oneshot_service_file = "/etc/systemd/system/raft-observer.service"
+        template = Template(
+            resources
+            .files("single_kernel_postgresql.templates.vm")
+            .joinpath("raft-observer.service.j2")
+            .read_text()
+        )
 
-    template = Template(
-        resources
-        .files("single_kernel_postgresql.templates.vm")
-        .joinpath("raft-observer.service.j2")
-        .read_text()
-    )
+        rendered = template.render(
+            envvars=copy_environment(),
+            script="-m single_kernel_postgresql.scripts.raft_observer",
+        )
+        render_file(Substrates.VM, oneshot_service_file, rendered, 0o644, change_owner=False)
 
-    rendered = template.render(
-        envvars=copy_environment(),
-        script="-m single_kernel_postgresql.scripts.raft_observer",
-    )
-    render_file(Substrates.VM, oneshot_service_file, rendered, 0o644, change_owner=False)
+        template = Template(
+            resources
+            .files("single_kernel_postgresql.templates.vm")
+            .joinpath("raft-observer.timer.j2")
+            .read_text()
+        )
+        rendered = template.render()
+        render_file(Substrates.VM, timer_service_file, rendered, 0o644, change_owner=False)
 
-    template = Template(
-        resources
-        .files("single_kernel_postgresql.templates.vm")
-        .joinpath("raft-observer.timer.j2")
-        .read_text()
-    )
-    rendered = template.render()
-    render_file(Substrates.VM, timer_service_file, rendered, 0o644, change_owner=False)
-
-    # Reload systemd to pick up the new service
-    daemon_reload()
-    service_enable(timer_service_file, "--now")
-    logger.info("Installed and enabled raft observer timer")
+        # Reload systemd to pick up the new service
+        daemon_reload()
+        service_enable(timer_service_file, "--now")
+        logger.info("Installed and enabled raft observer timer")
 
 
 def copy_environment() -> dict[str, str]:
