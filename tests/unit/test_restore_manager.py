@@ -472,3 +472,19 @@ def test_restoring_backup_holds_maintenance_through_collect(restore_manager):
     ]
     restore_manager.state.application.restoring_backup = ""
     assert restore_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
+def test_pitr_restore_window_holds_maintenance_through_collect(restore_manager):
+    """The restore-to-time window replays maintenance like the backup-id window.
+
+    Trunk keeps the unit non-active while the cluster re-forms after a PITR
+    restore (the is_cluster_restoring_to_time gate); without the replay the
+    collect reports active mid-window and the pitr wait_for_idle unblocks
+    early.
+    """
+    restore_manager.state.application.data["restore-to-time"] = "20251013T120000Z"
+    assert restore_manager.get_statuses("unit") == [
+        StatusObject(status="maintenance", message="restoring backup")
+    ]
+    restore_manager.state.application.data["restore-to-time"] = ""
+    assert restore_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
