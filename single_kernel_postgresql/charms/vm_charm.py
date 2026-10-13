@@ -89,6 +89,13 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         """Set the unit status that applies when no refresh status is active."""
         self.unit.status = ActiveStatus()
 
+    def post_refresh_side_effects(self) -> None:
+        """Set up the exporters, pgBackRest service, and watcher unit address."""
+
+    def has_async_replication_relation(self) -> bool:
+        """Whether this unit is related to an async replication partner."""
+        return False
+
     def update_config(
         self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
     ) -> bool:
@@ -116,3 +123,9 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
 
     def update_relation_endpoints(self) -> None:
         """Refresh the client and async relation endpoints after a switchover."""
+
+    def update_pebble_layers(self) -> None:
+        """Reconcile the workload's Pebble layers (K8s only)."""
+
+    def ensure_pgdata_dirs_and_symlinks(self) -> None:
+        """Create the storage directories and symlinks for the PostgreSQL data paths (K8s only)."""
