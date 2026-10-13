@@ -1107,11 +1107,16 @@ def test_legacy_sentinel_clears_with_the_generic_message(harness_config):
     path.
     """
     harness_config.state.peer.data["configuration-error"] = "1"
+    harness_config.state.add_status_if_not_present(  # seed the round-9-era store record
+        GeneralStatuses.CONFIGURATION_ERROR.value, scope="unit", component=harness_config.name
+    )
     harness_config.clear_configuration_error(EXTENSION_OBJECT_MESSAGE)
     assert harness_config.state.peer.data["configuration-error"] == "1"
 
     harness_config.clear_configuration_error(CONFIGURATION_ERROR_MESSAGE)
     assert "configuration-error" not in harness_config.state.peer.data
+    records = harness_config.state.statuses.get("unit", harness_config.name).root
+    assert not any(r.status == "blocked" for r in records)  # no store residue
 
 
 def test_legacy_configuration_error_sentinel_still_replays(harness_config):
