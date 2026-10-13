@@ -1099,6 +1099,21 @@ def test_clear_configuration_error_is_message_scoped(harness_config):
     assert "configuration-error" not in harness_config.state.peer.data
 
 
+def test_legacy_sentinel_clears_with_the_generic_message(harness_config):
+    """The legacy '1' sentinel clears on the generic self-heal only.
+
+    A plugin-scoped clear must not lift it: pre-message-fix units would
+    otherwise keep a permanently replayed generic blocked with no clear
+    path.
+    """
+    harness_config.state.peer.data["configuration-error"] = "1"
+    harness_config.clear_configuration_error(EXTENSION_OBJECT_MESSAGE)
+    assert harness_config.state.peer.data["configuration-error"] == "1"
+
+    harness_config.clear_configuration_error(CONFIGURATION_ERROR_MESSAGE)
+    assert "configuration-error" not in harness_config.state.peer.data
+
+
 def test_legacy_configuration_error_sentinel_still_replays(harness_config):
     """The '1' sentinel form (pre-message fix) still replays the generic block."""
     harness_config.state.peer.data["configuration-error"] = "1"
