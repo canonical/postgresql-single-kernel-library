@@ -712,6 +712,9 @@ class RestoreManager(BaseManager):
         cluster-formation window is not reported as active (the direct write
         only lives until hook end).
         """
-        if scope == "unit" and self.state.application.restoring_backup:
+        if scope == "unit" and (
+            self.state.application.restoring_backup
+            or self.state.application.is_cluster_restoring_to_time
+        ):
             return [StatusObject(status="maintenance", message="restoring backup")]
         return [GeneralStatuses.ACTIVE_IDLE.value]
