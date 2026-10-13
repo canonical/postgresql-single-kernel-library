@@ -57,12 +57,19 @@ def test_on_peer_relation_changed_sets_maintenance_on_patroni_retry(handler):
 
 
 def test_on_peer_relation_changed_blocks_on_invalid_config(handler):
-    membership = _mock_membership(handler)
+    """The invalid-config blocked persists through the status machinery.
+
+    A directly-written blocked is wiped by the collect handler's all-active
+    recompute on the same hook; the databag record is what collect replays.
+    """
+    _mock_membership(handler)
     with patch.object(handler.charm, "update_config", side_effect=ValueError("bad")):
         handler._on_peer_relation_changed(Mock())
-    status = membership.set_unit_status.call_args[0][0]
-    assert isinstance(status, BlockedStatus)
-    assert status.message == "Configuration Error. Please check the logs"
+    records = handler.state.statuses.get("unit", handler.config_manager.name).root
+    assert any(
+        r.status == "blocked" and r.message == "Configuration Error. Please check the logs"
+        for r in records
+    )
 
 
 def test_on_peer_relation_changed_exits_when_unit_blocked(handler, harness):
@@ -171,7 +178,11 @@ def test_on_config_changed_blocks_on_invalid_option(handler, harness):
         patch.object(handler.charm, "update_config"),
     ):
         handler._on_config_changed(event)
-    assert harness.model.unit.status.message == "Configuration Error. Please check the logs"
+    records = handler.state.statuses.get("unit", handler.config_manager.name).root
+    assert any(
+        r.status == "blocked" and r.message == "Configuration Error. Please check the logs"
+        for r in records
+    )
 
 
 def test_on_config_changed_clears_stale_configuration_error(handler, harness):
