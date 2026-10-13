@@ -19,7 +19,15 @@ from typing import Any, cast
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from ops import ActiveStatus, BlockedStatus, Relation, Secret, SecretNotFoundError, StatusBase
+from ops import (
+    ActiveStatus,
+    BlockedStatus,
+    Relation,
+    RelationDataAccessError,
+    Secret,
+    SecretNotFoundError,
+    StatusBase,
+)
 
 from single_kernel_postgresql.config.literals import (
     LOGICAL_REPLICATION_OFFER_RELATION,
@@ -138,8 +146,18 @@ class LogicalReplicationManager(BaseManager):
                     or LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS,
                 )
             ]
-        if remote_error := self.remote_publisher_error_message():
-            return [StatusObject(status="blocked", message=remote_error)]
+        # The subscription-request comparison reads the local app databag, which ops
+        # only lets the application leader read; non-leaders skip the check (trunk's
+        # status path never ran it at all).
+        if self.state.peer.is_app_leader:
+            try:
+                remote_error = self.remote_publisher_error_message()
+            except RelationDataAccessError:
+                # The collect must never crash the hook; the next hook re-checks.
+                logger.debug("publisher error check raced the relation teardown")
+                remote_error = None
+            if remote_error:
+                return [StatusObject(status="blocked", message=remote_error)]
         return super().get_statuses(scope, recompute)
 
     # region Helpers

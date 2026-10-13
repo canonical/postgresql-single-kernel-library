@@ -45,7 +45,7 @@ class TLSTransfer(Object):
             return
 
         secret_name = f"ca-{relation.app.name}"
-        self.charm.set_secret(SCOPE, secret_name, event.ca)
+        self.charm.state.set_secret(SCOPE, secret_name, event.ca)
 
         try:
             if not self.charm.push_ca_file_into_workload(secret_name):
@@ -65,7 +65,7 @@ class TLSTransfer(Object):
             return
 
         secret_name = f"ca-{relation.app.name}"
-        self.charm.set_secret(SCOPE, secret_name, None)
+        self.charm.state.set_secret(SCOPE, secret_name, None)
 
         try:
             if not self.charm.clean_ca_file_from_workload(secret_name):

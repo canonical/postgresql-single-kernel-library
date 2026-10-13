@@ -104,3 +104,22 @@ def test_on_ca_certificate_removed():
     mock_event.defer.assert_not_called()
     mock_charm.reset_mock()
     mock_event.reset_mock()
+
+
+def test_ca_secrets_route_through_state():
+    """The CA secrets go through the state's secret storage, not the charm.
+
+    The migration moved secret access onto CharmState; the charm-level
+    set_secret seam no longer exists, and calling it crashed every
+    receive-ca-cert hook (test_ldap glauth, CI 2026-10-13).
+    """
+    mock_charm = Mock()
+    mock_charm.model.get_relation.return_value.app.name = "testname"
+    tls_transfer = TLSTransfer(mock_charm, PEER_RELATION)
+
+    tls_transfer._on_certificate_available(Mock(ca="ca-pem"))
+    mock_charm.state.set_secret.assert_called_once_with(SCOPE, "ca-testname", "ca-pem")
+    mock_charm.set_secret.assert_not_called()
+
+    tls_transfer._on_certificate_removed(Mock())
+    mock_charm.state.set_secret.assert_called_with(SCOPE, "ca-testname", None)

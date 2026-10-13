@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 with suppress(ImportError):
     from lightkube.core.exceptions import ApiError
 
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops.pebble import ChangeError, ExecError
 
 from single_kernel_postgresql.config.enums import Substrates
@@ -36,6 +38,7 @@ from single_kernel_postgresql.config.literals import (
     REPLICATION_OFFER_RELATION,
     RESTORE_REPEAT_CAUSE,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.managers.backup import (
     IsStandbyClusterFunction,
     UpdateConfigFunction,
@@ -698,3 +701,17 @@ class RestoreManager(BaseManager):
             # Best-effort port release; a stale service may not be pebble-managed.
             except Exception as e:
                 logger.debug(f"Failed to stop {service}: {e!s}")
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses (the DPH component contract).
+
+        While a restore is in progress the unit stays in maintenance until
+        ``_was_restore_successful`` clears the flag, so the post-restore
+        cluster-formation window is not reported as active (the direct write
+        only lives until hook end).
+        """
+        if scope == "unit" and self.state.application.restoring_backup:
+            return [StatusObject(status="maintenance", message="restoring backup")]
+        return [GeneralStatuses.ACTIVE_IDLE.value]
