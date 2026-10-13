@@ -162,9 +162,7 @@ def test_config_error_survives_collect_and_recompute(charm, harness):
         patch.object(charm.refresh_manager, "reconcile_refresh_status"),
     ):
         harness.evaluate_status()
-        assert charm.unit.status == BlockedStatus(
-            "Configuration Error. Please check the logs"
-        )
+        assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
 
         # The update-status recompute clears the store per manager and re-adds
         # whatever get_statuses(recompute=True) returns; the durable flag must
@@ -175,9 +173,7 @@ def test_config_error_survives_collect_and_recompute(charm, harness):
             r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
         )
         harness.evaluate_status()
-        assert charm.unit.status == BlockedStatus(
-            "Configuration Error. Please check the logs"
-        )
+        assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
 
 
 def test_config_error_clears_when_config_validates(charm):
