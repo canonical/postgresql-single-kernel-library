@@ -851,8 +851,9 @@ def test_restart_k8s_reconciles_the_pebble_layers(handler):
     handler.cluster_manager = Mock()
     handler.postgresql = Mock()
     event = Mock()
-    handler._restart(event)
-    handler.workload.update_pebble_layers.assert_called_once()
+    with patch.object(type(handler.charm), "update_pebble_layers") as update:
+        handler._restart(event)
+    update.assert_called_once()
     assert handler.state.peer.data.get("postgresql_restarted") is None
     event.defer.assert_not_called()
 

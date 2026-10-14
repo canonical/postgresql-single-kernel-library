@@ -332,10 +332,10 @@ class K8sManager(BaseManager):
             try:
                 client.delete(
                     res=kind,
-                    name=f"{self.state.model.app.name}{suffix}",
+                    name=f"{self.state.cluster_name}{suffix}",
                     namespace=self.state.model.name,
                 )
-                logger.info(f"deleted {kind.__name__}/{self.state.model.app.name}{suffix}")
+                logger.info(f"deleted {kind.__name__}/{self.state.cluster_name}{suffix}")
             except ApiError as e:
                 if e.status.code == 403:
                     self.on_deployed_without_trust()
@@ -343,4 +343,4 @@ class K8sManager(BaseManager):
                 # Ignore the error only when the resource doesn't exist.
                 if e.status.code != 404:
                     raise e
-                logger.debug(f"{kind.__name__}/{self.state.model.app.name}{suffix} already absent")
+                logger.debug(f"{kind.__name__}/{self.state.cluster_name}{suffix} already absent")
