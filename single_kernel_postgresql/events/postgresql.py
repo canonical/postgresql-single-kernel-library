@@ -306,7 +306,8 @@ class PostgreSQLEventsHandler(Object):
                 self.membership_manager.raft_reinitialisation()
             except RaftRecoveryTimeoutError as e:
                 logger.warning("Deferring on_leader_elected: %s", e)
-                return
+                event.defer()
+            return
 
         self._update_leader_cluster_members(event)
 
