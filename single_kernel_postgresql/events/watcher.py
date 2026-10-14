@@ -126,7 +126,7 @@ class WatcherEventsHandler(Object):
         self._relation.data[self.state.peer.unit.app].update({"disable-watcher": "True"})
         try:
             if self.watcher_raft_address:
-                self.charm._patroni.remove_raft_member(self.watcher_raft_address)
+                self.charm.raft_manager.remove_raft_member(self.watcher_raft_address)
         except Exception as e:
             logger.warning(f"Error remove Raft watcher: {e}")
 
@@ -232,7 +232,7 @@ class WatcherEventsHandler(Object):
             # Only the leader handles Raft membership changes and user management
             # to avoid race conditions between multiple PostgreSQL units
             if self.state.peer.is_app_leader:
-                self.charm._patroni.cleanup_raft_cluster()
+                self.charm.raft_manager.cleanup_raft_cluster()
                 self._ensure_watcher_user()
             # Update Patroni configuration to include watcher in Raft
             self.charm.update_config()
@@ -255,7 +255,7 @@ class WatcherEventsHandler(Object):
         logger.info("Watcher relation broken, updating Patroni configuration")
         self.watcher_raft_address = None
         if self.state.peer.is_app_leader:
-            self.charm._patroni.cleanup_raft_cluster()
+            self.charm.raft_manager.cleanup_raft_cluster()
         # Update Patroni configuration without the watcher
         self.charm.update_config()
 
