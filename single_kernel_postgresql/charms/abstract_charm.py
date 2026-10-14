@@ -499,6 +499,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         """Returns whether the cluster is already initialised (trunk parity)."""
         return self.state.application.is_cluster_initialised
 
+    @property
+    def is_tls_enabled(self) -> bool:
+        """Return whether TLS is enabled (trunk parity; the K8s charm overrides)."""
+        return all(self.tls_manager.get_client_tls_files())
+
     def _setup_exporter(self) -> None:
         """Set up the postgres exporter snap service (VM only; overridden there)."""
         return None
