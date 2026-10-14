@@ -501,9 +501,9 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         return all(self.tls_manager.get_client_tls_files())
 
     @property
-    def _patroni(self) -> "PatroniManager":
-        """The trunk charm's Patroni manager alias, used by the watcher handlers."""
-        return self.patroni_manager
+    def _patroni(self) -> "RaftManager":
+        """The trunk charm's _patroni alias: the RAFT object, not the REST manager."""
+        return self.raft_manager
 
     def _setup_exporter(self) -> None:
         """Set up the postgres exporter snap service (VM only; overridden there)."""
