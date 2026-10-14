@@ -50,6 +50,7 @@ def membership(harness):
         update_relation_endpoints=Mock(),
         update_certificate=Mock(),
         raft_manager=Mock(),
+        primary_endpoint=lambda: harness.charm.primary_endpoint,
     )
 
 
@@ -423,7 +424,7 @@ def test_remove_departed_members_defers_without_dropping_members(harness, member
                 return_value=True,
             ),
             patch.object(
-                type(harness.charm.state),
+                type(harness.charm),
                 "primary_endpoint",
                 new_callable=PropertyMock,
                 return_value="10.0.0.1",
