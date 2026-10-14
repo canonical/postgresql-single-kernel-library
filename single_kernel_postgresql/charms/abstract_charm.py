@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
-from ops.charm import CharmBase
+from ops.charm import CharmBase, UpdateStatusEvent
 
 if TYPE_CHECKING:
     import charm_refresh
@@ -19,6 +19,7 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.async_replication import PostgreSQLAsyncReplication
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.ldap import LDAP
+from single_kernel_postgresql.events.logical_replication import PostgreSQLLogicalReplication
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.events.watcher import WatcherEventsHandler
@@ -32,6 +33,7 @@ from single_kernel_postgresql.managers.async_replication import (
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
+from single_kernel_postgresql.managers.logical_replication import LogicalReplicationManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
@@ -117,6 +119,28 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
         )
 
+        # Retry pending logical-replication validations on the update-status heartbeat;
+        # observed BEFORE StatusHandler so the charm-side checks run before the status
+        # recompute.
+        self.framework.observe(self.on.update_status, self._on_logical_replication_update_status)
+
+        # The manager owns the two logical-replication relations' data plane; the events
+        # handler owns the observers and event-flow guards. The config manager reads the
+        # manager's published slots for the Patroni render and API sync.
+        self.logical_replication_manager = LogicalReplicationManager(
+            state=self.state,
+            workload=self.workload,
+            # Per-call bridges: the client and the primary lookup are freshly
+            # constructed per access (Patroni primary lookup + app secret).
+            postgresql=lambda: self.postgresql,
+            primary_endpoint=lambda: self.primary_endpoint,
+            update_config=self.update_config,
+            set_unit_status=self.set_unit_status,
+        )
+        self.logical_replication = PostgreSQLLogicalReplication(
+            self, self.state, self.logical_replication_manager
+        )
+
         self.config_manager = ConfigManager(
             state=self.state,
             workload=self.workload,
@@ -127,6 +151,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             resource_provider=self.get_resource_provider,
             request_restart=self.request_restart,
             restart_services=self.restart_services,
+            logical_replication_slots=self.logical_replication.replication_slots,
         )
 
         # The refresh manager owns the charm_refresh integration and the priority gate
@@ -163,6 +188,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.logical_replication_manager,
         )
 
     # Postgresql Client
@@ -171,6 +197,15 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def postgresql(self) -> PostgreSQL:
         """Return a PostgreSQL client."""
         pass
+
+    def _on_logical_replication_update_status(self, event: UpdateStatusEvent) -> None:
+        """Retry pending logical-replication validations on the update-status heartbeat.
+
+        Runs BEFORE the StatusHandler's own update-status listener (constructed
+        later observes later), so the retry's validation results are part of the
+        status recompute that follows.
+        """
+        self.logical_replication.retry_validations()
 
     # Postgresql Workload
     @property

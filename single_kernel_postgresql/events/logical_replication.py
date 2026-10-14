@@ -12,6 +12,7 @@ bridge, Patroni re-render stays behind ``update_config``, and status writes go
 through ``set_unit_status``.
 """
 
+import json
 import logging
 
 from ops import (
@@ -32,7 +33,11 @@ from single_kernel_postgresql.config.literals import (
     SECRET_LABEL,
 )
 from single_kernel_postgresql.core.state import CharmState
-from single_kernel_postgresql.managers.logical_replication import LogicalReplicationManager
+from single_kernel_postgresql.managers.logical_replication import (
+    APPLIED_REQUEST_KEY,
+    VALIDATION_KEY,
+    LogicalReplicationManager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -116,16 +121,29 @@ class PostgreSQLLogicalReplication(Object):
             return False
         # Clear any previous error state when config changes
         # This prevents retry_validations() from validating stale config
-        self.state.application.data["logical-replication-validation"] = "ongoing"
+        self.state.application.data[VALIDATION_KEY] = "ongoing"
 
-        # Send subscription request to publisher first, before full validation
-        # This allows the publisher to detect circular replication and report errors
-        # which we can then check before doing our local validation
+        # Capture the PREVIOUSLY APPLIED request from the peer data: the empty-table check
+        # must fire for tables being NEWLY added, while already-replicated tables keep
+        # skipping it (canonical/postgresql-k8s-operator#1052).
+        previous_request = json.loads(self.state.application.data.get(APPLIED_REQUEST_KEY, "{}"))
+
+        # Push the request to the relation BEFORE validating: the publisher's chain
+        # checks read this request, and multi-hop circular detection only works after
+        # the round-trip (canonical/postgresql-operator#1085 exact order). Pushes are
+        # always syntactically valid JSON; a local validation failure leaves the request
+        # in place — the creation-time check still enforces the empty-table guard.
         if relation := self.model.get_relation(LOGICAL_REPLICATION_RELATION):
             self.manager.push_subscription_request(relation)
 
-        if self.manager.validate_subscription_request():
+        if self.manager.validate_subscription_request(previous_request, empty_tables="auto"):
             self.manager.apply_updated_subscription_request()
+            # The baseline means "replicated by a LIVE subscription": a newly-added
+            # database has no subscription yet (creation is deferred to relation-changed),
+            # so persisting its tables here would skip the empty-table guard and
+            # re-subscribe with copy_data=true over a non-empty table
+            # (canonical/postgresql-k8s-operator#982).
+            self.manager.persist_applied_request_baseline()
             # Clear any previous blocked status from validation errors
             self.charm.set_unit_status(ActiveStatus())
         return True
@@ -152,13 +170,13 @@ class PostgreSQLLogicalReplication(Object):
                 f"{LOGICAL_REPLICATION_RELATION} #{event.relation.id} join early exit due to unit not being a leader"
             )
             return
-        if self.state.application.data.get("logical-replication-validation") == "ongoing":
+        if self.state.application.data.get(VALIDATION_KEY) == "ongoing":
             logger.debug(
                 f"Deferring {LOGICAL_REPLICATION_RELATION} #{event.relation.id} join due to still ongoing logical replication config validation"
             )
             event.defer()
             return
-        if self.state.application.data.get("logical-replication-validation") == "error":
+        if self.state.application.data.get(VALIDATION_KEY) == "error":
             logger.debug(
                 f"{LOGICAL_REPLICATION_RELATION} #{event.relation.id} join early exit due to validation error"
             )
