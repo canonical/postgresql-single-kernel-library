@@ -75,3 +75,23 @@ def test_start_primary_blocks_on_create_user_error(vm_primary):
     ):
         vm_primary._start_primary(event)
     assert vm_primary.charm.unit.status == BlockedStatus("Failed to create postgres user")
+
+
+def test_can_start_stops_during_raft_recovery(harness, handler, substrate):
+    if substrate != "vm":
+        pytest.skip("VM flow")
+    with (
+        patch.object(handler, "_check_detached_storage"),
+        patch.object(type(handler.state), "has_raft_keys", lambda self: True),
+    ):
+        assert handler._can_start(Mock()) is False
+
+
+def test_can_start_proceeds_without_raft_keys(harness, handler, substrate):
+    if substrate != "vm":
+        pytest.skip("VM flow")
+    with (
+        patch.object(handler, "_check_detached_storage"),
+        patch.object(type(handler.state), "has_raft_keys", lambda self: False),
+    ):
+        assert handler._can_start(Mock()) is True
