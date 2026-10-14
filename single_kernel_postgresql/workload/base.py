@@ -345,6 +345,10 @@ class BaseWorkload(ABC):
         """Check if the Patroni service is running."""
         pass
 
+    def container_ready(self) -> bool:
+        """Whether the workload container (K8s) is connected; always true on VM."""
+        return True
+
     @abstractmethod
     def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
