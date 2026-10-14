@@ -6,7 +6,11 @@ from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import PATRONI_CONF_PATH, RAFT_PARTNER_PREFIX
+from single_kernel_postgresql.config.literals import (
+    BASE_SNAP_DIR,
+    RAFT_PARTNER_PREFIX,
+    SNAP_DATA,
+)
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.raft import RaftManager
 from single_kernel_postgresql.workload.vm import VMWorkload
@@ -118,7 +122,7 @@ def test_remove_raft_data(raft):
         raft.patroni_manager.stop_patroni.assert_called_once_with()
         assert _psutil.process_iter.call_count == 2
         _psutil.process_iter.assert_any_call(["name"])
-        _rmtree.assert_called_once_with(Path(f"{PATRONI_CONF_PATH}/raft"))
+        _rmtree.assert_called_once_with(Path(f"{BASE_SNAP_DIR}/{SNAP_DATA}/etc/patroni/raft"))
 
 
 def test_reinitialise_raft_data(raft):
