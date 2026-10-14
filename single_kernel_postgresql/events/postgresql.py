@@ -36,6 +36,7 @@ from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay,
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import (
     CannotConnectError,
+    RaftRecoveryTimeoutError,
     SettingSystemPasswordError,
     StorageUnavailableError,
     SwitchoverFailedError,
@@ -326,8 +327,11 @@ class PostgreSQLEventsHandler(Object):
                     logger.info(f"Generated new password for {key}")
 
         if self.state.has_raft_keys():
-            self.membership_manager.raft_reinitialisation()
-            return
+            try:
+                self.membership_manager.raft_reinitialisation()
+            except RaftRecoveryTimeoutError as e:
+                logger.warning("Deferring on_leader_elected: %s", e)
+                return
 
         self._update_leader_cluster_members(event)
 
@@ -884,7 +888,11 @@ class PostgreSQLEventsHandler(Object):
             if self.state.has_raft_keys():
                 self.state.peer.data.update({"raft_candidate": "True"})
                 if self.state.model.unit.is_leader():
-                    self.membership_manager.raft_reinitialisation()
+                    try:
+                        self.membership_manager.raft_reinitialisation()
+                    except RaftRecoveryTimeoutError as e:
+                        logger.warning("Deferring promote-to-primary: %s", e)
+                        event.defer()
                 return
             event.fail("Raft is not stuck")
         else:
@@ -994,7 +1002,11 @@ class PostgreSQLEventsHandler(Object):
             return False
         # Check whether raft is stuck.
         if membership.has_raft_keys():
-            membership.raft_reinitialisation()
+            try:
+                membership.raft_reinitialisation()
+            except RaftRecoveryTimeoutError as e:
+                logger.warning("Deferring on_peer_relation_changed: %s", e)
+                event.defer()
             logger.debug("Early exit on_peer_relation_changed: stuck raft recovery")
             return False
         # If the unit is the leader, it can reconfigure the cluster.
