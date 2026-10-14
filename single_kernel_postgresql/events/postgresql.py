@@ -89,7 +89,7 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLListUsersError,
     PostgreSQLUpdateUserPasswordError,
 )
-from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
+from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
@@ -505,10 +505,13 @@ class PostgreSQLEventsHandler(Object):
         if self.refresh_manager.refresh is None:
             logger.warning("Warning on_start: Refresh could be in progress")
         elif self.refresh_manager.refresh.in_progress:
-            # TODO(upstream): we should probably start the workload on scale-up
-            # while a refresh is in progress.
+            # TODO: we should probably start workload if scale up while refresh in progress
             logger.debug("Defer on_start: Refresh in progress")
             event.defer()
+            return False
+
+        if self.state.has_raft_keys():
+            logger.debug("Early exit on_start: Raft recovery in process")
             return False
 
         # Doesn't try to bootstrap the cluster if it's in a blocked state
@@ -598,15 +601,9 @@ class PostgreSQLEventsHandler(Object):
             return
 
         postgresql = self.postgresql()
-        try:
-            self.cluster_manager.setup_instance_users(postgresql)
-            self.database_manager.oversee_users(postgresql)
-        except Exception as e:
-            logger.exception(e)
-            self.membership_manager.set_unit_status(
-                BlockedStatus("Failed to create pre-defined roles")
-            )
+        if not self._setup_instance_users(postgresql, event):
             return
+        self.database_manager.oversee_users(postgresql)
 
         # Set the flag to enable the replicas to start the Patroni service.
         self.state.application.data["cluster_initialised"] = "True"
@@ -622,6 +619,37 @@ class PostgreSQLEventsHandler(Object):
 
         logger.debug("Active workload time: %s", datetime.now())
         self.charm.set_primary_status_message()
+
+    def _setup_instance_users(self, postgresql: "PostgreSQLClient", event: StartEvent) -> bool:
+        """Provision the pre-defined roles and system users (port of _setup_users).
+
+        Returns False when the failure was handled (status set or event deferred).
+        """
+        try:
+            self.cluster_manager.setup_instance_users(postgresql)
+        except PostgreSQLCreatePredefinedRolesError as e:
+            logger.exception(e)
+            self.membership_manager.set_unit_status(
+                BlockedStatus("Failed to create pre-defined roles")
+            )
+            return False
+        except PostgreSQLGrantDatabasePrivilegesToUserError as e:
+            logger.exception(e)
+            self.membership_manager.set_unit_status(
+                BlockedStatus("Failed to grant database privileges to user")
+            )
+            return False
+        except PostgreSQLCreateUserError as e:
+            logger.exception(e)
+            self.membership_manager.set_unit_status(
+                BlockedStatus("Failed to create postgres user")
+            )
+            return False
+        except PostgreSQLListUsersError:
+            logger.warning("Deferring on_start: Unable to list users")
+            event.defer()
+            return False
+        return True
 
     def _start_replica(self, event: StartEvent) -> None:
         """Configure the replica if the cluster was already initialised (port)."""
@@ -1128,9 +1156,9 @@ class PostgreSQLEventsHandler(Object):
             self.membership_manager.set_unit_status(BlockedStatus(error_message))
             return
 
+        # Update the health check URL (K8s; guarded against replan ChangeError).
         if self.state.substrate == Substrates.K8S:
-            # Keep the health-check URL current after the restart (port).
-            self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state))
+            self.charm.update_pebble_layers()
 
         try:
             for attempt in Retrying(wait=wait_fixed(3), stop=stop_after_delay(300)):
@@ -1269,7 +1297,7 @@ class PostgreSQLEventsHandler(Object):
                     logger.error("Data directory not attached.")
                     self.charm.unit.status = WaitingStatus("Data directory not attached")
                     raise StorageUnavailableError()
-        self.charm.unit.status = cached_status
+        self.config_manager._restore_unit_status(cached_status)
 
     # -- VM peer-relation membership flows (ported from the VM charm) ----------------
 
