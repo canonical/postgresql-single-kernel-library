@@ -293,6 +293,35 @@ def test_config_error_survives_collect_and_recompute(charm, harness):
         assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
 
 
+def test_on_config_changed_gates_on_apply_changed_config(charm, harness):
+    """Config-changed must run the logical-replication config gate and honor its veto."""
+    _set_initialised(harness)
+    charm.refresh_manager.refresh = None
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    with (
+        patch.object(type(charm), "update_config"),
+        patch.object(type(charm.config_manager), "validate_config_options"),
+        patch.object(type(charm.config_manager), "reconcile_extensions") as reconcile,
+        patch.object(
+            charm.logical_replication, "apply_changed_config", return_value=False
+        ) as apply_config,
+    ):
+        charm._on_config_changed(Mock(defer=Mock()))
+    apply_config.assert_called_once()
+    reconcile.assert_not_called()
+
+    apply_config.return_value = True
+    with (
+        patch.object(type(charm), "update_config"),
+        patch.object(type(charm.config_manager), "validate_config_options"),
+        patch.object(type(charm.config_manager), "reconcile_extensions") as reconcile,
+        patch.object(charm.logical_replication, "apply_changed_config", return_value=True),
+    ):
+        charm._on_config_changed(Mock(defer=Mock()))
+    reconcile.assert_called_once()
+
+
 # -- leader annotation / pebble layers ---------------------------------------------
 
 
