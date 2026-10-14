@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 """Unit tests for the VM start flow (typed user-setup failures)."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 from ops.model import BlockedStatus
@@ -25,6 +25,12 @@ def vm_primary(harness, handler, substrate):
     if substrate != "vm":
         pytest.skip("VM flow")
     with (
+        patch.object(
+            type(harness.charm),
+            "primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="10.0.0.1",
+        ),
         patch.object(handler.patroni_manager, "bootstrap_cluster", return_value=True),
         patch.object(type(handler.patroni_manager), "member_started", property(lambda _: True)),
         patch.object(handler.cluster_manager, "can_connect_to_postgresql", return_value=True),
