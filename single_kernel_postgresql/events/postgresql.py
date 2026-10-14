@@ -301,8 +301,11 @@ class PostgreSQLEventsHandler(Object):
                     logger.info(f"Generated new password for {key}")
 
         if self.state.has_raft_keys():
-            self.membership_manager.raft_reinitialisation()
-            return
+            try:
+                self.membership_manager.raft_reinitialisation()
+            except RaftRecoveryTimeoutError as e:
+                logger.warning("Deferring on_leader_elected: %s", e)
+                return
 
         self._update_leader_cluster_members(event)
 
@@ -862,7 +865,11 @@ class PostgreSQLEventsHandler(Object):
             if self.state.has_raft_keys():
                 self.state.peer.data.update({"raft_candidate": "True"})
                 if self.state.model.unit.is_leader():
-                    self.membership_manager.raft_reinitialisation()
+                    try:
+                        self.membership_manager.raft_reinitialisation()
+                    except RaftRecoveryTimeoutError as e:
+                        logger.warning("Deferring promote-to-primary: %s", e)
+                        event.defer()
                 return
             event.fail("Raft is not stuck")
         else:
