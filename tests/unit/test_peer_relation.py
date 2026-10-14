@@ -29,9 +29,7 @@ def _get_app_db(harness, key):
 
 def test_unit_ip_returns_none_when_the_peer_binding_is_torn(harness):
     """A RelationNotFoundError from get_binding must read as 'no ip', not crash."""
-    with patch.object(
-        harness.charm.model, "get_binding", side_effect=RelationNotFoundError()
-    ):
+    with patch.object(harness.charm.model, "get_binding", side_effect=RelationNotFoundError()):
         assert harness.charm.state.unit_ip is None
 
 

@@ -523,7 +523,10 @@ def test_update_primary_cluster_data_survives_a_stale_relation(harness, manager)
     harness.remove_relation(stale.id)
     with (
         patch.object(
-            AsyncReplicationManager, "async_relation", new_callable=PropertyMock, return_value=stale
+            AsyncReplicationManager,
+            "async_relation",
+            new_callable=PropertyMock,
+            return_value=stale,
         ),
         patch.object(
             AsyncReplicationManager,

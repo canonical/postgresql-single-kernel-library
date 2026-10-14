@@ -292,14 +292,19 @@ def test_secret_changed_offer_side_survives_a_torn_relation(harness, async_rel):
     event.secret.label = f"{PEER_RELATION}.{harness.charm.app.name}.app"
     with (
         patch.object(
-            AsyncReplicationManager, "async_relation", new_callable=PropertyMock, return_value=stale
+            AsyncReplicationManager,
+            "async_relation",
+            new_callable=PropertyMock,
+            return_value=stale,
         ),
-        patch.object(AsyncReplicationManager, "get_shared_secret", return_value=Mock()),
+        patch.object(
+            AsyncReplicationManager, "get_shared_secret", return_value=Mock(id="secret:x")
+        ),
         patch.object(
             AsyncReplicationManager,
             "primary_cluster_endpoint",
             new_callable=PropertyMock,
-            return_value=PRIMARY_ENDPOINT,
+            return_value=UNIT_IP,
         ),
     ):
         harness.charm.async_replication._on_secret_changed(event)
