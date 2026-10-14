@@ -31,6 +31,7 @@ from ops import (
     ModelError,
     Relation,
     RelationChangedEvent,
+    RelationNotFoundError,
     Secret,
     SecretNotFoundError,
     StatusBase,
@@ -521,9 +522,14 @@ class AsyncReplicationManager(BaseManager):
         relation = self.async_relation
         if relation is None:
             return
-        relation.data[self.state.model.unit].update({"unit-address": self.unit_ip})
-        if self.is_primary_cluster() and self.state.model.unit.is_leader():
-            self.update_primary_cluster_data()
+        # The cached relation can be torn down between events; a write to it must
+        # defer to the next hook instead of crashing (same guard as core/state.py).
+        try:
+            relation.data[self.state.model.unit].update({"unit-address": self.unit_ip})
+            if self.is_primary_cluster() and self.state.model.unit.is_leader():
+                self.update_primary_cluster_data()
+        except RelationNotFoundError:
+            return
 
     # -- Promotion flow (actions)
 
