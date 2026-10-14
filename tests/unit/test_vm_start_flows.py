@@ -108,3 +108,12 @@ def test_check_detached_storage_restores_status_through_the_config_manager(
     ):
         handler._check_detached_storage(handler.workload)
     restore.assert_called_once_with(harness.charm.unit.status)
+
+
+def test_charm_inherits_the_restart_callback(harness, substrate):
+    if substrate != "vm":
+        pytest.skip("VM flow")
+    event = Mock()
+    with patch.object(harness.charm.postgresql_events_handler, "_restart") as restart:
+        harness.charm._restart(event)
+    restart.assert_called_once_with(event)
