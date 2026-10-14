@@ -137,6 +137,10 @@ class ObserverManager(BaseManager):
 
     def start_raft_observer(self) -> None:
         """Render systemd units and start the observer."""
+        if self.state.substrate == Substrates.K8S:
+            # The K8s substrate has no systemd unit files; the raft observer
+            # is a VM-side concern (the K8s leg starts its own observer).
+            return
         timer_service_file = "/etc/systemd/system/raft-observer.timer"
         oneshot_service_file = "/etc/systemd/system/raft-observer.service"
 
