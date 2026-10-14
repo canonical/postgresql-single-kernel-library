@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 from lightkube.core.exceptions import ApiError
 from ops import ActiveStatus, BlockedStatus, StatusBase
+from ops.pebble import ChangeError
 
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
@@ -167,8 +168,13 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         """Refresh the client and async relation endpoints after a switchover."""
 
     def update_pebble_layers(self) -> None:
-        """Reconcile the workload's Pebble layers."""
-        self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state))
+        """Reconcile the workload's Pebble layers, guarded against replan failure."""
+        try:
+            self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state))
+        except ChangeError as e:
+            # A stale pgBackRest exporter can hold its port and fail the replan
+            # mid-hook; the next hook retries instead of erroring the unit.
+            logger.warning("Failed to replan pebble services: %s", e)
 
     def ensure_pgdata_dirs_and_symlinks(self) -> None:
         """Create the storage directories and symlinks for the PostgreSQL data paths."""
