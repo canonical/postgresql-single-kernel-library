@@ -2,8 +2,9 @@
 # See LICENSE file for licensing details.
 """Unit tests for the observer events handler (VM)."""
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 
+import pytest
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.events.observer import ObserverEventsHandler
 
@@ -29,3 +30,34 @@ def test_raft_reconnect_is_not_observed_by_the_observer_handler():
     """raft_reconnect has exactly one registration (postgresql events handler)."""
     _, handler = _handler()
     assert not hasattr(handler, "_on_raft_reconnect")
+
+
+def test_cluster_topology_change_gates_on_the_patroni_primary_endpoint():
+    """No endpoint updates run while the Patroni primary is unreachable."""
+    charm, handler = _handler()
+    # The k8s-service state.primary_endpoint is never falsy on VM; the gate
+    # must consult the Patroni-resolved endpoint instead.
+    charm.state.primary_endpoint = "postgresql-primary.test-model.svc.cluster.local"
+    charm.primary_endpoint = None
+    handler._on_cluster_topology_change(MagicMock())
+    handler.database_manager.update_endpoints.assert_not_called()
+
+
+def test_cluster_topology_change_updates_endpoints_with_a_primary():
+    charm, handler = _handler()
+    charm.state.primary_endpoint = "postgresql-primary.test-model.svc.cluster.local"
+    charm.primary_endpoint = "10.0.0.5"
+    charm.state.peer.is_app_leader = True
+    handler._on_cluster_topology_change(MagicMock())
+    handler.database_manager.update_endpoints.assert_called_once()
+    handler.charm.set_primary_status_message.assert_called_once()
+    handler.async_replication_manager.update_async_replication_data.assert_called_once()
+
+
+def test_raft_reconnect_observed_once_on_vm(harness, substrate):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM flow")
+    """Emitting raft_reconnect runs the membership flow exactly once."""
+    with patch.object(harness.charm.membership_manager, "raft_reconnect") as reconnect:
+        harness.charm.on.raft_reconnect.emit()
+    assert reconnect.call_count == 1
