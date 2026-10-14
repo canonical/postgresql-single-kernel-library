@@ -396,6 +396,7 @@ def test_watcher_relation_changed_reads_charm_is_cluster_initialised(charm, harn
         harness.add_relation_unit(rel_id, "external-watcher/0")
     event = Mock(relation=charm.model.relations["watcher-offer"][0], defer=Mock())
     assert charm.is_cluster_initialised is False
+    assert charm.is_tls_enabled is False  # no certs assigned yet (trunk parity)
     with patch.object(charm.watcher_handler, "update_unit_address"):
         charm.watcher_handler._on_watcher_relation_changed(event)
     event.defer.assert_called_once()  # not initialised yet -> defer, no crash
