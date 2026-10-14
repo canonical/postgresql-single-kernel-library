@@ -323,9 +323,9 @@ class K8sManager(BaseManager):
             try:
                 client.delete(
                     res=kind,
-                    name=f"{self.state.model.app.name}{suffix}",
+                    name=f"{self.state.cluster_name}{suffix}",
                     namespace=self.state.model.name,
                 )
-                logger.info(f"deleted {kind.__name__}/{self.state.model.app.name}{suffix}")
+                logger.info(f"deleted {kind.__name__}/{self.state.cluster_name}{suffix}")
             except ApiError:
-                logger.debug(f"{kind.__name__}/{self.state.model.app.name}{suffix} already absent")
+                logger.debug(f"{kind.__name__}/{self.state.cluster_name}{suffix} already absent")

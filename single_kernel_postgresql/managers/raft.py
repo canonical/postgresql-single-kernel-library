@@ -26,7 +26,6 @@ from single_kernel_postgresql.config.exceptions import (
     RemoveRaftMemberFailedError,
 )
 from single_kernel_postgresql.config.literals import (
-    PATRONI_CONF_PATH,
     PEER_RELATION,
     RAFT_MAJORITY_LOSS_MESSAGE,
     RAFT_PARTNER_PREFIX,
@@ -105,7 +104,8 @@ class RaftManager(BaseManager):
 
         logger.info("Removing raft data")
         try:
-            path = Path(f"{PATRONI_CONF_PATH}/raft")
+            # Anchor on the snap root: a CWD-relative path silently skips the rmtree.
+            path = Path(f"{self.workload.paths.patroni_conf}/raft")
             if path.exists() and path.is_dir():
                 shutil.rmtree(path)
         except OSError as e:
