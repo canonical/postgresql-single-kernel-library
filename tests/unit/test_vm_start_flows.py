@@ -129,11 +129,14 @@ def test_charm_inherits_the_restart_callback(harness, substrate):
 def test_leader_elected_defers_on_raft_recovery_timeout(harness, handler, substrate):
     if substrate != "vm":
         pytest.skip("VM flow")
-    with patch.object(
-        handler.membership_manager,
-        "raft_reinitialisation",
-        side_effect=RaftRecoveryTimeoutError("timed out"),
-    ), patch.object(type(handler.state), "has_raft_keys", lambda self: True):
+    with (
+        patch.object(
+            handler.membership_manager,
+            "raft_reinitialisation",
+            side_effect=RaftRecoveryTimeoutError("timed out"),
+        ),
+        patch.object(type(handler.state), "has_raft_keys", lambda self: True),
+    ):
         handler._on_leader_elected(Mock())
 
 
@@ -143,6 +146,11 @@ def test_promote_primary_unit_defers_on_raft_recovery_timeout(harness, handler, 
     event = Mock()
     with (
         patch.object(type(handler.state), "has_raft_keys", lambda self: True),
+        patch.object(
+            type(handler.state.model.unit),
+            "is_leader",
+            lambda self: True,
+        ),
         patch.object(
             handler.membership_manager,
             "raft_reinitialisation",
