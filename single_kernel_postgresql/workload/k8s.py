@@ -316,6 +316,10 @@ class K8sWorkload(BaseWorkload):
             len(self.container.pebble.get_services(names=[service])) > 0
         )
 
+    def container_ready(self) -> bool:
+        """Whether the postgresql container is connected."""
+        return self.container.can_connect()
+
     def service_is_running(self, service: str) -> bool:
         """Check whether a named Pebble service is running.
 
