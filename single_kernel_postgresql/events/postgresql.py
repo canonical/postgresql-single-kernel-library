@@ -1135,6 +1135,10 @@ class PostgreSQLEventsHandler(Object):
             self.membership_manager.set_unit_status(BlockedStatus(error_message))
             return
 
+        # Update the health check URL (K8s; guarded against replan ChangeError).
+        if self.state.substrate == Substrates.K8S:
+            self.charm.update_pebble_layers()
+
         try:
             for attempt in Retrying(wait=wait_fixed(3), stop=stop_after_delay(300)):
                 with attempt:
