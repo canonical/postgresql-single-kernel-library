@@ -494,6 +494,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         """Return whether TLS is enabled (trunk parity; the K8s charm overrides)."""
         return all(self.tls_manager.get_client_tls_files())
 
+    @property
+    def _patroni(self) -> "PatroniManager":
+        """The trunk charm's Patroni manager alias, used by the watcher handlers."""
+        return self.patroni_manager
+
     def _setup_exporter(self) -> None:
         """Set up the postgres exporter snap service (VM only; overridden there)."""
         return None
