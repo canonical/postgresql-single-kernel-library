@@ -431,9 +431,15 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         # Update the sync-standby endpoint in the async replication data.
         self.async_replication_manager.update_async_replication_data()
 
-        if not self.unit.is_leader():
+        # Parity with the VM branch: a changed replication config must apply (or veto) before the leader tail.
+        if not self.logical_replication.apply_changed_config(event):
             return
 
+        if self.unit.is_leader():
+            self._on_config_changed_leader(event)
+
+    def _on_config_changed_leader(self, event) -> None:
+        """Leader-only tail of config-changed (extensions and admin-secret rotation)."""
         # Enable and/or disable the extensions.
         self.config_manager.reconcile_extensions(self.postgresql)
 
