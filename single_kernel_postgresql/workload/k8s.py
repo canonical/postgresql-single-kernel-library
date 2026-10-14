@@ -188,23 +188,11 @@ class K8sWorkload(BaseWorkload):
         return Layer(layer_config)
 
     def _generate_metrics_service(self, spec: PebbleLayerSpec) -> ServiceDict:
-        """Generate the metrics service definition."""
-        return {
-            "override": "replace",
-            "summary": "postgresql metrics exporter",
-            "command": "/start-exporter.sh",
-            "startup": "enabled" if spec.monitoring_password is not None else "disabled",
-            "after": [K8S_POSTGRESQL_SERVICE_NAME],
-            "user": K8S_WORKLOAD_OS_USER,
-            "group": K8S_WORKLOAD_OS_GROUP,
-            "environment": {
-                "DATA_SOURCE_NAME": (
-                    f"user={MONITORING_USER} "
-                    f"password={spec.monitoring_password} "
-                    "host=/var/run/postgresql port=5432 database=postgres"
-                ),
-            },
-        }
+        """Generate the metrics service definition (single implementation below)."""
+        return self.generate_metrics_service(
+            monitoring_password=spec.monitoring_password,
+            postgresql_service=K8S_POSTGRESQL_SERVICE_NAME,
+        )
 
     def _generate_pgbackrest_metrics_service(self) -> ServiceDict:
         """Generate the pgbackrest metrics service definition."""
@@ -785,7 +773,7 @@ class K8sWorkload(BaseWorkload):
 
     def generate_metrics_service(
         self, monitoring_password: str | None, postgresql_service: str
-    ) -> dict:
+    ) -> ServiceDict:
         """Generate the metrics exporter service definition (port)."""
         return {
             "override": "replace",
@@ -795,4 +783,9 @@ class K8sWorkload(BaseWorkload):
             "after": [postgresql_service],
             "user": self.user,
             "group": self.group,
+            "environment": {
+                "DATA_SOURCE_URI": ":5432/postgres?host=/var/run/postgresql",
+                "DATA_SOURCE_USER": MONITORING_USER,
+                "DATA_SOURCE_PASS": str(monitoring_password),
+            },
         }
