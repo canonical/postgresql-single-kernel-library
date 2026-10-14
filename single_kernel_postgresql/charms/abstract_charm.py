@@ -484,6 +484,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         """Whether this unit is the primary instance."""
         return self.unit.name == self.patroni_manager.get_primary(unit_name_pattern=True)
 
+    @property
+    def is_cluster_initialised(self) -> bool:
+        """Returns whether the cluster is already initialised (trunk parity)."""
+        return self.state.application.is_cluster_initialised
+
     def _setup_exporter(self) -> None:
         """Set up the postgres exporter snap service (VM only; overridden there)."""
         return None
