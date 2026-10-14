@@ -14,4 +14,5 @@ myst:
 
 Enable an extension <enable-extension>
 Enable TimescaleDB <enable-timescaledb>
+Enable pg_cron <enable-pg-cron>
 ```

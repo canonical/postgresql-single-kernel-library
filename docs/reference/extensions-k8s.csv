@@ -25,6 +25,7 @@ lo, `plugin-lo-enable`, 168
 ltree, `plugin-ltree-enable`, 168
 old_snapshot, `plugin-old-snapshot-enable`, 168
 orafce, `plugin-orafce-enable`, 193
+pg_cron, `plugin-pg-cron-enable`, Not released
 pg_freespacemap, `plugin-pg-freespacemap-enable`, 168
 pg_similarity, `plugin-pg-similarity-enable`, 193
 pg_trgm, `plugin-pg-trgm-enable`, 100
