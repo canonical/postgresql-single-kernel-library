@@ -6,7 +6,7 @@ import json
 from unittest.mock import Mock
 
 import pytest
-from single_kernel_postgresql.config.literals import DATABASE_PORT
+from single_kernel_postgresql.config.literals import DATABASE_PORT, MONITORING_USER
 
 CERTS_PATH = "/usr/local/share/ca-certificates"
 
@@ -86,3 +86,42 @@ def test_generate_metrics_service_uses_charm_command(workload, patch_crypto):
         monitoring_password="pw", postgresql_service="postgresql"
     )
     assert service["startup"] == "enabled"
+
+
+def test_generate_metrics_service_uses_charm_data_source_env(workload, patch_crypto):
+    service = workload.generate_metrics_service(
+        monitoring_password="pw", postgresql_service="postgresql"
+    )
+    assert service["environment"] == {
+        "DATA_SOURCE_URI": ":5432/postgres?host=/var/run/postgresql",
+        "DATA_SOURCE_USER": MONITORING_USER,
+        "DATA_SOURCE_PASS": "pw",
+    }
+
+
+def test_rendered_layer_metrics_service_matches_the_charm_form(harness, workload):
+    from single_kernel_postgresql.config.literals import (
+        K8S_METRICS_SERVER_SERVICE_NAME,
+        K8S_POSTGRESQL_SERVICE_NAME,
+        MONITORING_USER,
+    )
+    from single_kernel_postgresql.workload.base import PebbleLayerSpec
+
+    spec = PebbleLayerSpec(
+        on_failure_condition="restart",
+        cluster_name="patroni-postgresql-k8s",
+        model_name="test-model",
+        pod_name="postgresql-k8s-0",
+        patroni_url="http://localhost:8008",
+        monitoring_password="pw",
+    )
+    layer = workload._postgresql_layer(spec)
+    service = layer.services[K8S_METRICS_SERVER_SERVICE_NAME]
+    assert service.command == "/usr/bin/prometheus-postgres-exporter"
+    assert service.startup == "enabled"
+    assert service.after == [K8S_POSTGRESQL_SERVICE_NAME]
+    assert service.environment == {
+        "DATA_SOURCE_URI": ":5432/postgres?host=/var/run/postgresql",
+        "DATA_SOURCE_USER": MONITORING_USER,
+        "DATA_SOURCE_PASS": "pw",
+    }
