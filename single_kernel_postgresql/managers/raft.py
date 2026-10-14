@@ -197,10 +197,16 @@ class RaftManager(BaseManager):
         # Leader doesn't always trigger when changing it's own peer data.
         if self.state.peer.is_app_leader:
             # TODO Factor out
-            self.peer_relation_changed.emit(
-                unit=self.state.peer.unit,
-                app=self.state.peer.unit.app,
-                relation=self.state.model.get_relation(PEER_RELATION),
+            relation = self.state.model.get_relation(PEER_RELATION)
+            relation_unit = self.state.peer.unit
+            relation_changed = getattr(
+                self.state.charm.on,
+                f"{PEER_RELATION.replace('-', '_')}_relation_changed",
+            )
+            relation_changed.emit(
+                relation,
+                app=relation_unit.app,
+                unit=relation_unit,
             )
 
     def get_raft_status(self) -> dict | None:

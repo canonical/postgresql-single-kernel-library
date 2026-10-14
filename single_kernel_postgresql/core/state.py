@@ -59,6 +59,7 @@ class CharmState(Object):
     ) -> None:
         """Initialize the CharmState object."""
         super().__init__(charm, "charm_state")
+        self.charm = charm
         self.substrate = substrate
         self.peer_app_interface = DataPeerData(model=charm.model, relation_name=PEER_RELATION)
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
