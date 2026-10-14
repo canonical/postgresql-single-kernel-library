@@ -383,6 +383,24 @@ def test_watcher_update_unit_address_writes_the_pinned_snap(charm, harness):
     assert relation.data[charm.state.peer.unit]["snap"] == "428"
 
 
+def test_watcher_relation_changed_reads_charm_is_cluster_initialised(charm, harness):
+    """The watcher relation-changed gate goes through the charm property.
+
+    test_build_and_deploy_stereo_mode crashed the relation-changed hook on
+    units without an initialised cluster: the lib watcher handler reads
+    self.charm.is_cluster_initialised (trunk charm.py parity) but no charm
+    attribute exposed it.
+    """
+    rel_id = harness.add_relation("watcher-offer", "external-watcher")
+    with harness.hooks_disabled():
+        harness.add_relation_unit(rel_id, "external-watcher/0")
+    event = Mock(relation=charm.model.relations["watcher-offer"][0], defer=Mock())
+    assert charm.is_cluster_initialised is False
+    with patch.object(charm.watcher_handler, "update_unit_address"):
+        charm.watcher_handler._on_watcher_relation_changed(event)
+    event.defer.assert_called_once()  # not initialised yet -> defer, no crash
+
+
 def test_raft_stuck_block_survives_collect(charm, harness):
     """The raft-majority-loss blocked must survive the collect.
 
