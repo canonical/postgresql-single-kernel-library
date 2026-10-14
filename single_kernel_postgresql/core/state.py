@@ -176,8 +176,9 @@ class CharmState(Object):
     @property
     def unit_ip(self) -> str | None:
         """Current unit ip."""
-        if binding := self.model.get_binding(PEER_RELATION):
-            return str(binding.network.bind_address)
+        with suppress(RelationNotFoundError):
+            if binding := self.model.get_binding(PEER_RELATION):
+                return str(binding.network.bind_address)
 
     @property
     def database_ip(self) -> str | None:
