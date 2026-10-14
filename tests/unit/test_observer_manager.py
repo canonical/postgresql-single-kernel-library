@@ -10,6 +10,7 @@ import importlib.resources
 from unittest.mock import MagicMock, patch
 
 from jinja2 import Template
+from ops import ActiveStatus
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.managers.observer import ObserverManager
 
@@ -71,3 +72,55 @@ def test_start_raft_observer_noop_on_k8s():
     with patch("single_kernel_postgresql.managers.observer.render_file") as _render_file:
         manager.start_raft_observer()
     _render_file.assert_not_called()
+
+
+def _gate_state(substrate: Substrates) -> MagicMock:
+    state = MagicMock()
+    state.substrate = substrate
+    state.peer.unit.status = ActiveStatus()
+    state.application.is_cluster_initialised = True
+    state.peer.observer_pid = None
+    state.peer.authorisation_rules_observer_pid = None
+    state.peer_relation = MagicMock()
+    state.unit_ip = "10.0.0.5"
+    state.patroni_url = "http://10.0.0.5:8008"
+    state.peer_members_ips = ["10.0.0.6"]
+    state.model.unit.name = "postgresql-k8s/0"
+    state.framework.charm_dir = "/tmp/charm"
+    return state
+
+
+@patch("builtins.open", MagicMock())
+@patch("single_kernel_postgresql.managers.observer.subprocess.Popen")
+def test_start_observer_starts_when_trunk_gates_pass(_popen):
+    state = _gate_state(Substrates.VM)
+    state.patroni_url = "http://10.0.0.5:8008"
+    _popen.return_value.pid = 42
+    manager = ObserverManager(state, MagicMock())
+    with patch(
+        "single_kernel_postgresql.managers.observer.copy_environment",
+        return_value={"PYTHONPATH": "/charm/lib/python3.12/site-packages"},
+    ):
+        manager.start_observer()
+    assert state.peer.observer_pid == 42
+
+
+@patch("builtins.open", MagicMock())
+@patch("single_kernel_postgresql.managers.observer.subprocess.Popen")
+def test_start_observer_skips_when_cluster_not_initialised(_popen):
+    state = _gate_state(Substrates.VM)
+    state.application.is_cluster_initialised = False
+    manager = ObserverManager(state, MagicMock())
+    manager.start_observer()
+    _popen.assert_not_called()
+
+
+@patch("builtins.open", MagicMock())
+@patch("single_kernel_postgresql.managers.observer.subprocess.Popen")
+def test_start_observer_skips_when_container_not_connected(_popen):
+    state = _gate_state(Substrates.K8S)
+    workload = MagicMock()
+    workload.container_ready.return_value = False
+    manager = ObserverManager(state, workload)
+    manager.start_observer()
+    _popen.assert_not_called()

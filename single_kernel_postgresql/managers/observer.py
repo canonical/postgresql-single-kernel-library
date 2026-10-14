@@ -46,6 +46,11 @@ class ObserverManager(BaseManager):
         if (
             not isinstance(self.state.peer.unit.status, ActiveStatus)
             or self.state.peer_relation is None
+            # Trunk-parity gates (AuthorisationRulesObserver): never start an
+            # observer before the cluster is initialised and, on K8s, the
+            # container is connected.
+            or not self.state.application.is_cluster_initialised
+            or (self.state.substrate == Substrates.K8S and not self.workload.container_ready())
         ):
             return
         if self.state.substrate == Substrates.VM:
