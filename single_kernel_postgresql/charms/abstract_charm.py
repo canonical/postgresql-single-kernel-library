@@ -187,6 +187,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             request_restart=self.request_restart,
             restart_services=self.restart_services,
             set_unit_status=self.set_unit_status,
+            primary_endpoint=lambda: self.primary_endpoint,
             logical_replication_slots=self.logical_replication.replication_slots,
         )
 
@@ -221,6 +222,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             set_primary_status_message=self.set_primary_status_message,
             update_certificate=self._update_certificate,
             k8s_manager=k8s_manager,
+            primary_endpoint=lambda: self.primary_endpoint,
         )
 
         # The backup subsystem (port of the VM charm's composition wiring): the
@@ -410,6 +412,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def set_default_unit_status(self) -> None:
         """Set the unit status that applies when no refresh status is active."""
         pass
+
+    def _restart(self, event) -> None:
+        """Rolling-ops restart callback; the body lives in the events handler."""
+        self.postgresql_events_handler._restart(event)
 
     @abstractmethod
     def update_config(
