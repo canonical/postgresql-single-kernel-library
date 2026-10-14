@@ -34,6 +34,7 @@ def membership(harness):
         async_replication_manager=Mock(),
         update_relation_endpoints=Mock(),
         raft_manager=Mock(),
+        primary_endpoint=lambda: "10.0.0.1",
         k8s_manager=Mock(),
     )
     manager.patroni_manager.are_all_members_ready.return_value = True

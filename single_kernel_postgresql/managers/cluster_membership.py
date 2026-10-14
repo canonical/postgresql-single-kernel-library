@@ -60,6 +60,7 @@ class ClusterMembershipManager(BaseManager):
         async_replication_manager: "AsyncReplicationManager",
         update_relation_endpoints: Callable[[], None],
         raft_manager: "RaftManager",
+        primary_endpoint: Callable[[], str | None],
         k8s_manager=None,
         update_certificate: Callable[[], None] | None = None,
         set_primary_status_message: Callable[[], None] | None = None,
@@ -71,6 +72,9 @@ class ClusterMembershipManager(BaseManager):
         self.watcher_handler = watcher_handler
         self.async_replication_manager = async_replication_manager
         self.update_relation_endpoints = update_relation_endpoints
+        # Patroni-resolved primary endpoint (None when unreachable); the state's
+        # k8s-service form is never falsy on VM and cannot gate VM flows.
+        self.primary_endpoint = primary_endpoint
         self.raft_manager = raft_manager
         self.k8s_manager = k8s_manager
         # Late-bound bridges (wired by the charm class when the target lands).
@@ -251,7 +255,7 @@ class ClusterMembershipManager(BaseManager):
             # Update the list of the current members.
             self.remove_member_ip(member_ip)
             self.update_config()
-            if self.state.primary_endpoint:
+            if self.primary_endpoint():
                 self.update_relation_endpoints()
             else:
                 self.set_unit_status(WaitingStatus(PRIMARY_NOT_REACHABLE_MESSAGE))

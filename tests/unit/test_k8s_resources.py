@@ -46,6 +46,7 @@ def membership(harness):
         async_replication_manager=Mock(),
         update_relation_endpoints=Mock(),
         raft_manager=Mock(),
+        primary_endpoint=lambda: "10.0.0.1",
         k8s_manager=Mock(),
     )
     manager.patroni_manager.cluster_members = set()
@@ -127,7 +128,9 @@ def test_cleanup_old_cluster_resources_deletes_suffixes(harness, k8s_manager):
     with patch("single_kernel_postgresql.managers.k8s.Client", return_value=client):
         k8s_manager.cleanup_old_cluster_resources()
     deleted = {call.kwargs["name"] for call in client.delete.call_args_list}
-    assert deleted == {f"{harness.charm.app.name}{suffix}" for suffix in ("", "-config", "-sync")}
+    assert deleted == {
+        f"{harness.charm.state.cluster_name}{suffix}" for suffix in ("", "-config", "-sync")
+    }
 
 
 def test_cleanup_old_cluster_resources_blocks_without_trust(harness, k8s_manager):
