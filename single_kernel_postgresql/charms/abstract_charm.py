@@ -357,6 +357,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         """Set the unit status that applies when no refresh status is active."""
         pass
 
+    def _restart(self, event) -> None:
+        """Rolling-ops restart callback; the body lives in the events handler."""
+        self.postgresql_events_handler._restart(event)
+
     @abstractmethod
     def update_config(
         self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
