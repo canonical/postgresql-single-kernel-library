@@ -499,3 +499,19 @@ def test_update_primary_cluster_data_on_the_consumer_side(harness, manager):
     data = json.loads(relation.data[harness.charm.model.app]["primary-cluster-data"])
     assert data == {"endpoint": PRIMARY_ENDPOINT}
     get_secret.assert_not_called()
+
+
+def _offer_relation(harness):
+    rel_id = harness.add_relation(REPLICATION_OFFER_RELATION, REMOTE_APP)
+    harness.add_relation_unit(rel_id, f"{REMOTE_APP}/0")
+    return harness.charm.model.relations[REPLICATION_OFFER_RELATION][0]
+
+
+def test_update_async_replication_data_survives_a_stale_relation(harness, manager):
+    """A torn relation cached on the manager must not crash the update."""
+    stale = _offer_relation(harness)
+    harness.remove_relation(stale.id)
+    with patch.object(
+        AsyncReplicationManager, "async_relation", new_callable=PropertyMock, return_value=stale
+    ):
+        manager.update_async_replication_data()

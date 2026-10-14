@@ -6,6 +6,7 @@ from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 from ops.model import BlockedStatus
+from single_kernel_postgresql.config.exceptions import RaftRecoveryTimeoutError
 from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLCreatePredefinedRolesError,
     PostgreSQLCreateUserError,
@@ -123,3 +124,30 @@ def test_charm_inherits_the_restart_callback(harness, substrate):
     with patch.object(harness.charm.postgresql_events_handler, "_restart") as restart:
         harness.charm._restart(event)
     restart.assert_called_once_with(event)
+
+
+def test_leader_elected_defers_on_raft_recovery_timeout(harness, handler, substrate):
+    if substrate != "vm":
+        pytest.skip("VM flow")
+    with patch.object(
+        handler.membership_manager,
+        "raft_reinitialisation",
+        side_effect=RaftRecoveryTimeoutError("timed out"),
+    ), patch.object(type(handler.state), "has_raft_keys", lambda self: True):
+        handler._on_leader_elected(Mock())
+
+
+def test_promote_primary_unit_defers_on_raft_recovery_timeout(harness, handler, substrate):
+    if substrate != "vm":
+        pytest.skip("VM flow")
+    event = Mock()
+    with (
+        patch.object(type(handler.state), "has_raft_keys", lambda self: True),
+        patch.object(
+            handler.membership_manager,
+            "raft_reinitialisation",
+            side_effect=RaftRecoveryTimeoutError("timed out"),
+        ),
+    ):
+        handler._promote_primary_unit(event)
+    event.defer.assert_called_once()
