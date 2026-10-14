@@ -5,7 +5,7 @@
 from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
-from ops import ActiveStatus, BlockedStatus, MaintenanceStatus
+from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, Object
 from single_kernel_postgresql.compat.postgresql import PostgreSQLCreateDatabaseError
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
@@ -13,6 +13,7 @@ from single_kernel_postgresql.config.literals import (
     EXTENSION_OBJECT_MESSAGE,
     PEER_RELATION,
     RAFT_MAJORITY_LOSS_MESSAGE,
+    RAFT_PARTNER_PREFIX,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 
@@ -429,6 +430,45 @@ def test_watcher_offer_joined_leader_cleans_up_raft_cluster(charm, harness):
     ):
         charm.watcher_handler._on_watcher_relation_changed(event)
     cleanup.assert_called_once()
+
+
+def test_remove_raft_member_stuck_cluster_re_emits_peer_changed(charm, harness):
+    """The stuck-raft re-emit goes through the real relation-changed event.
+
+    test_scaling / test_scaling_three_units(+async) crashed the
+    database-peers-relation-departed hook (run 38505392160 attempt 3): the
+    ported _set_stuck_raft_flag called .emit() on the ctor-injected FUNCTION
+    bridge (AttributeError 'function' object has no attribute 'emit'); trunk
+    emits charm.on[PEER_RELATION].relation_changed (src/cluster.py:174-178).
+    """
+    peer_rel = charm.model.relations[PEER_RELATION][0]
+    with harness.hooks_disabled():
+        harness.update_relation_data(peer_rel.id, charm.app.name, {"cluster_initialised": "True"})
+    with (
+        patch.object(
+            type(charm.state.application), "raft_password", PropertyMock(return_value="pw")
+        ),
+        patch.object(type(charm.state.peer), "is_app_leader", PropertyMock(return_value=True)),
+        patch("single_kernel_postgresql.managers.raft.TcpUtility") as tcp_utility,
+    ):
+        tcp_utility.return_value.executeCommand.return_value = {
+            "has_quorum": False,
+            "leader": None,
+            f"{RAFT_PARTNER_PREFIX}2.2.2.2:2222": 0,
+        }
+        emitted = []
+
+        class _Capture(Object):
+            def capture(self, event):
+                emitted.append(event)
+
+        capture = _Capture(charm, "capture")
+        charm.framework.observe(charm.on[PEER_RELATION].relation_changed, capture.capture)
+        charm.raft_manager.remove_raft_member("2.2.2.2:2222")
+    assert len(emitted) == 1
+    assert emitted[0].relation == peer_rel
+    assert charm.unit.status == BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE)
+    assert charm.state.peer.data["raft_stuck"] == "True"
 
 
 def test_raft_stuck_block_survives_collect(charm, harness):
