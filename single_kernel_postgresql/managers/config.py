@@ -103,6 +103,7 @@ class ConfigManager(BaseManager):
         request_restart: Callable[[], None],
         restart_services: Callable[[], None],
         set_unit_status: Callable[[StatusBase], None],
+        primary_endpoint: Callable[[], str | None],
         logical_replication_slots: Callable[[], dict[str, str]] | None = None,
     ):
         super().__init__(state, workload, "config_manager")
@@ -117,6 +118,9 @@ class ConfigManager(BaseManager):
         # service restarts stay in the charm until their own migration phases.
         self.request_restart = request_restart
         self.restart_services = restart_services
+        # Patroni-resolved primary endpoint (None when unreachable); the state's
+        # k8s-service form is never falsy on VM and cannot gate VM flows.
+        self.primary_endpoint = primary_endpoint
         # Unit-status bridge: the config-driven flows juggle unit statuses
         # (the extensions blocked/waiting dance) through the charm's seam.
         self.set_unit_status = set_unit_status
@@ -937,7 +941,7 @@ class ConfigManager(BaseManager):
             return user_database_map
         hosts = (
             [True, False]
-            if self.state.peer.is_connectivity_enabled and self.state.primary_endpoint
+            if self.state.peer.is_connectivity_enabled and self.primary_endpoint()
             else [self.state.peer.is_connectivity_enabled]
         )
         for current_host in hosts:
