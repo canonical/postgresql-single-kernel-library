@@ -90,7 +90,7 @@ class ObserverEventsHandler(Object):
     def _on_cluster_topology_change(self, _):
         """Updates endpoints and (optionally) certificates when the cluster topology changes."""
         logger.info("Cluster topology changed")
-        if self.state.primary_endpoint:
+        if self.charm.primary_endpoint:
             self.database_manager.update_endpoints(
                 online_members=self.patroni_manager.online_cluster_members()
                 if self.state.peer.is_app_leader

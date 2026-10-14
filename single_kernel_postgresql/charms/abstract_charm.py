@@ -202,6 +202,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             update_relation_endpoints=self.update_relation_endpoints,
             raft_manager=self.raft_manager,
             set_primary_status_message=self.set_primary_status_message,
+            primary_endpoint=lambda: self.primary_endpoint,
         )
 
         # Events Handler
