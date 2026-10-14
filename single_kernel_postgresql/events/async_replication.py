@@ -31,6 +31,7 @@ from ops import (
     Object,
     RelationChangedEvent,
     RelationDepartedEvent,
+    RelationNotFoundError,
     SecretChangedEvent,
 )
 from tenacity import RetryError
@@ -236,19 +237,25 @@ class PostgreSQLAsyncReplication(Object):
 
     def _on_async_relation_joined(self, _) -> None:
         """Publish this unit address in the relation data."""
-        # store unit address in relation data
-        self.manager.async_relation.data[self.state.model.unit].update(  # type: ignore
-            {"unit-address": self.manager.unit_ip}
-        )
+        # A cached relation can be torn down between events; a write to it must
+        # defer to the next hook instead of crashing (same guard as the manager).
+        try:
+            # store unit address in relation data
+            self.manager.async_relation.data[self.state.model.unit].update(  # type: ignore
+                {"unit-address": self.manager.unit_ip}
+            )
 
-        # Set the counter for new units.
-        highest_promoted_cluster_counter = (
-            self.manager.get_highest_promoted_cluster_counter_value()
-        )
-        if highest_promoted_cluster_counter != "0":
-            self.state.peer.data.update({
-                "unit-promoted-cluster-counter": highest_promoted_cluster_counter
-            })
+            # Set the counter for new units.
+            highest_promoted_cluster_counter = (
+                self.manager.get_highest_promoted_cluster_counter_value()
+            )
+            if highest_promoted_cluster_counter != "0":
+                self.state.peer.data.update({
+                    "unit-promoted-cluster-counter": highest_promoted_cluster_counter
+                })
+        except RelationNotFoundError:
+            logger.debug("Skipping on_async_relation_joined: relation already gone.")
+            return
 
         if self.watcher is not None and self.state.model.unit.is_leader():
             self.watcher.update_endpoints()
@@ -357,19 +364,23 @@ class PostgreSQLAsyncReplication(Object):
             and event.secret.label == f"{PEER_RELATION}.{self.state.model.app.name}.app"
         ):
             logger.info("Internal secret changed, updating relation secret")
-            if not (secret := self.manager.get_shared_secret()):
-                logger.debug("Defer on_secret_changed: Secret not created yet")
-                event.defer()
+            # A cached relation can be torn down between events; a write to it
+            # must defer to the next hook instead of crashing (F12 pattern).
+            try:
+                if not (secret := self.manager.get_shared_secret()):
+                    logger.debug("Defer on_secret_changed: Secret not created yet")
+                    event.defer()
+                    return
+                secret.grant(relation)
+                primary_cluster_data = {
+                    "endpoint": self.manager.primary_cluster_endpoint,
+                    "secret-id": secret.id,
+                }
+                relation.data[self.state.model.app]["primary-cluster-data"] = json.dumps(
+                    primary_cluster_data
+                )
+            except RelationNotFoundError:
                 return
-            secret.grant(relation)
-            primary_cluster_data = {
-                "endpoint": self.manager.primary_cluster_endpoint,
-                "secret-id": secret.id,
-            }
-            relation.data[self.state.model.app]["primary-cluster-data"] = json.dumps(
-                primary_cluster_data
-            )
-            return
 
         if relation.name == REPLICATION_CONSUMER_RELATION and _same_secret_id(
             event.secret.id, self.manager.remote_secret_id()
