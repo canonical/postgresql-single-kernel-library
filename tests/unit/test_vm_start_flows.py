@@ -95,3 +95,16 @@ def test_can_start_proceeds_without_raft_keys(harness, handler, substrate):
         patch.object(type(handler.state), "has_raft_keys", lambda self: False),
     ):
         assert handler._can_start(Mock()) is True
+
+
+def test_check_detached_storage_restores_status_through_the_config_manager(
+    harness, handler, substrate
+):
+    if substrate != "vm":
+        pytest.skip("VM flow")
+    with (
+        patch.object(handler.workload, "is_storage_attached", return_value=True),
+        patch.object(handler.config_manager, "_restore_unit_status") as restore,
+    ):
+        handler._check_detached_storage(handler.workload)
+    restore.assert_called_once_with(harness.charm.unit.status)
