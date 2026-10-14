@@ -10,7 +10,7 @@ import os
 import sys
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import psycopg2
 from lightkube import Client
@@ -61,6 +61,9 @@ logger = logging.getLogger(__name__)
 
 class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     """PostgreSQL K8s Charm."""
+
+    # COS requirers are constructed charm-side and assigned by the consuming charm.
+    metrics_endpoint: Any = None
 
     # Built by build_k8s_manager() while the abstract __init__ wires the
     # async-replication subsystem; never None on the K8s substrate.
@@ -283,9 +286,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
                 Layer(
                     LayerDict({
                         "services": {
-                            K8S_METRICS_SERVER_SERVICE_NAME: cast(
-                                "ServiceDict", self._generate_metrics_service()
-                            )
+                            K8S_METRICS_SERVER_SERVICE_NAME: self._generate_metrics_service()
                         }
                     })
                 ),
@@ -340,7 +341,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             },
         ]
 
-    def _generate_metrics_service(self) -> dict:
+    def _generate_metrics_service(self) -> "ServiceDict":
         """Generate the metrics exporter service definition (port)."""
         workload = cast("K8sWorkload", self.workload)
         monitoring_password = self.state.get_secret(APP_SCOPE, MONITORING_PASSWORD_KEY)
