@@ -72,7 +72,7 @@ psql --host=<primary-address> --username=operator --password postgres
 
 ## Schedule and inspect jobs
 
-For example, record a timestamp every minute:
+For example, to record a timestamp every minute:
 
 ```sql
 CREATE TABLE public.cron_example (run_at timestamptz DEFAULT now());
@@ -111,7 +111,9 @@ SELECT cron.alter_job(
 );
 ```
 
-Use `active := true` to resume it. To remove its schedule:
+Use `active := true` to resume it.
+
+To remove its schedule:
 
 ```sql
 SELECT cron.unschedule('record-time');
