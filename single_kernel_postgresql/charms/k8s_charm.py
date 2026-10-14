@@ -55,7 +55,6 @@ if TYPE_CHECKING:
 
     import charm_refresh
 
-    from single_kernel_postgresql.events.tls_transfer import TLSTransfer
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +70,6 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         self,
         *args,
         restart_lock_acquire: "Callable[[], None] | None" = None,
-        tls_transfer: "TLSTransfer | None" = None,
-        metrics_endpoint=None,
-        grafana_dashboards=None,
-        loki_push=None,
     ):
         """Initialize the PostgreSQL Kubernetes Charm.
 
@@ -84,11 +79,6 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         """
         super().__init__(*args)
         self.restart_lock_acquire = restart_lock_acquire
-        if tls_transfer is not None:
-            self.tls_transfer = tls_transfer
-        self.metrics_endpoint = metrics_endpoint
-        self.grafana_dashboards = grafana_dashboards
-        self.loki_push = loki_push
         assert isinstance(self.workload, K8sWorkload), (  # noqa: S101
             "Workload must be an instance of K8sWorkload"
         )
