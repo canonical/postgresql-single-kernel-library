@@ -120,7 +120,7 @@ def test_start_observer_skips_when_cluster_not_initialised(_popen):
 def test_start_observer_skips_when_container_not_connected(_popen):
     state = _gate_state(Substrates.K8S)
     workload = MagicMock()
-    workload.container.can_connect.return_value = False
+    workload.container_ready.return_value = False
     manager = ObserverManager(state, workload)
     manager.start_observer()
     _popen.assert_not_called()
