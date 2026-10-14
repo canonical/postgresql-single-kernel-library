@@ -11,12 +11,13 @@ from pysyncobj.utility import TcpUtility
 from yaml import safe_load
 
 from single_kernel_postgresql.config.literals import (
-    PATRONI_CONF_PATH,
     RAFT_PARTNER_PREFIX,
     RAFT_PORT,
 )
 
-PATRONI_CONF_FILE_PATH = f"{PATRONI_CONF_PATH}/patroni.yaml"
+# Runs from systemd with CWD=/, so the patroni conf path must be snap-absolute.
+SNAP_CURRENT_PATH = "/var/snap/charmed-postgresql/current"
+PATRONI_CONF_FILE_PATH = f"{SNAP_CURRENT_PATH}/etc/patroni/patroni.yaml"
 
 
 def dispatch(custom_event):
