@@ -35,6 +35,7 @@ def config(substrate):
             ldap_handler=Mock(),
             restart_services=Mock(),
             set_unit_status=Mock(),
+            primary_endpoint=lambda: None,
         )
     yield config
 
@@ -997,6 +998,7 @@ def harness_config(harness, substrate):
         request_restart=Mock(),
         restart_services=Mock(),
         set_unit_status=lambda status: setattr(harness.charm.unit, "status", status),
+        primary_endpoint=lambda: harness.charm.primary_endpoint,
     )
 
 
@@ -1150,3 +1152,48 @@ def test_build_relations_user_databases_map(harness_config, harness):
             "replication": "all",
             "rewind": "all",
         }
+
+
+def test_build_relations_user_databases_map_skips_remote_host_without_primary():
+    """Only the local host is queried when the Patroni primary is not reachable.
+
+    The k8s-service state.primary_endpoint is never falsy on VM, so the gate
+    must use the charm's Patroni-resolved primary endpoint instead.
+    """
+    manager = ConfigManager(
+        state=CharmState(charm=Mock(), substrate=Substrates.VM, s3_requirer=Mock()),
+        workload=VMWorkload("."),
+        tls_manager=Mock(),
+        patroni_manager=Mock(),
+        database_manager=Mock(),
+        ldap_handler=Mock(),
+        resource_provider=Mock(),
+        request_restart=Mock(),
+        restart_services=Mock(),
+        set_unit_status=Mock(),
+        primary_endpoint=lambda: None,
+    )
+    manager.database_manager.collect_user_relations.side_effect = lambda: {}
+    client = Mock()
+    client.list_users.return_value = set()
+    client.list_access_groups.return_value = {
+        "identity_access",
+        "internal_access",
+        "relation_access",
+    }
+    with (
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.is_cluster_initialised",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch.object(
+            type(manager.state.peer),
+            "is_connectivity_enabled",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+    ):
+        manager.patroni_manager.member_started = True
+        manager.build_relations_user_databases_map(client, [])
+    assert [call.kwargs["current_host"] for call in client.list_users.call_args_list] == [True]
