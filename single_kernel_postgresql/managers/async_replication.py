@@ -287,10 +287,16 @@ class AsyncReplicationManager(BaseManager):
 
     def get_shared_secret(self) -> Secret | None:
         """Return async replication necessary secrets."""
-        app_secret = self.state.model.get_secret(
-            label=f"{PEER_RELATION}.{self.state.model.app.name}.app"
-        )
-        content = app_secret.peek_content()
+        # Single choke point for a missing/torn peer app secret: both callers
+        # (update_primary_cluster_data, _on_secret_changed) already treat a
+        # None return as "not created yet", so read the absence as None.
+        try:
+            app_secret = self.state.model.get_secret(
+                label=f"{PEER_RELATION}.{self.state.model.app.name}.app"
+            )
+            content = app_secret.peek_content()
+        except SecretNotFoundError:
+            return None
 
         # Filter out unnecessary secrets.
         shared_content = dict(filter(lambda x: "password" in x[0], content.items()))
@@ -489,30 +495,37 @@ class AsyncReplicationManager(BaseManager):
         system_identifier: str | None = None,
     ) -> None:
         """Update the primary cluster data."""
-        async_relation = self.async_relation
+        # Called from update-status/relation-changed flows with a cached
+        # relation that may be torn down between events; a write to it must
+        # skip to the next hook instead of crashing (same guard as
+        # update_async_replication_data, covering both unguarded call sites).
+        try:
+            async_relation = self.async_relation
 
-        if promoted_cluster_counter is not None:
-            for relation in [async_relation, self.state.peer_relation]:
-                relation.data[self.state.model.app].update({  # type: ignore
-                    "promoted-cluster-counter": str(promoted_cluster_counter)
-                })
+            if promoted_cluster_counter is not None:
+                for relation in [async_relation, self.state.peer_relation]:
+                    relation.data[self.state.model.app].update({  # type: ignore
+                        "promoted-cluster-counter": str(promoted_cluster_counter)
+                    })
 
-        # Update the data in the relation.
-        primary_cluster_data = {"endpoint": self.primary_cluster_endpoint}
+            # Update the data in the relation.
+            primary_cluster_data = {"endpoint": self.primary_cluster_endpoint}
 
-        # Retrieve the secrets that will be shared between the clusters.
-        if async_relation.name == REPLICATION_OFFER_RELATION:  # type: ignore
-            secret = self.get_shared_secret()
-            if secret is not None:
-                secret.grant(async_relation)  # type: ignore
-                primary_cluster_data["secret-id"] = secret.id
+            # Retrieve the secrets that will be shared between the clusters.
+            if async_relation.name == REPLICATION_OFFER_RELATION:  # type: ignore
+                secret = self.get_shared_secret()
+                if secret is not None:
+                    secret.grant(async_relation)  # type: ignore
+                    primary_cluster_data["secret-id"] = secret.id
 
-        if system_identifier is not None:
-            primary_cluster_data["system-id"] = system_identifier
+            if system_identifier is not None:
+                primary_cluster_data["system-id"] = system_identifier
 
-        async_relation.data[self.state.model.app]["primary-cluster-data"] = json.dumps(  # type: ignore
-            primary_cluster_data
-        )
+            async_relation.data[self.state.model.app]["primary-cluster-data"] = json.dumps(  # type: ignore
+                primary_cluster_data
+            )
+        except RelationNotFoundError:
+            return
 
     def update_async_replication_data(self) -> None:
         """Updates the async-replication data, if the unit is the leader.
