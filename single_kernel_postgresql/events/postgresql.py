@@ -21,6 +21,7 @@ from tenacity import Retrying, stop_after_attempt, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import (
+    RaftRecoveryTimeoutError,
     SettingSystemPasswordError,
     StorageUnavailableError,
 )
@@ -305,7 +306,11 @@ class PostgreSQLEventsHandler(Object):
             return False
         # Check whether raft is stuck.
         if membership.has_raft_keys():
-            membership.raft_reinitialisation()
+            try:
+                membership.raft_reinitialisation()
+            except RaftRecoveryTimeoutError as e:
+                logger.warning("Deferring on_peer_relation_changed: %s", e)
+                event.defer()
             logger.debug("Early exit on_peer_relation_changed: stuck raft recovery")
             return False
         # If the unit is the leader, it can reconfigure the cluster.
