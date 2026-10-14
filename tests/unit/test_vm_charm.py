@@ -11,6 +11,7 @@ from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     CONFIGURATION_ERROR_MESSAGE,
     EXTENSION_OBJECT_MESSAGE,
+    PEER_RELATION,
     RAFT_MAJORITY_LOSS_MESSAGE,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
@@ -400,6 +401,34 @@ def test_watcher_relation_changed_reads_charm_is_cluster_initialised(charm, harn
     with patch.object(charm.watcher_handler, "update_unit_address"):
         charm.watcher_handler._on_watcher_relation_changed(event)
     event.defer.assert_called_once()  # not initialised yet -> defer, no crash
+
+
+def test_watcher_offer_joined_leader_cleans_up_raft_cluster(charm, harness):
+    """The leader's watcher-offer cleanup goes through the RAFT manager.
+
+    test_build_and_deploy_stereo_mode (arm64, run 38496136894) crashed the
+    watcher-offer-relation-joined hook with AttributeError
+    'PatroniManager' object has no attribute 'cleanup_raft_cluster':
+    trunk's _patroni property is the RAFT object (src/cluster.py Patroni),
+    not the REST-API PatroniManager.
+    """
+    peer_rel = charm.model.relations[PEER_RELATION][0]
+    rel_id = harness.add_relation("watcher-offer", "external-watcher")
+    with harness.hooks_disabled():
+        harness.update_relation_data(peer_rel.id, charm.app.name, {"cluster_initialised": "True"})
+        harness.add_relation_unit(rel_id, "external-watcher/0")
+        harness.update_relation_data(rel_id, "external-watcher/0", {"unit-address": "10.0.0.9"})
+    event = Mock(relation=charm.model.relations["watcher-offer"][0], defer=Mock())
+    with (
+        patch.object(type(charm.state.peer), "is_app_leader", PropertyMock(return_value=True)),
+        patch.object(charm.raft_manager, "cleanup_raft_cluster") as cleanup,
+        patch.object(charm.watcher_handler, "update_unit_address"),
+        patch.object(charm.watcher_handler, "_ensure_watcher_user"),
+        patch.object(charm.watcher_handler, "_update_relation_data"),
+        patch.object(charm, "update_config"),
+    ):
+        charm.watcher_handler._on_watcher_relation_changed(event)
+    cleanup.assert_called_once()
 
 
 def test_raft_stuck_block_survives_collect(charm, harness):
