@@ -159,6 +159,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             request_restart=self.request_restart,
             restart_services=self.restart_services,
             set_unit_status=self.set_unit_status,
+            primary_endpoint=lambda: self.primary_endpoint,
             logical_replication_slots=self.logical_replication.replication_slots,
         )
 
@@ -201,6 +202,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             update_relation_endpoints=self.update_relation_endpoints,
             raft_manager=self.raft_manager,
             set_primary_status_message=self.set_primary_status_message,
+            primary_endpoint=lambda: self.primary_endpoint,
         )
 
         # Events Handler
