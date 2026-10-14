@@ -208,8 +208,8 @@ class PatroniManager(BaseManager):
             endpoints = []
             if self.state.endpoint:
                 endpoints.append(self.state.endpoint)
-                for peer in self.state.endpoints:
-                    endpoints.append(peer)
+            for peer in self.state.endpoints:
+                endpoints.append(peer)
         # Request info from cluster endpoint (which returns all members of the cluster).
         if response := parallel_patroni_get_request(
             f"/{PATRONI_CLUSTER_STATUS_ENDPOINT}",
