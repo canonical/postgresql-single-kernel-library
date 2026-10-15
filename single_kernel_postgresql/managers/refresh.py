@@ -266,6 +266,9 @@ class RefreshManager(BaseManager):
         self._charm = charm
         self.set_default_status = set_default_status
         self.can_set_app_status = True
+        # The default (role) status as last computed by reconcile_refresh_status;
+        # None until the first no-refresh reconciliation runs.
+        self._default_status: StatusBase | None = None
         # charm_refresh resume callbacks (e.g. refresh_snap) run DURING the
         # charm_refresh.Machines()/Kubernetes() construction below and dispatch back
         # through this manager (refresh_snap ends with
@@ -334,26 +337,37 @@ class RefreshManager(BaseManager):
         would be re-fed through the collect handler forever (waiting outranks
         active there), self-perpetuating a stale status.
         """
-        try:
-            refresh_status_message = json.loads(
-                pathlib.Path(LAST_REFRESH_UNIT_STATUS_FILE).read_text()
-            )
-        except FileNotFoundError:
-            refresh_status_message = None
-        status = self._charm.unit.status
-        if (
-            status.name not in ("active", "blocked", "maintenance", "waiting")
-            or not isinstance(
-                status, (ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus)
-            )
-            or refresh_status_message != status.message
-        ):
-            # Unknown/error statuses carry no refresh information, and statuses
-            # the refresh did not set must not be snapshotted: the record would
-            # never clear once the underlying condition resolved.
-            record = GeneralStatuses.ACTIVE_IDLE.value
+        if self.refresh is None:
+            # Persist the freshly computed default (role) status so every hook's
+            # collect replays it and the mid-hook role writes become idempotent
+            # instead of being wiped to bare active().
+            if isinstance(self._default_status, ActiveStatus):
+                record = StatusObject(status="active", message=self._default_status.message)
+            else:
+                # Blocked/error defaults stay owned by the components that raise
+                # them; snapshotting them here could self-perpetuate stale states.
+                record = GeneralStatuses.ACTIVE_IDLE.value
         else:
-            record = StatusObject(status=status.name, message=status.message)
+            try:
+                refresh_status_message = json.loads(
+                    pathlib.Path(LAST_REFRESH_UNIT_STATUS_FILE).read_text()
+                )
+            except FileNotFoundError:
+                refresh_status_message = None
+            status = self._charm.unit.status
+            if (
+                status.name not in ("active", "blocked", "maintenance", "waiting")
+                or not isinstance(
+                    status, (ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus)
+                )
+                or refresh_status_message != status.message
+            ):
+                # Unknown/error statuses carry no refresh information, and statuses
+                # the refresh did not set must not be snapshotted: the record would
+                # never clear once the underlying condition resolved.
+                record = GeneralStatuses.ACTIVE_IDLE.value
+            else:
+                record = StatusObject(status=status.name, message=status.message)
         self.state.statuses.set(record, "unit", self.name)
         return record
 
@@ -402,6 +416,13 @@ class RefreshManager(BaseManager):
         if self.refresh is not None and self.refresh.unit_status_higher_priority:
             self._charm.unit.status = self.refresh.unit_status_higher_priority
             new_refresh_unit_status = self.refresh.unit_status_higher_priority.message
+        elif self.refresh is None:
+            # No refresh status is active: recompute the default (role) status on
+            # every reconcile, so the persisted record stays fresh and the collect
+            # handler replays it instead of wiping the unit to bare active()
+            # (primary-flap regression).
+            self.set_default_status()
+            self._default_status = self._charm.unit.status
         elif self._charm.unit.status.message == last_refresh_unit_status:
             if self.refresh is not None and (
                 refresh_status := self.refresh.unit_status_lower_priority(
