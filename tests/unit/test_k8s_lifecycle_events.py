@@ -490,11 +490,13 @@ def test_was_restore_successful_blocks_on_pitr_failure(handler, harness, contain
     with (
         patch.object(handler.restore_manager, "is_pitr_failed", return_value=(True, True)),
         patch.object(handler.restore_manager, "log_pitr_last_transaction_time") as log_pitr,
-        patch.object(handler.membership_manager, "set_unit_status") as set_status,
     ):
         assert handler._was_restore_successful_k8s(container, service) is False
     log_pitr.assert_called_once_with()
-    set_status.assert_called_once_with(BlockedStatus(CANNOT_RESTORE_PITR))
+    # The handler fixture replaces restore_manager with a Mock: the blocked
+    # CANNOT_RESTORE_PITR must be persisted through the status machinery
+    # (RestoreManager.block_on_pitr_failure), not written directly.
+    handler.restore_manager.block_on_pitr_failure.assert_called_once_with()
 
 
 # -- peer-relation flows -----------------------------------------------------------

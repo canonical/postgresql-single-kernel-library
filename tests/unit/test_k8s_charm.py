@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
 import pytest
 from lightkube.core.exceptions import ApiError
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus
-from ops.pebble import ChangeError
+from ops.pebble import ChangeError, ServiceStatus
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import DeployedWithoutTrustError
 from single_kernel_postgresql.config.literals import (
@@ -17,6 +17,7 @@ from single_kernel_postgresql.config.literals import (
     PEER_RELATION,
     PGBACKREST_METRICS_PORT,
 )
+from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR
 
 
 @pytest.fixture(autouse=True)
@@ -432,3 +433,33 @@ def test_install_is_not_observed_on_k8s(charm):
     with patch.object(charm.cluster_manager, "install_workload") as install:
         charm.on.install.emit()
     install.assert_not_called()
+
+
+def test_pitr_failure_persists_blocked_through_restore_check(charm, harness):
+    """The failed-PITR blocked must surface through the status machinery.
+
+    Mirror of the VM test: trunk (c4f378dda) wrote the blocked directly; the
+    migration's collect replay wiped it with the restore manager's maintenance
+    "restoring backup", so the unit never reached CANNOT_RESTORE_PITR.
+    """
+    _set_initialised(harness)
+    charm.state.application.data["restore-to-time"] = "20251015T120000Z"
+    service = Mock(current=ServiceStatus.ACTIVE)
+    with (
+        patch.object(charm.restore_manager, "is_pitr_failed", return_value=(True, True)),
+        patch.object(charm.restore_manager, "log_pitr_last_transaction_time"),
+    ):
+        assert (
+            charm.postgresql_events_handler._was_restore_successful_k8s(Mock(), service) is False
+        )
+
+    assert charm.state.peer.data["pitr-failed"] == "True"
+    records = charm.state.statuses.get("unit", charm.restore_manager.name).root
+    assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
