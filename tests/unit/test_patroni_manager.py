@@ -1023,6 +1023,8 @@ def test_primary_endpoint_ready_brackets_ipv6(substrate, patroni):
             auth=patroni._patroni_auth,
             timeout=API_REQUEST_TIMEOUT,
         )
+
+
 def test_primary_endpoint_ready_fails_fast_on_connection_error(substrate, patroni):
     """The first connection-level error returns False without burning the retry budget.
 

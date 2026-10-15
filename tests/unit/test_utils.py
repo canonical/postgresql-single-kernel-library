@@ -1,12 +1,14 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import asyncio
 import re
 from unittest.mock import AsyncMock, mock_open, patch
 
 import httpx
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.utils import (
+    _async_get_request,
     any_cpu_to_cores,
     any_memory_to_bytes,
     bracket_ipv6_host,
@@ -136,3 +138,50 @@ def test_parallel_patroni_get_request_brackets_ipv6_endpoints():
     # which is not caught by the request helper's error handling.
     for url in urls:
         httpx.URL(url)
+
+
+class _FakeResponse:
+    def raise_for_status(self):
+        return self
+
+    def json(self):
+        return {"members": []}
+
+
+class _FakeAsyncClient:
+    last_verify = None
+
+    def __init__(self, auth=None, timeout=None, verify=None, trust_env=None):
+        _FakeAsyncClient.last_verify = verify
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, url):
+        return _FakeResponse()
+
+
+def test_httpx_get_request_empty_ca_bundle_does_not_crash(tmp_path):
+    # Regression: an EXISTING but EMPTY charm-local CA bundle (e.g. the /tmp
+    # peer_ca_bundle.pem pre-created empty by the K8s on_start port) made
+    # load_verify_locations raise ssl.SSLError
+    # [X509: NO_CERTIFICATE_OR_CRL_FOUND], which crashed the data-storage-
+    # detaching hook inside get_primary instead of the intended
+    # RetryError-driven early exit (see R9 K8s test_self_healing_2 arm64).
+    empty_bundle = tmp_path / "peer_ca_bundle.pem"
+    empty_bundle.touch()
+    with patch("single_kernel_postgresql.utils.AsyncClient", _FakeAsyncClient):
+        result = asyncio.run(_async_get_request("/cluster", ["1.2.3.4"], str(empty_bundle), None))
+    assert result == {"members": []}
+
+
+def test_httpx_get_request_missing_ca_bundle_still_requests(tmp_path):
+    # Parity with trunk: an absent bundle was already suppressed; the request
+    # must still go out with the default (system trust) context.
+    missing = tmp_path / "does-not-exist.pem"
+    with patch("single_kernel_postgresql.utils.AsyncClient", _FakeAsyncClient):
+        result = asyncio.run(_async_get_request("/cluster", ["1.2.3.4"], str(missing), None))
+    assert result == {"members": []}
