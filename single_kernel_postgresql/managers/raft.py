@@ -28,6 +28,7 @@ from single_kernel_postgresql.config.literals import (
     PEER_RELATION,
     RAFT_PARTNER_PREFIX,
     RAFT_PORT,
+    SNAP,
 )
 from single_kernel_postgresql.managers.base import BaseManager
 
@@ -101,7 +102,7 @@ class RaftManager(BaseManager):
 
         logger.info("Removing raft data")
         try:
-            path = Path(f"{PATRONI_CONF_PATH}/raft")
+            path = Path(f"{SNAP}/{PATRONI_CONF_PATH}/raft")
             if path.exists() and path.is_dir():
                 shutil.rmtree(path)
         except OSError as e:

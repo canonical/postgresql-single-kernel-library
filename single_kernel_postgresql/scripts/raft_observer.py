@@ -14,9 +14,10 @@ from single_kernel_postgresql.config.literals import (
     PATRONI_CONF_PATH,
     RAFT_PARTNER_PREFIX,
     RAFT_PORT,
+    SNAP,
 )
 
-PATRONI_CONF_FILE_PATH = f"{PATRONI_CONF_PATH}/patroni.yaml"
+PATRONI_CONF_FILE_PATH = f"{SNAP}/{PATRONI_CONF_PATH}/patroni.yaml"
 
 
 def dispatch(custom_event):
