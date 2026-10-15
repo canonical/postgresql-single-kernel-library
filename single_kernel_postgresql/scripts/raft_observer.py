@@ -11,13 +11,14 @@ from pysyncobj.utility import TcpUtility
 from yaml import safe_load
 
 from single_kernel_postgresql.config.literals import (
+    BASE_SNAP_DIR,
     PATRONI_CONF_PATH,
     RAFT_PARTNER_PREFIX,
     RAFT_PORT,
-    SNAP,
+    SNAP_COMMON,
 )
 
-PATRONI_CONF_FILE_PATH = f"{SNAP}/{PATRONI_CONF_PATH}/patroni.yaml"
+PATRONI_CONF_FILE_PATH = f"{BASE_SNAP_DIR}/{SNAP_COMMON}{PATRONI_CONF_PATH}/patroni.yaml"
 
 
 def dispatch(custom_event):

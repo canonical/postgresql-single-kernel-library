@@ -7,7 +7,6 @@
 import logging
 import shutil
 from contextlib import suppress
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 with suppress(ImportError):
@@ -23,13 +22,7 @@ from single_kernel_postgresql.config.exceptions import (
     RaftPostgresqlStillUpError,
     RemoveRaftMemberFailedError,
 )
-from single_kernel_postgresql.config.literals import (
-    PATRONI_CONF_PATH,
-    PEER_RELATION,
-    RAFT_PARTNER_PREFIX,
-    RAFT_PORT,
-    SNAP,
-)
+from single_kernel_postgresql.config.literals import PEER_RELATION, RAFT_PARTNER_PREFIX, RAFT_PORT
 from single_kernel_postgresql.managers.base import BaseManager
 
 if TYPE_CHECKING:
@@ -102,9 +95,9 @@ class RaftManager(BaseManager):
 
         logger.info("Removing raft data")
         try:
-            path = Path(f"{SNAP}/{PATRONI_CONF_PATH}/raft")
+            path = self.workload.paths.patroni_conf / "raft"
             if path.exists() and path.is_dir():
-                shutil.rmtree(path)
+                shutil.rmtree(str(path))
         except OSError as e:
             raise Exception(
                 f"Failed to remove previous cluster information with error: {e!s}"
