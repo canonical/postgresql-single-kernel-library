@@ -79,6 +79,11 @@ PITR_K8S_JUJU2_BOOTSTRAP_FAILURE_PATTERN = (
     r" to bootstrap the cluster"
 )
 
+# Per-unit peer-databag marker of a terminally failed PITR restore (the
+# CANNOT_RESTORE_PITR blocked). Durable input for the collect replay, like the
+# ConfigManager's configuration-error flag.
+PITR_FAILED_KEY = "pitr-failed"
+
 
 class RestoreManager(BaseManager):
     """In this class, we manage PostgreSQL backup restores."""
@@ -422,6 +427,11 @@ class RestoreManager(BaseManager):
         application.restore_timeline = restore_stanza_timeline[1] if restore_to_time else ""
         application.restore_to_time = restore_to_time or ""
         application.s3_initialization_block_message = ""
+        # _pre_restore_cluster_checks accepts a CANNOT_RESTORE_PITR block so the
+        # user can retry after a failed PITR; the retry starts clean, else the
+        # stale blocked would outrank the new "restoring backup" maintenance
+        # and the update-status blocked early-exit would stop the new attempt.
+        self.clear_pitr_failure()
         self.update_config()
 
         # Start the database to start the restore process.
@@ -711,10 +721,44 @@ class RestoreManager(BaseManager):
         ``_was_restore_successful`` clears the flag, so the post-restore
         cluster-formation window is not reported as active (the direct write
         only lives until hook end).
+
+        A terminally failed PITR restore outranks that maintenance: the blocked
+        is re-surfaced here from the durable ``pitr-failed`` peer flag on EVERY
+        collect (ops applies the collect result last, so a directly-written
+        blocked only lives until hook end - the ConfigManager pattern).
         """
-        if scope == "unit" and (
-            self.state.application.restoring_backup
-            or self.state.application.is_cluster_restoring_to_time
-        ):
-            return [StatusObject(status="maintenance", message="restoring backup")]
+        if scope == "unit":
+            if self.state.peer.data.get(PITR_FAILED_KEY):
+                return [StatusObject(status="blocked", message=CANNOT_RESTORE_PITR)]
+            if (
+                self.state.application.restoring_backup
+                or self.state.application.is_cluster_restoring_to_time
+            ):
+                return [StatusObject(status="maintenance", message="restoring backup")]
         return [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def block_on_pitr_failure(self) -> None:
+        """Persist a failed-PITR state (unit scope) for the collect replay.
+
+        Trunk surfaced the CANNOT_RESTORE_PITR blocked through a direct
+        ``unit.status`` write, which survived because the trunk charm had no
+        collect handler. Here, the StatusHandler's collect replay re-adds this
+        manager's "restoring backup" maintenance over any direct write (the
+        restoring flags stay set on the failure path), so the blocked must be
+        persisted through the status machinery instead.
+        """
+        self.state.peer.data[PITR_FAILED_KEY] = "True"
+        self.state.add_status_if_not_present(
+            StatusObject(status="blocked", message=CANNOT_RESTORE_PITR),
+            scope="unit",
+            component=self.name,
+        )
+
+    def clear_pitr_failure(self) -> None:
+        """Clear the persisted failed-PITR state once its condition resolves."""
+        self.state.peer.data.pop(PITR_FAILED_KEY, None)
+        self.state.remove_status_if_present(
+            StatusObject(status="blocked", message=CANNOT_RESTORE_PITR),
+            scope="unit",
+            component=self.name,
+        )
