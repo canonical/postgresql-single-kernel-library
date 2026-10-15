@@ -261,11 +261,11 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
 
     def request_restart(self) -> None:
         """Refresh the metrics scrape jobs and acquire the restart lock (port)."""
-        if self.metrics_endpoint is not None:
+        if getattr(self, "metrics_endpoint", None) is not None:
             self.metrics_endpoint.update_scrape_job_spec(
                 self._generate_metrics_jobs(self.is_tls_enabled)
             )
-        if self.restart_lock_acquire:
+        if getattr(self, "restart_lock_acquire", None):
             self.restart_lock_acquire()
 
     def restart_services(self) -> None:
