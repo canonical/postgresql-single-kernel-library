@@ -12,6 +12,10 @@ persists the app-wide user hash. All are plain (non-secret) databag values,
 matching the charm's unit_peer_data / app_peer_data storage.
 """
 
+from unittest.mock import patch
+
+from ops import RelationNotFoundError
+
 
 def _get_unit_db(harness, key):
     rel_id = harness.model.get_relation("database-peers").id
@@ -21,6 +25,12 @@ def _get_unit_db(harness, key):
 def _get_app_db(harness, key):
     rel_id = harness.model.get_relation("database-peers").id
     return harness.get_relation_data(rel_id, harness.charm.app.name).get(key)
+
+
+def test_unit_ip_returns_none_when_the_peer_binding_is_torn(harness):
+    """A RelationNotFoundError from get_binding must read as 'no ip', not crash."""
+    with patch.object(harness.charm.model, "get_binding", side_effect=RelationNotFoundError()):
+        assert harness.charm.state.unit_ip is None
 
 
 # -- PostgreSQLPeer.config_hash ----------------------------------------------

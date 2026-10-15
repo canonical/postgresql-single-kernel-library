@@ -3,7 +3,8 @@
 """Skeleton for the abstract charm."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
@@ -31,19 +32,28 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.s3 import S3Requi
 from single_kernel_postgresql.managers.async_replication import (
     AsyncReplicationManager,
 )
+from single_kernel_postgresql.managers.backup import BackupManager
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.cluster_membership import ClusterMembershipManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
 from single_kernel_postgresql.managers.logical_replication import LogicalReplicationManager
+from single_kernel_postgresql.managers.observer import ObserverManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.raft import RaftManager
 from single_kernel_postgresql.managers.refresh import RefreshManager
+from single_kernel_postgresql.managers.restore import RestoreManager
 from single_kernel_postgresql.managers.tls import TLSManager
+from single_kernel_postgresql.utils.s3 import S3Client
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
 from ..config.enums import Substrates
-from ..config.literals import DATABASE, S3_RELATION_NAME
+from ..config.literals import (
+    DATABASE,
+    REPLICATION_CONSUMER_RELATION,
+    REPLICATION_OFFER_RELATION,
+    S3_RELATION_NAME,
+)
 from ..utils.postgresql import PostgreSQL
 
 
@@ -53,6 +63,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     # Custom charm events dispatched by the observer scripts (cluster topology
     # changes and raft reconnection).
     on = ClusterTopologyChangeCharmEvents()
+
+    # Real bridge injected by substrate subclasses; class default keeps the
+    # vm_charm/k8s_charm guarded reads safe during __init__ — charm_refresh
+    # runs its state machine at construction time and may call request_restart.
+    restart_lock_acquire: Callable[[], None] | None = None
 
     def __init__(self, *args):
         super().__init__(*args)
@@ -205,6 +220,30 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             primary_endpoint=lambda: self.primary_endpoint,
         )
 
+        # The backup subsystem (port of the VM charm's composition wiring): the
+        # charm-side duplicates are retired when the thin charm lands.
+        self.s3_client = S3Client(self.workload)
+        self.backup_manager = BackupManager(
+            state=self.state,
+            workload=self.workload,
+            s3_client=self.s3_client,
+            patroni_manager=self.patroni_manager,
+            update_config=self.update_config,
+            resource_provider=cast("ResourceProvider", self.workload),
+            is_standby_cluster=self._is_standby_cluster,
+            set_unit_status=self.set_unit_status,
+            refresh_primary_status=self.set_primary_status_message,
+        )
+        self.restore_manager = RestoreManager(
+            state=self.state,
+            workload=self.workload,
+            patroni_manager=self.patroni_manager,
+            update_config=self.update_config,
+            backup_manager=self.backup_manager,
+            is_standby_cluster=self._is_standby_cluster,
+        )
+        self.observer_manager = ObserverManager(self.state, self.workload)
+
         # Events Handler
         self.postgresql_events_handler = PostgreSQLEventsHandler(
             self,
@@ -216,6 +255,12 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.patroni_manager,
             self.refresh_manager,
             membership_manager=self.membership_manager,
+            backup_manager=self.backup_manager,
+            restore_manager=self.restore_manager,
+            observer_manager=self.observer_manager,
+            async_replication_manager=self.async_replication_manager,
+            database_manager=self.database_manager,
+            postgresql=lambda: self.postgresql,
         )
 
         # Resume or prepare the refresh (the charms' post-construction resume block).
@@ -231,6 +276,15 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.patroni_manager,
             self.logical_replication_manager,
         )
+
+    def _is_standby_cluster(self) -> bool:
+        """Whether this unit belongs to a standby (read-only) cluster (port)."""
+        if (
+            self.state.model.get_relation(REPLICATION_CONSUMER_RELATION) is None
+            and self.state.model.get_relation(REPLICATION_OFFER_RELATION) is None
+        ):
+            return False
+        return not self.async_replication_manager.is_primary_cluster()
 
     # Postgresql Client
     @property
@@ -308,6 +362,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def set_default_unit_status(self) -> None:
         """Set the unit status that applies when no refresh status is active."""
         pass
+
+    def _restart(self, event) -> None:
+        """Rolling-ops restart callback; the body lives in the events handler."""
+        self.postgresql_events_handler._restart(event)
 
     @abstractmethod
     def update_config(
