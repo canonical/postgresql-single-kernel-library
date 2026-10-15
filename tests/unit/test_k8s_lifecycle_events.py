@@ -62,6 +62,7 @@ from single_kernel_postgresql.config.literals import (  # noqa: E402
     REWIND_PASSWORD_KEY,
     USER_PASSWORD_KEY,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses  # noqa: E402
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication  # noqa: E402
 from single_kernel_postgresql.events.tls_transfer import TLSTransfer  # noqa: E402
 from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR  # noqa: E402
@@ -150,6 +151,73 @@ def test_pebble_ready_creates_pgdata_and_defers_for_unready_replica(handler, con
         handler._on_postgresql_pebble_ready(event)
     create_pgdata.assert_called_once_with()
     event.defer.assert_called_once()
+
+
+def test_pebble_ready_replica_membership_wait_persists_through_collect(
+    handler, harness, container
+):
+    """A replica stuck on the members-list gate surfaces a collect-surviving waiting.
+
+    The silent defer+return left juju reporting active while the replica had
+    not joined yet, releasing the deploy's all-active gate mid-join
+    (test_symlinks pg_wal symlink failure, CI 2026-10-15).
+    """
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    harness.set_leader(False)
+    _set_cluster_initialised(harness, rel_id)
+    event = Mock(workload=container, defer=Mock())
+    container.can_connect.return_value = True
+    with (
+        patch.object(type(handler.charm), "create_pgdata"),
+        patch.object(
+            type(handler.charm),
+            "primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="10.1.1.1",
+        ),
+    ):
+        handler._on_postgresql_pebble_ready(event)
+    event.defer.assert_called_once()
+    records = handler.state.statuses.get("unit", handler.cluster_manager.name).root
+    assert records == [GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value]
+    with patch.object(handler.refresh_manager, "reconcile_refresh_status"):
+        harness.evaluate_status()
+    assert harness.charm.unit.status == WaitingStatus("Waiting for cluster membership")
+
+    # The leader adds this unit's endpoint: re-firing clears the wait.
+    _set_endpoints_with_self(harness, rel_id)
+    with (
+        patch.object(type(handler.charm), "create_pgdata"),
+        patch.object(type(handler.charm), "fix_pod"),
+        patch.object(
+            type(handler.charm),
+            "primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="10.1.1.1",
+        ),
+        patch.object(type(handler.state), "get_secret", return_value="ca"),
+        patch.object(
+            type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
+        ),
+        patch.object(type(handler.charm), "update_pebble_layers"),
+        patch.object(type(handler.charm), "update_config", return_value=True),
+        patch.object(handler, "_set_active_status"),
+        patch.object(
+            type(handler.async_replication_manager),
+            "async_relation",
+            new_callable=PropertyMock,
+            return_value=None,
+        ),
+        patch.object(type(handler.patroni_manager), "is_replication_hba_ready", return_value=True),
+    ):
+        assert handler._replica_can_start() is True
+        handler._on_postgresql_pebble_ready(event)
+    event.defer.assert_called_once()
+    records = handler.state.statuses.get("unit", handler.cluster_manager.name).root
+    assert GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value not in records
+    with patch.object(handler.refresh_manager, "reconcile_refresh_status"):
+        harness.evaluate_status()
+    assert harness.charm.unit.status != WaitingStatus("Waiting for cluster membership")
 
 
 def test_pebble_ready_generates_internal_cert_chain(handler, harness, container):
