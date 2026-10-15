@@ -151,6 +151,8 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             resource_provider=self.get_resource_provider,
             request_restart=self.request_restart,
             restart_services=self.restart_services,
+            set_unit_status=self.set_unit_status,
+            primary_endpoint=lambda: self.primary_endpoint,
             logical_replication_slots=self.logical_replication.replication_slots,
         )
 
