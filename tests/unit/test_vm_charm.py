@@ -351,6 +351,9 @@ def resuming_refresh(monkeypatch):
 
         def __init__(self, charm_specific, /):
             seen["membership_manager_seen"] = hasattr(charm_specific._charm, "membership_manager")
+            # Reproduce the action path: the construction-time state machine may
+            # reach request_restart before the subclass assigned its bridges.
+            charm_specific._charm.request_restart()
 
         def unit_status_lower_priority(self, *, workload_is_running=True):
             return None
@@ -370,6 +373,22 @@ def test_refresh_resume_during_init_sees_the_membership_manager(resuming_refresh
     AttributeError.
     """
     assert resuming_refresh["membership_manager_seen"] is True
+
+
+def test_refresh_resume_during_init_request_restart_needs_no_lock_yet(resuming_refresh, charm):
+    """charm_refresh.Machines runs its state machine AT construction time.
+
+    A force-refresh-start reaches request_restart INSIDE the abstract
+    __init__ (via the refresh manager), before the substrate subclass
+    assigns restart_lock_acquire: the guarded read must not raise
+    AttributeError, and no lock may be invoked during construction.
+    """
+    assert charm.restart_lock_acquire is None  # class default, nothing injected yet
+
+    lock = Mock()
+    charm.restart_lock_acquire = lock
+    charm.request_restart()
+    lock.assert_called_once_with()
 
 
 def test_watcher_update_unit_address_writes_the_pinned_snap(charm, harness):
