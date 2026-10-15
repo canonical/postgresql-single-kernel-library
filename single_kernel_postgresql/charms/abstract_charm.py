@@ -3,6 +3,7 @@
 """Skeleton for the abstract charm."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 from data_platform_helpers.advanced_statuses import StatusHandler
@@ -67,6 +68,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     # Custom charm events dispatched by the observer scripts (cluster topology
     # changes and raft reconnection).
     on = ClusterTopologyChangeCharmEvents()
+
+    # Real bridge injected by substrate subclasses; class default keeps the
+    # vm_charm/k8s_charm guarded reads safe during __init__ — charm_refresh
+    # runs its state machine at construction time and may call request_restart.
+    restart_lock_acquire: Callable[[], None] | None = None
 
     def __init__(self, *args):
         super().__init__(*args)
