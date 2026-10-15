@@ -7,6 +7,7 @@
 
 import json
 from collections.abc import MutableMapping
+from contextlib import suppress
 from functools import cached_property
 
 from ops import ActiveStatus, Application, BlockedStatus, ModelError, Relation, Unit
@@ -567,6 +568,20 @@ class PostgreSQLApplication(PeerRelationState):
         if not self.relation:
             return set()
         return set(json.loads(self.relation.data[self.app].get("members_ips", "[]")))
+
+    def add_member_ip(self, ip: str) -> None:
+        """Add one IP to the members list (port of the charm's _add_to_members_ips write)."""
+        ips = json.loads(self.data.get("members_ips", "[]"))
+        if ip not in ips:
+            ips.append(ip)
+        self.data["members_ips"] = json.dumps(ips)
+
+    def remove_member_ip(self, ip: str) -> None:
+        """Remove one IP from the members list (port of the charm's _remove_from_members_ips)."""
+        ips = json.loads(self.data.get("members_ips", "[]"))
+        with suppress(ValueError):
+            ips.remove(ip)
+        self.data["members_ips"] = json.dumps(ips)
 
     @property
     def endpoints(self) -> set[str]:

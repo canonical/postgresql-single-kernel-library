@@ -35,6 +35,10 @@ class RaftPostgresqlStillUpError(PostgreSQLBaseError):
     """Postgresql not yet down."""
 
 
+class RaftRecoveryTimeoutError(PostgreSQLBaseError):
+    """A raft-recovery wait exceeded its bound; the flow must defer, not hang."""
+
+
 class RaftNotPromotedError(PostgreSQLBaseError):
     """Leader not yet set when reinitialising raft."""
 
