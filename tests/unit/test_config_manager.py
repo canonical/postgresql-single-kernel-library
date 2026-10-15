@@ -1,5 +1,6 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
+import contextlib
 import logging
 from unittest.mock import ANY, MagicMock, Mock, PropertyMock, patch, sentinel
 
@@ -938,6 +939,194 @@ def test_update_config_vm_snap_gate_exits_before_restart_services(
     # config_hash is read (getter, call()) for the restart decision but never PERSISTED
     # (setter, call("newhash")) — the snap gate returns before the hash write-back.
     assert call("newhash") not in orchestrate._peer_cfg_hash.mock_calls
+
+
+@pytest.fixture
+def guard_orchestrate(config, postgresql_client):
+    """Like orchestrate, but the real render runs (file writes + template stubbed)."""
+    render_params = {}
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(
+            patch.object(config, "_build_postgresql_parameters", return_value=render_params)
+        )
+        _render_file = stack.enter_context(
+            patch("single_kernel_postgresql.managers.config.render_file")
+        )
+        _template = stack.enter_context(patch("single_kernel_postgresql.managers.config.Template"))
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.managers.config._snap_provided_libraries",
+                return_value={"pg_cron"},
+            )
+        )
+        _is_tls = stack.enter_context(
+            patch.object(type(config), "is_tls_enabled", new_callable=PropertyMock)
+        )
+        _hash = stack.enter_context(
+            patch.object(type(config), "generate_config_hash", new_callable=PropertyMock)
+        )
+        stack.enter_context(patch.object(config, "handle_restart_need"))
+        stack.enter_context(patch.object(config, "apply_api_config", return_value=True))
+        stack.enter_context(patch.object(config, "_can_connect_to_postgresql", return_value=True))
+        stack.enter_context(patch.object(config.workload, "is_patroni_running", return_value=True))
+        stack.enter_context(
+            patch.object(
+                config,
+                "resource_provider",
+                return_value=Mock(get_available_resources=Mock(return_value=(4, 8_000_000_000))),
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.is_connectivity_enabled",
+                new_callable=PropertyMock,
+                return_value=True,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.is_ldap_enabled",
+                new_callable=PropertyMock,
+                return_value=False,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.data",
+                new_callable=PropertyMock,
+                return_value={},
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.data",
+                new_callable=PropertyMock,
+                return_value={},
+            )
+        )
+        _config = stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.state.CharmState.config",
+                new_callable=PropertyMock,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.state.CharmState.endpoint",
+                new_callable=PropertyMock,
+                return_value=sentinel.endpoint,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.state.CharmState.model_name",
+                new_callable=PropertyMock,
+                return_value=sentinel.model_name,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.state.CharmState.listen_ips",
+                new_callable=PropertyMock,
+                return_value=sentinel.listen_ips,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.state.CharmState.unit_ip",
+                new_callable=PropertyMock,
+                return_value=sentinel.unit_ip,
+            )
+        )
+        for attr, val in (
+            ("patroni_password", sentinel.patroni_pass),
+            ("user_password", sentinel.user_pass),
+            ("replication_password", sentinel.replication_pass),
+            ("rewind_password", sentinel.rewind_pass),
+            ("raft_password", sentinel.raft_pass),
+            ("cluster_name", sentinel.cluster_name),
+            ("endpoints", ["endpoint1", "endpoint2", "endpoint3"]),
+            ("members_ips", ["ip1", "ip2", "ip3"]),
+            ("planned_units", 1),
+        ):
+            stack.enter_context(
+                patch(
+                    f"single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.{attr}",
+                    new_callable=PropertyMock,
+                    return_value=val,
+                )
+            )
+        config.ldap_handler.get_ldap_parameters = Mock(return_value={})
+        _peer_cfg_hash = stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.config_hash",
+                new_callable=PropertyMock,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.user_hash",
+                new_callable=PropertyMock,
+            )
+        )
+        _app_user_hash = stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.user_hash",
+                new_callable=PropertyMock,
+            )
+        )
+        _peer_cfg_hash.return_value = "oldhash"
+        _app_user_hash.return_value = "uh"
+        stack.enter_context(
+            patch(
+                "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.member_name",
+                new_callable=PropertyMock,
+                return_value=sentinel.member_name,
+            )
+        )
+        _files = stack.enter_context(
+            patch("single_kernel_postgresql.managers.config.importlib.resources.files")
+        )
+        _files.return_value.joinpath.return_value.read_text.return_value = "template"
+        _template.return_value.render.return_value = sentinel.template_output
+        _is_tls.return_value = False
+        _hash.return_value = "newhash"
+        _config.return_value.synchronous_node_count = 1
+        _config.return_value.durability_maximum_lag_on_failover = (
+            sentinel.durability_maximum_lag_on_failover
+        )
+        _config.return_value.instance_password_encryption = sentinel.instance_password_encryption
+        config.patroni_manager.member_started = True
+        config.patroni_manager.ensure_slots_controller_by_patroni.return_value = True
+        config.database_manager.user_hash = "uh"
+        config._render_params = render_params
+        yield config, _render_file
+
+
+def test_update_config_skips_render_and_reload_on_identical_params(
+    guard_orchestrate, postgresql_client
+):
+    """Repeated identical renders skip the render, the API patch and the Patroni reload.
+
+    A real configuration change is a genuine diff, so it re-renders and reloads.
+    """
+    config, render_file = guard_orchestrate
+    # First flow (bootstrap/first peer-changed): renders + reloads.
+    assert config.update_config(postgresql_client) is True
+    assert render_file.call_count == 1
+    assert config.handle_restart_need.call_count == 1
+    assert config.apply_api_config.call_count == 1
+    # Repeated peer-changed with identical params: nothing to apply.
+    assert config.update_config(postgresql_client) is True
+    assert render_file.call_count == 1
+    assert config.handle_restart_need.call_count == 1
+    assert config.apply_api_config.call_count == 1
+    # Genuine configuration change: re-render + reload.
+    config._render_params["max_wal_size"] = "80GB"
+    assert config.update_config(postgresql_client) is True
+    assert render_file.call_count == 2
+    assert config.handle_restart_need.call_count == 2
+    assert config.apply_api_config.call_count == 2
 
 
 @pytest.mark.parametrize(
