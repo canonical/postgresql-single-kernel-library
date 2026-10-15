@@ -48,7 +48,54 @@ def _set_initialised(harness):
     return rel_id
 
 
+@pytest.fixture
+def resuming_refresh(monkeypatch):
+    """Construct charm_refresh.Kubernetes so its resume runs during charm init."""
+    seen = {"lock_calls": 0}
+
+    class ResumingKubernetes:
+        in_progress = True
+        next_unit_allowed_to_refresh = True
+        workload_allowed_to_start = True
+        pinned_oci_image = "charmed-postgresql-16.0"
+        app_status_higher_priority = None
+        unit_status_higher_priority = None
+
+        def __init__(self, charm_specific, /):
+            seen["lock_calls"] += 1
+            # Reproduce the action path: the construction-time state machine may
+            # reach request_restart before the subclass assigned its bridges.
+            charm_specific._charm.request_restart()
+
+        def unit_status_lower_priority(self, *, workload_is_running=True):
+            return None
+
+    monkeypatch.setattr("charm_refresh.Kubernetes", ResumingKubernetes)
+    return seen
+
+
 # -- status bridges ----------------------------------------------------------------
+
+
+def test_refresh_resume_during_init_request_restart_needs_no_lock_yet(resuming_refresh, charm):
+    """charm_refresh.Kubernetes runs its state machine AT construction time.
+
+    A force-refresh-start reaches request_restart INSIDE the abstract
+    __init__ (via the refresh manager), before the substrate subclass
+    assigns restart_lock_acquire: the guarded read must not raise
+    AttributeError, and the injected lock (assigned post-init) must be the
+    only invocation.
+    """
+    assert resuming_refresh["lock_calls"] == 1  # constructor ran request_restart
+    assert charm.restart_lock_acquire is None  # class default, nothing injected yet
+
+    lock = Mock()
+    charm.restart_lock_acquire = lock
+    with patch.object(
+        type(charm.tls_manager), "get_client_tls_files", return_value=("k", "ca", "c")
+    ):
+        charm.request_restart()
+    lock.assert_called_once_with()
 
 
 def test_set_unit_status_respects_higher_refresh_priority(charm):
