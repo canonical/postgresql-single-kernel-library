@@ -8,6 +8,8 @@
 {%- set pg_log_dir = postgresql_log_path if is_vm else logs_storage_path ~ '/' ~ version ~ '/main/pg_logs' -%}
 {%- set pg_bin_dir = '/snap/charmed-postgresql/current/usr/lib/postgresql/' ~ version ~ '/bin' if is_vm else '/usr/lib/postgresql/' ~ version ~ '/bin' -%}
 {%- set pgb_flag = pgbackrest_configuration_file ~ ' ' if is_vm else '' -%}
+{#- Single-host pg_hba address: the prefix length depends on the address family. #}
+{%- macro hba_addr(addr) -%}{{ addr }}{{ '/128' if ':' in (addr or '') else '/32' }}{%- endmacro -%}
 #########################################################################################
 # [ WARNING ]
 # patroni configuration file maintained by the postgres-operator
@@ -177,14 +179,14 @@ bootstrap:
   - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
   - {{ hba_type }} replication replication ::1/128 scram-sha-256
   {%- for endpoint in extra_replication_endpoints %}
-  - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
+  - {{ hba_type }} replication replication {{ hba_addr(endpoint) }} scram-sha-256
   {%- endfor %}
 bypass_api_service: true
 pod_ip: '{{ endpoint }}'
 {%- endif %}
 
 postgresql:
-  listen: {{ (listen_ips | join(',') ~ ':5432') if is_vm else "'*:5432'" }}
+  listen: '{{ listen_ips | join(',') if is_vm else "*" }}:5432'
   basebackup:
     - waldir: {{ wal_path }}
   connect_address: '{{ node_addr }}:5432'
@@ -235,7 +237,7 @@ postgresql:
     - {{ hba_type }} all +{{ role }} ::/0 scram-sha-256
     {%- endfor %}
     {%- if not connectivity %}
-    - {{ hba_type }} all all {{ self_ip ~ ('/128' if ':' in self_ip else '/32') if is_vm else endpoint ~ '.' ~ namespace ~ '.svc.cluster.local' }} {{ instance_password_encryption }}
+    - {{ hba_type }} all all {{ hba_addr(self_ip) if is_vm else endpoint ~ '.' ~ namespace ~ '.svc.cluster.local' }} {{ instance_password_encryption }}
     - {{ hba_type }} all all 0.0.0.0/0 reject
     - {{ hba_type }} all all ::/0 reject
     {%- elif enable_ldap %}
@@ -262,7 +264,7 @@ postgresql:
     {%- endif %}
     {%- if is_vm and watcher_addr %}
     # Allow watcher to connect for health checks
-    - {{ hba_type }} postgres watcher {{ watcher_addr }}/32 scram-sha-256
+    - {{ hba_type }} postgres watcher {{ hba_addr(watcher_addr) }} scram-sha-256
     {%- endif %}
     - {{ hba_type }} replication replication 127.0.0.1/32 scram-sha-256
     - {{ hba_type }} replication replication ::1/128 scram-sha-256
@@ -271,7 +273,7 @@ postgresql:
     {%- endif %}
     # Allow replications connections from other cluster members.
     {%- for endpoint in extra_replication_endpoints %}
-    - {{ hba_type }} replication replication {{ endpoint }}/32 scram-sha-256
+    - {{ hba_type }} replication replication {{ hba_addr(endpoint) }} scram-sha-256
     {%- endfor %}
     {%- if is_vm %}
     {%- for peer_ip in peers_ips %}

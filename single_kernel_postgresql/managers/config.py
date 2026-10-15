@@ -735,6 +735,9 @@ class ConfigManager(BaseManager):
                 "listen_ips": self.state.listen_ips,
                 "raft_password": self.state.application.raft_password,
                 "watcher": watcher_raft_address,
+                "watcher_addr": watcher_raft_address.rsplit(":", 1)[0]
+                if watcher_raft_address
+                else None,
                 "pg_cron_available": "pg_cron" in snap_libraries,
                 "shared_preload_libraries": ",".join(
                     library for library in SHARED_PRELOAD_LIBRARIES if library in snap_libraries

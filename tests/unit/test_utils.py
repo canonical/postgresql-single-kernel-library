@@ -9,6 +9,7 @@ from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.utils import (
     any_cpu_to_cores,
     any_memory_to_bytes,
+    bracket_ipv6_host,
     create_directory,
     label2name,
     new_password,
@@ -107,6 +108,13 @@ def test_create_directory():
         _chmod.assert_called_once_with("test", 0o640)
         _chown.assert_called_once_with("test", uid=35, gid=35)
         _pwnam.assert_called_with("postgres")
+
+
+def test_bracket_ipv6_host_is_idempotent():
+    assert bracket_ipv6_host("fd42::1") == "[fd42::1]"
+    assert bracket_ipv6_host("[fd42::1]") == "[fd42::1]"
+    assert bracket_ipv6_host("192.0.2.10") == "192.0.2.10"
+    assert bracket_ipv6_host(None) is None
 
 
 def test_parallel_patroni_get_request_brackets_ipv6_endpoints():

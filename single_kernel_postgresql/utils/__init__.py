@@ -112,7 +112,8 @@ def bracket_ipv6_host(host: str | None) -> str | None:
     """Quote an IPv6 literal so it is valid in a URL authority (RFC 3986).
 
     An IPv6 literal in a URL must be bracketed, otherwise the client parses
-    the address at the first colon. Other hosts (and None) pass through.
+    the address at the first colon. Other hosts (and None) pass through, as
+    does a literal that is already bracketed.
 
     Args:
         host: a bare host name or address, or None.
@@ -120,7 +121,7 @@ def bracket_ipv6_host(host: str | None) -> str | None:
     Returns:
         The host, bracketed when it is an IPv6 literal.
     """
-    return f"[{host}]" if host and ":" in host else host
+    return f"[{host}]" if host and ":" in host and not host.startswith("[") else host
 
 
 def render_file(
@@ -192,7 +193,10 @@ async def _httpx_get_request(
     else:
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = CERT_NONE
-    async with AsyncClient(auth=auth, timeout=API_REQUEST_TIMEOUT, verify=ssl_ctx) as client:
+    # Patroni is reached directly: never through the proxy configured in the hook environment.
+    async with AsyncClient(
+        auth=auth, timeout=API_REQUEST_TIMEOUT, verify=ssl_ctx, trust_env=False
+    ) as client:
         try:
             return (await client.get(url)).raise_for_status().json()
         except (HTTPError, ValueError):
