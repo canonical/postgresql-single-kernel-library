@@ -556,7 +556,12 @@ class CharmState(Object):
         # Try to update synchronous_node_count.
         return {
             "synchronous_node_count": self.synchronous_node_count,
-            "synchronous_mode_strict": len(self.application.members_ips) > 1
+            # Strict mode pins synchronous_standby_names even when no standby can ever
+            # ACK: before cluster_initialised that would block bootstrap forever on a
+            # nonexistent synchronous standby, so enable strict only once members have
+            # actually joined the cluster.
+            "synchronous_mode_strict": self.application.is_cluster_initialised
+            and len(self.application.members_ips) > 1
             and self.config.synchronous_mode_strict
             and self.synchronous_node_count > 0,
         }
