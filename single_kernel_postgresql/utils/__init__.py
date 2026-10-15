@@ -7,6 +7,7 @@ import os
 import pwd
 import re
 import secrets
+import ssl
 import string
 from asyncio import as_completed, create_task, run, wait
 from contextlib import suppress
@@ -172,7 +173,14 @@ async def _httpx_get_request(
 ) -> dict[str, Any] | None:
     ssl_ctx = create_default_context()
     if verify:
-        with suppress(FileNotFoundError):
+        # An absent bundle falls back to the default (system trust) context; an
+        # existing but empty or otherwise invalid bundle (e.g. the charm-local
+        # peer_ca_bundle.pem pre-created empty on K8s start, or emptied while
+        # the unit's storage is being detached) raises ssl.SSLError
+        # [X509: NO_CERTIFICATE_OR_CRL_FOUND] here, which previously escaped
+        # get_primary and crashed hooks like data-storage-detaching. Treat it
+        # like a missing bundle so the caller surfaces the intended RetryError.
+        with suppress(FileNotFoundError, ssl.SSLError):
             ssl_ctx.load_verify_locations(cafile=cafile)
     else:
         ssl_ctx.check_hostname = False

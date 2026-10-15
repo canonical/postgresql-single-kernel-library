@@ -16,6 +16,7 @@ from single_kernel_postgresql.config.literals import (
     RAFT_PARTNER_PREFIX,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
+from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR
 
 
 @pytest.fixture(autouse=True)
@@ -536,3 +537,35 @@ def test_config_validation_clear_does_not_lift_a_plugin_block(charm, harness):
     ):
         charm.postgresql_events_handler._vm_config_changed(Mock())
     assert charm.state.peer.data["configuration-error"] == EXTENSION_OBJECT_MESSAGE
+
+
+def test_pitr_failure_persists_blocked_through_collect(charm, harness):
+    """The failed-PITR blocked must surface through the status machinery.
+
+    CI 2026-10-15 trunk-parity regression: trunk wrote the CANNOT_RESTORE_PITR
+    blocked directly and it survived (no collect handler); the migration's
+    collect replay re-added the restore manager's maintenance "restoring
+    backup" over that direct write, so the unit never reached blocked and
+    stayed "restoring backup" forever.
+    """
+    charm.state.application.data["cluster_initialised"] = "True"
+    charm.state.application.data["restore-to-time"] = "20251015T120000Z"
+    charm.refresh_manager.refresh = Mock(in_progress=False)
+    with (
+        patch.object(charm.restore_manager, "is_pitr_failed", return_value=(True, True)),
+        patch.object(charm.restore_manager, "log_pitr_last_transaction_time"),
+    ):
+        charm.postgresql_events_handler._on_update_status(Mock())
+
+    assert charm.state.peer.data["pitr-failed"] == "True"
+    records = charm.state.statuses.get("unit", charm.restore_manager.name).root
+    assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+
+    # Patch the live collectors: the emit walks every manager's get_statuses,
+    # which would reach the snap/charm_refresh surface the unit env cannot build.
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
