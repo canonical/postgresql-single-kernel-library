@@ -488,3 +488,69 @@ def test_pitr_restore_window_holds_maintenance_through_collect(restore_manager):
     ]
     restore_manager.state.application.data["restore-to-time"] = ""
     assert restore_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
+# -- PITR failure persistence (collect-survivable blocked) -------------------------
+
+
+def test_block_on_pitr_failure_persists_flag_and_store_record(restore_manager):
+    """Blocking on PITR failure marks the per-unit flag and the status store."""
+    restore_manager.block_on_pitr_failure()
+    assert restore_manager.state.peer.data["pitr-failed"] == "True"
+    records = restore_manager.state.statuses.get("unit", restore_manager.name).root
+    assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+
+
+def test_pitr_failure_replays_blocked_through_collect(restore_manager):
+    """The PITR-failure blocked must outrank the in-progress maintenance.
+
+    Live repro (CI 2026-10-15, pitr_* legs): the collect replay re-added
+    maintenance "restoring backup" after the update-status hook wrote the
+    blocked, so the unit flapped back to maintenance and never surfaced
+    CANNOT_RESTORE_PITR (trunk had no collect handler, so its direct write
+    survived).
+    """
+    restore_manager.state.application.data["restore-to-time"] = "20251015T120000Z"
+    restore_manager.block_on_pitr_failure()
+    for recompute in (False, True):
+        assert restore_manager.get_statuses("unit", recompute=recompute) == [
+            StatusObject(status="blocked", message=CANNOT_RESTORE_PITR)
+        ]
+    # A new restore (restore-to-time cleared) must replay maintenance again.
+    restore_manager.state.application.data["restore-to-time"] = ""
+    restore_manager.state.application.restoring_backup = "20251013T120000Z"
+    restore_manager.clear_pitr_failure()
+    assert restore_manager.get_statuses("unit", recompute=True) == [
+        StatusObject(status="maintenance", message="restoring backup")
+    ]
+
+
+def test_clear_pitr_failure_removes_flag_and_store_record(restore_manager):
+    """Clearing drops both the persistent flag and the status-store record."""
+    restore_manager.block_on_pitr_failure()
+    restore_manager.clear_pitr_failure()
+    assert restore_manager.state.peer.data.get("pitr-failed") is None
+    records = restore_manager.state.statuses.get("unit", restore_manager.name).root
+    assert not any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+
+
+def test_clear_pitr_failure_is_a_noop_without_a_block(restore_manager):
+    """Clearing without a prior block must not raise or write."""
+    restore_manager.clear_pitr_failure()
+    assert "pitr-failed" not in restore_manager.state.peer.data
+
+
+def test_restore_clears_stale_pitr_failure_state(restore_manager, substrate):
+    """A new restore clears the previous attempt's PITR-failure block.
+
+    _pre_restore_cluster_checks accepts a CANNOT_RESTORE_PITR block so the user
+    can retry; the retry must start clean, else the blocked outranks the new
+    "restoring backup" maintenance and update-status early-exits on blocked.
+    """
+    restore_manager.block_on_pitr_failure()
+    if substrate == "vm":
+        restore_manager.patroni_manager.get_patroni_restart_condition.return_value = "always"
+    restore_manager.restore((BACKUP_LABEL, "2"), BACKUP_ID, TIMELINE_ID, is_backup_id_real=True)
+    assert restore_manager.state.peer.data.get("pitr-failed") is None
+    records = restore_manager.state.statuses.get("unit", restore_manager.name).root
+    assert not any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
