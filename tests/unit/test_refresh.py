@@ -446,6 +446,70 @@ def test_get_statuses_snapshots_a_refresh_set_status(refresh_manager, charm):
     refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
 
 
+@pytest.fixture
+def persisted_statuses(refresh_manager):
+    """A fake status store so the replay of the persisted record is observable."""
+    store: dict = {}
+
+    def fake_set(record, scope, name):
+        store[(scope, name)] = [record]
+
+    def fake_get(scope, name):
+        entry = MagicMock(name="statuses entry")
+        entry.root = store.get((scope, name), [])
+        return entry
+
+    refresh_manager.state.statuses.set.side_effect = fake_set
+    refresh_manager.state.statuses.get.side_effect = fake_get
+    return store
+
+
+@pytest.mark.parametrize(
+    "role_message", ["Primary", "Primary (degraded)", "Primary (read-only)", "Standby"]
+)
+def test_get_statuses_recompute_persists_the_default_role_status(
+    refresh_manager, charm, set_default_status, role_message
+):
+    """Recompute with no refresh must surface AND persist the freshly computed role status.
+
+    Otherwise every hook's collect wipes the mid-hook write to a bare active()
+    and juju flaps between the two (primary-flap regression).
+    """
+
+    def compute_default():
+        charm.unit.status = ActiveStatus(role_message)
+
+    set_default_status.side_effect = compute_default
+    refresh_manager.refresh = None
+    charm.unit.status = ActiveStatus()
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    set_default_status.assert_called_once()
+    record = StatusObject(status="active", message=role_message)
+    assert statuses == [record]
+    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+
+
+def test_get_statuses_replays_the_persisted_role_status_without_recompute(
+    refresh_manager, charm, set_default_status, persisted_statuses
+):
+    """A later hook's collect replays the stored role record.
+
+    Keeps the unit status message stable between update-status recomputes.
+    """
+    set_default_status.side_effect = lambda: setattr(charm.unit, "status", ActiveStatus("Primary"))
+    refresh_manager.refresh = None
+    charm.unit.status = ActiveStatus()
+
+    refresh_manager.get_statuses("unit", recompute=True)
+
+    assert refresh_manager.get_statuses("unit") == [
+        StatusObject(status="active", message="Primary")
+    ]
+
+
 def test_get_statuses_returns_cached_active_idle_for_app_scope_without_recompute(
     refresh_manager,
 ):
