@@ -9,6 +9,7 @@ Responsible for managing the configuration of the PostgreSQL instance.
 
 import importlib.resources
 import logging
+import pathlib
 from collections.abc import Callable
 from functools import cached_property
 from hashlib import shake_128
@@ -26,8 +27,10 @@ from single_kernel_postgresql.config.exceptions import PostgreSQLCannotConnectEr
 from single_kernel_postgresql.config.literals import (
     PG_CRON_DATABASE,
     PGBACKREST_CONF_FILE,
+    POSTGRESQL_SNAP_NAME,
     POSTGRESQL_STORAGE_PERMISSIONS,
     REWIND_USER,
+    SHARED_PRELOAD_LIBRARIES,
     USER,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
@@ -48,6 +51,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _snap_provided_libraries() -> set[str]:
+    """Libraries shipped by the currently installed PostgreSQL snap."""
+    return {
+        path.stem
+        for path in pathlib.Path(f"/snap/{POSTGRESQL_SNAP_NAME}/current/usr/lib/postgresql").glob(
+            "*/lib/*.so"
+        )
+    }
+
+
 class ConfigManager(BaseManager):
     """PostgreSQL Config Manager.
 
@@ -65,6 +78,7 @@ class ConfigManager(BaseManager):
         resource_provider: Callable[[], ResourceProvider],
         request_restart: Callable[[], None],
         restart_services: Callable[[], None],
+        logical_replication_slots: Callable[[], dict[str, str]] | None = None,
     ):
         super().__init__(state, workload, "config_manager")
         self.tls_manager = tls_manager
@@ -78,6 +92,10 @@ class ConfigManager(BaseManager):
         # service restarts stay in the charm until their own migration phases.
         self.request_restart = request_restart
         self.restart_services = restart_services
+        # Publishes the managed logical replication slots for the Patroni render and API
+        # sync; the callable is wired from the logical replication manager at the
+        # composition root and defaults to an empty mapping when absent.
+        self.logical_replication_slots = logical_replication_slots or (lambda: {})
 
     @staticmethod
     def _dict_to_hba_string(_dict: dict[str, Any]) -> str:
@@ -92,16 +110,18 @@ class ConfigManager(BaseManager):
 
     def configure_patroni_on_unit(self):
         """Configure Patroni (configuration files and service) on the unit."""
+        # Create the versioned data directory before taking ownership: the parent
+        # storage mount exists, but the versioned path itself is only created here.
+        self.workload.mkdir(
+            self.workload.paths.data,
+            mode=POSTGRESQL_STORAGE_PERMISSIONS,
+            parents=True,
+            exist_ok=True,
+        )
         _change_owner(self.state.substrate, str(self.workload.paths.data))
 
         # Create empty base config
         self.workload.write_text("", self.workload.paths.postgresql_conf)
-
-        # Expected permission
-        # Replicas refuse to start with the default permissions
-        self.workload.mkdir(
-            self.workload.paths.data, mode=POSTGRESQL_STORAGE_PERMISSIONS, exist_ok=True
-        )
 
     def _calculate_max_worker_processes(self, cpu_cores: int) -> str | None:
         """Calculate cpu_max_worker_processes configuration value."""
@@ -499,10 +519,11 @@ class ConfigManager(BaseManager):
             postgresql_client, cpu_cores, available_memory
         )
 
-        # replication_slots = self.logical_replication.replication_slots()
-        replication_slots = {}
+        replication_slots = self.logical_replication_slots()
 
-        # TODO add rel handler
+        # The embedding charm supplies relations_user_databases_map on every
+        # render (the relation-user pg_hba rules stay charm-side until their
+        # migration phase); the library default keeps the render working.
         relations_user_databases_map = relations_user_databases_map or {}
 
         # Update and reload configuration based on TLS files availability.
@@ -564,9 +585,7 @@ class ConfigManager(BaseManager):
             logger.warning("Early exit update_config: Unable to patch Patroni API")
             return False
 
-        if self.state.substrate == Substrates.K8S and not (
-            self.patroni_manager.ensure_slots_controller_by_patroni(replication_slots)
-        ):
+        if not self.patroni_manager.ensure_slots_controller_by_patroni(replication_slots):
             logger.warning(
                 "Failed to sync replication slots with Patroni — will retry on next config update"
             )
@@ -699,6 +718,9 @@ class ConfigManager(BaseManager):
             "extra_replication_endpoints": async_standby_endpoints,
         }
         if self.state.substrate == Substrates.VM:
+            # The installed snap may predate a library the charm pins (e.g.
+            # pg_cron); only preload what the snap actually ships.
+            snap_libraries = _snap_provided_libraries()
             confs.update({
                 "conf_path": str(self.workload.paths.patroni_conf),
                 "log_path": str(self.workload.paths.patroni_logs),
@@ -713,6 +735,10 @@ class ConfigManager(BaseManager):
                 "listen_ips": self.state.listen_ips,
                 "raft_password": self.state.application.raft_password,
                 "watcher": watcher_raft_address,
+                "pg_cron_available": "pg_cron" in snap_libraries,
+                "shared_preload_libraries": ",".join(
+                    library for library in SHARED_PRELOAD_LIBRARIES if library in snap_libraries
+                ),
             })
             perms = 0o600
         else:
@@ -725,6 +751,8 @@ class ConfigManager(BaseManager):
                 "logs_storage_path": str(self.workload.paths.logs),
                 "pgdata_path": str(self.workload.paths.data),
                 "restoring_backup": backup_id is not None or pitr_target is not None,
+                "pg_cron_available": True,
+                "shared_preload_libraries": ",".join(SHARED_PRELOAD_LIBRARIES),
             })
             perms = 0o644
         rendered = template.render(**confs)

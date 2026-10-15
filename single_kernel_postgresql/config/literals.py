@@ -12,6 +12,9 @@ POSTGRESQL_STORAGE_PERMISSIONS = 0o700
 
 # Snap
 POSTGRESQL_SNAP_NAME = "charmed-postgresql"
+SNAP_OOM_SCORE_ADJUST_MIN = -900
+SNAP_VITALITY_HINT = "resilience.vitality-hint"
+SNAP_VITALITY_MAX_SNAPS = 100
 
 # Relations
 PEER_RELATION = "database-peers"
@@ -29,6 +32,17 @@ SYSTEM_USERS = [BACKUP_USER, MONITORING_USER, REPLICATION_USER, REWIND_USER, USE
 
 # Extensions
 PG_CRON_DATABASE = "postgres"
+
+# Libraries the charm pins into `shared_preload_libraries`, in load order.
+# ConfigManager renders only the libraries the installed snap actually ships,
+# so an older snap never receives a preload entry it cannot load.
+SHARED_PRELOAD_LIBRARIES = (
+    "timescaledb",
+    "pgaudit",
+    "set_user",
+    "pg_stat_statements",
+    "pg_cron",
+)
 
 # Paths
 ## VM Paths
@@ -139,6 +153,11 @@ ALL_CLIENT_RELATIONS = [DATABASE]
 REPLICATION_CONSUMER_RELATION = "replication"
 REPLICATION_OFFER_RELATION = "replication-offer"
 
+# Logical replication relations
+LOGICAL_REPLICATION_OFFER_RELATION = "logical-replication-offer"
+LOGICAL_REPLICATION_RELATION = "logical-replication"
+LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS = "Logical replication setup is invalid. Check logs"
+SECRET_LABEL = "logical-replication-relation"  # noqa: S105
 # Async replication peer-data key holding the id of the labelless shared cluster-credentials
 # secret the owner persists: referenced by id everywhere, never by label (DPE-10203).
 ASYNC_SHARED_SECRET_ID_KEY = "async-replication-secret-id"  # noqa: S105 — a databag key name, not a credential
@@ -224,3 +243,8 @@ VM_CHARM_NAME = "postgresql"
 K8S_CHARM_NAME = "postgresql-k8s"
 K8S_OCI_RESOURCE_NAME = "postgresql-image"
 LAST_REFRESH_UNIT_STATUS_FILE = ".last_refresh_unit_status.json"
+
+# Observers log path
+OBSERVER_K8S_LOG_FILE_PATH = "/var/log/authorisation_rules_observer.log"
+OBSERVER_VM_LOG_FILE_PATH = "/var/log/cluster_topology_observer.log"
+JUJU_RUN_CMD = "/usr/bin/juju-exec"

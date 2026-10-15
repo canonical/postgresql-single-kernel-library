@@ -29,6 +29,7 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
+from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
 from single_kernel_postgresql.workload.vm import VMWorkload
@@ -51,6 +52,7 @@ class PostgreSQLEventsHandler(Object):
         tls_manager: TLSManager,
         config_manager: ConfigManager,
         patroni_manager: PatroniManager,
+        refresh_manager: RefreshManager,
     ) -> None:
         super().__init__(charm, key="postgresql_events")
         self.charm = charm
@@ -60,6 +62,7 @@ class PostgreSQLEventsHandler(Object):
         self.config_manager = config_manager
         self.tls_manager = tls_manager
         self.patroni_manager = patroni_manager
+        self.refresh_manager = refresh_manager
 
         # Charm events
         self.framework.observe(self.charm.on.install, self._on_install)
@@ -123,7 +126,16 @@ class PostgreSQLEventsHandler(Object):
 
     def _on_postgresql_pebble_ready(self, event: WorkloadEvent) -> None:
         """Event handler for PostgreSQL container on PebbleReadyEvent."""
-        # TODO: Safeguard against refresh
+        # Safeguard against starting while refreshing.
+        if self.refresh_manager.refresh is None:
+            logger.warning("Warning on_postgresql_pebble_ready: Refresh could be in progress")
+        elif (
+            self.refresh_manager.refresh.in_progress
+            and not self.refresh_manager.refresh.workload_allowed_to_start
+        ):
+            logger.debug("Defer on_postgresql_pebble_ready: Refresh in progress")
+            event.defer()
+            return
         if self.state.endpoint in self.state.endpoints:
             # TODO: Fix pod by adding services
             pass
@@ -175,8 +187,11 @@ class PostgreSQLEventsHandler(Object):
 
         self.tls_manager.configure_internal_peer_ca()
 
-        # if self.charm.substrate == Substrates.VM:
-        #     self.config_manager.update_config()
+        # Render the Patroni configuration — required for bootstrap (the real charm
+        # renders on leader-elected); route through the charm bridge for the per-user
+        # pg_hba map the real charm passes.
+        if self.charm.substrate == Substrates.VM:
+            self.charm.update_config()
 
         # TODO: Add next steps of leader elected
 
@@ -209,6 +224,12 @@ class PostgreSQLEventsHandler(Object):
             )
             return
 
+        # The real charm sets this in _start_primary after _setup_users (not migrated
+        # yet); the flag gates every client-relation request, so set it right after
+        # bootstrap. Must be the peer APP databag: PostgreSQLPeer.update() writes the
+        # unit scope.
+        self.state.application.data["cluster_initialised"] = "True"
+
         # TODO: Assert the member is up and running before marking it as initialised.
 
         # TODO: Check primary endpoint
@@ -219,9 +240,13 @@ class PostgreSQLEventsHandler(Object):
         Workaround for lxd containers not getting storage attached on startups.
         """
         cached_status = self.charm.unit.status
+        # Check the juju-managed mount (the metadata storage location) rather than the
+        # workload's versioned data path, which is a child of the mount and is never a
+        # mountpoint itself.
+        storage_location = self.charm.meta.storages["data"].location
         for attempt in Retrying(stop=stop_after_attempt(10), wait=wait_fixed(1), reraise=True):
             with attempt:
-                if not workload.is_storage_attached():
+                if not workload.is_storage_attached(storage_location):
                     logger.error("Data directory not attached.")
                     self.charm.unit.status = WaitingStatus("Data directory not attached")
                     raise StorageUnavailableError()

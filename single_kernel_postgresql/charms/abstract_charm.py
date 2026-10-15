@@ -7,12 +7,19 @@ from typing import TYPE_CHECKING
 
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
-from ops.charm import CharmBase
+from ops.charm import CharmBase, UpdateStatusEvent
+
+if TYPE_CHECKING:
+    import charm_refresh
+
+    from single_kernel_postgresql.managers.k8s import K8sManager
+
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.async_replication import PostgreSQLAsyncReplication
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.ldap import LDAP
+from single_kernel_postgresql.events.logical_replication import PostgreSQLLogicalReplication
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.events.watcher import WatcherEventsHandler
@@ -26,6 +33,7 @@ from single_kernel_postgresql.managers.async_replication import (
 from single_kernel_postgresql.managers.cluster import ClusterManager
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.database import DatabaseManager
+from single_kernel_postgresql.managers.logical_replication import LogicalReplicationManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
@@ -34,11 +42,6 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 from ..config.enums import Substrates
 from ..config.literals import DATABASE, S3_RELATION_NAME
 from ..utils.postgresql import PostgreSQL
-
-if TYPE_CHECKING:
-    import charm_refresh
-
-    from single_kernel_postgresql.managers.k8s import K8sManager
 
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
@@ -116,6 +119,28 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
         )
 
+        # Retry pending logical-replication validations on the update-status heartbeat;
+        # observed BEFORE StatusHandler so the charm-side checks run before the status
+        # recompute.
+        self.framework.observe(self.on.update_status, self._on_logical_replication_update_status)
+
+        # The manager owns the two logical-replication relations' data plane; the events
+        # handler owns the observers and event-flow guards. The config manager reads the
+        # manager's published slots for the Patroni render and API sync.
+        self.logical_replication_manager = LogicalReplicationManager(
+            state=self.state,
+            workload=self.workload,
+            # Per-call bridges: the client and the primary lookup are freshly
+            # constructed per access (Patroni primary lookup + app secret).
+            postgresql=lambda: self.postgresql,
+            primary_endpoint=lambda: self.primary_endpoint,
+            update_config=self.update_config,
+            set_unit_status=self.set_unit_status,
+        )
+        self.logical_replication = PostgreSQLLogicalReplication(
+            self, self.state, self.logical_replication_manager
+        )
+
         self.config_manager = ConfigManager(
             state=self.state,
             workload=self.workload,
@@ -126,6 +151,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             resource_provider=self.get_resource_provider,
             request_restart=self.request_restart,
             restart_services=self.restart_services,
+            logical_replication_slots=self.logical_replication.replication_slots,
         )
 
         # The refresh manager owns the charm_refresh integration and the priority gate
@@ -147,16 +173,22 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.refresh_manager,
         )
         self.watcher_handler = WatcherEventsHandler(self, self.workload, self.state)
+
+        # Resume or prepare the refresh (the charms' post-construction resume block).
+        self.refresh_manager.on_init()
 
         # Status Handler
         self.status_handler = StatusHandler(
             self,
+            self.refresh_manager,
             self.cluster_manager,
             self.tls_manager,
             self.config_manager,
             self.patroni_manager,
+            self.logical_replication_manager,
         )
 
     # Postgresql Client
@@ -165,6 +197,15 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def postgresql(self) -> PostgreSQL:
         """Return a PostgreSQL client."""
         pass
+
+    def _on_logical_replication_update_status(self, event: UpdateStatusEvent) -> None:
+        """Retry pending logical-replication validations on the update-status heartbeat.
+
+        Runs BEFORE the StatusHandler's own update-status listener (constructed
+        later observes later), so the retry's validation results are part of the
+        status recompute that follows.
+        """
+        self.logical_replication.retry_validations()
 
     # Postgresql Workload
     @property
@@ -235,6 +276,24 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         pass
 
     @abstractmethod
+    def post_refresh_side_effects(self) -> None:
+        """Run the post-snap-refresh side effects owned by not-yet-migrated modules.
+
+        The VM charm sets up the exporter and pgBackRest exporter, starts/stops the
+        pgBackRest service and updates the watcher unit address here.
+        """
+        pass
+
+    @abstractmethod
+    def has_async_replication_relation(self) -> bool:
+        """Whether this unit is related to an async replication partner.
+
+        Owned by the async-replication module until that phase migrates; the temp
+        tablespace migration skips units inside an async cluster.
+        """
+        pass
+
+    @abstractmethod
     def update_relation_endpoints(self) -> None:
         """Refresh the client and async relation endpoints after a switchover.
 
@@ -284,4 +343,14 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         Owned by the async-replication module until that phase migrates; the refresh
         pre-refresh checks need it to decide whether a switchover crosses clusters.
         """
+        pass
+
+    @abstractmethod
+    def update_pebble_layers(self) -> None:
+        """Reconcile the workload's Pebble layers (K8s)."""
+        pass
+
+    @abstractmethod
+    def ensure_pgdata_dirs_and_symlinks(self) -> None:
+        """Create the storage directories and symlinks for the PostgreSQL data paths (K8s)."""
         pass

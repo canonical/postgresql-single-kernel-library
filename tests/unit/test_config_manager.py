@@ -61,6 +61,10 @@ def test_render_patroni_yml_file(substrate, config):
         patch("single_kernel_postgresql.managers.config.render_file") as _render_file,
         patch("single_kernel_postgresql.managers.config.Template") as _template,
         patch(
+            "single_kernel_postgresql.managers.config._snap_provided_libraries",
+            return_value={"timescaledb", "pgaudit", "set_user", "pg_stat_statements", "pg_cron"},
+        ),
+        patch(
             "single_kernel_postgresql.core.state.CharmState.config", new_callable=PropertyMock
         ) as _config,
         patch(
@@ -182,6 +186,8 @@ def test_render_patroni_yml_file(substrate, config):
                 endpoint=sentinel.endpoint,
                 endpoints=["endpoint1", "endpoint2", "endpoint3"],
                 is_no_sync_member=False,
+                pg_cron_available=True,
+                shared_preload_libraries="timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron",
                 namespace=sentinel.model_name,
                 storage_path="/var/lib/pg/data",
                 logs_storage_path="/var/lib/pg/logs",
@@ -238,6 +244,8 @@ def test_render_patroni_yml_file(substrate, config):
                 listen_ips=sentinel.listen_ips,
                 raft_password=sentinel.raft_pass,
                 watcher=None,
+                pg_cron_available=True,
+                shared_preload_libraries="timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron",
             )
             _render_file.assert_called_once_with(
                 substrate,
@@ -888,17 +896,22 @@ def test_update_config_happy_path_persists_hashes_and_calls_bridges(
     orchestrate._app_user_hash.assert_called_with("uh")
 
 
-def test_update_config_ensure_slots_is_k8s_only(substrate, orchestrate, postgresql_client):
+def test_update_config_ensure_slots_runs_on_all_substrates(
+    substrate, orchestrate, postgresql_client
+):
+    """The publisher-side slot sync must run on every substrate.
+
+    The subscriber's CREATE SUBSCRIPTION uses create_slot=false and depends on
+    the pre-agreed slot existing (the VM apply worker fails forever with
+    'slot does not exist' when the sync is skipped).
+    """
     with patch(
         "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.is_app_leader",
         new_callable=PropertyMock,
         return_value=False,
     ):
         orchestrate.update_config(postgresql_client)
-    if substrate == Substrates.K8S:
-        orchestrate.patroni_manager.ensure_slots_controller_by_patroni.assert_called_once()
-    else:
-        orchestrate.patroni_manager.ensure_slots_controller_by_patroni.assert_not_called()
+    orchestrate.patroni_manager.ensure_slots_controller_by_patroni.assert_called_once()
 
 
 def test_update_config_vm_snap_gate_exits_before_restart_services(
@@ -918,3 +931,44 @@ def test_update_config_vm_snap_gate_exits_before_restart_services(
     # config_hash is read (getter, call()) for the restart decision but never PERSISTED
     # (setter, call("newhash")) — the snap gate returns before the hash write-back.
     assert call("newhash") not in orchestrate._peer_cfg_hash.mock_calls
+
+
+@pytest.mark.parametrize(
+    ("initialised", "members_ips", "expected_strict"),
+    [
+        # Members registered but not yet joined: strict must stay off, or the
+        # leader's first commits block on a synchronous ACK no standby can send.
+        (False, {"10.0.0.1", "10.0.0.2", "10.0.0.3"}, False),
+        # Initialised cluster with replicas: strict per configuration.
+        (True, {"10.0.0.1", "10.0.0.2", "10.0.0.3"}, True),
+        # Single-unit cluster: no standby can exist.
+        (True, {"10.0.0.1"}, False),
+        (False, {"10.0.0.1"}, False),
+    ],
+)
+def test_synchronous_mode_strict_requires_initialised_cluster(
+    substrate, initialised, members_ips, expected_strict
+):
+    state = CharmState(charm=Mock(), substrate=substrate, s3_requirer=Mock())
+    config = MagicMock()
+    config.synchronous_node_count = 2
+    config.synchronous_mode_strict = True
+    application = MagicMock()
+    application.planned_units = 3
+    application.members_ips = members_ips
+    application.is_cluster_initialised = initialised
+    with (
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.config",
+            new_callable=PropertyMock,
+            return_value=config,
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.application",
+            new_callable=PropertyMock,
+            return_value=application,
+        ),
+    ):
+        synchronous_configuration = state.synchronous_configuration
+    assert synchronous_configuration["synchronous_node_count"] == 2
+    assert synchronous_configuration["synchronous_mode_strict"] is expected_strict
