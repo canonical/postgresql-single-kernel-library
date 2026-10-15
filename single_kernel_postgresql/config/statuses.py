@@ -31,6 +31,9 @@ class GeneralStatuses(Enum):
     WAITING_DATABASE_TO_START = StatusObject(
         status="waiting", message="awaiting for database to start"
     )
+    WAITING_FOR_CLUSTER_MEMBERSHIP = StatusObject(
+        status="waiting", message="Waiting for cluster membership"
+    )
 
 
 # Manager specific statuses

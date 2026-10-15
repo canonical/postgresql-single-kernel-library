@@ -254,8 +254,7 @@ class PostgreSQLEventsHandler(Object):
 
         # Defer replica bootstrap until the leader added this unit's endpoint: without
         # the pg_hba replication entry pg_basebackup is rejected and Patroni wipes pgdata.
-        if not self.state.model.unit.is_leader() and not self._replica_can_start():
-            event.defer()
+        if not self._replica_membership_gate(event):
             return
 
         if not self.state.get_secret(APP_SCOPE, "internal-ca"):
@@ -289,6 +288,32 @@ class PostgreSQLEventsHandler(Object):
         self.backup_manager.start_stop_pgbackrest_service()
 
         self._set_active_status()
+
+    def _replica_membership_gate(self, event: "HookEvent") -> bool:
+        """Defer a replica whose endpoint is not yet in the members list (gate).
+
+        Returns True when the unit may proceed with the bootstrap flow. While the
+        leader has not added this unit's endpoint, persist the wait through the
+        status machinery so the collect handler replays it instead of leaving the
+        pre-join window silently active (test_symlinks pg_wal symlink failure,
+        CI 2026-10-15).
+        """
+        if not self.state.model.unit.is_leader() and not self._replica_can_start():
+            if self.state.endpoint not in self.state.endpoints:
+                self.state.add_status_if_not_present(
+                    GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value,
+                    scope="unit",
+                    component=self.cluster_manager.name,
+                )
+            event.defer()
+            return False
+        if not self.state.model.unit.is_leader():
+            self.state.remove_status_if_present(
+                GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value,
+                scope="unit",
+                component=self.cluster_manager.name,
+            )
+        return True
 
     def _k8s_pebble_ready_refresh_gate(self, event) -> bool:
         """Safeguard against starting while refreshing (port); False skips the flow."""
@@ -1630,7 +1655,19 @@ class PostgreSQLEventsHandler(Object):
 
         # Don't update this member before it's part of the members list.
         if self.state.endpoint not in self.state.endpoints:
+            if not self.state.model.unit.is_leader():
+                self.state.add_status_if_not_present(
+                    GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value,
+                    scope="unit",
+                    component=self.cluster_manager.name,
+                )
             return
+        if not self.state.model.unit.is_leader():
+            self.state.remove_status_if_present(
+                GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value,
+                scope="unit",
+                component=self.cluster_manager.name,
+            )
 
         if not cast("K8sWorkload", self.workload).container.can_connect():
             logger.debug(
