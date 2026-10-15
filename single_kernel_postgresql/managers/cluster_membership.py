@@ -26,6 +26,7 @@ from single_kernel_postgresql.config.literals import (
     REPLICATION_OFFER_RELATION,
 )
 from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.managers.restore import PITR_FAILED_KEY
 from single_kernel_postgresql.utils import label2name
 
 if TYPE_CHECKING:
@@ -283,6 +284,17 @@ class ClusterMembershipManager(BaseManager):
             NotReadyError: when a member is not ready (caller defers).
             RetryError: when the cluster members could not be retrieved.
         """
+        # Do not override the blocked PITR status: the reconfigure cannot succeed
+        # while Patroni is down and would mask the blocked status on every tick.
+        # Trunk inspected the live unit status; here the durable ``pitr-failed``
+        # peer flag is the pre-collect equivalent (the block is replayed from it
+        # on every collect).
+        if self.state.application.is_cluster_restoring_to_time and self.state.peer.data.get(
+            PITR_FAILED_KEY
+        ):
+            logger.debug("Early exit add_members: blocked after failed PITR restore")
+            return
+
         # Compare the Patroni cluster members with the Juju hosts to avoid
         # unnecessary reconfiguration.
         if self.patroni_manager.cluster_members == self.hosts() and self.state.units_ips <= (
