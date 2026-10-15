@@ -1,6 +1,7 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
 import os
+import time
 from contextlib import contextmanager
 from unittest.mock import MagicMock, Mock, PropertyMock, call, mock_open, patch, sentinel
 
@@ -1022,6 +1023,65 @@ def test_primary_endpoint_ready_brackets_ipv6(substrate, patroni):
             auth=patroni._patroni_auth,
             timeout=API_REQUEST_TIMEOUT,
         )
+def test_primary_endpoint_ready_fails_fast_on_connection_error(substrate, patroni):
+    """The first connection-level error returns False without burning the retry budget.
+
+    The leader's re-emitted pebble-ready calls this on every hook; a 10s retry
+    budget per hook starved the peer-relation cascade (test_symlinks, CI
+    2026-10-15). The pebble-ready defer supplies the retry cadence instead.
+    """
+    if substrate == Substrates.VM:
+        pytest.skip("K8s only")
+        return
+    started = time.monotonic()
+    with (
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="endpoint",
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch("requests.get") as _get,
+    ):
+        _get.side_effect = requests.exceptions.ConnectionError("connection refused")
+        assert not patroni.primary_endpoint_ready
+        assert _get.call_count == 1
+        assert time.monotonic() - started < 2
+
+
+def test_primary_endpoint_ready_still_retries_endpoint_not_ready(substrate, patroni):
+    """EndpointNotReady (non-running state) is still retried within the budget."""
+    if substrate == Substrates.VM:
+        pytest.skip("K8s only")
+        return
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.stop_after_delay",
+            return_value=stop_after_delay(0.5),
+        ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.wait_fixed",
+            return_value=wait_fixed(0.05),
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="endpoint",
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch("requests.get") as _get,
+    ):
+        _get.return_value.json.return_value = {"state": "stopped"}
+        assert not patroni.primary_endpoint_ready
+        assert _get.call_count >= 2
 
 
 @contextmanager
