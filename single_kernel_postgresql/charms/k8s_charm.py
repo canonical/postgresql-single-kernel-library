@@ -263,6 +263,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
                 self._generate_metrics_jobs(self.is_tls_enabled)
             )
         if getattr(self, "restart_lock_acquire", None):
+            assert self.restart_lock_acquire is not None  # noqa: S101 (ty narrowing)
             self.restart_lock_acquire()
 
     def restart_services(self) -> None:
