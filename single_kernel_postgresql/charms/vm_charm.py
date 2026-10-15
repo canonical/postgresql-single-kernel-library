@@ -196,7 +196,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         injected through ``restart_lock_acquire``.
         """
         self.state.peer.data.pop("postgresql_restarted", None)
-        if self.restart_lock_acquire:
+        if getattr(self, "restart_lock_acquire", None):
             self.restart_lock_acquire()
 
     def restart_services(self) -> None:
