@@ -853,12 +853,18 @@ class PatroniManager(BaseManager):
         try:
             for attempt in Retrying(stop=stop_after_delay(10), wait=wait_fixed(1)):
                 with attempt:
-                    r = requests.get(
-                        f"https://{self.state.primary_endpoint}:8008/health",
-                        verify=self.verify,
-                        auth=self._patroni_auth,
-                        timeout=API_REQUEST_TIMEOUT,
-                    )
+                    try:
+                        r = requests.get(
+                            f"https://{self.state.primary_endpoint}:8008/health",
+                            verify=self.verify,
+                            auth=self._patroni_auth,
+                            timeout=API_REQUEST_TIMEOUT,
+                        )
+                    except requests.exceptions.ConnectionError:
+                        # Connection-level errors (DNS or service down) only resolve via
+                        # the pebble-ready defer's retry cadence, so fail fast instead
+                        # of burning the retry budget inside every hook.
+                        return False
                     if r.json()["state"] not in RUNNING_STATES:
                         raise EndpointNotReadyError
         except RetryError:
