@@ -728,7 +728,10 @@ class PostgreSQLEventsHandler(Object):
                 "You can launch another restore with different parameters"
             )
             restore_manager.log_pitr_last_transaction_time()
-            self.membership_manager.set_unit_status(BlockedStatus(CANNOT_RESTORE_PITR))
+            # Direct unit.status writes are wiped by the collect-unit-status
+            # replay (which re-adds this manager's "restoring backup"
+            # maintenance): persist the blocked through the status machinery.
+            restore_manager.block_on_pitr_failure()
             return False
 
         member_name = self.state.model.unit.name.replace("/", "-")
@@ -767,6 +770,7 @@ class PostgreSQLEventsHandler(Object):
             "restore-to-time": "",
             "restore-timeline": "",
         })
+        restore_manager.clear_pitr_failure()
         self.charm.update_config()
         restore_manager.restore_patroni_restart_condition()
 
@@ -947,7 +951,8 @@ class PostgreSQLEventsHandler(Object):
                 "You can launch another restore with different parameters"
             )
             self.restore_manager.log_pitr_last_transaction_time()
-            self.membership_manager.set_unit_status(BlockedStatus(CANNOT_RESTORE_PITR))
+            # Collect-wipe: see the VM branch above.
+            self.restore_manager.block_on_pitr_failure()
             return False
 
         if (
@@ -985,6 +990,7 @@ class PostgreSQLEventsHandler(Object):
             "restore-to-time": "",
             "restore-timeline": "",
         })
+        self.restore_manager.clear_pitr_failure()
         self.charm.update_config()
         self.restore_manager.restore_patroni_restart_condition()
 

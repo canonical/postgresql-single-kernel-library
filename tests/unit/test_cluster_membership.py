@@ -11,7 +11,7 @@ import json
 from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
-from ops import MaintenanceStatus
+from ops import BlockedStatus, MaintenanceStatus
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import (
     NotReadyError,
@@ -23,6 +23,7 @@ from single_kernel_postgresql.managers.cluster_membership import (
     DEFER,
     ClusterMembershipManager,
 )
+from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR
 from tenacity import RetryError
 
 PEER_ADDRESS = f"{PEER_RELATION}-address"
@@ -145,6 +146,44 @@ def test_reconfigure_cluster(harness, membership):
         assert membership.reconfigure_cluster(event) is True
         _cleanup.assert_called_once_with()
         _add_members.assert_called_once_with(event)
+
+
+def test_add_members_does_not_override_blocked_pitr_status(harness):
+    """The reconfigure loop must not run while a failed PITR restore blocks the unit.
+
+    Port of the trunk charm's guard (canonical/postgresql-operator#2044): the
+    deferred reconfigure cannot succeed while Patroni is down, and running it
+    overrides the blocked status on every peer-changed tick. Trunk inspected
+    the live unit status; here the durable ``pitr-failed`` peer flag is the
+    pre-collect equivalent (``get_statuses`` replays the blocked from it).
+    """
+    harness.charm.state.application.data["restore-to-time"] = "20261015T120000Z"
+    harness.charm.restore_manager.block_on_pitr_failure()
+    harness.charm.unit.status = BlockedStatus(CANNOT_RESTORE_PITR)
+
+    membership = ClusterMembershipManager(
+        state=harness.charm.state,
+        workload=harness.charm.workload,
+        patroni_manager=Mock(),
+        update_config=Mock(),
+        set_unit_status=lambda status: setattr(harness.charm.unit, "status", status),
+        watcher_handler=Mock(),
+        async_replication_manager=Mock(),
+        update_relation_endpoints=Mock(),
+        update_certificate=Mock(),
+        raft_manager=Mock(),
+        primary_endpoint=lambda: harness.charm.primary_endpoint,
+    )
+
+    # The reconfigure path is exercised: the Mock cluster members differ from
+    # the harness hosts, and the member-add body is inert (patched) so the
+    # status write is the observable.
+    membership.patroni_manager.cluster_members = set()
+    with patch.object(membership, "add_cluster_member"):
+        membership.add_members(Mock())
+
+    assert isinstance(harness.charm.unit.status, BlockedStatus)
+    assert harness.charm.unit.status.message == CANNOT_RESTORE_PITR
 
 
 def test_add_cluster_member(harness, membership):
