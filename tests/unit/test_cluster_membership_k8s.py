@@ -6,6 +6,7 @@ The K8s add-members flow defers on NotReadyError/RetryError and adds members
 through the K8s variant (endpoint + pod labels), never through the VM variant.
 """
 
+import json
 from unittest.mock import Mock, patch
 
 import pytest
@@ -88,3 +89,19 @@ def test_add_members_k8s_defers_when_patroni_members_are_unavailable(harness, me
     event = Mock()
     membership.add_members_k8s(event)
     event.defer.assert_called_once()
+
+
+def test_remove_departed_endpoints_removes_only_departed(harness, membership):
+    """The purge removes exactly the endpoints whose units left the relation."""
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    app = harness.charm.app.name
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        harness.add_relation_unit(rel_id, f"{app}/1")
+        endpoints = [f"{app}-{i}.{app}-endpoints" for i in (0, 1, 2)]
+        harness.update_relation_data(rel_id, app, {"endpoints": json.dumps(endpoints)})
+
+    removed = membership.remove_departed_endpoints()
+
+    assert removed == [f"{app}-2.{app}-endpoints"]
+    assert json.loads(harness.get_relation_data(rel_id, app)["endpoints"]) == endpoints[:2]
