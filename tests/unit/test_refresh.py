@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import charm_refresh
 import psycopg2
 import pytest
+import requests
 from charm_refresh import CharmVersion, PrecheckFailed
 from data_platform_helpers.advanced_statuses import StatusObject
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, UnknownStatus, WaitingStatus
@@ -20,7 +21,7 @@ from single_kernel_postgresql.managers.refresh import (
     PostgreSQLRefreshK8s,
     RefreshManager,
 )
-from tenacity import RetryError, stop_after_attempt
+from tenacity import Future, RetryError, stop_after_attempt
 
 
 @pytest.fixture
@@ -155,11 +156,15 @@ def test_pre_refresh_check_after_1_unit_refreshed_switches_primary(
         "postgresql-k8s-2",
     ]
     charm.patroni_manager.get_primary.return_value = "postgresql-k8s/2"
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/2"
     charm.get_async_primary_cluster_endpoint.return_value = endpoint
 
     refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
 
-    charm.patroni_manager.get_primary.assert_called_once_with(unit_name_pattern=True)
+    if expected_async_cluster:
+        charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
+    else:
+        charm.patroni_manager.get_primary.assert_called_once_with(unit_name_pattern=True)
     charm.patroni_manager.switchover.assert_called_once_with(
         candidate="postgresql-k8s/0", async_cluster=expected_async_cluster
     )
@@ -175,6 +180,7 @@ def test_pre_refresh_check_after_1_unit_refreshed_already_primary(refresh_k8s, c
         "postgresql-k8s-2",
     ]
     charm.patroni_manager.get_primary.return_value = "postgresql-k8s/0"
+    charm.get_async_primary_cluster_endpoint.return_value = None
 
     refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
 
@@ -195,6 +201,90 @@ def test_pre_refresh_check_after_1_unit_refreshed_switchover_failed(refresh_k8s,
 
     with pytest.raises(PrecheckFailed, match=r"Unable to switch primary"):
         refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_standby_already_primary(refresh_k8s, charm):
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/0"
+    charm.get_async_primary_cluster_endpoint.return_value = "primary.async-replication:5432"
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
+    charm.patroni_manager.switchover.assert_not_called()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_standby_switches(refresh_k8s, charm):
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/2"
+    charm.get_async_primary_cluster_endpoint.return_value = "primary.async-replication:5432"
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
+    charm.patroni_manager.switchover.assert_called_once_with(
+        candidate="postgresql-k8s/0", async_cluster=True
+    )
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_switchover_retry_error_maps_to_precheck_failed(
+    refresh_k8s, charm
+):
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
+    charm.patroni_manager.get_primary.return_value = "postgresql-k8s/2"
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.switchover.side_effect = RetryError(
+        Future.construct(1, requests.exceptions.ConnectionError(), True)
+    )
+
+    with pytest.raises(PrecheckFailed, match=r"Unable to switch primary"):
+        refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_status_unreachable_still_attempts_switchover(
+    refresh_k8s, charm
+):
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
+    charm.patroni_manager.get_primary.side_effect = RetryError(
+        Future.construct(1, Exception("Unable to reach any units"), True)
+    )
+    charm.get_async_primary_cluster_endpoint.return_value = None
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.switchover.assert_called_once_with(
+        candidate="postgresql-k8s/0", async_cluster=False
+    )
 
 
 def test_pre_refresh_check_before_any_units_refreshed_members_not_ready(refresh_k8s, charm):
@@ -570,6 +660,25 @@ def test_refresh_snap_runs_the_post_refresh_flow(refresh_vm, charm):
     charm.update_config.assert_called_once_with(refresh=refresh)
     charm.workload.install_snap_package.assert_called_once_with(revision="366", refresh=refresh)
     charm.refresh_manager.post_snap_refresh.assert_called_once_with(refresh)
+
+
+def test_pre_refresh_check_before_any_units_refreshed_switchover_retry_error_maps_to_precheck_failed(
+    refresh_vm, charm
+):
+    charm.patroni_manager.are_all_members_ready.return_value = True
+    charm.patroni_manager.is_creating_backup = False
+    charm.postgresql._connect_to_database.return_value.cursor.return_value.fetchone.return_value = [
+        0
+    ]
+    charm.unit.name = "postgresql/2"
+    charm.state.peer_relation = MagicMock(units=[])
+    charm.patroni_manager.get_primary.return_value = "postgresql-0"
+    charm.patroni_manager.switchover.side_effect = RetryError(
+        Future.construct(1, requests.exceptions.ConnectionError(), True)
+    )
+
+    with pytest.raises(PrecheckFailed, match=r"Unable to switch primary"):
+        refresh_vm.run_pre_refresh_checks_before_any_units_refreshed()
 
 
 def test_post_snap_refresh_blocks_when_patroni_fails_to_start(vm_manager, charm):
