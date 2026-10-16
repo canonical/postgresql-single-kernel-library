@@ -545,7 +545,7 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
 
     def get_async_primary_cluster_endpoint(self) -> str | None:
         """Endpoint of the primary cluster of the async replication partner, if any."""
-        return None
+        return self.async_replication_manager.get_primary_cluster_endpoint()
 
     def update_relation_endpoints(self) -> None:
         """Refresh the client and async relation endpoints after a switchover."""
