@@ -13,7 +13,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from ops import BlockedStatus, MaintenanceStatus, WaitingStatus
-from tenacity import RetryError
+from tenacity import RetryError, Retrying, stop_after_delay, wait_fixed
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import NotReadyError, RemoveRaftMemberFailedError
@@ -488,8 +488,19 @@ class ClusterMembershipManager(BaseManager):
         if self.state.model.unit.is_leader():
             self.stuck_cluster_cleanup()
 
-    def raft_reconnect(self, _) -> None:
-        """Re-add this unit's raft member after a potential stuck connection (port)."""
+    def raft_reconnect(self, event) -> str:
+        """Re-add this unit's raft member after a potential stuck connection (port).
+
+        The remove/add dance is retried within a bounded budget matching the
+        in-hook 300s recovery loop (``managers/raft.py``); on exhaustion the
+        flow reports ``DEFER`` so the event handler can defer to the next
+        event (the raft observer timer re-fires every 10s while a partner is
+        stuck).
+
+        Returns:
+            ``COMPLETED`` when there is nothing to do or the re-add succeeded;
+            ``DEFER`` when the retry budget was exhausted.
+        """
         raft_status = self.raft_manager.get_raft_status()
         logger.debug(f"Local raft status: {raft_status}")
         if (
@@ -503,34 +514,43 @@ class ClusterMembershipManager(BaseManager):
                 and not self.watcher_handler.watcher_raft_address
             )
         ):
-            return
+            return COMPLETED
         if all(
             raft_status[partner] == 2
             for partner in raft_status
             if partner.startswith(RAFT_PARTNER_PREFIX)
         ):
             logger.debug("All raft members are active.")
-            return
+            return COMPLETED
         logger.info("Potentially stuck Raft connection detected. Re-adding Raft member.")
         local_addr = f"{self.state.unit_ip}:{RAFT_PORT}"
-        remote_addr = (
-            watcher_addr
-            if (watcher_addr := self.watcher_handler.watcher_raft_address)
-            and self.watcher_handler.is_active
-            else f"{next(member for member in self.state.application.members_ips if member != self.state.unit_ip)}:{RAFT_PORT}"
-        )
         try:
-            self.raft_manager.remove_raft_member(
-                local_addr, remote_address=remote_addr, set_raft_flags=False
-            )
+            for attempt in Retrying(stop=stop_after_delay(300), wait=wait_fixed(5), reraise=True):
+                with attempt:
+                    # Re-evaluate the remote address on each attempt: the
+                    # watcher may have become active mid-retry.
+                    remote_addr = (
+                        watcher_addr
+                        if (watcher_addr := self.watcher_handler.watcher_raft_address)
+                        and self.watcher_handler.is_active
+                        else f"{next(member for member in self.state.application.members_ips if member != self.state.unit_ip)}:{RAFT_PORT}"
+                    )
+                    try:
+                        self.raft_manager.remove_raft_member(
+                            local_addr, remote_address=remote_addr, set_raft_flags=False
+                        )
+                    except Exception:
+                        logger.exception("Unable to remove Raft member")
+                        raise
+                    try:
+                        self.raft_manager.add_raft_member(local_addr, remote_address=remote_addr)
+                    except Exception:
+                        logger.exception("Unable to add Raft member")
+                        raise
         except Exception:
-            logger.exception("Unable to remove Raft member")
-            return
-        try:
-            self.raft_manager.add_raft_member(local_addr, remote_address=remote_addr)
-        except Exception:
-            logger.exception("Unable to add Raft member")
-            return
+            logger.warning("Unable to re-add the Raft member within the retry budget; deferring")
+            return DEFER
+        return COMPLETED
 
     # -- K8s membership (port of the K8s charm's endpoints bookkeeping) --------------
 
@@ -565,6 +585,19 @@ class ClusterMembershipManager(BaseManager):
         old = set(self.state.application.endpoints)
         current = {self.get_hostname_from_member(member) for member in self.hosts()}
         return list(old - current)
+
+    def remove_departed_endpoints(self) -> list[str]:
+        """Reconcile departed endpoints out of the app databag (K8s port).
+
+        Runs get_endpoints_to_remove() and removes each endpoint from the
+        members list; non-leaders no-op inside remove_endpoint. Returns the
+        removed endpoints.
+        """
+        removed = self.get_endpoints_to_remove()
+        for endpoint in removed:
+            self.remove_endpoint(endpoint)
+            logger.info(f"Removing departed endpoint {endpoint} from cluster members")
+        return removed
 
     def peer_members_endpoints(self) -> list[str]:
         """The peer member endpoints minus this unit's own endpoint (K8s port)."""

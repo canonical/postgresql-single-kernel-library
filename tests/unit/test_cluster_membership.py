@@ -8,6 +8,7 @@ and _on_peer_relation_departed, against the lib managers.
 """
 
 import json
+from contextlib import ExitStack
 from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
@@ -24,7 +25,7 @@ from single_kernel_postgresql.managers.cluster_membership import (
     ClusterMembershipManager,
 )
 from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR
-from tenacity import RetryError
+from tenacity import RetryError, stop_after_attempt, wait_fixed
 
 PEER_ADDRESS = f"{PEER_RELATION}-address"
 
@@ -52,6 +53,11 @@ def membership(harness):
         raft_manager=Mock(),
         primary_endpoint=lambda: harness.charm.primary_endpoint,
     )
+
+
+@pytest.fixture
+def charm(harness):
+    return harness.charm
 
 
 def _rel_id(harness) -> int:
@@ -469,3 +475,239 @@ def test_remove_departed_members_defers_without_dropping_members(harness, member
             assert json.loads(
                 harness.get_relation_data(rel_id, harness.charm.app.name)["members_ips"]
             ) == ["1.1.1.1"]
+
+
+# -- raft_reconnect bounded retry / DEFER (leg 116790413638) -----------------------
+
+RETRY_PATCHES = (
+    patch(
+        "single_kernel_postgresql.managers.cluster_membership.stop_after_delay",
+        lambda _: stop_after_attempt(2),
+    ),
+    patch(
+        "single_kernel_postgresql.managers.cluster_membership.wait_fixed",
+        lambda _: wait_fixed(0),
+    ),
+)
+
+
+def _stuck_raft_state(harness, membership, raft_status):
+    """Wire the harness state so raft_reconnect passes its early-exit guards."""
+    rel_id = _rel_id(harness)
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            rel_id, harness.charm.app.name, {"members_ips": json.dumps(["1.1.1.1", "2.2.2.2"])}
+        )
+    membership.raft_manager.get_raft_status.return_value = raft_status
+    return (
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.is_cluster_initialised",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch.object(type(harness.charm.state), "has_raft_keys", Mock(return_value=False)),
+        patch.object(
+            type(harness.charm.state),
+            "unit_ip",
+            new_callable=PropertyMock,
+            return_value="1.1.1.1",
+        ),
+    )
+
+
+def test_raft_reconnect_retries_transient_remove_failure(harness, membership):
+    """A transient remove failure is retried in-hook; the add still runs."""
+    stuck_status = {"partner_node_status_server_2.2.2.2:2222": 1}
+    patches = _stuck_raft_state(harness, membership, stuck_status)
+    membership.raft_manager.remove_raft_member.side_effect = [
+        RemoveRaftMemberFailedError,
+        None,
+    ]
+    with ExitStack() as stack:
+        for ctx in (*patches, *RETRY_PATCHES):
+            stack.enter_context(ctx)
+        assert membership.raft_reconnect(MagicMock()) == COMPLETED
+    assert membership.raft_manager.remove_raft_member.call_count == 2
+    membership.raft_manager.add_raft_member.assert_called_once()
+
+
+def test_raft_reconnect_defers_after_exhausted_retries(harness, membership):
+    """When the retry budget is exhausted the flow returns DEFER, never adds."""
+    stuck_status = {"partner_node_status_server_2.2.2.2:2222": 1}
+    patches = _stuck_raft_state(harness, membership, stuck_status)
+    membership.raft_manager.remove_raft_member.side_effect = RemoveRaftMemberFailedError
+    with ExitStack() as stack:
+        for ctx in (*patches, *RETRY_PATCHES):
+            stack.enter_context(ctx)
+        assert membership.raft_reconnect(MagicMock()) == DEFER
+    membership.raft_manager.add_raft_member.assert_not_called()
+
+
+def test_raft_reconnect_no_retry_when_cluster_recovered(harness, membership):
+    """A dispatch after a failed one sees all partners active and does not retry."""
+    stuck_status = {"partner_node_status_server_2.2.2.2:2222": 1}
+    patches = _stuck_raft_state(harness, membership, stuck_status)
+    membership.raft_manager.remove_raft_member.side_effect = RemoveRaftMemberFailedError
+    with ExitStack() as stack:
+        for ctx in (*patches, *RETRY_PATCHES):
+            stack.enter_context(ctx)
+        assert membership.raft_reconnect(MagicMock()) == DEFER
+    attempts_after_failure = membership.raft_manager.remove_raft_member.call_count
+    membership.raft_manager.get_raft_status.return_value = {
+        "partner_node_status_server_2.2.2.2:2222": 2
+    }
+    with ExitStack() as stack:
+        for ctx in (*patches, *RETRY_PATCHES):
+            stack.enter_context(ctx)
+        assert membership.raft_reconnect(MagicMock()) == COMPLETED
+    assert membership.raft_manager.remove_raft_member.call_count == attempts_after_failure
+
+
+# -- leader-side update-status membership reconcile (leg 116790413638) -------------
+
+
+def _reconcile_context(charm, running_members, planned_units):
+    """Patches to drive _on_update_status up to the membership reconcile point."""
+    charm.state.application.data["cluster_initialised"] = "True"
+    charm.refresh_manager.refresh = Mock(in_progress=False)
+    charm.state.application.data.pop("pitr-failed", None)
+    return (
+        patch.object(
+            type(charm.patroni_manager),
+            "member_started",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch.object(
+            type(charm.patroni_manager),
+            "is_member_isolated",
+            new_callable=PropertyMock,
+            return_value=False,
+        ),
+        patch.object(
+            charm.patroni_manager,
+            "get_running_cluster_members",
+            Mock(return_value=running_members),
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.planned_units",
+            new_callable=PropertyMock,
+            return_value=planned_units,
+        ),
+        patch.object(
+            type(charm), "primary_endpoint", new_callable=PropertyMock, return_value="10.0.0.1"
+        ),
+        patch.object(charm.database_manager, "oversee_users"),
+        patch.object(charm.membership_manager, "update_relation_endpoints"),
+        patch.object(charm.async_replication_manager, "update_async_replication_data"),
+        patch.object(charm.async_replication_manager, "clear_stale_promotion"),
+        patch.object(charm.backup_manager, "coordinate_stanza_fields"),
+        patch.object(charm, "set_primary_status_message"),
+        patch.object(charm.observer_manager, "start_observer"),
+        patch.object(charm.watcher_handler, "update_unit_address"),
+        patch.object(charm.postgresql_events_handler, "postgresql"),
+    )
+
+
+def test_reconcile_running_members_below_planned_adds_missing_member(charm, harness):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    patches = _reconcile_context(charm, ["postgresql-0", "postgresql-1"], 3)
+    recorded = Mock(return_value=True)
+    with ExitStack() as stack:
+        for ctx in (
+            *patches,
+            patch.object(charm.membership_manager, "reconfigure_cluster", new=recorded),
+        ):
+            stack.enter_context(ctx)
+        charm.postgresql_events_handler._on_update_status(Mock())
+    recorded.assert_called_once()
+
+
+def test_reconcile_skipped_when_running_members_match_planned(charm, harness):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    patches = _reconcile_context(charm, ["postgresql-0", "postgresql-1", "postgresql-2"], 3)
+    recorded = Mock(return_value=True)
+    with ExitStack() as stack:
+        for ctx in (*patches,):
+            stack.enter_context(ctx)
+        stack.enter_context(
+            patch.object(charm.membership_manager, "reconfigure_cluster", new=recorded)
+        )
+        charm.postgresql_events_handler._on_update_status(Mock())
+    recorded.assert_not_called()
+    # Manager-level steady-state no-op: equal members and IPs short-circuits.
+    membership = charm.membership_manager
+    with (
+        patch.object(
+            type(membership.patroni_manager),
+            "cluster_members",
+            new_callable=PropertyMock,
+            return_value={"postgresql-0", "postgresql-1"},
+        ),
+        patch.object(membership, "hosts", return_value={"postgresql-0", "postgresql-1"}),
+        patch.object(
+            type(charm.state),
+            "units_ips",
+            new_callable=PropertyMock,
+            return_value={"1.1.1.1"},
+        ),
+        patch.object(
+            type(charm.state.application),
+            "members_ips",
+            new_callable=PropertyMock,
+            return_value={"1.1.1.1"},
+        ),
+        patch.object(membership, "set_unit_status") as set_status,
+        patch.object(membership, "add_cluster_member") as add_member,
+    ):
+        membership.add_members(Mock())
+    set_status.assert_not_called()
+    add_member.assert_not_called()
+
+
+def test_reconcile_leader_gated(charm, harness):
+    with harness.hooks_disabled():
+        harness.set_leader(False)
+    patches = _reconcile_context(charm, ["postgresql-0", "postgresql-1"], 3)
+    recorded = Mock(return_value=True)
+    with ExitStack() as stack:
+        for ctx in (
+            *patches,
+            patch.object(charm.membership_manager, "reconfigure_cluster", new=recorded),
+        ):
+            stack.enter_context(ctx)
+        charm.postgresql_events_handler._on_update_status(Mock())
+    recorded.assert_not_called()
+
+
+def test_reconcile_skipped_when_leader_isolated(charm, harness):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    patches = _reconcile_context(charm, [], 3)
+    patches = list(patches)
+    # Force the isolation early-return: member not started + zero members.
+    patches[0] = patch.object(
+        type(charm.patroni_manager),
+        "member_started",
+        new_callable=PropertyMock,
+        return_value=False,
+    )
+    patches[1] = patch.object(
+        type(charm.patroni_manager),
+        "is_member_isolated",
+        new_callable=PropertyMock,
+        return_value=True,
+    )
+    recorded = Mock(return_value=True)
+    with ExitStack() as stack:
+        for ctx in (
+            *patches,
+            patch.object(charm.membership_manager, "reconfigure_cluster", new=recorded),
+        ):
+            stack.enter_context(ctx)
+        restarted = stack.enter_context(patch.object(charm.patroni_manager, "restart_patroni"))
+        charm.postgresql_events_handler._on_update_status(Mock())
+    recorded.assert_not_called()
+    restarted.assert_called_once()
