@@ -469,3 +469,24 @@ def test_pitr_failure_persists_blocked_through_restore_check(charm, harness):
     ):
         harness.evaluate_status()
         assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
+
+
+# -- get_async_primary_cluster_endpoint -------------------------------------------
+
+
+def test_get_async_primary_cluster_endpoint_delegates_to_manager(charm):
+    with patch.object(
+        type(charm.async_replication_manager),
+        "get_primary_cluster_endpoint",
+        return_value="endpoint-1",
+    ):
+        assert charm.get_async_primary_cluster_endpoint() == "endpoint-1"
+
+
+def test_get_async_primary_cluster_endpoint_returns_none_without_primary_cluster(charm):
+    with patch.object(
+        type(charm.async_replication_manager),
+        "get_primary_cluster_endpoint",
+        return_value=None,
+    ):
+        assert charm.get_async_primary_cluster_endpoint() is None
