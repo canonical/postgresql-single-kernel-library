@@ -16,6 +16,7 @@ from single_kernel_postgresql.config.literals import (
     RAFT_PARTNER_PREFIX,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
+from single_kernel_postgresql.events.watcher import WatcherEventsHandler
 from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR
 
 
@@ -390,6 +391,19 @@ def test_refresh_resume_during_init_request_restart_needs_no_lock_yet(resuming_r
     charm.restart_lock_acquire = lock
     charm.request_restart()
     lock.assert_called_once_with()
+
+
+def test_async_subsystem_receives_the_live_watcher_bridge(charm):
+    """Trunk parity (trunk charm.py:391/399): live WatcherEventsHandler lands in the async subsystem.
+
+    With the watcher bridge dead, the standby conversion never disables/re-points/re-enables
+    the watcher, which stays a stale voting raft partner on the re-bootstrapped cluster —
+    the DCS never elects a leader and the standby-leader assertion fails
+    (test_async_replication_dead_dc_recovery.py::test_relate_and_replicate).
+    """
+    assert isinstance(charm.watcher_handler, WatcherEventsHandler)  # not None-vacuous
+    assert charm.async_replication_manager.watcher is charm.watcher_handler
+    assert charm.async_replication.watcher is charm.watcher_handler
 
 
 def test_watcher_update_unit_address_writes_the_pinned_snap(charm, harness):

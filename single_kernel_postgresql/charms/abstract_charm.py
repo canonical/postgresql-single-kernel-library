@@ -106,6 +106,13 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         # async-replication subsystem (below) can consume it.
         k8s_manager = self.build_k8s_manager()
 
+        # The watcher handler feeds the async subsystem (trunk parity: the monolith passed
+        # `watcher=self.watcher_handler` into both AsyncReplicationManager and
+        # PostgreSQLAsyncReplication, charm.py:391/399) AND the membership subsystem
+        # (endpoints, raft addresses). Built BEFORE the async subsystem so the VM
+        # _async_watcher bridge can return it.
+        self.watcher_handler = WatcherEventsHandler(self, self.workload, self.state)
+
         # Async-replication subsystem: the manager owns the data plane and the
         # promotion/standby flows; the handler owns the observers and the public facade.
         watcher = self._async_watcher()
@@ -192,9 +199,6 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             primary_endpoint=lambda: self.primary_endpoint,
             logical_replication_slots=self.logical_replication.replication_slots,
         )
-
-        # The watcher handler feeds the membership subsystem (endpoints, raft addresses).
-        self.watcher_handler = WatcherEventsHandler(self, self.workload, self.state)
 
         # The RAFT manager owns the low-level raft operations; the membership
         # manager owns the VM peer-relation orchestration and the raft
