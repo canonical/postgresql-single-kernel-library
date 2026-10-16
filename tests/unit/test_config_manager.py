@@ -244,6 +244,7 @@ def test_render_patroni_yml_file(substrate, config):
                 listen_ips=sentinel.listen_ips,
                 raft_password=sentinel.raft_pass,
                 watcher=None,
+                watcher_addr=None,
                 pg_cron_available=True,
                 shared_preload_libraries="timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron",
             )

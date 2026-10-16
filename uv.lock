@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.8, <4.0"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -1465,7 +1465,7 @@ wheels = [
 
 [[package]]
 name = "postgresql-charms-single-kernel"
-version = "16.3.18"
+version = "16.3.19"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography", version = "47.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version <= '3.9'" },
@@ -1519,11 +1519,6 @@ unit = [
     { name = "coverage", marker = "python_full_version >= '3.12'" },
     { name = "pytest", marker = "python_full_version >= '3.12'" },
 ]
-
-[package.group-requires-python]
-format = ">=3.12"
-lint = ">=3.12"
-unit = ">=3.12"
 
 [package.metadata]
 requires-dist = [
