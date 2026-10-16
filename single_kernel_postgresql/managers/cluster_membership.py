@@ -566,6 +566,19 @@ class ClusterMembershipManager(BaseManager):
         current = {self.get_hostname_from_member(member) for member in self.hosts()}
         return list(old - current)
 
+    def remove_departed_endpoints(self) -> list[str]:
+        """Reconcile departed endpoints out of the app databag (K8s port).
+
+        Runs get_endpoints_to_remove() and removes each endpoint from the
+        members list; non-leaders no-op inside remove_endpoint. Returns the
+        removed endpoints.
+        """
+        removed = self.get_endpoints_to_remove()
+        for endpoint in removed:
+            self.remove_endpoint(endpoint)
+            logger.info(f"Removing departed endpoint {endpoint} from cluster members")
+        return removed
+
     def peer_members_endpoints(self) -> list[str]:
         """The peer member endpoints minus this unit's own endpoint (K8s port)."""
         endpoints = list(self.state.application.endpoints)
