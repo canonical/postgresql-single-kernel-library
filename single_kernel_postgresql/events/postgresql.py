@@ -276,6 +276,8 @@ class PostgreSQLEventsHandler(Object):
 
         self.charm.update_pebble_layers()
 
+        self._pre_gate_pgbackrest_render()
+
         # Ensure the member is up and running before marking the cluster as initialised.
         if not self.patroni_manager.member_started:
             logger.debug("Deferring on_postgresql_pebble_ready: Waiting for cluster to start")
@@ -295,6 +297,24 @@ class PostgreSQLEventsHandler(Object):
         self.backup_manager.start_stop_pgbackrest_service()
 
         self._set_active_status()
+
+    def _pre_gate_pgbackrest_render(self) -> None:
+        """Re-render the pgBackRest config before the member-started status gate.
+
+        A recreated pod boots with the image default pgbackrest.conf; the
+        post-gate render (below) can lose the race against a wait_for_idle-
+        gated capture. Re-render the backup config before the status gate
+        when a stanza exists (idempotent, cheap; wave-2 K8S-117102348440).
+        """
+        if not self.state.cluster_stanza:
+            return
+        self.backup_manager.remove_departed_endpoints()
+        if (
+            self.state.application.is_cluster_restoring_backup
+            or self.state.application.is_cluster_restoring_to_time
+        ):
+            return
+        self.backup_manager._render_pgbackrest_conf_file()
 
     def _k8s_pebble_ready_refresh_gate(self, event) -> bool:
         """Safeguard against starting while refreshing (port); False skips the flow."""
