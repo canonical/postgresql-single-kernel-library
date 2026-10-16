@@ -706,7 +706,7 @@ class PostgreSQLEventsHandler(Object):
 
     # -- Update status (port of the VM charm's update-status family) ------------------
 
-    def _on_update_status(self, _) -> None:
+    def _on_update_status(self, event) -> None:
         """Update the unit status message and users list in the database."""
         if self.state.substrate == Substrates.K8S:
             self._on_update_status_k8s()
@@ -730,6 +730,24 @@ class PostgreSQLEventsHandler(Object):
         if not self.patroni_manager.member_started and self.patroni_manager.is_member_isolated:
             self.patroni_manager.restart_patroni()
             self.observer_manager.start_observer()
+            return
+
+        # Leader-side membership reconcile: if the Patroni cluster is missing
+        # members relative to the planned unit count (e.g. a former leader
+        # serving a divergent DCS view after a network cut), run the same
+        # cleanup_raft_cluster/add_members flow the peer-relation-changed
+        # leader path uses. Status stays untouched: the "(degraded)" suffix
+        # computed by set_primary_status_message below is the user surface,
+        # and the next update-status is the retry.
+        if (
+            self.state.model.unit.is_leader()
+            and len(self.patroni_manager.get_running_cluster_members())
+            < self.state.application.planned_units
+        ) and not self.membership_manager.reconfigure_cluster(event):
+            logger.debug(
+                "on_update_status: membership reconcile did not complete; "
+                "retrying on the next update-status"
+            )
             return
 
         # Update the sync-standby endpoint in the async replication data.
@@ -1634,7 +1652,13 @@ class PostgreSQLEventsHandler(Object):
     def _on_raft_reconnect(self, event: "EventBase") -> None:
         """Re-add this unit's raft member after a stuck connection (port)."""
         if self.membership_manager:
-            self.membership_manager.raft_reconnect(event)
+            outcome = self.membership_manager.raft_reconnect(event)
+            if outcome == DEFER:
+                logger.warning(
+                    "on_raft_reconnect: re-adding the Raft member failed within "
+                    "the retry budget; deferring"
+                )
+                event.defer()
 
     # -- K8s lifecycle flows (ported from the K8s charm) ------------------------------
 
