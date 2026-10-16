@@ -262,6 +262,8 @@ class K8SCharmConfig(CharmConfig):
     locales the K8s rock provides and the VM snap does not (``C.utf8``, ``POSIX``).
     """
 
-    response_lc_monetary: K8S_LOCALES | None = Field(default=None)
-    response_lc_numeric: K8S_LOCALES | None = Field(default=None)
-    response_lc_time: K8S_LOCALES | None = Field(default=None)
+    # Intentional widening: the K8s rock also ships C.utf8 and POSIX (see locales.py).
+    # ty flags literal-set expansion as invalid-attribute-override; pydantic handles it.
+    response_lc_monetary: K8S_LOCALES | None = Field(default=None)  # ty: ignore[invalid-attribute-override]
+    response_lc_numeric: K8S_LOCALES | None = Field(default=None)  # ty: ignore[invalid-attribute-override]
+    response_lc_time: K8S_LOCALES | None = Field(default=None)  # ty: ignore[invalid-attribute-override]
