@@ -416,7 +416,7 @@ def test_switchover(patroni):
         ),
     ):
         # Test a successful switchover.
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-1"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
         response = _post.return_value
         response.status_code = 200
         patroni.switchover()
@@ -430,7 +430,7 @@ def test_switchover(patroni):
 
         # Test a successful switchover with a candidate name.
         _post.reset_mock()
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-2"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-2"]
         patroni.switchover("postgresql-k8s/2")
         _post.assert_called_once_with(
             "https://endpoint:8008/switchover",
@@ -442,7 +442,7 @@ def test_switchover(patroni):
 
         # Test failed switchovers.
         _post.reset_mock()
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-1"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
         with pytest.raises(SwitchoverFailedError):
             patroni.switchover("postgresql-k8s/2")
             assert False
@@ -455,7 +455,7 @@ def test_switchover(patroni):
         )
 
         _post.reset_mock()
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-2"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-2"]
         response.status_code = 400
         with pytest.raises(SwitchoverFailedError):
             patroni.switchover("postgresql-k8s/2")
@@ -469,6 +469,7 @@ def test_switchover(patroni):
         )
 
         # Test candidate, not sync
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0"]
         response = _post.return_value
         response.status_code = 412
         response.text = "candidate name does not match with sync_standby"
@@ -1019,7 +1020,7 @@ def test_switchover_posts_to_leader_api_url_when_local_unreachable(patroni):
             "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
         ) as _cluster_status,
     ):
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-1"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
         _cluster_status.return_value = [
             {
                 "name": "postgresql-k8s-0",
@@ -1071,7 +1072,7 @@ def test_switchover_falls_back_to_local_when_cluster_status_unreachable(patroni)
             "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
         ) as _cluster_status,
     ):
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-1"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
         _cluster_status.side_effect = RetryError(
             last_attempt=Future.construct(1, Exception("Unable to reach any units"), True)
         )
@@ -1141,7 +1142,7 @@ def test_switchover_uses_standby_leader_api_url_on_async_cluster(patroni):
             "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
         ) as _cluster_status,
     ):
-        _get_standby_leader.side_effect = ["db2-0", "db2-1"]
+        _get_standby_leader.side_effect = ["db2-0", "db2-0", "db2-1"]
         _cluster_status.return_value = [
             {
                 "name": "db2-0",
@@ -1207,3 +1208,23 @@ def test_switchover_http_response_does_not_hop(patroni):
             _post.call_args.args[0]
             == "https://postgresql-k8s-0.postgresql-k8s-endpoints:8008/switchover"
         )
+
+
+def test_switchover_fails_fast_when_primary_unresolvable(patroni):
+    """A leader-less switchover is never POSTed: fail fast with SwitchoverFailedError."""
+    with (
+        _switchover_patches(),
+        patch("requests.post") as _post,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
+        ) as _cluster_status,
+    ):
+        _cluster_status.side_effect = RetryError(
+            last_attempt=Future.construct(1, Exception("Unable to reach any units"), True)
+        )
+
+        with pytest.raises(SwitchoverFailedError):
+            patroni.switchover()
+
+        # No leader-less body is ever sent to Patroni.
+        _post.assert_not_called()

@@ -278,13 +278,83 @@ def test_pre_refresh_check_after_1_unit_refreshed_status_unreachable_still_attem
     charm.patroni_manager.get_primary.side_effect = RetryError(
         Future.construct(1, Exception("Unable to reach any units"), True)
     )
+    # The primary probe raises, but the role-based fallback resolves the standby
+    # leader, so the switchover is still attempted (as an async switchover).
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/2"
     charm.get_async_primary_cluster_endpoint.return_value = None
 
     refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
 
+    charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
     charm.patroni_manager.switchover.assert_called_once_with(
-        candidate="postgresql-k8s/0", async_cluster=False
+        candidate="postgresql-k8s/0", async_cluster=True
     )
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_stub_getter_standby_already_primary(
+    refresh_k8s, charm
+):
+    # The explicit None mirrors the k8s_charm.py getter stub; it reflects the lib
+    # behavior, not a convenience stub (a bare MagicMock would be truthy).
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/0"
+    _arrange_running_members(charm)
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.switchover.assert_not_called()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_stub_getter_standby_switches(refresh_k8s, charm):
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/2"
+    _arrange_running_members(charm)
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
+    charm.patroni_manager.switchover.assert_called_once_with(
+        candidate="postgresql-k8s/0", async_cluster=True
+    )
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_stub_getter_cannot_determine_primary_blocks(
+    refresh_k8s, charm
+):
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = None
+    _arrange_running_members(charm)
+
+    with pytest.raises(PrecheckFailed, match=r"Unable to determine the current primary"):
+        refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_standby_probe_retry_error_maps_to_precheck_failed(
+    refresh_k8s, charm
+):
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.side_effect = RetryError(
+        Future.construct(1, requests.exceptions.ConnectionError(), True)
+    )
+    _arrange_running_members(charm)
+
+    with pytest.raises(PrecheckFailed, match=r"Unable to determine the current primary"):
+        refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+
+def _arrange_running_members(charm) -> None:
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
 
 
 def test_pre_refresh_check_before_any_units_refreshed_members_not_ready(refresh_k8s, charm):
