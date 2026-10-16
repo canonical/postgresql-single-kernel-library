@@ -50,6 +50,7 @@ from single_kernel_postgresql.workload.vm import VMWorkload
 if TYPE_CHECKING:
     from ops.model import Relation
 
+    from single_kernel_postgresql.events.watcher import WatcherEventsHandler
     from single_kernel_postgresql.workload.base import ResourceProvider
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,16 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
     def substrate(self) -> Substrates:
         """The VM substrate (port)."""
         return Substrates.VM
+
+    def _async_watcher(self) -> "WatcherEventsHandler":
+        """Trunk parity (trunk charm.py:391/399): live watcher bridge for the async subsystem.
+
+        A dead (None) bridge leaves the watcher — a voting raft partner with quorum 2
+        on a 2-node cluster — unmanaged across the standby conversion: never disabled
+        before the raft wipe, never re-pointed, never re-enabled, so the re-bootstrapped
+        cluster never elects a leader and no standby_leader ever appears.
+        """
+        return self.watcher_handler
 
     @property
     def _peers(self) -> "Relation | None":
