@@ -319,6 +319,111 @@ def test_pebble_ready_member_gate_and_leader_bootstrap(handler, harness, contain
     set_active.assert_called_once_with()
 
 
+def test_pebble_ready_rerenders_pgbackrest_conf_when_stanza_exists(handler, harness, container):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    event = Mock(workload=container, defer=Mock())
+    with (
+        patch.object(type(handler.charm), "create_pgdata"),
+        patch.object(type(handler.charm), "update_pebble_layers"),
+        patch.object(type(handler.state), "get_secret", return_value="ca"),
+        patch.object(type(handler.state), "cluster_stanza", "some-stanza", create=True),
+        patch.object(
+            type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
+        ),
+        patch.object(
+            type(handler.state.application),
+            "is_cluster_restoring_backup",
+            new_callable=PropertyMock,
+            return_value=False,
+        ),
+        patch.object(
+            type(handler.state.application),
+            "is_cluster_restoring_to_time",
+            new_callable=PropertyMock,
+            return_value=False,
+        ),
+        patch.object(
+            type(handler.patroni_manager),
+            "member_started",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch.object(handler, "_initialize_cluster", return_value=True),
+        patch.object(type(handler.charm), "update_config", return_value=True),
+        patch.object(type(handler.config_manager), "reconcile_extensions"),
+        patch.object(handler.backup_manager, "start_stop_pgbackrest_service"),
+        patch.object(handler, "_set_active_status"),
+    ):
+        handler._on_postgresql_pebble_ready(event)
+    handler.backup_manager.remove_departed_endpoints.assert_called_once_with()
+    handler.backup_manager._render_pgbackrest_conf_file.assert_called_once_with()
+
+
+def test_pebble_ready_skips_pgbackrest_rerender_without_stanza(handler, harness, container):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    event = Mock(workload=container, defer=Mock())
+    with (
+        patch.object(type(handler.charm), "create_pgdata"),
+        patch.object(type(handler.charm), "update_pebble_layers"),
+        patch.object(type(handler.state), "get_secret", return_value="ca"),
+        patch.object(type(handler.state), "cluster_stanza", None, create=True),
+        patch.object(
+            type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
+        ),
+        patch.object(
+            type(handler.patroni_manager),
+            "member_started",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch.object(handler, "_initialize_cluster", return_value=True),
+        patch.object(type(handler.charm), "update_config", return_value=True),
+        patch.object(type(handler.config_manager), "reconcile_extensions"),
+        patch.object(handler.backup_manager, "start_stop_pgbackrest_service"),
+        patch.object(handler, "_set_active_status"),
+    ):
+        handler._on_postgresql_pebble_ready(event)
+    handler.backup_manager.remove_departed_endpoints.assert_not_called()
+    handler.backup_manager._render_pgbackrest_conf_file.assert_not_called()
+
+
+def test_pebble_ready_skips_pgbackrest_rerender_while_restoring(handler, harness, container):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    event = Mock(workload=container, defer=Mock())
+    with (
+        patch.object(type(handler.charm), "create_pgdata"),
+        patch.object(type(handler.charm), "update_pebble_layers"),
+        patch.object(type(handler.state), "get_secret", return_value="ca"),
+        patch.object(type(handler.state), "cluster_stanza", "some-stanza", create=True),
+        patch.object(
+            type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
+        ),
+        patch.object(
+            type(handler.state.application),
+            "is_cluster_restoring_backup",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch.object(
+            type(handler.patroni_manager),
+            "member_started",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch.object(handler, "_initialize_cluster", return_value=True),
+        patch.object(type(handler.charm), "update_config", return_value=True),
+        patch.object(type(handler.config_manager), "reconcile_extensions"),
+        patch.object(handler.backup_manager, "start_stop_pgbackrest_service"),
+        patch.object(handler, "_set_active_status"),
+    ):
+        handler._on_postgresql_pebble_ready(event)
+    handler.backup_manager.remove_departed_endpoints.assert_called_once_with()
+    handler.backup_manager._render_pgbackrest_conf_file.assert_not_called()
+
+
 # -- update-status family ----------------------------------------------------------
 
 
