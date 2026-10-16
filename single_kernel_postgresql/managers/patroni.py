@@ -16,6 +16,7 @@ from contextlib import suppress
 from functools import cached_property
 from time import monotonic
 from typing import Any, Literal, TypedDict
+from urllib.parse import urljoin
 
 # Platform specific imports
 with suppress(ImportError):
@@ -641,6 +642,55 @@ class PatroniManager(BaseManager):
             logger.exception(error_message, exc_info=e)
             return False
 
+    def _switchover_endpoints(self, current_primary: str | None) -> list[str]:
+        """Build the ordered list of switchover endpoints to try.
+
+        The current leader/standby leader's API URL comes first (the member that
+        processes the switchover), then the other running members' API URLs, and
+        the local Patroni endpoint last as a fallback (the previous behavior).
+        """
+        try:
+            members = self.cluster_status()
+        except RetryError:
+            members = []
+        running = {
+            member["name"]: urljoin(member["api_url"], "switchover")
+            for member in members
+            if member.get("state") in RUNNING_STATES
+        }
+        endpoints = []
+        if current_primary is not None and current_primary in running:
+            endpoints.append(running[current_primary])
+        for name, url in running.items():
+            if name != current_primary and url not in endpoints:
+                endpoints.append(url)
+        endpoints.append(f"{self.state.patroni_url}/switchover")
+        return endpoints
+
+    def _post_switchover(self, endpoints: list[str], body: dict[str, Any]) -> requests.Response:
+        """POST the switchover request to the first endpoint that responds.
+
+        Connection errors hop to the next endpoint (the local unit may be down during a
+        refresh); if every endpoint is unreachable, re-raise the last ConnectionError so
+        tenacity retries the whole attempt.
+        """
+        last_error: Exception = requests.exceptions.ConnectionError(
+            "No switchover endpoint was reachable"
+        )
+        for endpoint in endpoints:
+            try:
+                return requests.post(
+                    endpoint,
+                    json=body,
+                    verify=self.verify,
+                    auth=self._patroni_auth,
+                    timeout=API_REQUEST_TIMEOUT,
+                )
+            except requests.exceptions.ConnectionError as exc:
+                logger.debug("API switchover: endpoint %s is unreachable: %s", endpoint, exc)
+                last_error = exc
+        raise last_error
+
     def switchover(
         self, candidate: str | None = None, async_cluster: bool = False, wait: bool = True
     ) -> None:
@@ -664,13 +714,7 @@ class PatroniManager(BaseManager):
                 body = {"leader": current_primary}
                 if candidate:
                     body["candidate"] = candidate
-                r = requests.post(
-                    f"{self.state.patroni_url}/switchover",
-                    json=body,
-                    verify=self.verify,
-                    auth=self._patroni_auth,
-                    timeout=API_REQUEST_TIMEOUT,
-                )
+                r = self._post_switchover(self._switchover_endpoints(current_primary), body)
                 logger.debug("API switchover: %s (%s)", r, r.elapsed.total_seconds())
                 self._invalidate_cluster_status_cache()
 
