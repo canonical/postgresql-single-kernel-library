@@ -13,24 +13,32 @@ bracketing, and the S3 initialization flow — no tautological asserts.
 """
 
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from data_platform_helpers.advanced_statuses import StatusObject
 from ops import BlockedStatus
+from ops.pebble import ExecError
 from single_kernel_postgresql.config.exceptions import ListBackupsError
 from single_kernel_postgresql.config.literals import PEER_RELATION, S3_RELATION_NAME
 from single_kernel_postgresql.config.statuses import GeneralStatuses
-from single_kernel_postgresql.managers.backup import BackupManager
+from single_kernel_postgresql.managers.backup import (
+    PGBACKREST_CHECK_TIMEOUT,
+    PGBACKREST_STANZA_CREATE_TIMEOUT,
+    BackupManager,
+)
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     CANNOT_RESTORE_PITR,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
+    FAILED_TO_CHECK_STANZA_ERROR_MESSAGE,
     FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
     STANDBY_CLUSTER_CREATE_BACKUP_ERROR_MESSAGE,
 )
-from single_kernel_postgresql.workload.base import BackupConfig
+from single_kernel_postgresql.workload.base import BackupConfig, CommandResult
+from tenacity import wait_fixed
 
 VM_EXECUTABLE = "charmed-postgresql.pgbackrest"
 K8S_EXECUTABLE = "pgbackrest"
@@ -246,6 +254,7 @@ def test_render_omits_purged_endpoints(harness, backup_manager, substrate):
     assert "tls-server-auth" not in content
     assert "tls-server-address" not in content
     assert "backup-standby=y" in content
+
 
 # -- backup permission gates -------------------------------------------------------
 
@@ -505,3 +514,115 @@ def test_s3_block_message_survives_collect(backup_manager, harness):
         harness.set_leader(True)
     backup_manager.reset_s3_initialization_markers()
     assert backup_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
+# -- bounded stanza execs + membership reconcile (validator round: stale pgbackrest.conf) --
+
+
+@pytest.fixture
+def no_retry_wait():
+    """Zero out the tenacity inter-attempt wait (10 s) for retry-loop tests."""
+    with patch("single_kernel_postgresql.managers.backup.wait_fixed", return_value=wait_fixed(0)):
+        yield
+
+
+def test_check_stanza_passes_bounded_timeout(harness, backup_manager, substrate):
+    """The stanza check exec is bounded (PGBACKREST_CHECK_TIMEOUT)."""
+    _mock_run_cmd(backup_manager)
+    assert backup_manager.check_stanza() is True
+    assert backup_manager.workload.run_cmd.call_args.kwargs["timeout"] == (
+        PGBACKREST_CHECK_TIMEOUT
+    )
+
+
+def test_create_stanza_passes_bounded_timeout(harness, backup_manager, substrate):
+    """The stanza-create exec is bounded (PGBACKREST_STANZA_CREATE_TIMEOUT)."""
+    _mock_run_cmd(backup_manager)
+    assert backup_manager._create_stanza() is True
+    assert backup_manager.workload.run_cmd.call_args.kwargs["timeout"] == (
+        PGBACKREST_STANZA_CREATE_TIMEOUT
+    )
+
+
+def test_check_stanza_recovers_after_timeout_by_reconciling_and_rerendering(
+    harness, backup_manager, substrate, no_retry_wait
+):
+    """A first exec timeout retries once after reconciling + re-rendering (K8s)."""
+    if substrate != "k8s":
+        pytest.skip("pebble exec timeouts are the K8s flavor")
+    reconcile = MagicMock(return_value=[])
+    backup_manager.remove_departed_endpoints = reconcile
+    render = MagicMock(return_value=True)
+    backup_manager._render_pgbackrest_conf_file = render
+    backup_manager.workload.run_cmd.side_effect = [
+        TimeoutError("pgbackrest exec timed out"),
+        CommandResult(0, "", ""),
+    ]
+    assert backup_manager.check_stanza() is True
+    assert backup_manager.workload.run_cmd.call_count == 2
+    assert reconcile.call_count == 2
+    assert render.call_count == 2
+
+
+def test_check_stanza_maps_second_timeout_to_check_message(
+    harness, backup_manager, substrate, no_retry_wait
+):
+    """A second consecutive exec timeout blocks with the check message (K8s)."""
+    if substrate != "k8s":
+        pytest.skip("pebble exec timeouts are the K8s flavor")
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    reconcile = MagicMock(return_value=[])
+    backup_manager.remove_departed_endpoints = reconcile
+    backup_manager._render_pgbackrest_conf_file = MagicMock(return_value=True)
+    backup_manager.set_unit_status = MagicMock()
+    backup_manager.workload.run_cmd.side_effect = TimeoutError("pgbackrest exec timed out")
+    assert backup_manager.check_stanza() is False
+    rel_id = harness.model.get_relation("database-peers").id
+    app_db = harness.get_relation_data(rel_id, harness.charm.app.name)
+    assert app_db.get("s3-initialization-block-message") == FAILED_TO_CHECK_STANZA_ERROR_MESSAGE
+    status = backup_manager.set_unit_status.call_args.args[0]
+    assert status == BlockedStatus(FAILED_TO_CHECK_STANZA_ERROR_MESSAGE)
+    assert backup_manager.workload.run_cmd.call_count == 2
+
+
+def test_check_stanza_exec_error_keeps_retry_semantics_with_reconcile(
+    harness, backup_manager, substrate, no_retry_wait
+):
+    """Fast ExecError keeps the 6-attempt retry loop, with reconcile per attempt (K8s)."""
+    if substrate != "k8s":
+        pytest.skip("pebble ExecError is the K8s flavor")
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    reconcile = MagicMock(return_value=[])
+    backup_manager.remove_departed_endpoints = reconcile
+    backup_manager._render_pgbackrest_conf_file = MagicMock(return_value=True)
+    backup_manager.workload.run_cmd.side_effect = ExecError(
+        command=["pgbackrest", "check"], exit_code=1, stdout="", stderr="boom"
+    )
+    assert backup_manager.check_stanza() is False
+    rel_id = harness.model.get_relation("database-peers").id
+    app_db = harness.get_relation_data(rel_id, harness.charm.app.name)
+    assert app_db.get("s3-initialization-block-message") == FAILED_TO_CHECK_STANZA_ERROR_MESSAGE
+    assert backup_manager.workload.run_cmd.call_count == 6
+    assert reconcile.call_count == 6
+
+
+def test_vm_check_timeout_reraises_after_single_reconciled_retry(
+    harness, backup_manager, substrate, no_retry_wait
+):
+    """VM: an exec timeout retries once, then re-raises the TimeoutError contract."""
+    if substrate != "vm":
+        pytest.skip("run_cmd subprocess.TimeoutExpired is the VM flavor")
+    reconcile = MagicMock(return_value=[])
+    backup_manager.remove_departed_endpoints = reconcile
+    backup_manager._render_pgbackrest_conf_file = MagicMock(return_value=True)
+    backup_manager.workload.run_cmd.side_effect = subprocess.TimeoutExpired(
+        cmd="pgbackrest", timeout=300
+    )
+    with pytest.raises(TimeoutError):
+        backup_manager.check_stanza()
+    # The reconcile runs at every attempt entry (before each exec), matching
+    # the per-attempt contract of the stanza lifecycle.
+    assert backup_manager.workload.run_cmd.call_count == 2
+    assert reconcile.call_count == 2

@@ -112,7 +112,17 @@ class PostgreSQLRefreshK8s(PostgreSQLRefreshBase, charm_refresh.CharmSpecificKub
 
         # Switch primary to last unit to refresh (lowest unit number).
         last_unit_to_refresh = f"{self._charm.app.name}/0"
-        if self._charm.patroni_manager.get_primary(unit_name_pattern=True) == last_unit_to_refresh:
+        async_cluster = bool(self._charm.get_async_primary_cluster_endpoint())
+        try:
+            current_primary = (
+                self._charm.patroni_manager.get_standby_leader(unit_name_pattern=True)
+                if async_cluster
+                else self._charm.patroni_manager.get_primary(unit_name_pattern=True)
+            )
+        except RetryError:
+            logger.debug("Unable to determine the primary. Cluster status unreachable")
+            current_primary = None
+        if current_primary == last_unit_to_refresh:
             logger.info(
                 f"Unit {last_unit_to_refresh} was already primary during pre-refresh check"
             )
@@ -120,9 +130,9 @@ class PostgreSQLRefreshK8s(PostgreSQLRefreshBase, charm_refresh.CharmSpecificKub
             try:
                 self._charm.patroni_manager.switchover(
                     candidate=last_unit_to_refresh,
-                    async_cluster=bool(self._charm.get_async_primary_cluster_endpoint()),
+                    async_cluster=async_cluster,
                 )
-            except SwitchoverFailedError as e:
+            except (SwitchoverFailedError, RetryError) as e:
                 logger.warning(f"switchover failed with reason: {e}")
                 raise PrecheckFailed("Unable to switch primary") from None
             else:
@@ -205,7 +215,7 @@ class PostgreSQLRefreshVM(PostgreSQLRefreshBase, charm_refresh.CharmSpecificMach
                     async_cluster=bool(self._charm.get_async_primary_cluster_endpoint()),
                 )
                 self._charm.update_relation_endpoints()
-            except SwitchoverFailedError as e:
+            except (SwitchoverFailedError, RetryError) as e:
                 logger.warning(f"switchover failed with reason: {e}")
                 raise PrecheckFailed("Unable to switch primary") from None
             else:
