@@ -416,7 +416,7 @@ def test_switchover(patroni):
         ),
     ):
         # Test a successful switchover.
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-1"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
         response = _post.return_value
         response.status_code = 200
         patroni.switchover()
@@ -430,7 +430,7 @@ def test_switchover(patroni):
 
         # Test a successful switchover with a candidate name.
         _post.reset_mock()
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-2"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-2"]
         patroni.switchover("postgresql-k8s/2")
         _post.assert_called_once_with(
             "https://endpoint:8008/switchover",
@@ -442,7 +442,7 @@ def test_switchover(patroni):
 
         # Test failed switchovers.
         _post.reset_mock()
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-1"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
         with pytest.raises(SwitchoverFailedError):
             patroni.switchover("postgresql-k8s/2")
             assert False
@@ -455,7 +455,7 @@ def test_switchover(patroni):
         )
 
         _post.reset_mock()
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-2"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-2"]
         response.status_code = 400
         with pytest.raises(SwitchoverFailedError):
             patroni.switchover("postgresql-k8s/2")
@@ -469,6 +469,7 @@ def test_switchover(patroni):
         )
 
         # Test candidate, not sync
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0"]
         response = _post.return_value
         response.status_code = 412
         response.text = "candidate name does not match with sync_standby"
