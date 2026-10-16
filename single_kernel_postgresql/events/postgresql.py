@@ -879,7 +879,9 @@ class PostgreSQLEventsHandler(Object):
         self._check_pgdata_storage_size()
 
         unit_status = self.state.peer.unit.status
-        if (isinstance(unit_status, BlockedStatus) and unit_status not in S3_BLOCK_MESSAGES) or (
+        if (
+            isinstance(unit_status, BlockedStatus) and unit_status.message not in S3_BLOCK_MESSAGES
+        ) or (
             isinstance(unit_status, WaitingStatus)
             and not self.state.application.is_cluster_restoring_backup
             and not self.state.application.is_cluster_restoring_to_time
