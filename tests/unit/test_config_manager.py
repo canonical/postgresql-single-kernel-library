@@ -14,7 +14,6 @@ from single_kernel_postgresql.config.literals import (
     EXTENSION_OBJECT_MESSAGE,
     EXTENSIONS_DEPENDENCY_MESSAGE,
 )
-from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.utils.postgresql import PostgreSQLEnableDisableExtensionError

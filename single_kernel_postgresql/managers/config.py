@@ -90,6 +90,7 @@ def _snap_provided_libraries() -> set[str]:
         )
     }
 
+
 class ConfigManager(BaseManager):
     """PostgreSQL Config Manager.
 
