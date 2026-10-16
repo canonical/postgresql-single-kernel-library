@@ -255,7 +255,6 @@ def test_render_omits_purged_endpoints(harness, backup_manager, substrate):
     assert "tls-server-address" not in content
     assert "backup-standby=y" in content
 
-
 # -- backup permission gates -------------------------------------------------------
 
 
