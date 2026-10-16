@@ -106,6 +106,12 @@ def test_set_unit_status_respects_higher_refresh_priority(charm):
     assert charm.unit.status == ActiveStatus()
 
 
+def test_async_subsystem_watcher_stays_none_on_k8s(charm):
+    """The K8s substrate has no watcher bridge for the async subsystem (trunk parity)."""
+    assert charm.async_replication_manager.watcher is None
+    assert charm.async_replication.watcher is None
+
+
 def test_set_app_status_gates(charm, harness):
     with harness.hooks_disabled():
         harness.set_leader(True)
