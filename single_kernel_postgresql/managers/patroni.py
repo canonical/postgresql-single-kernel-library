@@ -643,6 +643,15 @@ class PatroniManager(BaseManager):
                 last_error = exc
         raise last_error
 
+    def _determine_current_primary(self, async_cluster: bool) -> str | None:
+        """Resolve the current primary; fail fast rather than POST a leader-less switchover."""
+        current_primary = self.get_primary() if not async_cluster else self.get_standby_leader()
+        if current_primary is None:
+            raise SwitchoverFailedError(
+                "Unable to determine the current primary; not POSTing a leader-less switchover"
+            )
+        return current_primary
+
     def switchover(
         self, candidate: str | None = None, async_cluster: bool = False, wait: bool = True
     ) -> None:
@@ -650,6 +659,8 @@ class PatroniManager(BaseManager):
         # Try to trigger the switchover.
         if candidate is not None:
             candidate = candidate.replace("/", "-")
+
+        current_primary = self._determine_current_primary(async_cluster)
 
         for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
             with attempt:
