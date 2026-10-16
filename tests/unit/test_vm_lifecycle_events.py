@@ -13,7 +13,10 @@ import pytest
 from ops import BlockedStatus, ModelError
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PEER_RELATION
-from single_kernel_postgresql.utils.backup import S3_BLOCK_MESSAGES
+from single_kernel_postgresql.utils.backup import (
+    FAILED_TO_CHECK_STANZA_ERROR_MESSAGE,
+    S3_BLOCK_MESSAGES,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -143,3 +146,8 @@ def test_storage_detaching_stops_on_teardown(handler, harness):
         handler._on_storage_detaching(Mock())
     handler.observer_manager.stop_observer.assert_called_once()
     handler.backup_manager.stop_log_rotation.assert_called_once()
+
+
+def test_check_stanza_message_is_an_s3_block_message():
+    """The check-stanza failure message is appended to S3_BLOCK_MESSAGES (lock)."""
+    assert FAILED_TO_CHECK_STANZA_ERROR_MESSAGE in S3_BLOCK_MESSAGES
