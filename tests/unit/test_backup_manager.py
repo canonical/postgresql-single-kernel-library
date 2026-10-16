@@ -20,7 +20,7 @@ import pytest
 from data_platform_helpers.advanced_statuses import StatusObject
 from ops import BlockedStatus
 from single_kernel_postgresql.config.exceptions import ListBackupsError
-from single_kernel_postgresql.config.literals import S3_RELATION_NAME
+from single_kernel_postgresql.config.literals import PEER_RELATION, S3_RELATION_NAME
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.managers.backup import BackupManager
 from single_kernel_postgresql.utils.backup import (
@@ -203,6 +203,49 @@ def test_check_stanza_writes_done_marker_on_non_leader(harness, backup_manager):
     else:
         assert unit_db.get("s3-initialization-done") == "True"
 
+
+def test_render_omits_purged_endpoints(harness, backup_manager, substrate):
+    """A purged departed endpoint no longer leaks into the rendered conf (K8s)."""
+    if substrate != "k8s":
+        pytest.skip("endpoints are a K8s concept")
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    app = harness.charm.app.name
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+        harness.update_relation_data(
+            rel_id,
+            app,
+            {"endpoints": json.dumps([f"{app}-{i}.{app}-endpoints" for i in (0, 2)])},
+        )
+    backup_manager._remove_departed_endpoints_bridge = (
+        harness.charm.membership_manager.remove_departed_endpoints
+    )
+    assert backup_manager.remove_departed_endpoints() is None
+    assert json.loads(harness.get_relation_data(rel_id, app)["endpoints"]) == [
+        f"{app}-0.{app}-endpoints"
+    ]
+    s3_rel = harness.add_relation(S3_RELATION_NAME, "s3-integrator")
+    harness.update_relation_data(
+        s3_rel, "s3-integrator", {"bucket": "b", "access-key": "k", "secret-key": "s"}
+    )
+    backup_manager.workload.root = Path("/")
+    backup_manager.workload.write_text = MagicMock()
+    backup_manager.workload.service_exists = MagicMock(return_value=True)
+    with patch.object(
+        BackupManager, "_tls_ca_chain_filename", new_callable=PropertyMock, return_value=""
+    ):
+        assert backup_manager._render_pgbackrest_conf_file() is True
+    content = next(
+        c.args[0]
+        for c in backup_manager.workload.write_text.call_args_list
+        if str(c.args[1]).endswith("pgbackrest.conf")
+    )
+    # The departed unit-2 endpoint must be gone, and with zero peer endpoints
+    # left the TLS server blocks are not rendered at all.
+    assert f"{app}-2" not in content
+    assert "tls-server-auth" not in content
+    assert "tls-server-address" not in content
+    assert "backup-standby=y" in content
 
 # -- backup permission gates -------------------------------------------------------
 
