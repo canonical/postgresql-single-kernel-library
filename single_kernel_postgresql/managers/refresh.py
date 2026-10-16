@@ -91,6 +91,33 @@ class PostgreSQLRefreshBase(charm_refresh.CharmSpecificCommon):
 class PostgreSQLRefreshK8s(PostgreSQLRefreshBase, charm_refresh.CharmSpecificKubernetes):
     """Charm-specific refresh callbacks for the Kubernetes substrate."""
 
+    def _resolve_current_primary(self, async_cluster: bool) -> tuple[str | None, bool]:
+        """Resolve the current primary from the cluster's roles.
+
+        When the async endpoint getter is unavailable (degraded async relation
+        data), a leader-less /cluster view that still shows a standby_leader
+        means this is the async standby cluster: fall back to the standby leader
+        as the role holder driving the switchover. The second return value is
+        whether the primary was resolved through the standby role.
+        """
+        try:
+            current_primary = (
+                self._charm.patroni_manager.get_standby_leader(unit_name_pattern=True)
+                if async_cluster
+                else self._charm.patroni_manager.get_primary(unit_name_pattern=True)
+            )
+        except RetryError:
+            logger.debug("Unable to determine the primary. Cluster status unreachable")
+            current_primary = None
+        if current_primary is not None or async_cluster:
+            return current_primary, async_cluster
+        try:
+            standby = self._charm.patroni_manager.get_standby_leader(unit_name_pattern=True)
+        except RetryError:
+            logger.debug("Unable to determine the standby leader. Cluster status unreachable")
+            return None, False
+        return standby, standby is not None
+
     def run_pre_refresh_checks_after_1_unit_refreshed(self) -> None:
         """Implement pre-refresh checks after 1 unit refreshed."""
         logger.debug("Running pre-refresh checks")
@@ -113,15 +140,9 @@ class PostgreSQLRefreshK8s(PostgreSQLRefreshBase, charm_refresh.CharmSpecificKub
         # Switch primary to last unit to refresh (lowest unit number).
         last_unit_to_refresh = f"{self._charm.app.name}/0"
         async_cluster = bool(self._charm.get_async_primary_cluster_endpoint())
-        try:
-            current_primary = (
-                self._charm.patroni_manager.get_standby_leader(unit_name_pattern=True)
-                if async_cluster
-                else self._charm.patroni_manager.get_primary(unit_name_pattern=True)
-            )
-        except RetryError:
-            logger.debug("Unable to determine the primary. Cluster status unreachable")
-            current_primary = None
+        current_primary, async_cluster = self._resolve_current_primary(async_cluster)
+        if current_primary is None:
+            raise PrecheckFailed("Unable to determine the current primary")
         if current_primary == last_unit_to_refresh:
             logger.info(
                 f"Unit {last_unit_to_refresh} was already primary during pre-refresh check"
