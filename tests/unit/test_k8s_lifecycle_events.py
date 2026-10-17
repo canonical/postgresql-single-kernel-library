@@ -36,9 +36,9 @@ from single_kernel_postgresql.config.literals import (
     REWIND_PASSWORD_KEY,
     USER_PASSWORD_KEY,
 )
-from single_kernel_postgresql.config.statuses import GeneralStatuses  # noqa: E402
-from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication  # noqa: E402
-from single_kernel_postgresql.utils.postgresql import (  # noqa: E402
+from single_kernel_postgresql.config.statuses import GeneralStatuses
+from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication
+from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLCreatePredefinedRolesError,
     PostgreSQLCreateUserError,
     PostgreSQLGrantDatabasePrivilegesToUserError,

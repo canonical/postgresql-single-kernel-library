@@ -3,7 +3,6 @@
 from unittest.mock import Mock
 
 import pytest
-
 from ops.pebble import ConnectionError as PebbleConnectionError
 from single_kernel_postgresql.config.literals import PEER_RELATION
 from single_kernel_postgresql.events.tls_transfer import TLSTransfer
