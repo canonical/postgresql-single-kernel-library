@@ -336,5 +336,11 @@ class K8sManager(BaseManager):
                     namespace=self.state.model.name,
                 )
                 logger.info(f"deleted {kind.__name__}/{self.state.cluster_name}{suffix}")
-            except ApiError:
+            except ApiError as e:
+                if e.status.code == 403:
+                    self.on_deployed_without_trust()
+                    return
+                # Ignore the error only when the resource doesn't exist.
+                if e.status.code != 404:
+                    raise e
                 logger.debug(f"{kind.__name__}/{self.state.cluster_name}{suffix} already absent")

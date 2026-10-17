@@ -42,7 +42,6 @@ from single_kernel_postgresql.config.exceptions import (
     CannotConnectError,
     DeployedWithoutTrustError,
     RaftRecoveryTimeoutError,
-    SettingSystemPasswordError,
     StorageUnavailableError,
     SwitchoverFailedError,
     SwitchoverNotSyncError,
@@ -91,7 +90,7 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLListUsersError,
     PostgreSQLUpdateUserPasswordError,
 )
-from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
+from single_kernel_postgresql.workload.base import BaseWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
@@ -309,6 +308,7 @@ class PostgreSQLEventsHandler(Object):
         ):
             return
         self.backup_manager._render_pgbackrest_conf_file()
+
     def _replica_membership_gate(self, event: "HookEvent") -> bool:
         """Defer a replica whose endpoint is not yet in the members list (gate).
 
