@@ -25,7 +25,12 @@ def handler(harness):
     handler.restore_manager = Mock()
     handler.charm.async_replication = Mock()
     handler.charm.watcher_handler = Mock()
-    return handler
+    # Default the cheap running-probe to "not running" so the peers hook still
+    # enqueues the start (pre-gate behavior); tests exercising the running-state
+    # gate override this with return_value=True. Patching also keeps the suite
+    # deterministic on hosts where snapd has no charmed-postgresql snap.
+    with patch.object(handler.workload, "is_patroni_running", return_value=False):
+        yield handler
 
 
 def _mock_membership(handler):
@@ -130,6 +135,51 @@ def test_on_peer_relation_changed_leader_updates_endpoints(handler):
     handler.charm.update_relation_endpoints.assert_called_once()
     handler.charm.async_replication.handle_read_only_mode.assert_called_once()
     handler.charm.watcher_handler.update_endpoints.assert_called()
+
+
+def test_on_peer_relation_changed_skips_start_when_patroni_running(handler):
+    """Patroni already running: the hook must NOT enqueue another snap start.
+
+    The unconditional per-hook start raced deliberate service stops (systemd
+    canceled the stop job or re-activated the stopped service); the gate uses
+    the cheap workload running-probe, not the 60s-retrying member_started.
+    """
+    _mock_membership(handler)
+    handler.patroni_manager = Mock()
+    handler.patroni_manager.member_started = True
+    handler.patroni_manager.is_member_registered_in_cluster.return_value = True
+    handler.backup_manager.start_stop_pgbackrest_service.return_value = True
+    handler.state.peer.data.update({
+        "exporter-started": "True",
+        "pgbackrest-exporter-started": "True",
+    })
+    event = Mock()
+    with (
+        patch.object(handler.workload, "is_patroni_running", return_value=True),
+        patch.object(handler.charm, "update_config"),
+    ):
+        handler._on_peer_relation_changed(event)
+    handler.patroni_manager.start_patroni.assert_not_called()
+    # The rest of the flow is unaffected: the member gate passes, no defer.
+    event.defer.assert_not_called()
+
+
+def test_on_peer_relation_changed_starts_patroni_when_not_running(handler):
+    """Patroni not running: the hook still starts it (first peer data arrival)."""
+    membership = _mock_membership(handler)
+    handler.patroni_manager = Mock()
+    handler.patroni_manager.member_started = False
+    event = Mock()
+    with (
+        patch.object(handler.workload, "is_patroni_running", return_value=False),
+        patch.object(handler.charm, "update_config"),
+    ):
+        handler._on_peer_relation_changed(event)
+    handler.patroni_manager.start_patroni.assert_called_once()
+    membership.set_unit_status.assert_called_once_with(
+        WaitingStatus("awaiting for member to start")
+    )
+    event.defer.assert_called_once()
 
 
 # -- config-changed ------------------------------------------------------------
