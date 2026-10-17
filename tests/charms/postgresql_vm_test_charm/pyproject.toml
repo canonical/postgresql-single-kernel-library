@@ -28,7 +28,8 @@ data-platform-helpers = "^1.1.1"
 ops = ">=2.0.0"
 # data_platform_libs/v0/data_models.py
 pydantic = "*"
-# grafana_agent/v0/cos_agent.py
-cosl = ">=0.0.50"
+# COS charm libs vendored inside single_kernel_postgresql (grafana_agent et al):
+# their python deps.
+cosl = ">=0.0.53"
 # certificate_transfer_interface/v0/certificate_transfer.py
 jsonschema = "*"
