@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 import charm_refresh
+import httpx
 import psycopg2
 from charm_refresh import CharmVersion, PrecheckFailed
 from cryptography.x509 import load_pem_x509_certificate
@@ -28,6 +29,7 @@ from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, StatusBase, Wait
 from tenacity import (
     RetryError,
     Retrying,
+    retry_if_exception_type,
     stop_after_attempt,
     stop_after_delay,
     wait_fixed,
@@ -310,22 +312,30 @@ class RefreshManager(BaseManager):
         self.refresh: charm_refresh.Machines | charm_refresh.Kubernetes | None
         if state.substrate == Substrates.VM:
             try:
-                self.refresh = charm_refresh.Machines(
+                self.refresh = self._construct_refresh_object(
+                    charm_refresh.Machines,
                     PostgreSQLRefreshVM(
                         workload_name=WORKLOAD_NAME, charm_name=VM_CHARM_NAME, _charm=charm
-                    )
+                    ),
                 )
             except (charm_refresh.UnitTearingDown, charm_refresh.PeerRelationNotReady):
                 self.refresh = None
+            except httpx.HTTPError as e:
+                logger.warning(
+                    "Failed to construct the refresh object on a transient transport error: "
+                    f"{e}. Continuing without refresh support for this hook run."
+                )
+                self.refresh = None
         else:
             try:
-                self.refresh = charm_refresh.Kubernetes(
+                self.refresh = self._construct_refresh_object(
+                    charm_refresh.Kubernetes,
                     PostgreSQLRefreshK8s(
                         workload_name=WORKLOAD_NAME,
                         charm_name=K8S_CHARM_NAME,
                         oci_resource_name=K8S_OCI_RESOURCE_NAME,
                         _charm=charm,
-                    )
+                    ),
                 )
             except charm_refresh.KubernetesJujuAppNotTrusted:
                 self.refresh = None
@@ -335,8 +345,40 @@ class RefreshManager(BaseManager):
             except charm_refresh.UnitTearingDown:
                 self._charm.unit.status = MaintenanceStatus("Tearing down")
                 sys.exit()
+            except httpx.HTTPError as e:
+                logger.warning(
+                    "Failed to construct the refresh object on a transient transport error: "
+                    f"{e}. Continuing without refresh support for this hook run."
+                )
+                self.refresh = None
         self.reconcile_refresh_status()
         self._persist_machinery_status()
+
+    def _construct_refresh_object(
+        self,
+        constructor: type[charm_refresh.Machines] | type[charm_refresh.Kubernetes],
+        charm_specific: charm_refresh.CharmSpecificCommon,
+    ) -> charm_refresh.Machines | charm_refresh.Kubernetes:
+        """Construct the charm_refresh object, retrying transient transport errors.
+
+        The constructors make blocking substrate API calls (e.g. the synchronous
+        ``SelfSubjectAccessReview`` create in ``charm_refresh.Kubernetes.__init__``),
+        so a transient network error raises raw ``httpx`` exceptions that the
+        ``__init__`` except chain does not cover: the hook exits 1 and the charm
+        container crash-loops (CI 2026-10-17, K8s pitr_aws attempt 3). Retry a few
+        times with a small wait; on exhaustion the original exception is reraised so
+        the caller can degrade to the existing ``refresh=None`` path. charm_refresh's
+        own exceptions (not httpx errors) are never retried. lightkube rides on
+        httpx, so ``httpx.HTTPError`` (which includes ``httpx.TransportError`` and
+        ``httpx.ConnectTimeout``) covers lightkube's transport errors too.
+        """
+        retrying = Retrying(
+            stop=stop_after_attempt(3),
+            wait=wait_fixed(5),
+            retry=retry_if_exception_type(httpx.HTTPError),
+            reraise=True,
+        )
+        return retrying(constructor, charm_specific)
 
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False

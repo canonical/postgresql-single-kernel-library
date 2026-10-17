@@ -118,6 +118,9 @@ def test_reparent_services_on_stop(harness, k8s_manager):
     # The same Patroni-created resource is listed twice (Service + Endpoints) and
     # reparented on each sighting — faithful to the charm's double-listing flow.
     assert client.apply.call_count == 4
+    # The charm builds its stop-flow Client with field_manager=self.model.app.name:
+    # lightkube's APPLY patch requires one (bare Client() + apply() raises ValueError).
+    assert all(call.kwargs.get("field_manager") == app for call in client.apply.call_args_list)
 
 
 def test_cleanup_old_cluster_resources_deletes_suffixes(harness, k8s_manager):
