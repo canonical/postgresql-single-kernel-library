@@ -22,7 +22,7 @@ from single_kernel_postgresql.config.literals import (
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication
-from single_kernel_postgresql.managers.restore import RestoreManager
+from single_kernel_postgresql.managers.restore import PITR_FAILED_KEY, RestoreManager
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     CANNOT_RESTORE_PITR,
@@ -126,6 +126,22 @@ def test_pre_restore_checks_rejects_blocking_state(harness, restore_manager):
 def test_pre_restore_checks_allows_pitr_blocked_status(harness, restore_manager):
     """A PITR failure blocked state must not block a new restore request."""
     harness.charm.unit.status = BlockedStatus(CANNOT_RESTORE_PITR)
+    ok, _ = restore_manager.pre_restore_checks(BACKUP_ID, None)
+    assert ok
+
+
+def test_pre_restore_checks_allows_retry_after_durable_pitr_failure(harness, restore_manager):
+    """A durable ``pitr-failed`` flag must re-allow a new restore attempt.
+
+    CI 2026-10-17 (K8s pitr_aws): after a terminal PITR failure the service-failed
+    branch of the completion check rewrites the live unit status to 'Failed to
+    restore backup' in the same process, so the message-based allow-list never
+    matches and every retry is rejected with 'Cluster or unit is in a blocking
+    state'. The durable flag — the sole writer is block_on_pitr_failure — is the
+    authoritative signal that the block is a re-runnable PITR failure.
+    """
+    harness.charm.unit.status = BlockedStatus("Failed to restore backup")
+    restore_manager.state.peer.data[PITR_FAILED_KEY] = "True"
     ok, _ = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert ok
 

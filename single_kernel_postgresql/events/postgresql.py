@@ -75,6 +75,7 @@ from single_kernel_postgresql.managers.cluster_membership import (
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.refresh import RefreshManager
+from single_kernel_postgresql.managers.restore import PITR_FAILED_KEY
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import new_password
 from single_kernel_postgresql.utils.backup import (
@@ -91,6 +92,7 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLUpdateUserPasswordError,
 )
 from single_kernel_postgresql.workload.base import BaseWorkload
+from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -111,7 +113,6 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.managers.restore import RestoreManager
     from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
     from single_kernel_postgresql.workload.k8s import K8sWorkload
-    from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -211,12 +212,8 @@ class PostgreSQLEventsHandler(Object):
     def _on_install(self, event: InstallEvent) -> None:
         """Install prerequisites for the application."""
         logger.debug("Install start time: %s", datetime.now())
-        if self.charm.substrate == Substrates.VM:
-            # Imported lazily: the k8s-flavored install carries no vm-extra (psutil).
-            from single_kernel_postgresql.workload.vm import VMWorkload
-
-            if isinstance(self.workload, VMWorkload):
-                self._check_detached_storage(self.workload)
+        if self.charm.substrate == Substrates.VM and isinstance(self.workload, VMWorkload):
+            self._check_detached_storage(self.workload)
 
         self.state.add_status_if_not_present(
             GeneralStatuses.MAINTAINENANCE_INSTALLING.value,
@@ -570,12 +567,8 @@ class PostgreSQLEventsHandler(Object):
 
     def _can_start(self, event: StartEvent) -> bool:
         """Returns whether the workload can be started on this unit."""
-        if self.charm.substrate == Substrates.VM:
-            # Imported lazily: the k8s-flavored install carries no vm-extra (psutil).
-            from single_kernel_postgresql.workload.vm import VMWorkload
-
-            if isinstance(self.workload, VMWorkload):
-                self._check_detached_storage(self.workload)
+        if self.charm.substrate == Substrates.VM and isinstance(self.workload, VMWorkload):
+            self._check_detached_storage(self.workload)
 
         # Safeguard against starting while refreshing.
         if self.refresh_manager.refresh is None:
@@ -1049,6 +1042,12 @@ class PostgreSQLEventsHandler(Object):
                     BlockedStatus(app_data["s3-initialization-block-message"])
                 )
                 return
+            # if self.unit.is_leader() and (
+            #     self.app_peer_data.get("logical-replication-validation") == "error"
+            #     or self.logical_replication.has_remote_publisher_errors()
+            # ):
+            #     self.set_unit_status(BlockedStatus(LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS))
+            #     return
             unit_name = self.state.model.unit.name
             is_standby_leader = (
                 self.patroni_manager.get_standby_leader(unit_name_pattern=True) == unit_name
@@ -1073,13 +1072,12 @@ class PostgreSQLEventsHandler(Object):
 
     def _was_restore_successful_k8s(self, container, service) -> bool:
         """Complete a restore: verify, clean the flags, and revalidate S3 (K8s port)."""
-        # Trunk parity: only a NEW bootstrap failure blocks. The pebble service
-        # log accumulates across restores, so a prior restore's failure line
-        # (e.g. a negative control) must not re-block a valid restore in
-        # progress (CI 2026-10-18 pitr wave); the ``pitr-failed`` flag already
-        # persists the blocked through the collect replay.
-        if self.state.application.is_cluster_restoring_to_time and all(
-            self.restore_manager.is_pitr_failed()
+        # Detection, not trunk's detection-and-novelty conjunction: repeat
+        # evaluations of the same terminal bootstrap failure (is_new=False) must
+        # still count, and the durable ``pitr-failed`` flag counts as detection
+        # even when the failure is no longer visible in the scanned logs.
+        if self.state.application.is_cluster_restoring_to_time and (
+            self.restore_manager.is_pitr_failed()[0] or self.state.peer.data.get(PITR_FAILED_KEY)
         ):
             logger.error(
                 "Restore failed: database service failed to reach point-in-time-recovery target. "
@@ -1386,7 +1384,7 @@ class PostgreSQLEventsHandler(Object):
         logger.debug(f"Removing secret with label {event.secret.label} revision {event.revision}")
         event.remove_revision()
 
-    def _check_detached_storage(self, workload: "VMWorkload") -> None:
+    def _check_detached_storage(self, workload: VMWorkload) -> None:
         """Wait for storage to become available.
 
         Workaround for lxd containers not getting storage attached on startups.

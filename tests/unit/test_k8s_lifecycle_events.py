@@ -64,6 +64,9 @@ from single_kernel_postgresql.config.literals import (  # noqa: E402
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses  # noqa: E402
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication  # noqa: E402
+from single_kernel_postgresql.events.tls_transfer import TLSTransfer  # noqa: E402
+from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR  # noqa: E402
+from single_kernel_postgresql.managers.restore import PITR_FAILED_KEY  # noqa: E402
 from single_kernel_postgresql.utils.postgresql import (  # noqa: E402
     PostgreSQLCreatePredefinedRolesError,
     PostgreSQLCreateUserError,
@@ -603,16 +606,14 @@ def test_was_restore_successful_blocks_on_pitr_failure(handler, harness, contain
     handler.restore_manager.block_on_pitr_failure.assert_called_once_with()
 
 
-def test_was_restore_successful_pitr_branch_ignores_stale_failure(handler, harness, container):
-    """A prior restore's failure line must not re-block a later valid restore.
+def test_was_restore_successful_pitr_branch_fires_on_repeat_detection(handler, harness, container):
+    """A repeat evaluation of the same terminal PITR failure must still block.
 
-    CI 2026-10-18 (K8s pitr wave): the scan reads the lifetime-accumulated
-    pebble service logs, so a negative control's terminal failure line still
-    matched while the next valid restore ran; every hook that evaluated during
-    the restore window re-blocked it and the test timed out waiting for
-    active. Only a NEW bootstrap failure may re-block; the durable
-    ``pitr-failed`` flag already persists the blocked through the collect
-    replay.
+    CI 2026-10-17 (K8s pitr_aws): the trunk-parity gate
+    ``all(is_pitr_failed())`` includes the novelty bit, so every re-evaluation
+    of the same bootstrap failure (``is_new=False``) skipped the PITR branch
+    and the service-failed branch kept rewriting the unit status to 'Failed to
+    restore backup'. The branch must key on DETECTION of the terminal failure.
     """
     rel_id = harness.model.get_relation(PEER_RELATION).id
     with harness.hooks_disabled():
@@ -622,22 +623,43 @@ def test_was_restore_successful_pitr_branch_ignores_stale_failure(handler, harne
     service = Mock(current=ServiceStatus.ACTIVE)
     with (
         patch.object(handler.restore_manager, "is_pitr_failed", return_value=(True, False)),
-        patch.object(
-            type(handler.patroni_manager),
-            "member_started",
-            new_callable=PropertyMock,
-            return_value=True,
-        ),
-        patch(TIMELINE_PATCH, return_value="3"),
-        patch.object(type(handler.charm), "update_config", return_value=True),
-        patch.object(handler.restore_manager, "restore_patroni_restart_condition"),
-        patch.object(handler.backup_manager, "can_use_s3_repository", return_value=(True, None)),
-        patch.object(type(handler.cluster_manager), "setup_instance_users_k8s"),
+        patch.object(handler.restore_manager, "log_pitr_last_transaction_time") as log_pitr,
+        patch.object(handler.restore_manager, "block_on_pitr_failure") as block,
+        patch.object(handler.membership_manager, "set_unit_status") as set_status,
     ):
-        assert handler._was_restore_successful_k8s(container, service) is True
-    handler.restore_manager.log_pitr_last_transaction_time.assert_not_called()
-    handler.restore_manager.block_on_pitr_failure.assert_not_called()
-    handler.restore_manager.clear_pitr_failure.assert_called_once_with()
+        assert handler._was_restore_successful_k8s(container, service) is False
+    log_pitr.assert_called_once_with()
+    block.assert_called_once_with()
+    # The service-failed branch ('Failed to restore backup') must not win.
+    set_status.assert_not_called()
+
+
+def test_was_restore_successful_pitr_branch_counts_durable_flag_as_detection(
+    handler, harness, container
+):
+    """The durable ``pitr-failed`` flag counts as detection of the failure.
+
+    When the bootstrap failure is no longer visible in the scanned logs but the
+    flag persisted by block_on_pitr_failure is still set and the cluster is
+    still restoring to a point in time, the PITR branch must still fire instead
+    of falling through to the success path or the service-failed branch.
+    """
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            rel_id, harness.charm.app.name, {"restore-to-time": "2023-01-01"}
+        )
+        handler.state.peer.data[PITR_FAILED_KEY] = "True"
+    service = Mock(current=ServiceStatus.ACTIVE)
+    with (
+        patch.object(handler.restore_manager, "is_pitr_failed", return_value=(False, False)),
+        patch.object(handler.restore_manager, "log_pitr_last_transaction_time"),
+        patch.object(handler.restore_manager, "block_on_pitr_failure") as block,
+        patch.object(handler.membership_manager, "set_unit_status") as set_status,
+    ):
+        assert handler._was_restore_successful_k8s(container, service) is False
+    block.assert_called_once_with()
+    set_status.assert_not_called()
 
 
 # -- peer-relation flows -----------------------------------------------------------
@@ -1062,9 +1084,8 @@ def test_restart_k8s_reconciles_the_pebble_layers(handler):
     handler.cluster_manager = Mock()
     handler.postgresql = Mock()
     event = Mock()
-    with patch.object(handler.charm, "update_pebble_layers") as update_layers:
-        handler._restart(event)
-    update_layers.assert_called_once()
+    handler._restart(event)
+    handler.workload.update_pebble_layers.assert_called_once()
     assert handler.state.peer.data.get("postgresql_restarted") is None
     event.defer.assert_not_called()
 
