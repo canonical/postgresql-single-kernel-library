@@ -569,6 +569,20 @@ class PostgreSQLApplication(PeerRelationState):
             return set()
         return set(json.loads(self.relation.data[self.app].get("members_ips", "[]")))
 
+    def add_endpoint(self, endpoint: str) -> None:
+        """Add one endpoint to the members list (K8s port of the charm's _add_to_endpoints)."""
+        endpoints = json.loads(self.data.get("endpoints", "[]"))
+        if endpoint not in endpoints:
+            endpoints.append(endpoint)
+        self.data["endpoints"] = json.dumps(endpoints)
+
+    def remove_endpoint(self, endpoint: str) -> None:
+        """Remove one endpoint from the members list (K8s port of _remove_from_endpoints)."""
+        endpoints = json.loads(self.data.get("endpoints", "[]"))
+        with suppress(ValueError):
+            endpoints.remove(endpoint)
+        self.data["endpoints"] = json.dumps(endpoints)
+
     def add_member_ip(self, ip: str) -> None:
         """Add one IP to the members list (port of the charm's _add_to_members_ips write)."""
         ips = json.loads(self.data.get("members_ips", "[]"))
