@@ -25,6 +25,7 @@ from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCha
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
+    CERTS_PATH,
     DATABASE,
     DATABASE_DEFAULT_NAME,
     MONITORING_PASSWORD_KEY,
@@ -54,8 +55,6 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.workload.base import ResourceProvider
 
 logger = logging.getLogger(__name__)
-
-CERTS_PATH = "/usr/local/share/ca-certificates"
 
 
 class PostgreSQLVMCharm(AbstractPostgreSQLCharm):

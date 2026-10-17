@@ -218,8 +218,11 @@ VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME
 VM_METRICS_SERVICE_NAME = "prometheus-postgres-exporter"
 VM_PGBACKREST_METRICS_SERVICE_NAME = "pgbackrest-exporter"
 UPDATE_CERTS_BIN_PATH = "/usr/sbin/update-ca-certificates"
+CERTS_PATH = "/usr/local/share/ca-certificates"
 EXTENSIONS_DEPENDENCY_MESSAGE = "Unsatisfied plugin dependencies. Please check the logs"
 EXTENSION_OBJECT_MESSAGE = "Cannot disable plugins: Existing objects depend on it. See logs"
+# K8s charm constant: blocks the unit when the pgdata volume drops under 10% free.
+INSUFFICIENT_SIZE_WARNING = "<10% free space on pgdata volume."
 POSTGRESQL_LOGS_PATTERN = "*.log"
 POSTGRES_LOG_FILES = ["postgresql-16-main.log"]
 RAFT_MAJORITY_LOSS_MESSAGE = "Raft majority loss, run: promote-to-primary"
