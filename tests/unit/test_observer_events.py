@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.events.observer import ObserverEventsHandler
+from single_kernel_postgresql.managers.cluster_membership import COMPLETED, DEFER
 
 
 def _handler():
@@ -61,3 +62,23 @@ def test_raft_reconnect_observed_once_on_vm(harness, substrate):
     with patch.object(harness.charm.membership_manager, "raft_reconnect") as reconnect:
         harness.charm.on.raft_reconnect.emit()
     assert reconnect.call_count == 1
+
+
+def test_on_raft_reconnect_defers_on_defer(harness, substrate):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM flow")
+    """The glue defers the event when the membership flow reports DEFER."""
+    event = MagicMock()
+    with patch.object(harness.charm.membership_manager, "raft_reconnect", return_value=DEFER):
+        harness.charm.postgresql_events_handler._on_raft_reconnect(event)
+    event.defer.assert_called_once()
+
+
+def test_on_raft_reconnect_no_defer_on_completed(harness, substrate):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM flow")
+    """A COMPLETED flow result does not defer the event."""
+    event = MagicMock()
+    with patch.object(harness.charm.membership_manager, "raft_reconnect", return_value=COMPLETED):
+        harness.charm.postgresql_events_handler._on_raft_reconnect(event)
+    event.defer.assert_not_called()

@@ -10,7 +10,9 @@ test charms.
 import json
 from unittest.mock import Mock, PropertyMock, patch
 
+from ops import RelationDataAccessError
 from single_kernel_postgresql.config.literals import PEER_RELATION, SECRET_LABEL
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.managers.logical_replication import (
     APPLIED_REQUEST_KEY,
     SUBSCRIPTIONS_KEY,
@@ -904,3 +906,34 @@ def test_fail_validation_persists_marker_that_survives_healing(harness):
     assert peer_data.get("logical-replication-last-block-message") == (
         "Publisher errors: table public.test_table in database testdb doesn't exist"
     )
+
+
+def test_publisher_error_status_reads_leader_only(harness):
+    """The publisher-error status check reads the LOCAL app databag.
+
+    ops only lets the application leader read its own app databag on a
+    non-peer relation; the collect runs get_statuses on EVERY unit after
+    every hook, so non-leaders crashed the hook with RelationDataAccessError
+    (test_logical_replication deploy legs, CI 2026-10-13). Non-leaders now
+    skip the check.
+    """
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    harness.update_relation_data(rel_id, "remote-app", {"errors": json.dumps(["boom"])})
+    with harness.hooks_disabled():
+        harness.set_leader(False)
+    manager = harness.charm.logical_replication_manager
+    statuses = manager.get_statuses("unit")
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
+def test_publisher_error_race_does_not_crash_collect(harness):
+    """A RelationDataAccessError race during the collect must not crash the hook."""
+    rel_id = _add_logical_relation(harness, "logical-replication", "remote-app")
+    harness.update_relation_data(rel_id, "remote-app", {"errors": json.dumps(["boom"])})
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    manager = harness.charm.logical_replication_manager
+    with patch.object(
+        manager, "remote_publisher_error_message", side_effect=RelationDataAccessError("race")
+    ):
+        assert manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
