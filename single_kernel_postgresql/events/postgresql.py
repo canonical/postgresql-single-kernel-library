@@ -75,6 +75,7 @@ from single_kernel_postgresql.managers.cluster_membership import (
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.refresh import RefreshManager
+from single_kernel_postgresql.managers.restore import PITR_FAILED_KEY
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import new_password
 from single_kernel_postgresql.utils.backup import (
@@ -1053,8 +1054,12 @@ class PostgreSQLEventsHandler(Object):
 
     def _was_restore_successful_k8s(self, container, service) -> bool:
         """Complete a restore: verify, clean the flags, and revalidate S3 (K8s port)."""
-        if self.state.application.is_cluster_restoring_to_time and all(
-            self.restore_manager.is_pitr_failed()
+        # Detection, not trunk's detection-and-novelty conjunction: repeat
+        # evaluations of the same terminal bootstrap failure (is_new=False) must
+        # still count, and the durable ``pitr-failed`` flag counts as detection
+        # even when the failure is no longer visible in the scanned logs.
+        if self.state.application.is_cluster_restoring_to_time and (
+            self.restore_manager.is_pitr_failed()[0] or self.state.peer.data.get(PITR_FAILED_KEY)
         ):
             logger.error(
                 "Restore failed: database service failed to reach point-in-time-recovery target. "

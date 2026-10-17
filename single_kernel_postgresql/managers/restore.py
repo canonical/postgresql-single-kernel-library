@@ -241,10 +241,20 @@ class RestoreManager(BaseManager):
             a restore.
         """
         logger.info("Checking if cluster is in blocked state")
-        if self.state.peer.is_blocked_status and self.state.peer.status_message not in [
-            ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
-            CANNOT_RESTORE_PITR,
-        ]:
+        if (
+            self.state.peer.is_blocked_status
+            and self.state.peer.status_message
+            not in [
+                ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
+                CANNOT_RESTORE_PITR,
+            ]
+            # A terminally failed PITR restore is re-runnable: the durable
+            # ``pitr-failed`` flag (sole writer: block_on_pitr_failure)
+            # re-allows a new attempt even when the live unit status was
+            # rewritten by the service-failed branch ('Failed to restore
+            # backup') in the same process after the PITR branch fired.
+            and not self.state.peer.data.get(PITR_FAILED_KEY)
+        ):
             error_message = "Cluster or unit is in a blocking state"
             logger.error(f"Restore failed: {error_message}")
             return error_message
