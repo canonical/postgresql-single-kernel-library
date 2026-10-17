@@ -10,7 +10,6 @@ import os
 import pathlib
 import subprocess
 import sys
-from collections.abc import Callable
 from functools import cached_property
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -28,11 +27,14 @@ from single_kernel_postgresql.config.literals import (
     CERTS_PATH,
     DATABASE,
     DATABASE_DEFAULT_NAME,
+    METRICS_PORT,
     MONITORING_PASSWORD_KEY,
     PEER_RELATION,
+    PGBACKREST_METRICS_PORT,
     REPLICATION_OFFER_RELATION,
     REPLICATION_PASSWORD_KEY,
     SYSTEM_USERS,
+    TRACING_PROTOCOL,
     UNIT_SCOPE,
     UPDATE_CERTS_BIN_PATH,
     USER,
@@ -40,12 +42,15 @@ from single_kernel_postgresql.config.literals import (
     VM_METRICS_SERVICE_NAME,
     VM_PGBACKREST_METRICS_SERVICE_NAME,
 )
+from single_kernel_postgresql.lib.charms.grafana_agent.v0.cos_agent import COSAgentProvider
+from single_kernel_postgresql.utils.payloads import payload_dir
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_IDENTITY,
 )
 from single_kernel_postgresql.utils.postgresql import (
     PostgreSQL as PostgreSQLClient,
 )
+from single_kernel_postgresql.utils.tracing import charm_tracing_config
 from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
@@ -63,16 +68,14 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
     def __init__(
         self,
         *args,
-        restart_lock_acquire: Callable[[], None] | None = None,
     ):
         """Initialize the PostgreSQL VM Charm.
 
-        The thin charm constructs the COS requirer objects (charm libs stay
-        charm-side) and passes any late-bound bridges in; everything else
-        lives in the library.
+        The COS requirer (the COS-agent provider, with the payload data served
+        from the library package) and the rolling-restart seam are constructed
+        here, in the library — the thin consuming charm carries no wiring at all.
         """
         super().__init__(*args)
-        self.restart_lock_acquire = restart_lock_acquire
         self._charm_dir = pathlib.Path(os.environ.get("CHARM_DIR", "."))
 
         # Show the logger name (module name) in logs.
@@ -99,6 +102,29 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
             )
             self.unit.status = BlockedStatus("Disabled")
             sys.exit(0)
+
+        # COS requirer (the grafana_agent charm lib is vendored in the library
+        # package now): the COS-agent provider carries the VM metrics/log/
+        # dashboard/tracing surface, with the payload data served from the package.
+        self._grafana_agent = COSAgentProvider(
+            self,
+            metrics_endpoints=[
+                {"path": "/metrics", "port": int(METRICS_PORT)},
+                {"path": "/metrics", "port": int(PGBACKREST_METRICS_PORT)},
+            ],
+            scrape_configs=self.patroni_scrape_config,
+            refresh_events=[
+                self.on[PEER_RELATION].relation_changed,
+                self.on.secret_changed,
+                self.on.secret_remove,
+            ],
+            log_slots=[f"{charm_refresh.snap_name()}:logs"],
+            tracing_protocols=[TRACING_PROTOCOL],
+            metrics_rules_dir=str(payload_dir("vm", "prometheus_alert_rules")),
+            logs_rules_dir=str(payload_dir("vm", "loki_alert_rules")),
+            dashboard_dirs=[str(payload_dir("vm", "grafana_dashboards"))],
+        )
+        charm_tracing_config(self._grafana_agent)
 
     @property
     def workload(self) -> VMWorkload:
@@ -202,8 +228,9 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
     def request_restart(self) -> None:
         """Clear the restarted flag and acquire the rolling-restart lock (port).
 
-        The rolling-ops manager is a charm lib and stays thin-side; it is
-        injected through ``restart_lock_acquire``.
+        The rolling-ops manager and the lock seam are owned by the library
+        (abstract charm); the guarded read only tolerates the mid-init window
+        where charm_refresh may call this before the seam exists.
         """
         self.state.peer.data.pop("postgresql_restarted", None)
         # Always bound (class default None + __init__ assignment), so a direct None

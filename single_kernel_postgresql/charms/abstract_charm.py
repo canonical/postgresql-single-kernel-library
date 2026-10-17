@@ -9,12 +9,12 @@ from typing import TYPE_CHECKING, cast
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
 from ops.charm import CharmBase, UpdateStatusEvent
+from ops_tracing import Tracing
 
 if TYPE_CHECKING:
     import charm_refresh
     from ops import EventBase
 
-    from single_kernel_postgresql.events.tls_transfer import TLSTransfer
     from single_kernel_postgresql.managers.k8s import K8sManager
 
 
@@ -30,11 +30,13 @@ from single_kernel_postgresql.events.observer import (
 )
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
+from single_kernel_postgresql.events.tls_transfer import TLSTransfer
 from single_kernel_postgresql.events.watcher import WatcherEventsHandler
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces import (
     DatabaseProvides,
 )
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.s3 import S3Requirer
+from single_kernel_postgresql.lib.charms.rolling_ops.v0.rollingops import RollingOpsManager
 from single_kernel_postgresql.managers.async_replication import (
     AsyncReplicationManager,
 )
@@ -56,9 +58,12 @@ from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvide
 from ..config.enums import Substrates
 from ..config.literals import (
     DATABASE,
+    PEER_RELATION,
     REPLICATION_CONSUMER_RELATION,
     REPLICATION_OFFER_RELATION,
+    RESTART_RELATION,
     S3_RELATION_NAME,
+    TRACING_RELATION_NAME,
 )
 from ..utils.postgresql import PostgreSQL
 
@@ -327,6 +332,25 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.backup_manager,
             self.restore_manager,
         )
+
+        # Rolling-restart manager (the rolling_ops charm lib is vendored in the
+        # library package now): the thin consuming charms used to construct it and
+        # inject the lock-acquisition seam; the library owns both.
+        self.restart_manager = RollingOpsManager(
+            charm=self, relation=RESTART_RELATION, callback=self._restart
+        )
+        self.restart_lock_acquire = self._acquire_restart_lock
+
+        # Shared COS surface (both substrates): the TLS-transfer requirer (the
+        # certificate-transfer charm lib is vendored in the library package) and
+        # the tracing requirer. The substrate-specific COS requirers are built by
+        # the substrate classes at the end of their __init__.
+        self.tls_transfer = TLSTransfer(self, PEER_RELATION)
+        self.tracing = Tracing(self, tracing_relation_name=TRACING_RELATION_NAME)
+
+    def _acquire_restart_lock(self) -> None:
+        """Acquire the rolling-restart lock (the seam ``request_restart`` calls)."""
+        self.on[str(self.restart_manager.name)].acquire_lock.emit()
 
     def _reconcile_refresh_status(self, event=None) -> None:
         """Reconcile the unit status with the refresh status on collect-unit-status."""
