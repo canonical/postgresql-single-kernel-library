@@ -573,6 +573,48 @@ def test_get_statuses_persists_active_idle_for_unsettled_unit_status(refresh_man
     )
 
 
+def test_get_statuses_snapshots_an_active_role_status(refresh_manager, charm):
+    """An ActiveStatus carrying a role message survives the machinery record.
+
+    The charm's update-status handler writes ActiveStatus('Primary') as its
+    last statement; the collect-phase recompute must replay the message
+    instead of wiping it to bare active (roles-family '' != 'Primary' after a
+    fast self-heal, CI 2026-10-17). Only the active rank relaxes: waiting,
+    maintenance and blocked statuses the refresh did not set keep the
+    ACTIVE_IDLE fallback, whose record would never clear once the underlying
+    condition resolved. A bare active() write clears the record on the next
+    evaluation.
+    """
+    refresh_manager.refresh.unit_status_higher_priority = None
+    charm.unit.status = ActiveStatus("Primary")
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    record = StatusObject(status="active", message="Primary")
+    assert statuses == [record]
+    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+
+
+def test_get_statuses_does_not_snapshot_a_bare_active_status(refresh_manager, charm):
+    """A bare active() the refresh did not set keeps the ACTIVE_IDLE record.
+
+    The empty message is the no-role-information surface: replaying it is
+    indistinguishable from ACTIVE_IDLE, and snapshotting every bare active()
+    would only churn the record between equivalent values.
+    """
+    refresh_manager.refresh.unit_status_higher_priority = None
+    charm.unit.status = ActiveStatus()
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_called_once_with(
+        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
+    )
+
+
 def test_get_statuses_does_not_snapshot_a_non_refresh_unit_status(refresh_manager, charm):
     """The machinery record must not snapshot statuses the refresh did not set.
 
