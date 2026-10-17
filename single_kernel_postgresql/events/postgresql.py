@@ -63,7 +63,6 @@ from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import new_password
 from single_kernel_postgresql.utils.backup import (
-    CANNOT_RESTORE_PITR,
     S3_BLOCK_MESSAGES,
     parse_backup_id,
 )

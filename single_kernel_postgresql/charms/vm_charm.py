@@ -73,7 +73,16 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         return self.workload
 
     def request_restart(self) -> None:
-        """Run the substrate pre-restart side effect and acquire the restart lock."""
+        """Clear the restarted flag and acquire the rolling-restart lock (port).
+
+        The rolling-ops manager is a charm lib and stays thin-side; it is
+        injected through ``restart_lock_acquire``.
+        """
+        self.state.peer.data.pop("postgresql_restarted", None)
+        # Always bound (class default None + __init__ assignment), so a direct None
+        # check is equivalent to the historical getattr probe and type-checks.
+        if self.restart_lock_acquire is not None:
+            self.restart_lock_acquire()
 
     def restart_services(self) -> None:
         """Restart the monitoring and LDAP-sync sidecar services."""
