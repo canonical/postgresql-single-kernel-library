@@ -64,7 +64,6 @@ from single_kernel_postgresql.config.literals import (  # noqa: E402
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses  # noqa: E402
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication  # noqa: E402
-from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR  # noqa: E402
 from single_kernel_postgresql.utils.postgresql import (  # noqa: E402
     PostgreSQLCreatePredefinedRolesError,
     PostgreSQLCreateUserError,
