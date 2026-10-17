@@ -1228,3 +1228,120 @@ def test_switchover_fails_fast_when_primary_unresolvable(patroni):
 
         # No leader-less body is ever sent to Patroni.
         _post.assert_not_called()
+
+
+# -- cluster_status hook-local memoization -------------------------------------
+
+
+_CLUSTER_MEMBERS = [
+    {"name": "postgresql-0", "host": "10.1.1.1", "role": "leader", "state": "running"},
+    {"name": "postgresql-1", "host": "10.1.1.2", "role": "replica", "state": "streaming"},
+]
+
+
+@contextmanager
+def _cluster_api_patches(members=_CLUSTER_MEMBERS):
+    """Common patches so cluster_status reaches the (mocked) upstream fetch."""
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.parallel_patroni_get_request",
+            return_value={"members": members},
+        ) as _parallel,
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.endpoints",
+            new_callable=PropertyMock,
+            return_value=["10.1.1.2"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.members_ips",
+            new_callable=PropertyMock,
+            return_value=["10.1.1.1", "10.1.1.2"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.endpoint",
+            new_callable=PropertyMock,
+            return_value="10.1.1.1",
+        ),
+    ):
+        yield _parallel
+
+
+def test_cluster_status_burst_shares_one_upstream_fetch(patroni):
+    """Back-to-back membership/role reads within the TTL fetch /cluster exactly once.
+
+    The collect/reconcile bursts (role-status recompute, membership reconciliation)
+    used to re-fetch the identical /cluster payload several times per hook
+    (~7 fetches/hook measured in round5-test_charm.md).
+    """
+    with _cluster_api_patches() as _parallel:
+        assert patroni.get_primary() == "postgresql-0"
+        assert patroni.get_member_status("postgresql-1") == "streaming"
+        assert patroni.get_member_ip("postgresql-0") == "10.1.1.1"
+        assert patroni.get_running_cluster_members() == ["postgresql-0", "postgresql-1"]
+        assert patroni.get_standby_leader() is None
+        # K8s readiness is "all endpoints running" (only one endpoint patched here).
+        assert patroni.are_all_members_ready() is (patroni.state.substrate == Substrates.VM)
+        assert _parallel.call_count == 1
+
+
+def test_cluster_status_refetched_after_ttl_expiry(patroni):
+    """Once the TTL elapses the next read goes upstream again (no unbounded staleness)."""
+    clock = {"now": 100.0}
+    with (
+        _cluster_api_patches() as _parallel,
+        patch(
+            "single_kernel_postgresql.managers.patroni.monotonic",
+            side_effect=lambda: clock["now"],
+        ),
+    ):
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 1
+
+        clock["now"] += 10.0
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 2
+
+
+def test_cluster_status_failed_fetch_is_not_cached(patroni):
+    """A fetch that reaches no endpoint raises and leaves the cache empty."""
+    with _cluster_api_patches() as _parallel:
+        _parallel.return_value = None
+        with pytest.raises(RetryError):
+            patroni.cluster_status()
+        assert _parallel.call_count == 1
+
+        # The failed round is not a cache entry: the next read goes upstream.
+        _parallel.return_value = {"members": _CLUSTER_MEMBERS}
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 2
+
+
+def test_cluster_status_mutations_invalidate_the_cache(patroni):
+    """Service-control mutations drop the memo so post-mutation reads go upstream."""
+    with _cluster_api_patches() as _parallel:
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 1
+
+        with patch("single_kernel_postgresql.managers.patroni.snap.SnapCache") as _snap_cache:
+            _snap_cache.return_value.__getitem__.return_value.restart.return_value = None
+            _snap_cache.return_value.__getitem__.return_value.services = {
+                "patroni": {"active": True}
+            }
+            assert patroni.restart_patroni() is True
+
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 2
+
+
+def test_cluster_status_alternative_endpoints_bypass_the_cache(patroni):
+    """External-cluster reads (alternative_endpoints) are never served from the memo."""
+    with _cluster_api_patches() as _parallel:
+        assert patroni.get_primary(alternative_endpoints=["10.9.9.9"]) == "postgresql-0"
+        assert patroni.get_primary(alternative_endpoints=["10.9.9.9"]) == "postgresql-0"
+        # Two upstream rounds: the alternative (external-cluster) path is never memoized.
+        assert _parallel.call_count == 2
