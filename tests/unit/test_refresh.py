@@ -8,6 +8,7 @@ import pathlib
 from unittest.mock import MagicMock, patch
 
 import charm_refresh
+import httpx
 import psycopg2
 import pytest
 import requests
@@ -406,6 +407,63 @@ def test_refresh_manager_peer_relation_not_ready(state, charm, set_default_statu
             charm=charm,
             set_default_status=set_default_status,
         )
+    assert manager.refresh is None
+    assert manager.can_set_app_status is True
+
+
+@pytest.mark.parametrize("substrate", [Substrates.K8S, Substrates.VM])
+def test_refresh_manager_constructor_retries_transient_transport_error(
+    substrate, state, charm, set_default_status, monkeypatch
+):
+    """A transient K8s API transport error in the charm_refresh constructor is retried.
+
+    CI 2026-10-17 (K8s pitr_aws attempt 3): an httpx.ConnectTimeout raised by the
+    blocking SelfSubjectAccessReview round-trip inside charm_refresh.Kubernetes()
+    propagated out of RefreshManager.__init__ (the except chain only covers
+    KubernetesJujuAppNotTrusted/PeerRelationNotReady/UnitTearingDown), crashed the
+    install hook and put the charm container into CrashLoopBackOff.
+    """
+    state.substrate = substrate
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda _: None)
+    target = (
+        "charm_refresh.Kubernetes" if substrate == Substrates.K8S else "charm_refresh.Machines"
+    )
+    constructed = MagicMock(name="refresh")
+    with (
+        patch(target, side_effect=[httpx.ConnectTimeout("timed out"), constructed]) as construct,
+        # The mock refresh object would leak Mocks into the machinery-status
+        # JSON file; the reconciliation is out of scope for this test.
+        patch.object(RefreshManager, "reconcile_refresh_status"),
+        patch.object(RefreshManager, "_persist_machinery_status"),
+    ):
+        manager = RefreshManager(
+            state=state,
+            workload=MagicMock(),
+            charm=charm,
+            set_default_status=set_default_status,
+        )
+    assert construct.call_count == 2
+    assert manager.refresh is constructed
+
+
+@pytest.mark.parametrize("substrate", [Substrates.K8S, Substrates.VM])
+def test_refresh_manager_constructor_transport_exhaustion_degrades(
+    substrate, state, charm, set_default_status, monkeypatch
+):
+    """Exhausted transport retries degrade to refresh=None instead of crashing."""
+    state.substrate = substrate
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda _: None)
+    target = (
+        "charm_refresh.Kubernetes" if substrate == Substrates.K8S else "charm_refresh.Machines"
+    )
+    with patch(target, side_effect=httpx.ConnectTimeout("timed out")) as construct:
+        manager = RefreshManager(
+            state=state,
+            workload=MagicMock(),
+            charm=charm,
+            set_default_status=set_default_status,
+        )
+    assert construct.call_count == 3
     assert manager.refresh is None
     assert manager.can_set_app_status is True
 
