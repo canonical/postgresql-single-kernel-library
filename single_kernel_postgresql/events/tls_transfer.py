@@ -6,16 +6,17 @@
 import logging
 from collections.abc import Iterator
 
-# Charmlib import. Should be made available in the charm itself
-from charms.certificate_transfer_interface.v0.certificate_transfer import (  # type: ignore
-    CertificateAvailableEvent,
-    CertificateRemovedEvent,
-    CertificateTransferRequires,
-)
 from ops.framework import Object
 from ops.pebble import ConnectionError as PebbleConnectionError
 from ops.pebble import PathError, ProtocolError
 from tenacity import RetryError
+
+# The certificate-transfer charm lib is vendored in the library package now.
+from single_kernel_postgresql.lib.charms.certificate_transfer_interface.v0.certificate_transfer import (
+    CertificateAvailableEvent,
+    CertificateRemovedEvent,
+    CertificateTransferRequires,
+)
 
 logger = logging.getLogger(__name__)
 SCOPE = "unit"

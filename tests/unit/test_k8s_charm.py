@@ -82,13 +82,13 @@ def test_refresh_resume_during_init_request_restart_needs_no_lock_yet(resuming_r
     """charm_refresh.Kubernetes runs its state machine AT construction time.
 
     A force-refresh-start reaches request_restart INSIDE the abstract
-    __init__ (via the refresh manager), before the substrate subclass
-    assigns restart_lock_acquire: the guarded read must not raise
-    AttributeError, and the injected lock (assigned post-init) must be the
-    only invocation.
+    __init__ (via the refresh manager), before the abstract init tail
+    assigns the lib-owned lock seam: the guarded read must not raise
+    AttributeError, and the seam (set post-init) must be the only
+    subsequent invocation.
     """
     assert resuming_refresh["lock_calls"] == 1  # constructor ran request_restart
-    assert charm.restart_lock_acquire is None  # class default, nothing injected yet
+    assert callable(charm.restart_lock_acquire)  # the lib sets its own seam post-init
 
     lock = Mock()
     charm.restart_lock_acquire = lock

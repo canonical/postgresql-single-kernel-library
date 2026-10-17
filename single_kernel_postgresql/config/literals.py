@@ -19,6 +19,7 @@ SNAP_VITALITY_MAX_SNAPS = 100
 # Relations
 PEER_RELATION = "database-peers"
 STATUS_PEERS_RELATION = "status-peers"
+RESTART_RELATION = "restart"
 S3_RELATION_NAME = "s3-parameters"
 
 # Users.
