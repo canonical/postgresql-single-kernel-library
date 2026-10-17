@@ -207,6 +207,7 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         """
         self.state.peer.data.pop("postgresql_restarted", None)
         if getattr(self, "restart_lock_acquire", None):
+            assert self.restart_lock_acquire is not None  # noqa: S101 (ty narrowing)
             self.restart_lock_acquire()
 
     def restart_services(self) -> None:
