@@ -367,6 +367,16 @@ class RefreshManager(BaseManager):
         LAST_REFRESH_UNIT_STATUS_FILE, and a snapshot of an unrelated status
         would be re-fed through the collect handler forever (waiting outranks
         active there), self-perpetuating a stale status.
+
+        One relaxation keeps the role surface visible: the charm's update-status
+        handler writes the role message (Primary/Standby, with its degraded or
+        read-only suffixes) as its last statement, so an ActiveStatus carrying a
+        message is snapshotted even when the refresh did not set it. Active
+        ranks self-clear — the next bare active() write fails the branch and
+        resets the record. Blocked/maintenance/waiting statuses the refresh did
+        not set keep the plain ACTIVE_IDLE fallback. A bare active() (no role
+        information) is also not snapshotted: replaying it is indistinguishable
+        from ACTIVE_IDLE.
         """
         if self.refresh is None:
             # Persist the freshly computed default (role) status so every hook's
@@ -393,10 +403,17 @@ class RefreshManager(BaseManager):
                 )
                 or refresh_status_message != status.message
             ):
-                # Unknown/error statuses carry no refresh information, and statuses
-                # the refresh did not set must not be snapshotted: the record would
-                # never clear once the underlying condition resolved.
-                record = GeneralStatuses.ACTIVE_IDLE.value
+                if isinstance(status, ActiveStatus) and status.message:
+                    # The role message the charm just wrote must survive the
+                    # collect-phase recompute (roles-family '' != 'Primary'
+                    # after a fast self-heal, CI 2026-10-17).
+                    record = StatusObject(status="active", message=status.message)
+                else:
+                    # Unknown/error statuses carry no refresh information, and
+                    # statuses the refresh did not set must not be snapshotted:
+                    # the record would never clear once the underlying condition
+                    # resolved.
+                    record = GeneralStatuses.ACTIVE_IDLE.value
             else:
                 record = StatusObject(status=status.name, message=status.message)
         self.state.statuses.set(record, "unit", self.name)
