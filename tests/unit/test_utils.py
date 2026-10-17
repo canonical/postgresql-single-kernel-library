@@ -7,7 +7,7 @@ from unittest.mock import mock_open, patch
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.utils import (
-    _httpx_get_request,
+    _async_get_request,
     any_cpu_to_cores,
     any_memory_to_bytes,
     create_directory,
@@ -143,7 +143,7 @@ def test_httpx_get_request_empty_ca_bundle_does_not_crash(tmp_path):
     empty_bundle = tmp_path / "peer_ca_bundle.pem"
     empty_bundle.touch()
     with patch("single_kernel_postgresql.utils.AsyncClient", _FakeAsyncClient):
-        result = asyncio.run(_httpx_get_request("https://1.2.3.4:8008/cluster", str(empty_bundle)))
+        result = asyncio.run(_async_get_request("/cluster", ["1.2.3.4"], str(empty_bundle), None))
     assert result == {"members": []}
 
 
@@ -152,5 +152,5 @@ def test_httpx_get_request_missing_ca_bundle_still_requests(tmp_path):
     # must still go out with the default (system trust) context.
     missing = tmp_path / "does-not-exist.pem"
     with patch("single_kernel_postgresql.utils.AsyncClient", _FakeAsyncClient):
-        result = asyncio.run(_httpx_get_request("https://1.2.3.4:8008/cluster", str(missing)))
+        result = asyncio.run(_async_get_request("/cluster", ["1.2.3.4"], str(missing), None))
     assert result == {"members": []}
