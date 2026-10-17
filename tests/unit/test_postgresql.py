@@ -1,7 +1,7 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 # ruff: noqa: I001
-from unittest.mock import call, patch, sentinel, PropertyMock
+from unittest.mock import MagicMock, call, patch, sentinel, PropertyMock
 from datetime import datetime, timezone, UTC
 
 import psycopg2
@@ -1366,3 +1366,58 @@ def test_create_subscription_wraps_error_when_budget_exhausted():
         with pytest.raises(PostgreSQLCreateSubscriptionError):
             pg.create_subscription("sub_15", "10.0.0.5", "testdb", "user", "pw", "pub", "slot_15")
         assert _connect_to_database.call_count >= 2
+
+
+def test_connect_to_database_retries_on_datapath_no_backend_eperm(monkeypatch):
+    """A datapath 'Operation not permitted' during connect is retried, then succeeds.
+
+    The k8s snap's kube-proxy replacement (Cilium socket-LB) returns EPERM
+    from connect() while a Service transiently has zero ready backends
+    (selector/label churn -> EndpointSlice recompute; upstream
+    cilium/cilium#45184). The window is sub-second and the bootstrap connect
+    burst deterministically crosses it (round-6 smoke leg, 2/2).
+    """
+    pg = PostgreSQL(Substrates.VM, "primary", "current", "operator", "password", "postgres", None)
+    final = MagicMock()
+    outcomes = [
+        psycopg2.OperationalError(
+            'connection to server at "primary", port 5432 failed: Operation not permitted'
+        ),
+        psycopg2.OperationalError(
+            'connection to server at "primary", port 5432 failed: Operation not permitted'
+        ),
+        final,
+    ]
+    calls = []
+
+    def fake_connect(dsn):
+        calls.append(dsn)
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(psycopg2, "connect", fake_connect)
+
+    connection = pg._connect_to_database()
+
+    assert connection is final
+    assert len(calls) == 3
+    assert connection.autocommit is True
+
+
+def test_connect_to_database_does_not_retry_other_operational_errors(monkeypatch):
+    """Non-datapath OperationalErrors surface immediately without retries."""
+    pg = PostgreSQL(Substrates.VM, "primary", "current", "operator", "password", "postgres", None)
+    calls = []
+
+    def fake_connect(dsn):
+        calls.append(dsn)
+        raise psycopg2.OperationalError("connection refused")
+
+    monkeypatch.setattr(psycopg2, "connect", fake_connect)
+
+    with pytest.raises(psycopg2.OperationalError, match="connection refused"):
+        pg._connect_to_database()
+
+    assert len(calls) == 1

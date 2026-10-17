@@ -27,12 +27,31 @@ import psycopg2
 import psycopg2.errors
 import psycopg2.extensions
 from psycopg2.sql import SQL, Identifier, Literal
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_fixed
 
 from ..config.literals import (
     BACKUP_USER,
     PG_CRON_DATABASE,
     SYSTEM_USERS,
 )
+
+# The k8s snap's kube-proxy replacement (Cilium socket-LB) returns EPERM from
+# connect() while a Service transiently has zero ready backends — selector or
+# label churn triggers an EndpointSlice recompute that briefly publishes no
+# ready endpoints (upstream cilium/cilium#45184). The window is sub-second,
+# and the charm's bootstrap connect burst deterministically crosses it
+# (round-6 smoke leg, 2/2 on different runners). Bridge it with a bounded
+# retry; any other OperationalError keeps failing immediately.
+DATAPATH_EPERM_CONNECT_ATTEMPTS = 5
+DATAPATH_EPERM_CONNECT_WAIT_SECS = 0.5
+
+
+def _is_datapath_eperm(error: BaseException) -> bool:
+    """Whether connect() failed with the datapath's transient no-backend denial."""
+    return isinstance(error, psycopg2.OperationalError) and (
+        "operation not permitted" in str(error).lower()
+    )
+
 
 ACCESS_GROUP_RELATION = "relation_access"
 
@@ -184,10 +203,20 @@ class PostgreSQLBase:
         logger.debug(
             f"New DB connection: dbname='{dbname}' user='{self.user}' host='{host}' connect_timeout=1"
         )
-        connection = psycopg2.connect(
-            f"dbname='{dbname}' user='{self.user}' host='{host}'"
-            f"password='{self.password}' connect_timeout=1"
-        )
+        connection: Optional[psycopg2.extensions.connection] = None
+        for attempt in Retrying(
+            stop=stop_after_attempt(DATAPATH_EPERM_CONNECT_ATTEMPTS),
+            wait=wait_fixed(DATAPATH_EPERM_CONNECT_WAIT_SECS),
+            retry=retry_if_exception(_is_datapath_eperm),
+            reraise=True,
+        ):
+            with attempt:
+                connection = psycopg2.connect(
+                    f"dbname='{dbname}' user='{self.user}' host='{host}'"
+                    f"password='{self.password}' connect_timeout=1"
+                )
+        if connection is None:  # pragma: no cover - the retry always assigns or raises
+            raise PostgreSQLBaseError("database connect retry loop produced no connection")
         connection.autocommit = True
         return connection
 
