@@ -78,7 +78,6 @@ from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import new_password
 from single_kernel_postgresql.utils.backup import (
-    CANNOT_RESTORE_PITR,
     S3_BLOCK_MESSAGES,
     parse_backup_id,
 )
@@ -1388,9 +1387,14 @@ class PostgreSQLEventsHandler(Object):
         if not self._vm_peer_relation_changed_gates(event):
             return
 
-        # Start is idempotent: it starts Patroni the first time peer data arrives in
-        # the relation.
-        self.patroni_manager.start_patroni()
+        # Start Patroni the first time peer data arrives in the relation, but only
+        # when it is not already running: an unconditional start on every event
+        # enqueues a snap start job that can land inside a deliberate stop of the
+        # service, canceling the stop ("Job ... canceled.") or re-activating the
+        # stopped service seconds later. The cheap snap running-probe is used here,
+        # NOT member_started (which retries over the Patroni API for up to 60s).
+        if not self.workload.is_patroni_running():
+            self.patroni_manager.start_patroni()
 
         # Assert the member is up and running before marking the unit as active.
         if not self.patroni_manager.member_started:
