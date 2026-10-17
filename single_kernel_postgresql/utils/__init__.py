@@ -227,7 +227,9 @@ async def _async_get_request(
         ):
             return result
         tasks = [
-            create_task(_httpx_get_request(f"https://{bracket_ipv6_host(ip)}:8008{uri}", client))
+            create_task(
+                _httpx_get_request(f"https://{bracket_ipv6_host(ip)}:8008{uri}", client)
+            )
             for ip in endpoints
         ]
         for task in as_completed(tasks):
