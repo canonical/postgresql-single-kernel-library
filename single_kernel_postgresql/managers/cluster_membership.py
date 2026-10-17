@@ -320,6 +320,10 @@ class ClusterMembershipManager(BaseManager):
         Returns:
             Whether it was possible to reconfigure the cluster.
         """
+        # The stale-recovery unwedge runs at the caller gates (update-status and
+        # peer-relation-changed): they are the only paths here, and they exit on
+        # has_raft_keys() before this point unless the unwedge already cleared
+        # them — a call here could never observe keys.
         # Remove departing units when the leader changes.
         if (
             self.state.application.is_cluster_initialised
@@ -332,6 +336,18 @@ class ClusterMembershipManager(BaseManager):
         except Exception:
             logger.debug("Deferring on_peer_relation_changed: Unable to add members")
             return False
+        # Drop leftover partner addresses a departed or re-IP'd unit left
+        # behind (members_ips residue): a stale raft partner would otherwise
+        # survive as a status-0 ghost with a diluted quorum (CI 2026-10-17
+        # stereo_mode: postgresql-2's pre-isolation IP survived its re-IP).
+        for member_ip in self.get_ips_to_remove():
+            try:
+                logger.info(f"Removing stale Raft member: {member_ip}:{RAFT_PORT}")
+                self.raft_manager.remove_raft_member(f"{member_ip}:{RAFT_PORT}")
+            except RemoveRaftMemberFailedError:
+                logger.debug("Deferring on_peer_relation_changed: failed to remove raft member")
+                return False
+            self.remove_member_ip(member_ip)
         return True
 
     # -- RAFT recovery state machine (port of the charm's stuck-raft family) ---------
@@ -339,6 +355,56 @@ class ClusterMembershipManager(BaseManager):
     def has_raft_keys(self) -> bool:
         """Checks for the presence of raft recovery keys in peer data."""
         return self.state.has_raft_keys()
+
+    def unwedge_stale_recovery(self) -> bool:
+        """Clear stale raft-recovery keys when the cluster has quorum again.
+
+        A transient quorum-dilution window (e.g. a member re-IP: the new
+        address is added while the old one is still a raft partner) can arm
+        the stuck-raft recovery flag. Once the cluster has quorum again the
+        recovery machine is a false alarm that would otherwise run forever —
+        and worse, ``remove_raft_member`` early-exits while recovery keys
+        exist, so even ``cleanup_raft_cluster`` cannot drop the stale address
+        (CI 2026-10-17 stereo_mode: the app leader stayed Blocked
+        'Raft majority loss' with ``has_quorum`` true). Returns whether stale
+        keys were cleared.
+
+        Never touch a COMMITTED recovery (fix-validation round 1, W1-W3): a
+        ``promote-to-primary`` machine leaves durable markers — ``raft_stopped``
+        on the wiped units' peer data, and ``raft_selected_candidate`` /
+        ``raft_followers_stopped`` / ``raft_reset_primary`` / ``raft_rejoin``
+        on the app data. Wiping those mid-machine would strand the wiped units
+        (Patroni stopped, no ungated start path); post-wipe false alarms cannot
+        exist anyway (all wiped servers are down, so quorum reads False).
+        """
+        if not self.state.has_raft_keys():
+            return False
+        if not self.raft_manager.has_raft_quorum():
+            logger.debug("Raft recovery unwedge: no quorum; keeping the recovery state")
+            return False
+        machine_committed = any(
+            "raft_stopped" in peer.data for peer in self.state.application_peers
+        ) or bool(
+            {
+                "raft_selected_candidate",
+                "raft_followers_stopped",
+                "raft_reset_primary",
+                "raft_rejoin",
+            }
+            & set(self.state.application.data)
+        )
+        if machine_committed:
+            logger.debug("Raft recovery unwedge: recovery machine committed; keeping state")
+            return False
+        logger.info("Raft recovery unwedge: cluster has quorum; clearing stale recovery keys")
+        # The stuck flag is unit-scoped; the committed-machine markers (checked
+        # above) stay untouched.
+        for key in [key for key in self.state.peer.data if key.startswith("raft_")]:
+            self.state.peer.data.pop(key)
+        if self.state.model.unit.is_leader():
+            for key in [key for key in self.state.application.data if key.startswith("raft_")]:
+                self.state.application.data.pop(key)
+        return True
 
     def stuck_cluster_check(self) -> None:
         """Check for a stuck raft cluster and select a reinit candidate if safe."""
@@ -516,9 +582,15 @@ class ClusterMembershipManager(BaseManager):
         try:
             for attempt in Retrying(stop=stop_after_delay(300), wait=wait_fixed(5), reraise=True):
                 with attempt:
-                    # Re-evaluate the remote address on each attempt: the
-                    # watcher may have become active mid-retry.
-                    remote_addr = (
+                    # Re-evaluate the remote address on each attempt: the watcher
+                    # may have become active mid-retry. Prefer the live raft
+                    # leader (the re-add must reach a running raft server);
+                    # the previous fallback could select the stale ghost itself
+                    # from members_ips and burn the whole retry budget.
+                    leader_addr = getattr(raft_status.get("leader"), "address", None)
+                    if leader_addr == local_addr:
+                        leader_addr = None
+                    remote_addr = leader_addr or (
                         watcher_addr
                         if (watcher_addr := self.watcher_handler.watcher_raft_address)
                         and self.watcher_handler.is_active
