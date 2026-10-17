@@ -773,7 +773,7 @@ class K8sWorkload(BaseWorkload):
 
     def generate_metrics_service(
         self, monitoring_password: str | None, postgresql_service: str
-    ) -> dict:
+    ) -> ServiceDict:
         """Generate the metrics exporter service definition (port)."""
         return {
             "override": "replace",
