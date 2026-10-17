@@ -144,7 +144,7 @@ def test_on_peer_relation_changed_skips_start_when_patroni_running(handler):
     canceled the stop job or re-activated the stopped service); the gate uses
     the cheap workload running-probe, not the 60s-retrying member_started.
     """
-    membership = _mock_membership(handler)
+    _mock_membership(handler)
     handler.patroni_manager = Mock()
     handler.patroni_manager.member_started = True
     handler.patroni_manager.is_member_registered_in_cluster.return_value = True
