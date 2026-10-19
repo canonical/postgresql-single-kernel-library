@@ -455,6 +455,37 @@ def test_is_pitr_failed_k8s_scans_pebble_logs(restore_manager, substrate):
     assert restore_manager.is_pitr_failed() == (True, True)
 
 
+def test_is_pitr_failed_novelty_survives_peer_data_round_trip(restore_manager, substrate):
+    """The novelty key must be type-stable across the peer-databag round-trip.
+
+    The id is written by one hook and read back by the next; the databag
+    serializes values, so the stored id must already be a plain string. A
+    stale failure line (a prior restore's failure, still in the scanned logs)
+    must read back as NOT new, while a new failure line (new timestamp) reads
+    back as new.
+    """
+    if substrate != "k8s":
+        pytest.skip("K8s-only pebble logs")
+    failure_line = (
+        "2024-01-01T00:00:00.000Z [postgresql] patroni.exceptions.PatroniFatalException:"
+        " Failed to bootstrap cluster"
+    )
+    restore_manager.workload.pitr_bootstrap_failure_logs.return_value = (failure_line, False)
+    assert restore_manager.is_pitr_failed() == (True, True)
+    # The id as the NEXT hook reads it back from the databag: a plain string.
+    restore_manager.state.peer.data["last_pitr_fail_id"] = "2024-01-01T00:00:00.000Z"
+    assert restore_manager.is_pitr_failed() == (True, False)
+    # A genuinely new failure (new timestamp) is a new event.
+    restore_manager.workload.pitr_bootstrap_failure_logs.return_value = (
+        (
+            "2024-01-02T00:00:00.000Z [postgresql] patroni.exceptions.PatroniFatalException:"
+            " Failed to bootstrap cluster"
+        ),
+        False,
+    )
+    assert restore_manager.is_pitr_failed() == (True, True)
+
+
 def test_log_pitr_last_transaction_time(restore_manager, caplog):
     caplog.set_level(logging.INFO)
     restore_manager.patroni_manager.last_postgresql_logs.return_value = (
