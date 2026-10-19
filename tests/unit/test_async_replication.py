@@ -717,7 +717,11 @@ def test_re_emit_skips_when_the_remote_has_no_units(harness):
     """Regression guard: a relation without units must not raise StopIteration."""
     _set_leader(harness)
     _initialise_cluster(harness)
-    harness.add_relation(REPLICATION_OFFER_RELATION, REMOTE_APP)
+    with patch.object(
+        AsyncReplicationManager, "unit_ip", new_callable=PropertyMock, return_value=UNIT_IP
+    ):
+        # relation_created (k8s) publishes the unit IP; the real lookup reads /etc/hosts.
+        harness.add_relation(REPLICATION_OFFER_RELATION, REMOTE_APP)
     # no units added: the guard must skip silently
     harness.charm.async_replication._re_emit_async_relation_changed_event()
 
