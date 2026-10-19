@@ -91,7 +91,6 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLUpdateUserPasswordError,
 )
 from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -112,6 +111,7 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.managers.restore import RestoreManager
     from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
     from single_kernel_postgresql.workload.k8s import K8sWorkload
+    from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -211,8 +211,12 @@ class PostgreSQLEventsHandler(Object):
     def _on_install(self, event: InstallEvent) -> None:
         """Install prerequisites for the application."""
         logger.debug("Install start time: %s", datetime.now())
-        if self.charm.substrate == Substrates.VM and isinstance(self.workload, VMWorkload):
-            self._check_detached_storage(self.workload)
+        if self.charm.substrate == Substrates.VM:
+            # Imported lazily: the k8s-flavored install carries no vm-extra (psutil).
+            from single_kernel_postgresql.workload.vm import VMWorkload
+
+            if isinstance(self.workload, VMWorkload):
+                self._check_detached_storage(self.workload)
 
         self.state.add_status_if_not_present(
             GeneralStatuses.MAINTAINENANCE_INSTALLING.value,
@@ -566,8 +570,12 @@ class PostgreSQLEventsHandler(Object):
 
     def _can_start(self, event: StartEvent) -> bool:
         """Returns whether the workload can be started on this unit."""
-        if self.charm.substrate == Substrates.VM and isinstance(self.workload, VMWorkload):
-            self._check_detached_storage(self.workload)
+        if self.charm.substrate == Substrates.VM:
+            # Imported lazily: the k8s-flavored install carries no vm-extra (psutil).
+            from single_kernel_postgresql.workload.vm import VMWorkload
+
+            if isinstance(self.workload, VMWorkload):
+                self._check_detached_storage(self.workload)
 
         # Safeguard against starting while refreshing.
         if self.refresh_manager.refresh is None:
@@ -1041,12 +1049,6 @@ class PostgreSQLEventsHandler(Object):
                     BlockedStatus(app_data["s3-initialization-block-message"])
                 )
                 return
-            # if self.unit.is_leader() and (
-            #     self.app_peer_data.get("logical-replication-validation") == "error"
-            #     or self.logical_replication.has_remote_publisher_errors()
-            # ):
-            #     self.set_unit_status(BlockedStatus(LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS))
-            #     return
             unit_name = self.state.model.unit.name
             is_standby_leader = (
                 self.patroni_manager.get_standby_leader(unit_name_pattern=True) == unit_name
@@ -1384,7 +1386,7 @@ class PostgreSQLEventsHandler(Object):
         logger.debug(f"Removing secret with label {event.secret.label} revision {event.revision}")
         event.remove_revision()
 
-    def _check_detached_storage(self, workload: VMWorkload) -> None:
+    def _check_detached_storage(self, workload: "VMWorkload") -> None:
         """Wait for storage to become available.
 
         Workaround for lxd containers not getting storage attached on startups.
