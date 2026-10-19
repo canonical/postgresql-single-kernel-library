@@ -504,6 +504,7 @@ def test_remove_raft_member_stuck_cluster_re_emits_peer_changed(charm, harness):
     assert charm.unit.status == BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE)
     assert charm.state.peer.data["raft_stuck"] == "True"
 
+
 def test_raft_stuck_block_survives_collect(charm, harness):
     """The raft-majority-loss blocked must survive the collect.
 

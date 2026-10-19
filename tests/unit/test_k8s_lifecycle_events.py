@@ -64,8 +64,6 @@ from single_kernel_postgresql.config.literals import (  # noqa: E402
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses  # noqa: E402
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication  # noqa: E402
-from single_kernel_postgresql.events.tls_transfer import TLSTransfer  # noqa: E402
-from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR  # noqa: E402
 from single_kernel_postgresql.utils.postgresql import (  # noqa: E402
     PostgreSQLCreatePredefinedRolesError,
     PostgreSQLCreateUserError,
@@ -1064,8 +1062,9 @@ def test_restart_k8s_reconciles_the_pebble_layers(handler):
     handler.cluster_manager = Mock()
     handler.postgresql = Mock()
     event = Mock()
-    handler._restart(event)
-    handler.workload.update_pebble_layers.assert_called_once()
+    with patch.object(handler.charm, "update_pebble_layers") as update_layers:
+        handler._restart(event)
+    update_layers.assert_called_once()
     assert handler.state.peer.data.get("postgresql_restarted") is None
     event.defer.assert_not_called()
 
