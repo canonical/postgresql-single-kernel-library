@@ -13,13 +13,14 @@ with suppress(ImportError):
     import psutil
     from pysyncobj.utility import TcpUtility, UtilityException
 from ops import BlockedStatus
-from tenacity import Retrying, wait_fixed
+from tenacity import RetryError, Retrying, stop_after_delay, wait_fixed
 
 from single_kernel_postgresql.config.exceptions import (
     AddRaftMemberFailedError,
     RaftNotPromotedError,
     RaftPostgresqlNotUpError,
     RaftPostgresqlStillUpError,
+    RaftRecoveryTimeoutError,
     RemoveRaftMemberFailedError,
 )
 from single_kernel_postgresql.config.literals import PEER_RELATION, RAFT_PARTNER_PREFIX, RAFT_PORT
@@ -87,11 +88,15 @@ class RaftManager(BaseManager):
         self.patroni_manager.stop_patroni()
 
         logger.info("Wait for postgresql to stop")
-        for attempt in Retrying(wait=wait_fixed(5)):
-            with attempt:
-                for proc in psutil.process_iter(["name"]):
-                    if proc.name() == "postgres":
-                        raise RaftPostgresqlStillUpError()
+        # Bounded: an unbounded wait here would hang the hook on a wedged stop.
+        try:
+            for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(300)):
+                with attempt:
+                    for proc in psutil.process_iter(["name"]):
+                        if proc.name() == "postgres":
+                            raise RaftPostgresqlStillUpError()
+        except RetryError:
+            raise RaftRecoveryTimeoutError("Timed out waiting for postgresql to stop") from None
 
         logger.info("Removing raft data")
         try:
@@ -113,26 +118,34 @@ class RaftManager(BaseManager):
         self.patroni_manager.start_patroni()
 
         logger.info("Waiting for new raft cluster to initialise")
-        for attempt in Retrying(wait=wait_fixed(5)):
-            with attempt:
-                health_status = self.patroni_manager.get_patroni_health()
-                if (
-                    health_status["role"] not in ["leader", "master"]
-                    or health_status["state"] != "running"
-                ):
-                    raise RaftNotPromotedError()
+        # Bounded: promotion may never complete; defer instead of hanging.
+        try:
+            for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(300)):
+                with attempt:
+                    health_status = self.patroni_manager.get_patroni_health()
+                    if (
+                        health_status["role"] not in ["leader", "master"]
+                        or health_status["state"] != "running"
+                    ):
+                        raise RaftNotPromotedError()
+        except RetryError:
+            raise RaftRecoveryTimeoutError("Timed out waiting for raft promotion") from None
 
         logger.info("Restarting patroni")
         self.patroni_manager.restart_patroni()
-        for attempt in Retrying(wait=wait_fixed(5)):
-            with attempt:
-                found_postgres = False
-                for proc in psutil.process_iter(["name"]):
-                    if proc.name() == "postgres":
-                        found_postgres = True
-                        break
-                if not found_postgres:
-                    raise RaftPostgresqlNotUpError()
+        # Bounded: postgres may never come back; defer instead of hanging.
+        try:
+            for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(300)):
+                with attempt:
+                    found_postgres = False
+                    for proc in psutil.process_iter(["name"]):
+                        if proc.name() == "postgres":
+                            found_postgres = True
+                            break
+                    if not found_postgres:
+                        raise RaftPostgresqlNotUpError()
+        except RetryError:
+            raise RaftRecoveryTimeoutError("Timed out waiting for postgresql to start") from None
         logger.info("Raft should be unstuck")
 
     def cleanup_raft_cluster(self) -> bool:
