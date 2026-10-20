@@ -245,6 +245,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             is_standby_cluster=self._is_standby_cluster,
             set_unit_status=self.set_unit_status,
             refresh_primary_status=self.set_primary_status_message,
+            remove_departed_endpoints=self.membership_manager.remove_departed_endpoints,
         )
         self.restore_manager = RestoreManager(
             state=self.state,

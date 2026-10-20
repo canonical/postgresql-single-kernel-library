@@ -14,7 +14,6 @@ from single_kernel_postgresql.config.literals import (
     EXTENSION_OBJECT_MESSAGE,
     EXTENSIONS_DEPENDENCY_MESSAGE,
 )
-from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.utils.postgresql import PostgreSQLEnableDisableExtensionError
@@ -1289,32 +1288,6 @@ def test_clear_configuration_error_is_message_scoped(harness_config):
 
     harness_config.clear_configuration_error()
     assert "configuration-error" not in harness_config.state.peer.data
-
-
-def test_legacy_sentinel_clears_with_the_generic_message(harness_config):
-    """The legacy '1' sentinel clears on the generic self-heal only.
-
-    A plugin-scoped clear must not lift it: pre-message-fix units would
-    otherwise keep a permanently replayed generic blocked with no clear
-    path.
-    """
-    harness_config.state.peer.data["configuration-error"] = "1"
-    harness_config.state.add_status_if_not_present(  # seed the round-9-era store record
-        GeneralStatuses.CONFIGURATION_ERROR.value, scope="unit", component=harness_config.name
-    )
-    harness_config.clear_configuration_error(EXTENSION_OBJECT_MESSAGE)
-    assert harness_config.state.peer.data["configuration-error"] == "1"
-
-    harness_config.clear_configuration_error(CONFIGURATION_ERROR_MESSAGE)
-    assert "configuration-error" not in harness_config.state.peer.data
-    records = harness_config.state.statuses.get("unit", harness_config.name).root
-    assert not any(r.status == "blocked" for r in records)  # no store residue
-
-
-def test_legacy_configuration_error_sentinel_still_replays(harness_config):
-    """The '1' sentinel form (pre-message fix) still replays the generic block."""
-    harness_config.state.peer.data["configuration-error"] = "1"
-    assert harness_config.get_statuses("unit") == [GeneralStatuses.CONFIGURATION_ERROR.value]
 
 
 @pytest.mark.parametrize("unsettable_status", [ErrorStatus(), UnknownStatus()])

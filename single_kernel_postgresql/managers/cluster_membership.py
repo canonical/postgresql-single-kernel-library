@@ -12,9 +12,10 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ops import MaintenanceStatus, WaitingStatus
+from ops import BlockedStatus, MaintenanceStatus, WaitingStatus
 from tenacity import RetryError, Retrying, stop_after_delay, wait_fixed
 
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import NotReadyError, RemoveRaftMemberFailedError
 from single_kernel_postgresql.config.literals import (
     DATABASE,
@@ -27,7 +28,7 @@ from single_kernel_postgresql.config.literals import (
 )
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.restore import PITR_FAILED_KEY
-from single_kernel_postgresql.utils import label2name
+from single_kernel_postgresql.utils import label2name, unit_name_to_pod_name
 
 if TYPE_CHECKING:
     from ops.model import Relation
@@ -61,6 +62,7 @@ class ClusterMembershipManager(BaseManager):
         update_relation_endpoints: Callable[[], None],
         raft_manager: "RaftManager",
         primary_endpoint: Callable[[], str | None],
+        k8s_manager=None,
         update_certificate: Callable[[], None] | None = None,
         set_primary_status_message: Callable[[], None] | None = None,
     ):
@@ -75,6 +77,7 @@ class ClusterMembershipManager(BaseManager):
         # k8s-service form is never falsy on VM and cannot gate VM flows.
         self.primary_endpoint = primary_endpoint
         self.raft_manager = raft_manager
+        self.k8s_manager = k8s_manager
         # Late-bound bridges (wired by the charm class when the target lands).
         self.update_certificate = update_certificate
         self.set_primary_status_message = set_primary_status_message
@@ -85,7 +88,15 @@ class ClusterMembershipManager(BaseManager):
         return self.state.model.get_relation(PEER_RELATION)
 
     def hosts(self) -> set[str]:
-        """The current Juju hosts with '-' instead of '/' (port of the charm's _hosts)."""
+        """The current Juju hosts (port of the charms' _hosts).
+
+        VM: unit names with '-' instead of '/'; K8s: pod names.
+        """
+        if self.state.substrate == Substrates.K8S:
+            hosts = [unit_name_to_pod_name(self.state.model.unit.name)]
+            if relation := self._peer_relation():
+                hosts.extend(unit_name_to_pod_name(unit.name) for unit in relation.units)
+            return set(hosts)
         hosts = [self.state.model.unit.name.replace("/", "-")]
         if relation := self._peer_relation():
             hosts.extend(unit.name.replace("/", "-") for unit in relation.units)
@@ -612,3 +623,116 @@ class ClusterMembershipManager(BaseManager):
             logger.warning("Unable to re-add the Raft member within the retry budget; deferring")
             return DEFER
         return COMPLETED
+
+    # -- K8s membership (port of the K8s charm's endpoints bookkeeping) --------------
+
+    def get_hostname_from_member(self, member: str) -> str:
+        """Create a DNS name for a Patroni cluster member (K8s port)."""
+        unit_id = member.split("-")[-1]
+        return f"{self.state.model.app.name}-{unit_id}.{self.state.model.app.name}-endpoints"
+
+    def get_hostname_by_unit(self, unit_name: str) -> str:
+        """Create a DNS name for a PostgreSQL unit from its juju name (K8s port)."""
+        unit_id = unit_name.split("/")[1]
+        return f"{self.state.model.app.name}-{unit_id}.{self.state.model.app.name}-endpoints"
+
+    def build_service_name(self, service: str) -> str:
+        """Build a full k8s service name based on the service name (K8s port)."""
+        return f"{self.state.model.app.name}-{service}.{self.state.model.name}.svc.cluster.local"
+
+    def add_endpoint(self, endpoint: str) -> None:
+        """Add one endpoint to the members list (leader only, K8s port)."""
+        if not self.state.model.unit.is_leader():
+            return
+        self.state.application.add_endpoint(endpoint)
+
+    def remove_endpoint(self, endpoint: str) -> None:
+        """Remove one endpoint from the members list (leader only, K8s port)."""
+        if not self.state.model.unit.is_leader():
+            return
+        self.state.application.remove_endpoint(endpoint)
+
+    def get_endpoints_to_remove(self) -> list[str]:
+        """List the endpoints that were part of the cluster but departed (K8s port)."""
+        old = set(self.state.application.endpoints)
+        current = {self.get_hostname_from_member(member) for member in self.hosts()}
+        return list(old - current)
+
+    def remove_departed_endpoints(self) -> list[str]:
+        """Reconcile departed endpoints out of the app databag (K8s port).
+
+        Runs get_endpoints_to_remove() and removes each endpoint from the
+        members list; non-leaders no-op inside remove_endpoint. Returns the
+        removed endpoints.
+        """
+        removed = self.get_endpoints_to_remove()
+        for endpoint in removed:
+            self.remove_endpoint(endpoint)
+            logger.info(f"Removing departed endpoint {endpoint} from cluster members")
+        return removed
+
+    def peer_members_endpoints(self) -> list[str]:
+        """The peer member endpoints minus this unit's own endpoint (K8s port)."""
+        endpoints = list(self.state.application.endpoints)
+        current = self.get_hostname_from_member(unit_name_to_pod_name(self.state.model.unit.name))
+        if current in endpoints:
+            endpoints.remove(current)
+        return endpoints
+
+    def add_cluster_member_k8s(self, member: str) -> None:
+        """K8s variant: add the endpoint and patch the pod labels (port)."""
+        if self.state.substrate != Substrates.K8S:
+            raise NotImplementedError
+        if self.k8s_manager is None:
+            raise RuntimeError("k8s_manager is not wired")
+        hostname = self.get_hostname_from_member(member)
+        if not self.patroni_manager.are_all_members_ready():
+            logger.info("not all members are ready")
+            raise NotReadyError("not all members are ready")
+        # Add the member to the list that should be updated in each other member.
+        self.add_endpoint(hostname)
+        # Add the labels needed for replication in this pod; this also enables
+        # the member as part of the cluster.
+        try:
+            self.k8s_manager.patch_pod_labels(member)
+        except Exception as e:
+            logger.error("failed to patch pod")
+            self.set_unit_status(BlockedStatus(f"failed to patch pod with error {e}"))
+
+    def add_members_k8s(self, event) -> None:
+        """K8s variant: add new cluster members (port).
+
+        The event is deferred by the caller when one of the current units is
+        copying data from the primary.
+        """
+        # Only the leader can reconfigure.
+        if not self.state.model.unit.is_leader():
+            return
+        # Reconfiguration can be successful only if the cluster is initialised.
+        if not self.state.application.is_cluster_initialised:
+            return
+        host_endpoints = {self.get_hostname_from_member(member) for member in self.hosts()}
+        try:
+            # Compare the Patroni cluster members and the Juju hosts to avoid an
+            # unnecessary reconfiguration.
+            if (
+                self.patroni_manager.cluster_members == self.hosts()
+                and set(self.state.application.endpoints) == host_endpoints
+            ):
+                return
+            logger.info("Reconfiguring cluster")
+            self.set_unit_status(MaintenanceStatus("reconfiguring cluster"))
+            missing_endpoints = host_endpoints - set(self.state.application.endpoints)
+            members_to_add = (self.hosts() - self.patroni_manager.cluster_members) | {
+                endpoint.split(".")[0] for endpoint in missing_endpoints
+            }
+            for member in members_to_add:
+                logger.debug("Adding %s to cluster", member)
+                self.add_cluster_member_k8s(member)
+            self.patroni_manager.update_synchronous_node_count()
+        except NotReadyError:
+            logger.info("Deferring reconfigure: another member doing sync right now")
+            event.defer()
+        except RetryError:
+            logger.info("Deferring reconfigure: failed to obtain cluster members from Patroni")
+            event.defer()

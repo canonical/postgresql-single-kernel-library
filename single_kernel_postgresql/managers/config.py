@@ -1051,8 +1051,6 @@ class ConfigManager(BaseManager):
         flag (the LogicalReplicationManager pattern).
         """
         if scope == "unit" and (message := self.state.peer.data.get(CONFIGURATION_ERROR_KEY)):
-            if message == "1":  # legacy sentinel; fresh units never carry it
-                return [GeneralStatuses.CONFIGURATION_ERROR.value]
             return [StatusObject(status="blocked", message=message)]
         return [GeneralStatuses.ACTIVE_IDLE.value]
 
@@ -1067,17 +1065,12 @@ class ConfigManager(BaseManager):
         """Clear the persisted invalid-config state once its condition resolves.
 
         With a message, only clear when the stored message matches, so the
-        config-validation sites never lift a plugin/dependency block. The
-        legacy "1" sentinel counts as the generic message for that clear.
+        config-validation sites never lift a plugin/dependency block.
         """
         stored = self.state.peer.data.get(CONFIGURATION_ERROR_KEY)
-        legacy_generic = stored == "1" and message == CONFIGURATION_ERROR_MESSAGE
-        if stored is None or (message is not None and stored != message and not legacy_generic):
+        if stored is None or (message is not None and stored != message):
             return
         self.state.peer.data.pop(CONFIGURATION_ERROR_KEY, None)
         self.state.remove_status_if_present(
             StatusObject(status="blocked", message=stored), scope="unit", component=self.name
-        )
-        self.state.remove_status_if_present(  # legacy store record from the "1"-era helper
-            GeneralStatuses.CONFIGURATION_ERROR.value, scope="unit", component=self.name
         )
