@@ -603,6 +603,43 @@ def test_was_restore_successful_blocks_on_pitr_failure(handler, harness, contain
     handler.restore_manager.block_on_pitr_failure.assert_called_once_with()
 
 
+def test_was_restore_successful_pitr_branch_ignores_stale_failure(handler, harness, container):
+    """A prior restore's failure line must not re-block a later valid restore.
+
+    CI 2026-10-18 (K8s pitr wave): the scan reads the lifetime-accumulated
+    pebble service logs, so a negative control's terminal failure line still
+    matched while the next valid restore ran; every hook that evaluated during
+    the restore window re-blocked it and the test timed out waiting for
+    active. Only a NEW bootstrap failure may re-block; the durable
+    ``pitr-failed`` flag already persists the blocked through the collect
+    replay.
+    """
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            rel_id, harness.charm.app.name, {"restore-to-time": "2023-01-01"}
+        )
+    service = Mock(current=ServiceStatus.ACTIVE)
+    with (
+        patch.object(handler.restore_manager, "is_pitr_failed", return_value=(True, False)),
+        patch.object(
+            type(handler.patroni_manager),
+            "member_started",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch(TIMELINE_PATCH, return_value="3"),
+        patch.object(type(handler.charm), "update_config", return_value=True),
+        patch.object(handler.restore_manager, "restore_patroni_restart_condition"),
+        patch.object(handler.backup_manager, "can_use_s3_repository", return_value=(True, None)),
+        patch.object(type(handler.cluster_manager), "setup_instance_users_k8s"),
+    ):
+        assert handler._was_restore_successful_k8s(container, service) is True
+    handler.restore_manager.log_pitr_last_transaction_time.assert_not_called()
+    handler.restore_manager.block_on_pitr_failure.assert_not_called()
+    handler.restore_manager.clear_pitr_failure.assert_called_once_with()
+
+
 # -- peer-relation flows -----------------------------------------------------------
 
 
