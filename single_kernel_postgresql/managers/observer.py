@@ -137,6 +137,8 @@ class ObserverManager(BaseManager):
 
     def start_raft_observer(self) -> None:
         """Render systemd units and start the observer."""
+        if self.state.substrate != Substrates.VM:
+            return
         timer_service_file = "/etc/systemd/system/raft-observer.timer"
         oneshot_service_file = "/etc/systemd/system/raft-observer.service"
 
