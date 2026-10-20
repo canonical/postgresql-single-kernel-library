@@ -253,9 +253,6 @@ VM_PATRONICTL_EXECUTABLE = "charmed-postgresql.patronictl"
 PATRONICTL_REMOVE_CONFIRMATION = "Yes I am aware"
 RESTORE_REPEAT_CAUSE = "restore-backup"
 
-# Watcher relation
-RAFT_PORT = 2222
-RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 # Refresh (charm_refresh integration)
 WORKLOAD_NAME = "PostgreSQL"
 VM_CHARM_NAME = "postgresql"
