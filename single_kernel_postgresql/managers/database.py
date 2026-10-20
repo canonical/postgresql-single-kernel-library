@@ -35,7 +35,7 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
 )
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import ClusterMember
-from single_kernel_postgresql.utils import label2name, new_password
+from single_kernel_postgresql.utils import bracket_ipv6_host, label2name, new_password
 from single_kernel_postgresql.utils.postgresql import (
     ACCESS_GROUP_RELATION,
     ACCESS_GROUPS,
@@ -441,21 +441,23 @@ class DatabaseManager(BaseManager):
                 # A stale leader unit without a peer address publishes "None:5432",
                 # as the charm did.
                 primary_unit_ip = self.state.unit_database_address(unit, self.relation_name)
-                rw_endpoint = f"{primary_unit_ip}:{DATABASE_PORT}"
+                rw_endpoint = f"{bracket_ipv6_host(primary_unit_ip)}:{DATABASE_PORT}"
             else:
                 replica_ip = self.state.unit_database_address(unit, self.relation_name)
                 if not replica_ip:
                     continue
                 if ro_hosts:
-                    ro_hosts = f"{ro_hosts},{replica_ip}"
-                    ro_endpoints = f"{ro_endpoints},{replica_ip}:{DATABASE_PORT}"
+                    ro_hosts = f"{ro_hosts},{bracket_ipv6_host(replica_ip)}"
+                    ro_endpoints = (
+                        f"{ro_endpoints},{bracket_ipv6_host(replica_ip)}:{DATABASE_PORT}"
+                    )
                 else:
-                    ro_hosts = replica_ip
-                    ro_endpoints = f"{replica_ip}:{DATABASE_PORT}"
+                    ro_hosts = bracket_ipv6_host(replica_ip) or ""
+                    ro_endpoints = f"{bracket_ipv6_host(replica_ip)}:{DATABASE_PORT}"
         if not ro_hosts and primary_unit_ip:
             # If there are no replicas, fallback to primary
             ro_endpoints = rw_endpoint
-            ro_hosts = primary_unit_ip
+            ro_hosts = bracket_ipv6_host(primary_unit_ip) or ""
         return rw_endpoint, ro_endpoints, ro_hosts
 
     def _k8s_endpoints(self) -> tuple[str, str, str]:

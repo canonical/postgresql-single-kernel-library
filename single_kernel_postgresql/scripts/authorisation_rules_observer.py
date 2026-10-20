@@ -34,7 +34,7 @@ async def _httpx_get_request(url: str):
     with suppress(FileNotFoundError):
         # Certificate bundle is not secret
         ssl_ctx.load_verify_locations(cafile=f"/tmp/{TLS_CA_BUNDLE_FILE}")  # noqa: S108
-    async with AsyncClient(timeout=API_REQUEST_TIMEOUT, verify=ssl_ctx) as client:
+    async with AsyncClient(timeout=API_REQUEST_TIMEOUT, verify=ssl_ctx, trust_env=False) as client:
         try:
             return (await client.get(url)).json()
         except Exception as e:

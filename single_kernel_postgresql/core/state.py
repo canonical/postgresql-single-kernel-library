@@ -43,7 +43,7 @@ from single_kernel_postgresql.lib.charms.data_platform_libs.v0.data_interfaces i
     DataPeerUnitData,
 )
 from single_kernel_postgresql.lib.charms.data_platform_libs.v0.s3 import S3Requirer
-from single_kernel_postgresql.utils import unit_name_to_pod_name
+from single_kernel_postgresql.utils import bracket_ipv6_host, unit_name_to_pod_name
 from single_kernel_postgresql.utils.secret import translate_field_to_secret_key
 from single_kernel_postgresql.utils.status import format_status
 
@@ -239,7 +239,7 @@ class CharmState(Object):
     @cached_property
     def patroni_url(self) -> str:
         """Patroni REST API URL."""
-        return f"https://{self.endpoint}:8008"
+        return f"https://{bracket_ipv6_host(self.endpoint)}:8008"
 
     @property
     def peer_members_ips(self) -> set[str]:
@@ -579,3 +579,24 @@ class CharmState(Object):
     def replicas_endpoint(self) -> str:
         """Returns the endpoint of the replicas instances' service."""
         return self._build_service_name("replicas")
+
+    def has_raft_keys(self) -> bool:
+        """Checks for the presence of raft recovery keys in peer data."""
+        for key in self.application.data:
+            if key.startswith("raft_"):
+                return True
+
+        return any(key.startswith("raft_") for key in self.peer.data)
+
+    @property
+    def units_ips(self) -> set[str]:
+        """Fetch current list of peers IPs."""
+        addresses = set()
+
+        if self.unit_ip:
+            addresses.add(self.unit_ip)
+        if self.peer_relation:
+            for unit in self.peer_relation.units:
+                if ip := self.peer_relation.data[unit].get(f"{PEER_RELATION}-address"):
+                    addresses.add(ip)
+        return addresses
