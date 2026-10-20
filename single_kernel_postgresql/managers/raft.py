@@ -26,7 +26,6 @@ from single_kernel_postgresql.config.exceptions import (
     RemoveRaftMemberFailedError,
 )
 from single_kernel_postgresql.config.literals import (
-    PATRONI_CONF_PATH,
     PEER_RELATION,
     RAFT_MAJORITY_LOSS_MESSAGE,
     RAFT_PARTNER_PREFIX,

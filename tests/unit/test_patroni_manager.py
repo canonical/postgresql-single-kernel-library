@@ -1022,6 +1022,8 @@ def test_primary_endpoint_ready_brackets_ipv6(substrate, patroni):
             auth=patroni._patroni_auth,
             timeout=API_REQUEST_TIMEOUT,
         )
+
+
 @contextmanager
 def _switchover_patches(endpoint="endpoint"):
     """Common patches for the switchover target-selection tests."""
