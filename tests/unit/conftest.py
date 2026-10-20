@@ -11,7 +11,8 @@ from unittest.mock import MagicMock, PropertyMock, patch, sentinel
 import pytest
 import requests
 from ops.testing import Harness
-from single_kernel_postgresql.config.literals import PEER_RELATION
+from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS_RELATION
 
 
 def _test_charm_class(test_charm_path: str, module_name: str):
@@ -95,6 +96,27 @@ def patch_crypto():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _update_config_is_a_noop(request, substrate):
+    """The charm suites always patched charm.update_config.
+
+    The real body needs a live database; the vm_charm bridge tests opt out and
+    exercise the real body.
+    """
+    if request.module.__name__.endswith("test_vm_charm"):
+        yield
+        return
+    target = (
+        "single_kernel_postgresql.charms.vm_charm.PostgreSQLVMCharm.update_config"
+        if substrate == Substrates.VM
+        else "single_kernel_postgresql.charms.k8s_charm.PostgreSQLK8sCharm.update_config"
+    )
+    patcher = patch(target, return_value=True)
+    patcher.start()
+    yield
+    patcher.stop()
+
+
 @pytest.fixture
 def harness(substrate, test_charm_path):
     """A begun Harness for the substrate's test charm, with the peer relation added."""
@@ -116,6 +138,12 @@ def harness(substrate, test_charm_path):
         )
     peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
+    # The status machinery (DPH StatusesState) persists component statuses in
+    # the status-peers relation databag; without the relation every write is
+    # silently dropped ("No databag present for statuses").
+    if STATUS_PEERS_RELATION in meta:
+        status_rel_id = harness.add_relation(STATUS_PEERS_RELATION, "postgresql-single-kernel")
+        harness.add_relation_unit(status_rel_id, "postgresql-single-kernel/0")
     # Set before begin(): Model.name (K8s namespace) is read by substrate-aware
     # state accessors (e.g. common_hosts Service FQDNs).
     harness.set_model_name("test-model")
@@ -168,6 +196,15 @@ def harness(substrate, test_charm_path):
             stack.enter_context(patch(f"{patroni}.get_member_ip", return_value=None))
             stack.enter_context(patch(f"{patroni}.get_member_status", return_value="running"))
             stack.enter_context(patch(f"{patroni}.get_primary", return_value=None))
+            stack.enter_context(patch(f"{patroni}.get_standby_leader", return_value=None))
+            stack.enter_context(patch(f"{patroni}.restart_patroni", return_value=True))
+            stack.enter_context(patch(f"{patroni}.restart_postgresql", return_value=None))
+            stack.enter_context(patch(f"{patroni}.start_patroni", return_value=True))
+            stack.enter_context(patch(f"{patroni}.stop_patroni", return_value=True))
+            stack.enter_context(patch(f"{patroni}.bootstrap_cluster", return_value=True))
+            stack.enter_context(patch(f"{patroni}.switchover", return_value=None))
+            stack.enter_context(patch(f"{patroni}.get_running_cluster_members", return_value=[]))
+            stack.enter_context(patch(f"{patroni}.online_cluster_members", return_value=None))
             stack.enter_context(patch(f"{patroni}.get_patroni_health", return_value={}))
             stack.enter_context(patch(f"{patroni}.is_member_isolated", return_value=False))
             stack.enter_context(

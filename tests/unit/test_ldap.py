@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 """Tests for the LDAP events handler (single_kernel_postgresql/events/ldap.py)."""
 
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 from ops.model import ActiveStatus
 from single_kernel_postgresql.lib.charms.glauth_k8s.v0.ldap import LdapProviderData
@@ -70,21 +70,21 @@ def _patch_config(search_filter: str = "(uid=$username)"):
 def test_on_ldap_ready_sets_flag_and_updates_config(harness, patch_crypto):
     charm = harness.charm
     _set_leader(harness)
-    with patch.object(charm.config_manager, "update_config") as update_config:
-        charm.ldap._on_ldap_ready(MagicMock())
+    charm.update_config = Mock()
+    charm.ldap._on_ldap_ready(MagicMock())
 
     assert charm.state.application.data["ldap_enabled"] == "True"
-    update_config.assert_called_once()
+    charm.update_config.assert_called_once()
     assert charm.unit.status == ActiveStatus()
 
 
 def test_on_ldap_ready_skips_flag_write_when_not_leader(harness):
     charm = harness.charm
-    with patch.object(charm.config_manager, "update_config") as update_config:
-        charm.ldap._on_ldap_ready(MagicMock())
+    charm.update_config = Mock()
+    charm.ldap._on_ldap_ready(MagicMock())
 
     # only the leader writes the peer flag; the config update happens on every unit
-    update_config.assert_called_once()
+    charm.update_config.assert_called_once()
     assert "ldap_enabled" not in charm.state.application.data
 
 
@@ -92,11 +92,11 @@ def test_on_ldap_unavailable_clears_flag_and_updates_config(harness, patch_crypt
     charm = harness.charm
     _set_leader(harness)
     charm.state.application.data.update({"ldap_enabled": "True"})
-    with patch.object(charm.config_manager, "update_config") as update_config:
-        charm.ldap._on_ldap_unavailable(MagicMock())
+    charm.update_config = Mock()
+    charm.ldap._on_ldap_unavailable(MagicMock())
 
     assert charm.state.application.data["ldap_enabled"] == "False"
-    update_config.assert_called_once()
+    charm.update_config.assert_called_once()
 
 
 def test_get_relation_data_without_relation_is_none(harness):

@@ -38,6 +38,7 @@ from single_kernel_postgresql.config.exceptions import (
     PostgreSQLCannotConnectError,
 )
 from single_kernel_postgresql.config.literals import (
+    CONFIGURATION_ERROR_MESSAGE,
     EXTENSION_OBJECT_MESSAGE,
     EXTENSIONS_DEPENDENCY_MESSAGE,
     PG_CRON_DATABASE,
@@ -74,6 +75,10 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
+
+# Per-unit peer-databag flag: the durable invalid-config signal behind the
+# collect replay (see ConfigManager.get_statuses).
+CONFIGURATION_ERROR_KEY = "configuration-error"
 
 
 def _snap_provided_libraries() -> set[str]:
@@ -876,6 +881,7 @@ class ConfigManager(BaseManager):
                 continue
             extension = PLUGIN_OVERRIDES.get(extension, extension)
             if self._check_extension_dependencies(extension, enable):
+                self.block_on_configuration_error(EXTENSIONS_DEPENDENCY_MESSAGE)
                 self.set_unit_status(BlockedStatus(EXTENSIONS_DEPENDENCY_MESSAGE))
                 return
             extensions[extension] = enable
@@ -883,6 +889,7 @@ class ConfigManager(BaseManager):
             self.is_blocked
             and self.state.peer.unit.status.message == EXTENSIONS_DEPENDENCY_MESSAGE
         ):
+            self.clear_configuration_error()
             self.set_unit_status(ActiveStatus())
             original_status = self.state.peer.unit.status
         self.set_unit_status(WaitingStatus("Updating extensions"))
@@ -895,11 +902,13 @@ class ConfigManager(BaseManager):
                 "`juju config postgresql plugin-<plugin_name>-enable=True`",
                 str(e),
             )
+            self.block_on_configuration_error(EXTENSION_OBJECT_MESSAGE)
             self.set_unit_status(BlockedStatus(EXTENSION_OBJECT_MESSAGE))
             return
         except (PostgreSQLEnableDisableExtensionError, PostgreSQLUndefinedHostError) as e:
             logger.exception("failed to change plugins: %s", str(e))
         if original_status.message == EXTENSION_OBJECT_MESSAGE:
+            self.clear_configuration_error()
             self.set_unit_status(ActiveStatus())
             return
         self._restore_unit_status(original_status)
@@ -1033,5 +1042,42 @@ class ConfigManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
+        """Compute the manager's statuses.
+
+        The invalid-config blocked must be re-surfaced here on EVERY collect:
+        ops applies the collect result last, so a directly-written blocked
+        only lives until hook end, and the status store is wiped by the
+        update-status recompute. The durable signal is a per-unit peer-databag
+        flag (the LogicalReplicationManager pattern).
+        """
+        if scope == "unit" and (message := self.state.peer.data.get(CONFIGURATION_ERROR_KEY)):
+            if message == "1":  # legacy sentinel; fresh units never carry it
+                return [GeneralStatuses.CONFIGURATION_ERROR.value]
+            return [StatusObject(status="blocked", message=message)]
         return [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def block_on_configuration_error(self, message: str = CONFIGURATION_ERROR_MESSAGE) -> None:
+        """Persist an invalid-config state (unit scope) for the collect replay."""
+        self.state.peer.data[CONFIGURATION_ERROR_KEY] = message
+        self.state.add_status_if_not_present(
+            StatusObject(status="blocked", message=message), scope="unit", component=self.name
+        )
+
+    def clear_configuration_error(self, message: str | None = None) -> None:
+        """Clear the persisted invalid-config state once its condition resolves.
+
+        With a message, only clear when the stored message matches, so the
+        config-validation sites never lift a plugin/dependency block. The
+        legacy "1" sentinel counts as the generic message for that clear.
+        """
+        stored = self.state.peer.data.get(CONFIGURATION_ERROR_KEY)
+        legacy_generic = stored == "1" and message == CONFIGURATION_ERROR_MESSAGE
+        if stored is None or (message is not None and stored != message and not legacy_generic):
+            return
+        self.state.peer.data.pop(CONFIGURATION_ERROR_KEY, None)
+        self.state.remove_status_if_present(
+            StatusObject(status="blocked", message=stored), scope="unit", component=self.name
+        )
+        self.state.remove_status_if_present(  # legacy store record from the "1"-era helper
+            GeneralStatuses.CONFIGURATION_ERROR.value, scope="unit", component=self.name
+        )

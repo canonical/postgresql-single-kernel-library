@@ -22,12 +22,18 @@ FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE = (
     "failed to access/create the bucket, check your S3 settings"
 )
 FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE = "failed to initialize stanza, check your S3 settings"
+# The stanza check also validates the S3 repository, so its failure message must
+# not assert that S3 is fine; it points at the debug-log and the S3 settings.
+FAILED_TO_CHECK_STANZA_ERROR_MESSAGE = (
+    "failed to check stanza, inspect the charm debug-log and verify your S3 settings"
+)
 CANNOT_RESTORE_PITR = "cannot restore PITR, juju debug-log for details"
 
 S3_BLOCK_MESSAGES = [
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
     FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
+    FAILED_TO_CHECK_STANZA_ERROR_MESSAGE,
 ]
 
 # Standby (async-replication) cluster guard messages. ``is_standby_cluster`` is

@@ -12,16 +12,21 @@ from ops.charm import CharmBase, UpdateStatusEvent
 
 if TYPE_CHECKING:
     import charm_refresh
+    from ops import EventBase
 
     from single_kernel_postgresql.managers.k8s import K8sManager
 
 
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.events.async_replication import PostgreSQLAsyncReplication
+from single_kernel_postgresql.events.backup import BackupEventsHandler
 from single_kernel_postgresql.events.database import DatabaseEventsHandler
 from single_kernel_postgresql.events.ldap import LDAP
 from single_kernel_postgresql.events.logical_replication import PostgreSQLLogicalReplication
-from single_kernel_postgresql.events.observer import ClusterTopologyChangeCharmEvents
+from single_kernel_postgresql.events.observer import (
+    ClusterTopologyChangeCharmEvents,
+    ObserverEventsHandler,
+)
 from single_kernel_postgresql.events.postgresql import PostgreSQLEventsHandler
 from single_kernel_postgresql.events.tls import TLS
 from single_kernel_postgresql.events.watcher import WatcherEventsHandler
@@ -95,12 +100,18 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             peer_certificate=self.tls.peer_certificate,
         )
         self.patroni_manager = PatroniManager(state=self.state, workload=self.workload)
-        self.cluster_manager = ClusterManager(state=self.state, workload=self.workload)
 
         # Substrate-only K8s API seam: the K8s charm builds it by overriding
         # build_k8s_manager(); VM charms need no K8s API access. Built here so the
         # async-replication subsystem (below) can consume it.
         k8s_manager = self.build_k8s_manager()
+
+        # The watcher handler feeds the async subsystem (trunk parity: the monolith passed
+        # `watcher=self.watcher_handler` into both AsyncReplicationManager and
+        # PostgreSQLAsyncReplication, charm.py:391/399) AND the membership subsystem
+        # (endpoints, raft addresses). Built BEFORE the async subsystem so the VM
+        # _async_watcher bridge can return it.
+        self.watcher_handler = WatcherEventsHandler(self, self.workload, self.state)
 
         # Async-replication subsystem: the manager owns the data plane and the
         # promotion/standby flows; the handler owns the observers and the public facade.
@@ -141,6 +152,17 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self, self.state, self.database_manager, self.patroni_manager, self.tls_manager
         )
 
+        # Built after the async subsystem so the rotation/standby bridges resolve.
+        self.cluster_manager = ClusterManager(
+            state=self.state,
+            workload=self.workload,
+            patroni_manager=self.patroni_manager,
+            async_replication_manager=self.async_replication_manager,
+            update_config=self.update_config,
+            set_unit_status=self.set_unit_status,
+            is_standby_cluster=self._is_standby_cluster,
+        )
+
         # Retry pending logical-replication validations on the update-status heartbeat;
         # observed BEFORE StatusHandler so the charm-side checks run before the status
         # recompute.
@@ -178,19 +200,6 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             logical_replication_slots=self.logical_replication.replication_slots,
         )
 
-        # The refresh manager owns the charm_refresh integration and the priority gate
-        # every unit status write routes through. Constructed before the events handler
-        # so the K8s pebble-ready handler can consult the refresh state.
-        self.refresh_manager = RefreshManager(
-            state=self.state,
-            workload=self.workload,
-            charm=self,
-            set_default_status=self.set_default_unit_status,
-        )
-
-        # The watcher handler feeds the membership subsystem (endpoints, raft addresses).
-        self.watcher_handler = WatcherEventsHandler(self, self.workload, self.state)
-
         # The RAFT manager owns the low-level raft operations; the membership
         # manager owns the VM peer-relation orchestration and the raft
         # recovery state machine (late-bound bridges as callables).
@@ -202,7 +211,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             update_config=self.update_config,
             set_unit_status=self.set_unit_status,
             peer_relation_changed=lambda event: (
-                self.postgresql_events_handler._on_peer_relation_changed(event)  # ty: ignore[unresolved-attribute]
+                self.postgresql_events_handler._on_peer_relation_changed(event)
             ),
             remove_from_members_ips=lambda ip: self.membership_manager.remove_member_ip(ip),
         )
@@ -218,6 +227,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             raft_manager=self.raft_manager,
             set_primary_status_message=self.set_primary_status_message,
             primary_endpoint=lambda: self.primary_endpoint,
+            update_certificate=self._update_certificate,
         )
 
         # The backup subsystem (port of the VM charm's composition wiring): the
@@ -229,7 +239,9 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             s3_client=self.s3_client,
             patroni_manager=self.patroni_manager,
             update_config=self.update_config,
-            resource_provider=cast("ResourceProvider", self.workload),
+            # K8s renders pgbackrest.conf from the K8s API (trunk passes the
+            # k8s_manager); the VM reads /proc and snap state via the workload.
+            resource_provider=cast("ResourceProvider", k8s_manager or self.workload),
             is_standby_cluster=self._is_standby_cluster,
             set_unit_status=self.set_unit_status,
             refresh_primary_status=self.set_primary_status_message,
@@ -243,6 +255,31 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             is_standby_cluster=self._is_standby_cluster,
         )
         self.observer_manager = ObserverManager(self.state, self.workload)
+        self.backup_events_handler = BackupEventsHandler(
+            self, self.state, self.backup_manager, self.restore_manager
+        )
+        self.observer_events_handler = ObserverEventsHandler(
+            self,
+            self.workload,
+            self.state,
+            self.async_replication_manager,
+            self.database_manager,
+            self.patroni_manager,
+            self.raft_manager,
+            self.tls_manager,
+            self.watcher_handler,
+        )
+
+        # The refresh manager owns the charm_refresh integration and the priority gate
+        # every unit status write routes through. Constructed after the managers the
+        # during-construction resume callbacks touch (they run inside this constructor),
+        # and before the events handler that consumes it.
+        self.refresh_manager = RefreshManager(
+            state=self.state,
+            workload=self.workload,
+            charm=self,
+            set_default_status=self.set_default_unit_status,
+        )
 
         # Events Handler
         self.postgresql_events_handler = PostgreSQLEventsHandler(
@@ -266,6 +303,10 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         # Resume or prepare the refresh (the charms' post-construction resume block).
         self.refresh_manager.on_init()
 
+        # ops only allows ops.Object methods as observers: the charm owns the
+        # collect-unit-status observe, the refresh manager owns the reconciliation.
+        self.framework.observe(self.on.collect_unit_status, self._reconcile_refresh_status)
+
         # Status Handler
         self.status_handler = StatusHandler(
             self,
@@ -275,7 +316,15 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.config_manager,
             self.patroni_manager,
             self.logical_replication_manager,
+            self.database_manager,
+            self.raft_manager,
+            self.backup_manager,
+            self.restore_manager,
         )
+
+    def _reconcile_refresh_status(self, event=None) -> None:
+        """Reconcile the unit status with the refresh status on collect-unit-status."""
+        self.refresh_manager.reconcile_refresh_status(event)
 
     def _is_standby_cluster(self) -> bool:
         """Whether this unit belongs to a standby (read-only) cluster (port)."""
@@ -315,6 +364,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def substrate(self) -> Substrates:
         """Access current substrate."""
         pass
+
+    @property
+    def refresh(self) -> "charm_refresh.Machines | charm_refresh.Kubernetes | None":
+        """The charm_refresh state machine, or None when refresh setup was skipped."""
+        return self.refresh_manager.refresh
 
     # Charm-side bridges the lib calls back into. request_restart/restart_services are
     # substrate-tangled and stay until their own migration phases; update_config still
@@ -369,7 +423,11 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
 
     @abstractmethod
     def update_config(
-        self, *, refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None
+        self,
+        is_creating_backup: bool = False,
+        no_peers: bool = False,
+        *,
+        refresh: "charm_refresh.Machines | charm_refresh.Kubernetes | None" = None,
     ) -> bool:
         """Re-render the Patroni configuration and apply it."""
         pass
@@ -428,6 +486,42 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     def fix_leader_annotation(self) -> bool:
         """Fix the leader annotation (K8s only; overridden there)."""
         return False
+
+    def _update_certificate(self) -> None:
+        """Re-request the TLS certificates after an IP change (VM only; overridden there)."""
+        return None
+
+    def _on_config_changed(self, event: "EventBase") -> None:
+        """Handle configuration changes (the K8s charm overrides; the VM flow lives in events)."""
+        return None
+
+    @property
+    def is_primary(self) -> bool:
+        """Whether this unit is the primary instance."""
+        return self.unit.name == self.patroni_manager.get_primary(unit_name_pattern=True)
+
+    @property
+    def is_cluster_initialised(self) -> bool:
+        """Returns whether the cluster is already initialised (trunk parity)."""
+        return self.state.application.is_cluster_initialised
+
+    @property
+    def is_tls_enabled(self) -> bool:
+        """Return whether TLS is enabled (trunk parity; the K8s charm overrides)."""
+        return all(self.tls_manager.get_client_tls_files())
+
+    @property
+    def _patroni(self) -> "RaftManager":
+        """The trunk charm's _patroni alias: the RAFT object, not the REST manager."""
+        return self.raft_manager
+
+    def _setup_exporter(self) -> None:
+        """Set up the postgres exporter snap service (VM only; overridden there)."""
+        return None
+
+    def _setup_pgbackrest_exporter(self) -> None:
+        """Set up the pgbackrest exporter snap service (VM only; overridden there)."""
+        return None
 
     @property
     @abstractmethod

@@ -122,11 +122,13 @@ def test_parallel_patroni_get_request_brackets_ipv6_endpoints():
     with patch(
         "single_kernel_postgresql.utils._httpx_get_request", new_callable=AsyncMock
     ) as mock_get:
-        mock_get.return_value = {"members": []}
+        # The local-first probe misses so the round falls through to the fan-out.
+        mock_get.return_value = None
         parallel_patroni_get_request("/_cluster", endpoints, "cafile")
 
     urls = [call.args[0] for call in mock_get.await_args_list]
     assert urls == [
+        "https://[fd42:a615:ea50:2a68:216:3eff:fef1:6b2]:8008/_cluster",
         "https://[fd42:a615:ea50:2a68:216:3eff:fef1:6b2]:8008/_cluster",
         "https://192.0.2.10:8008/_cluster",
     ]

@@ -12,12 +12,18 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import charm_refresh
+import psycopg2
+
+# Platform specific imports
+with suppress(ImportError):
+    from charmlibs import snap
 from ops import (
     ActiveStatus,
     BlockedStatus,
     InstallEvent,
     JujuVersion,
     LeaderElectedEvent,
+    MaintenanceStatus,
     ModelError,
     Object,
     SecretNotFoundError,
@@ -38,7 +44,9 @@ from single_kernel_postgresql.config.exceptions import (
 )
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
+    CONFIGURATION_ERROR_MESSAGE,
     EXTENSION_OBJECT_MESSAGE,
+    LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS,
     MONITORING_PASSWORD_KEY,
     PATRONI_PASSWORD_KEY,
     PEER_RELATION,
@@ -63,7 +71,6 @@ from single_kernel_postgresql.managers.refresh import RefreshManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import new_password
 from single_kernel_postgresql.utils.backup import (
-    CANNOT_RESTORE_PITR,
     S3_BLOCK_MESSAGES,
     parse_backup_id,
 )
@@ -81,9 +88,19 @@ from single_kernel_postgresql.workload.vm import VMWorkload
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ops import EventBase, HookEvent, RelationDepartedEvent, RelationEvent
+    from ops import (
+        ConfigChangedEvent,
+        EventBase,
+        HookEvent,
+        RelationDepartedEvent,
+    )
 
     from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
+    from single_kernel_postgresql.managers.async_replication import AsyncReplicationManager
+    from single_kernel_postgresql.managers.backup import BackupManager
+    from single_kernel_postgresql.managers.database import DatabaseManager
+    from single_kernel_postgresql.managers.observer import ObserverManager
+    from single_kernel_postgresql.managers.restore import RestoreManager
     from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
 
 logger = logging.getLogger(__name__)
@@ -103,11 +120,11 @@ class PostgreSQLEventsHandler(Object):
         patroni_manager: PatroniManager,
         refresh_manager: RefreshManager,
         membership_manager: "ClusterMembershipManager",
-        backup_manager,
-        restore_manager,
-        observer_manager,
-        async_replication_manager,
-        database_manager,
+        backup_manager: "BackupManager",
+        restore_manager: "RestoreManager",
+        observer_manager: "ObserverManager",
+        async_replication_manager: "AsyncReplicationManager",
+        database_manager: "DatabaseManager",
         postgresql: "Callable[[], PostgreSQLClient]",
     ) -> None:
         super().__init__(charm, key="postgresql_events")
@@ -131,12 +148,19 @@ class PostgreSQLEventsHandler(Object):
         self.framework.observe(self.charm.on.install, self._on_install)
         self.framework.observe(self.charm.on.start, self._on_start)
         self.framework.observe(self.charm.on.leader_elected, self._on_leader_elected)
+        self.framework.observe(self.charm.on.config_changed, self._on_config_changed)
         self.framework.observe(self.charm.on.update_status, self._on_update_status)
+        # The charm re-runs the full peer-relation flow on secret changes too, before
+        # the rotation observer.
+        self.framework.observe(self.charm.on.secret_changed, self._on_peer_relation_changed)
         self.framework.observe(self.charm.on.secret_changed, self._on_secret_changed)
         self.framework.observe(self.charm.on.secret_remove, self._on_secret_remove)
         self.framework.observe(self.charm.on.get_primary_action, self._on_get_primary)
         self.framework.observe(
             self.charm.on.promote_to_primary_action, self._on_promote_to_primary
+        )
+        self.framework.observe(
+            self.charm.on[PEER_RELATION].relation_changed, self._on_peer_relation_changed
         )
         if self.state.substrate == Substrates.K8S:
             self.framework.observe(
@@ -328,7 +352,7 @@ class PostgreSQLEventsHandler(Object):
         # Only update the connection endpoints if there is a primary.
         # A cluster can have all members as replicas for some time after
         # a failed switchover, so wait until the primary is elected.
-        if self.state.primary_endpoint:
+        if self.charm.primary_endpoint:
             self.membership_manager.update_relation_endpoints()
             self.async_replication_manager.update_async_replication_data()
         else:
@@ -482,7 +506,7 @@ class PostgreSQLEventsHandler(Object):
             event.defer()
             return
 
-        if not self.state.primary_endpoint:
+        if not self.charm.primary_endpoint:
             logger.debug("Deferring on_start: awaiting start of the primary")
             self.membership_manager.set_unit_status(WaitingStatus("awaiting start of the primary"))
             event.defer()
@@ -564,7 +588,7 @@ class PostgreSQLEventsHandler(Object):
 
     # -- Update status (port of the VM charm's update-status family) ------------------
 
-    def _on_update_status(self, _) -> None:
+    def _on_update_status(self, event) -> None:
         """Update the unit status message and users list in the database."""
         if self.state.substrate == Substrates.K8S:
             # The K8s update-status flow is ported by the K8s slice.
@@ -582,12 +606,30 @@ class PostgreSQLEventsHandler(Object):
             return
 
         self.database_manager.oversee_users(self.postgresql())
-        if self.state.primary_endpoint:
+        if self.charm.primary_endpoint:
             self.membership_manager.update_relation_endpoints()
 
         if not self.patroni_manager.member_started and self.patroni_manager.is_member_isolated:
             self.patroni_manager.restart_patroni()
             self.observer_manager.start_observer()
+            return
+
+        # Leader-side membership reconcile: if the Patroni cluster is missing
+        # members relative to the planned unit count (e.g. a former leader
+        # serving a divergent DCS view after a network cut), run the same
+        # cleanup_raft_cluster/add_members flow the peer-relation-changed
+        # leader path uses. Status stays untouched: the "(degraded)" suffix
+        # computed by set_primary_status_message below is the user surface,
+        # and the next update-status is the retry.
+        if (
+            self.state.model.unit.is_leader()
+            and len(self.patroni_manager.get_running_cluster_members())
+            < self.state.application.planned_units
+        ) and not self.membership_manager.reconfigure_cluster(event):
+            logger.debug(
+                "on_update_status: membership reconcile did not complete; "
+                "retrying on the next update-status"
+            )
             return
 
         # Update the sync-standby endpoint in the async replication data.
@@ -600,8 +642,6 @@ class PostgreSQLEventsHandler(Object):
         self.async_replication_manager.clear_stale_promotion()
 
         self.backup_manager.coordinate_stanza_fields()
-
-        # self.logical_replication.retry_validations()
 
         self.charm.set_primary_status_message()
 
@@ -633,7 +673,12 @@ class PostgreSQLEventsHandler(Object):
             return False
         if (
             self.state.peer.is_blocked_status
-            and self.state.peer.unit.status not in S3_BLOCK_MESSAGES
+            and self.state.peer.unit.status.message not in S3_BLOCK_MESSAGES
+            and self.state.peer.unit.status.message != LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS
+            and self.state.peer.unit.status.message
+            != self.state.application.data.get("logical-replication-validation-status-message")
+            and self.state.peer.unit.status.message
+            != self.state.application.data.get("logical-replication-last-block-message")
         ):
             # If the charm was failing to disable a plugin, try again (the user
             # may have removed the objects).
@@ -655,7 +700,10 @@ class PostgreSQLEventsHandler(Object):
                 "You can launch another restore with different parameters"
             )
             restore_manager.log_pitr_last_transaction_time()
-            self.membership_manager.set_unit_status(BlockedStatus(CANNOT_RESTORE_PITR))
+            # Direct unit.status writes are wiped by the collect-unit-status
+            # replay (which re-adds this manager's "restoring backup"
+            # maintenance): persist the blocked through the status machinery.
+            restore_manager.block_on_pitr_failure()
             return False
 
         member_name = self.state.model.unit.name.replace("/", "-")
@@ -694,6 +742,7 @@ class PostgreSQLEventsHandler(Object):
             "restore-to-time": "",
             "restore-timeline": "",
         })
+        restore_manager.clear_pitr_failure()
         self.charm.update_config()
         restore_manager.restore_patroni_restart_condition()
 
@@ -769,9 +818,6 @@ class PostgreSQLEventsHandler(Object):
             # Disable too, so a mid-teardown restart of the unit can't re-enable
             # the services and re-grab the storage mounts before Juju finishes
             # unmounting.
-            with suppress(ImportError):
-                from charmlibs import snap
-
             snap.SnapCache()[charm_refresh.snap_name()].stop(disable=True)
         except Exception:
             logger.exception("Failed to stop charmed-postgresql snap services")
@@ -803,9 +849,6 @@ class PostgreSQLEventsHandler(Object):
                     e.stderr,
                 )
                 return
-        with suppress(ImportError):
-            from charmlibs import snap
-
         try:
             snap.SnapCache()[charm_refresh.snap_name()].ensure(snap.SnapState.Absent)
         except (snap.SnapError, snap.SnapNotFoundError):
@@ -998,11 +1041,259 @@ class PostgreSQLEventsHandler(Object):
             return False
         return True
 
-    def _reconfigure_cluster(self, event: "RelationEvent") -> bool:
-        """Reconfigure the cluster via the membership manager (port)."""
-        return self.membership_manager.reconfigure_cluster(event)
+    def _on_peer_relation_changed(self, event: "HookEvent") -> None:
+        """Reconfigure cluster members when something changes (substrate-branched)."""
+        if self.state.substrate == Substrates.K8S:
+            # The K8s flow lands with the K8s slices (their ctor observes this event too).
+            return
+        if not self._peer_relation_changed_checks(event):
+            return
+        self._vm_peer_relation_changed(event)
+
+    def _vm_peer_relation_changed(self, event: "HookEvent") -> None:
+        """Reconfigure cluster members on VM (port of the charm's _on_peer_relation_changed)."""
+        try:
+            self.charm.update_config()
+        except RetryError:
+            self.membership_manager.set_unit_status(
+                MaintenanceStatus("cluster member update failed, retrying")
+            )
+            return
+        except ValueError as e:
+            self.config_manager.block_on_configuration_error()
+            self.membership_manager.set_unit_status(
+                BlockedStatus("Configuration Error. Please check the logs")
+            )
+            logger.error("Invalid configuration: %s", str(e))
+            return
+
+        # Config validates: clear any persisted config-error state (self-heal).
+        self.config_manager.clear_configuration_error(CONFIGURATION_ERROR_MESSAGE)
+
+        if not self._vm_peer_relation_changed_gates(event):
+            return
+
+        # Start Patroni the first time peer data arrives in the relation, but only
+        # when it is not already running: an unconditional start on every event
+        # enqueues a snap start job that can land inside a deliberate stop of the
+        # service, canceling the stop ("Job ... canceled.") or re-activating the
+        # stopped service seconds later. The cheap snap running-probe is used here,
+        # NOT member_started (which retries over the Patroni API for up to 60s).
+        if not self.workload.is_patroni_running():
+            self.patroni_manager.start_patroni()
+
+        # Assert the member is up and running before marking the unit as active.
+        if not self.patroni_manager.member_started:
+            logger.debug("Deferring on_peer_relation_changed: awaiting for member to start")
+            self.membership_manager.set_unit_status(WaitingStatus("awaiting for member to start"))
+            event.defer()
+            return
+
+        # In Raft mode with a watcher, ensure this member is properly registered in
+        # the DCS: a new member may be running but not registered if it was added to
+        # Raft after starting.
+        if (
+            self.charm.watcher_handler.is_watcher_connected
+            and not self.patroni_manager.is_member_registered_in_cluster()
+        ):
+            logger.info("Member running but not registered in Raft cluster - restarting Patroni")
+            self.patroni_manager.restart_patroni()
+            event.defer()
+            return
+
+        self._vm_start_stop_pgbackrest_service(event)
+
+        if not self._vm_handle_s3_initialization():
+            return
+
+        # Update the watcher relation with fresh peer IPs when peer data changes, so
+        # the pg-endpoints stay current when unit IPs change.
+        if self.state.model.unit.is_leader():
+            self.charm.watcher_handler.update_endpoints()
+            self.charm.async_replication.update_async_replication_data()
+
+        self._vm_update_new_unit_status()
+
+    def _vm_peer_relation_changed_gates(self, event: "HookEvent") -> bool:
+        """Post-update_config early-exit gates for the VM peer-relation flow (port).
+
+        Returns:
+            False when the flow must stop.
+        """
+        # Should not override a blocked status.
+        if isinstance(self.state.peer.unit.status, BlockedStatus):
+            logger.debug("on_peer_relation_changed early exit: Unit in blocked status")
+            return False
+
+        if (
+            self.state.application.is_cluster_restoring_backup
+            or self.state.application.is_cluster_restoring_to_time
+        ) and not self._was_restore_successful():
+            logger.debug("on_peer_relation_changed early exit: Backup restore check failed")
+            return False
+
+        return True
+
+    def _vm_start_stop_pgbackrest_service(self, event: "HookEvent") -> None:
+        """Start or stop the pgBackRest TLS server service on a TLS change (port)."""
+        if not self.backup_manager.start_stop_pgbackrest_service():
+            logger.debug(
+                "Deferring on_peer_relation_changed: awaiting for TLS server service to start on primary"
+            )
+            event.defer()
+            return
+
+        self.backup_manager.coordinate_stanza_fields()
+
+        if "exporter-started" not in self.state.peer.data:
+            self.charm._setup_exporter()
+        if "pgbackrest-exporter-started" not in self.state.peer.data:
+            self.charm._setup_pgbackrest_exporter()
+
+    def _vm_handle_s3_initialization(self) -> bool:
+        """Handle S3 re-initialization after a leader change (port).
+
+        Returns:
+            True if processing should continue, False if we should return early.
+        """
+        # Only executed when the leader is reinitializing the S3 connection due to a
+        # leader change.
+        if (
+            "s3-initialization-start" in self.state.application.data
+            and "s3-initialization-done" not in self.state.peer.data
+            and self.charm.is_primary
+            and not self.backup_manager.initialise_s3_repository()
+        ):
+            return False
+
+        # Clean up the unit initialization data after a successful sync to the leader.
+        if "s3-initialization-done" in self.state.application.data and (
+            not self.state.model.unit.is_leader()
+        ):
+            self.state.peer.data.update({
+                "stanza": "",
+                "s3-initialization-block-message": "",
+                "s3-initialization-done": "",
+                "s3-initialization-start": "",
+            })
+
+        return True
+
+    def _vm_update_new_unit_status(self) -> None:
+        """Update the status of a unit that recently joined the cluster (port)."""
+        # Only update the connection endpoints if there is a primary: a cluster can
+        # have all members as replicas for some time after a failed switchover, so
+        # wait until the primary is elected.
+        if self.charm.primary_endpoint:
+            self.charm.update_relation_endpoints()
+            self.charm.async_replication.handle_read_only_mode()
+            # Update the watcher relation with the current cluster endpoints.
+            self.charm.watcher_handler.update_endpoints()
+        else:
+            self.membership_manager.set_unit_status(WaitingStatus(PRIMARY_NOT_REACHABLE_MESSAGE))
+
+    def _on_config_changed(self, event: "ConfigChangedEvent") -> None:
+        """Handle configuration changes (substrate-branched)."""
+        if self.state.substrate == Substrates.K8S:
+            # The K8s charm ports the faithful body; the VM flow lives here.
+            self.charm._on_config_changed(event)
+            return
+        self._vm_config_changed(event)
+
+    def _vm_config_changed(self, event: "ConfigChangedEvent") -> None:
+        """Handle configuration changes on VM (port of the charm's _on_config_changed)."""
+        if not self._vm_config_changed_gates(event):
+            return
+
+        if self.membership_manager.update_member_ip():
+            # Update the sync-standby endpoint in the async replication data.
+            self.charm.async_replication.update_async_replication_data()
+            return
+
+        try:
+            self.config_manager.validate_config_options(self.postgresql())
+            # Update the config on every run.
+            self.charm.update_config()
+        except psycopg2.OperationalError:
+            logger.debug("Defer on_config_changed: Cannot connect to database")
+            event.defer()
+            return
+        except ValueError as e:
+            # Persist through the status machinery: a directly-written blocked
+            # status is wiped by the collect handler's all-active recompute on
+            # this same hook, so the "Configuration Error" message never
+            # becomes observable to anything reading juju status.
+            self.config_manager.block_on_configuration_error()
+            self.membership_manager.set_unit_status(
+                BlockedStatus("Configuration Error. Please check the logs")
+            )
+            logger.error("Invalid configuration: %s", str(e))
+            return
+        # Config now validates cleanly: clear any persisted config-error
+        # blocked (the collect recompute then reports active).
+        self.config_manager.clear_configuration_error(CONFIGURATION_ERROR_MESSAGE)
+
+        if self.state.peer.is_blocked_status and (
+            "Configuration Error" in self.state.peer.unit.status.message
+        ):
+            self.membership_manager.set_unit_status(ActiveStatus())
+
+        # Update the sync-standby endpoint in the async replication data.
+        self.charm.async_replication.update_async_replication_data()
+
+        if not self.charm.logical_replication.apply_changed_config(event):
+            return
+
+        self._vm_config_changed_leader(event)
+
+    def _vm_config_changed_gates(self, event: "ConfigChangedEvent") -> bool:
+        """Pre-work gates for the VM config-changed flow (port).
+
+        Returns:
+            False when the flow was deferred and must stop.
+        """
+        if not self.state.peer:
+            logger.debug("Defer on_config_changed: no peer relation")
+            event.defer()
+            return False
+        self.membership_manager.update_endpoint_addresses()
+
+        if not self.state.application.is_cluster_initialised:
+            logger.debug("Defer on_config_changed: cluster not initialised yet")
+            event.defer()
+            return False
+
+        if self.refresh_manager.refresh is None:
+            logger.warning("Warning _on_config_changed: Refresh could be in progress")
+        elif self.refresh_manager.refresh.in_progress:
+            logger.debug("Defer on_config_changed: Refresh in progress")
+            event.defer()
+            return False
+
+        return True
+
+    def _vm_config_changed_leader(self, event: "ConfigChangedEvent") -> None:
+        """Leader tail of the VM config-changed flow: extensions and rotation (port)."""
+        if not self.state.model.unit.is_leader():
+            return
+
+        self.config_manager.reconcile_extensions(self.postgresql())
+
+        if admin_secret_id := self.state.config.system_users:
+            try:
+                self.cluster_manager.rotate_system_user_passwords(
+                    self.postgresql(), admin_secret_id
+                )
+            except PostgreSQLUpdateUserPasswordError:
+                event.defer()
 
     def _on_raft_reconnect(self, event: "EventBase") -> None:
         """Re-add this unit's raft member after a stuck connection (port)."""
         if self.membership_manager:
-            self.membership_manager.raft_reconnect(event)
+            outcome = self.membership_manager.raft_reconnect(event)
+            if outcome == DEFER:
+                logger.warning(
+                    "on_raft_reconnect: re-adding the Raft member failed within "
+                    "the retry budget; deferring"
+                )
+                event.defer()

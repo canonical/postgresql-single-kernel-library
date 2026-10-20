@@ -91,6 +91,33 @@ class PostgreSQLRefreshBase(charm_refresh.CharmSpecificCommon):
 class PostgreSQLRefreshK8s(PostgreSQLRefreshBase, charm_refresh.CharmSpecificKubernetes):
     """Charm-specific refresh callbacks for the Kubernetes substrate."""
 
+    def _resolve_current_primary(self, async_cluster: bool) -> tuple[str | None, bool]:
+        """Resolve the current primary from the cluster's roles.
+
+        When the async endpoint getter is unavailable (degraded async relation
+        data), a leader-less /cluster view that still shows a standby_leader
+        means this is the async standby cluster: fall back to the standby leader
+        as the role holder driving the switchover. The second return value is
+        whether the primary was resolved through the standby role.
+        """
+        try:
+            current_primary = (
+                self._charm.patroni_manager.get_standby_leader(unit_name_pattern=True)
+                if async_cluster
+                else self._charm.patroni_manager.get_primary(unit_name_pattern=True)
+            )
+        except RetryError:
+            logger.debug("Unable to determine the primary. Cluster status unreachable")
+            current_primary = None
+        if current_primary is not None or async_cluster:
+            return current_primary, async_cluster
+        try:
+            standby = self._charm.patroni_manager.get_standby_leader(unit_name_pattern=True)
+        except RetryError:
+            logger.debug("Unable to determine the standby leader. Cluster status unreachable")
+            return None, False
+        return standby, standby is not None
+
     def run_pre_refresh_checks_after_1_unit_refreshed(self) -> None:
         """Implement pre-refresh checks after 1 unit refreshed."""
         logger.debug("Running pre-refresh checks")
@@ -112,7 +139,11 @@ class PostgreSQLRefreshK8s(PostgreSQLRefreshBase, charm_refresh.CharmSpecificKub
 
         # Switch primary to last unit to refresh (lowest unit number).
         last_unit_to_refresh = f"{self._charm.app.name}/0"
-        if self._charm.patroni_manager.get_primary(unit_name_pattern=True) == last_unit_to_refresh:
+        async_cluster = bool(self._charm.get_async_primary_cluster_endpoint())
+        current_primary, async_cluster = self._resolve_current_primary(async_cluster)
+        if current_primary is None:
+            raise PrecheckFailed("Unable to determine the current primary")
+        if current_primary == last_unit_to_refresh:
             logger.info(
                 f"Unit {last_unit_to_refresh} was already primary during pre-refresh check"
             )
@@ -120,9 +151,9 @@ class PostgreSQLRefreshK8s(PostgreSQLRefreshBase, charm_refresh.CharmSpecificKub
             try:
                 self._charm.patroni_manager.switchover(
                     candidate=last_unit_to_refresh,
-                    async_cluster=bool(self._charm.get_async_primary_cluster_endpoint()),
+                    async_cluster=async_cluster,
                 )
-            except SwitchoverFailedError as e:
+            except (SwitchoverFailedError, RetryError) as e:
                 logger.warning(f"switchover failed with reason: {e}")
                 raise PrecheckFailed("Unable to switch primary") from None
             else:
@@ -205,7 +236,7 @@ class PostgreSQLRefreshVM(PostgreSQLRefreshBase, charm_refresh.CharmSpecificMach
                     async_cluster=bool(self._charm.get_async_primary_cluster_endpoint()),
                 )
                 self._charm.update_relation_endpoints()
-            except SwitchoverFailedError as e:
+            except (SwitchoverFailedError, RetryError) as e:
                 logger.warning(f"switchover failed with reason: {e}")
                 raise PrecheckFailed("Unable to switch primary") from None
             else:
@@ -266,6 +297,9 @@ class RefreshManager(BaseManager):
         self._charm = charm
         self.set_default_status = set_default_status
         self.can_set_app_status = True
+        # The default (role) status as last computed by reconcile_refresh_status;
+        # None until the first no-refresh reconciliation runs.
+        self._default_status: StatusBase | None = None
         # charm_refresh resume callbacks (e.g. refresh_snap) run DURING the
         # charm_refresh.Machines()/Kubernetes() construction below and dispatch back
         # through this manager (refresh_snap ends with
@@ -326,15 +360,62 @@ class RefreshManager(BaseManager):
         return [self._persist_machinery_status()]
 
     def _persist_machinery_status(self) -> StatusObject:
-        """Persist the reconciled unit status as this manager's status record."""
-        status = self._charm.unit.status
-        if status.name not in ("active", "blocked", "maintenance", "waiting") or not isinstance(
-            status, (ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus)
-        ):
-            # Unknown/error unit statuses carry no refresh information.
-            record = GeneralStatuses.ACTIVE_IDLE.value
+        """Persist the reconciled unit status as this manager's status record.
+
+        Only snapshot the unit status when the refresh itself set it: the
+        reconciliation records the refresh status message in
+        LAST_REFRESH_UNIT_STATUS_FILE, and a snapshot of an unrelated status
+        would be re-fed through the collect handler forever (waiting outranks
+        active there), self-perpetuating a stale status.
+
+        One relaxation keeps the role surface visible: the charm's update-status
+        handler writes the role message (Primary/Standby, with its degraded or
+        read-only suffixes) as its last statement, so an ActiveStatus carrying a
+        message is snapshotted even when the refresh did not set it. Active
+        ranks self-clear — the next bare active() write fails the branch and
+        resets the record. Blocked/maintenance/waiting statuses the refresh did
+        not set keep the plain ACTIVE_IDLE fallback. A bare active() (no role
+        information) is also not snapshotted: replaying it is indistinguishable
+        from ACTIVE_IDLE.
+        """
+        if self.refresh is None:
+            # Persist the freshly computed default (role) status so every hook's
+            # collect replays it and the mid-hook role writes become idempotent
+            # instead of being wiped to bare active().
+            if isinstance(self._default_status, ActiveStatus):
+                record = StatusObject(status="active", message=self._default_status.message)
+            else:
+                # Blocked/error defaults stay owned by the components that raise
+                # them; snapshotting them here could self-perpetuate stale states.
+                record = GeneralStatuses.ACTIVE_IDLE.value
         else:
-            record = StatusObject(status=status.name, message=status.message)
+            try:
+                refresh_status_message = json.loads(
+                    pathlib.Path(LAST_REFRESH_UNIT_STATUS_FILE).read_text()
+                )
+            except FileNotFoundError:
+                refresh_status_message = None
+            status = self._charm.unit.status
+            if (
+                status.name not in ("active", "blocked", "maintenance", "waiting")
+                or not isinstance(
+                    status, (ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus)
+                )
+                or refresh_status_message != status.message
+            ):
+                if isinstance(status, ActiveStatus) and status.message:
+                    # The role message the charm just wrote must survive the
+                    # collect-phase recompute (roles-family '' != 'Primary'
+                    # after a fast self-heal, CI 2026-10-17).
+                    record = StatusObject(status="active", message=status.message)
+                else:
+                    # Unknown/error statuses carry no refresh information, and
+                    # statuses the refresh did not set must not be snapshotted:
+                    # the record would never clear once the underlying condition
+                    # resolved.
+                    record = GeneralStatuses.ACTIVE_IDLE.value
+            else:
+                record = StatusObject(status=status.name, message=status.message)
         self.state.statuses.set(record, "unit", self.name)
         return record
 
@@ -383,6 +464,13 @@ class RefreshManager(BaseManager):
         if self.refresh is not None and self.refresh.unit_status_higher_priority:
             self._charm.unit.status = self.refresh.unit_status_higher_priority
             new_refresh_unit_status = self.refresh.unit_status_higher_priority.message
+        elif self.refresh is None:
+            # No refresh status is active: recompute the default (role) status on
+            # every reconcile, so the persisted record stays fresh and the collect
+            # handler replays it instead of wiping the unit to bare active()
+            # (primary-flap regression).
+            self.set_default_status()
+            self._default_status = self._charm.unit.status
         elif self._charm.unit.status.message == last_refresh_unit_status:
             if self.refresh is not None and (
                 refresh_status := self.refresh.unit_status_lower_priority(

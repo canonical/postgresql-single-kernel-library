@@ -1,6 +1,7 @@
 # Copyright 2021 Canonical Ltd.
 # See LICENSE file for licensing details.
 import os
+from contextlib import contextmanager
 from unittest.mock import MagicMock, Mock, PropertyMock, call, mock_open, patch, sentinel
 
 import pytest
@@ -16,7 +17,7 @@ from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.workload.k8s import K8sWorkload
 from single_kernel_postgresql.workload.vm import VMWorkload
-from tenacity import RetryError, stop_after_delay, wait_fixed
+from tenacity import Future, RetryError, stop_after_delay, wait_fixed
 
 PATRONI_SERVICE = "patroni"
 
@@ -407,9 +408,15 @@ def test_switchover(patroni):
             new_callable=PropertyMock,
             return_value="endpoint",
         ),
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status",
+            side_effect=RetryError(
+                last_attempt=Future.construct(1, Exception("Unable to reach any units"), True)
+            ),
+        ),
     ):
         # Test a successful switchover.
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-1"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
         response = _post.return_value
         response.status_code = 200
         patroni.switchover()
@@ -423,7 +430,7 @@ def test_switchover(patroni):
 
         # Test a successful switchover with a candidate name.
         _post.reset_mock()
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-2"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-2"]
         patroni.switchover("postgresql-k8s/2")
         _post.assert_called_once_with(
             "https://endpoint:8008/switchover",
@@ -435,7 +442,7 @@ def test_switchover(patroni):
 
         # Test failed switchovers.
         _post.reset_mock()
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-1"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
         with pytest.raises(SwitchoverFailedError):
             patroni.switchover("postgresql-k8s/2")
             assert False
@@ -448,7 +455,7 @@ def test_switchover(patroni):
         )
 
         _post.reset_mock()
-        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-2"]
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-2"]
         response.status_code = 400
         with pytest.raises(SwitchoverFailedError):
             patroni.switchover("postgresql-k8s/2")
@@ -462,6 +469,7 @@ def test_switchover(patroni):
         )
 
         # Test candidate, not sync
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0"]
         response = _post.return_value
         response.status_code = 412
         response.text = "candidate name does not match with sync_standby"
@@ -1014,3 +1022,363 @@ def test_primary_endpoint_ready_brackets_ipv6(substrate, patroni):
             auth=patroni._patroni_auth,
             timeout=API_REQUEST_TIMEOUT,
         )
+
+
+@contextmanager
+def _switchover_patches(endpoint="endpoint"):
+    """Common patches for the switchover target-selection tests."""
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.stop_after_delay",
+            return_value=stop_after_delay(0),
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.endpoint",
+            new_callable=PropertyMock,
+            return_value=endpoint,
+        ),
+    ):
+        yield
+
+
+def test_switchover_posts_to_leader_api_url_when_local_unreachable(patroni):
+    with (
+        _switchover_patches("postgresql-k8s-2.postgresql-k8s-endpoints"),
+        patch("requests.post") as _post,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.get_primary"
+        ) as _get_primary,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
+        ) as _cluster_status,
+    ):
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
+        _cluster_status.return_value = [
+            {
+                "name": "postgresql-k8s-0",
+                "role": "leader",
+                "state": "running",
+                "api_url": "https://postgresql-k8s-0.postgresql-k8s-endpoints:8008",
+            },
+            {
+                "name": "postgresql-k8s-2",
+                "role": "replica",
+                "state": "running",
+                "api_url": "https://postgresql-k8s-2.postgresql-k8s-endpoints:8008",
+            },
+        ]
+        _post.side_effect = [
+            requests.exceptions.ConnectionError("connection refused"),
+            MagicMock(status_code=200),
+        ]
+
+        # The local unit (postgresql-k8s-2) is down; the leader's API URL is tried first
+        # and, after a ConnectionError, the next running member serves the request.
+        patroni.switchover(candidate="postgresql-k8s/1")
+
+        assert _post.call_count == 2
+        assert (
+            _post.call_args_list[0].args[0]
+            == "https://postgresql-k8s-0.postgresql-k8s-endpoints:8008/switchover"
+        )
+        assert _post.call_args_list[0].kwargs == {
+            "json": {"leader": "postgresql-k8s-0", "candidate": "postgresql-k8s-1"},
+            "verify": patroni.verify,
+            "auth": patroni._patroni_auth,
+            "timeout": API_REQUEST_TIMEOUT,
+        }
+        assert (
+            _post.call_args_list[1].args[0]
+            == "https://postgresql-k8s-2.postgresql-k8s-endpoints:8008/switchover"
+        )
+
+
+def test_switchover_falls_back_to_local_when_cluster_status_unreachable(patroni):
+    with (
+        _switchover_patches(),
+        patch("requests.post") as _post,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.get_primary"
+        ) as _get_primary,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
+        ) as _cluster_status,
+    ):
+        _get_primary.side_effect = ["postgresql-k8s-0", "postgresql-k8s-0", "postgresql-k8s-1"]
+        _cluster_status.side_effect = RetryError(
+            last_attempt=Future.construct(1, Exception("Unable to reach any units"), True)
+        )
+        response = _post.return_value
+        response.status_code = 200
+
+        patroni.switchover()
+
+        _post.assert_called_once_with(
+            "https://endpoint:8008/switchover",
+            json={"leader": "postgresql-k8s-0"},
+            verify=patroni.verify,
+            auth=patroni._patroni_auth,
+            timeout=API_REQUEST_TIMEOUT,
+        )
+
+
+def test_switchover_hops_within_attempt_and_retries_when_all_targets_down(patroni):
+    with (
+        _switchover_patches(),
+        patch("requests.post") as _post,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.get_primary"
+        ) as _get_primary,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
+        ) as _cluster_status,
+    ):
+        _get_primary.return_value = "postgresql-k8s-0"
+        _cluster_status.return_value = [
+            {
+                "name": "postgresql-k8s-0",
+                "role": "leader",
+                "state": "running",
+                "api_url": "https://postgresql-k8s-0.postgresql-k8s-endpoints:8008",
+            },
+            {
+                "name": "postgresql-k8s-2",
+                "role": "replica",
+                "state": "running",
+                "api_url": "https://postgresql-k8s-2.postgresql-k8s-endpoints:8008",
+            },
+        ]
+        _post.side_effect = requests.exceptions.ConnectionError("connection refused")
+
+        with pytest.raises(RetryError):
+            patroni.switchover(candidate="postgresql-k8s/1")
+
+        # One POST per configured endpoint (leader, other running member, local fallback)
+        # before the attempt re-raises and tenacity gives up (stop_after_delay(0)).
+        assert _post.call_count == 3
+        assert [c.args[0] for c in _post.call_args_list] == [
+            "https://postgresql-k8s-0.postgresql-k8s-endpoints:8008/switchover",
+            "https://postgresql-k8s-2.postgresql-k8s-endpoints:8008/switchover",
+            "https://endpoint:8008/switchover",
+        ]
+
+
+def test_switchover_uses_standby_leader_api_url_on_async_cluster(patroni):
+    with (
+        _switchover_patches(),
+        patch("requests.post") as _post,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.get_standby_leader"
+        ) as _get_standby_leader,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
+        ) as _cluster_status,
+    ):
+        _get_standby_leader.side_effect = ["db2-0", "db2-0", "db2-1"]
+        _cluster_status.return_value = [
+            {
+                "name": "db2-0",
+                "role": "standby_leader",
+                "state": "running",
+                "api_url": "https://db2-0.db2-endpoints:8008",
+            },
+            {
+                "name": "db2-1",
+                "role": "replica",
+                "state": "running",
+                "api_url": "https://db2-1.db2-endpoints:8008",
+            },
+        ]
+        _post.side_effect = [MagicMock(status_code=200)]
+
+        patroni.switchover(candidate="db2/1", async_cluster=True)
+
+        assert _post.call_count == 1
+        assert _post.call_args.args[0] == "https://db2-0.db2-endpoints:8008/switchover"
+        assert _post.call_args.kwargs["json"] == {
+            "leader": "db2-0",
+            "candidate": "db2-1",
+        }
+
+
+def test_switchover_http_response_does_not_hop(patroni):
+    with (
+        _switchover_patches("postgresql-k8s-2.postgresql-k8s-endpoints"),
+        patch("requests.post") as _post,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.get_primary"
+        ) as _get_primary,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
+        ) as _cluster_status,
+    ):
+        _get_primary.return_value = "postgresql-k8s-0"
+        _cluster_status.return_value = [
+            {
+                "name": "postgresql-k8s-0",
+                "role": "leader",
+                "state": "running",
+                "api_url": "https://postgresql-k8s-0.postgresql-k8s-endpoints:8008",
+            },
+            {
+                "name": "postgresql-k8s-1",
+                "role": "replica",
+                "state": "running",
+                "api_url": "https://postgresql-k8s-1.postgresql-k8s-endpoints:8008",
+            },
+        ]
+        _post.return_value = MagicMock(
+            status_code=412, text="candidate name does not match with sync_standby"
+        )
+
+        with pytest.raises(SwitchoverNotSyncError):
+            patroni.switchover(candidate="postgresql-k8s/1")
+
+        # Any HTTP response (even an error status) finishes the attempt: no member hop.
+        assert _post.call_count == 1
+        assert (
+            _post.call_args.args[0]
+            == "https://postgresql-k8s-0.postgresql-k8s-endpoints:8008/switchover"
+        )
+
+
+def test_switchover_fails_fast_when_primary_unresolvable(patroni):
+    """A leader-less switchover is never POSTed: fail fast with SwitchoverFailedError."""
+    with (
+        _switchover_patches(),
+        patch("requests.post") as _post,
+        patch(
+            "single_kernel_postgresql.managers.patroni.PatroniManager.cluster_status"
+        ) as _cluster_status,
+    ):
+        _cluster_status.side_effect = RetryError(
+            last_attempt=Future.construct(1, Exception("Unable to reach any units"), True)
+        )
+
+        with pytest.raises(SwitchoverFailedError):
+            patroni.switchover()
+
+        # No leader-less body is ever sent to Patroni.
+        _post.assert_not_called()
+
+
+# -- cluster_status hook-local memoization -------------------------------------
+
+
+_CLUSTER_MEMBERS = [
+    {"name": "postgresql-0", "host": "10.1.1.1", "role": "leader", "state": "running"},
+    {"name": "postgresql-1", "host": "10.1.1.2", "role": "replica", "state": "streaming"},
+]
+
+
+@contextmanager
+def _cluster_api_patches(members=_CLUSTER_MEMBERS):
+    """Common patches so cluster_status reaches the (mocked) upstream fetch."""
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.parallel_patroni_get_request",
+            return_value={"members": members},
+        ) as _parallel,
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.patroni_password",
+            new_callable=PropertyMock,
+            return_value="test-pass",
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.endpoints",
+            new_callable=PropertyMock,
+            return_value=["10.1.1.2"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.members_ips",
+            new_callable=PropertyMock,
+            return_value=["10.1.1.1", "10.1.1.2"],
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.endpoint",
+            new_callable=PropertyMock,
+            return_value="10.1.1.1",
+        ),
+    ):
+        yield _parallel
+
+
+def test_cluster_status_burst_shares_one_upstream_fetch(patroni):
+    """Back-to-back membership/role reads within the TTL fetch /cluster exactly once.
+
+    The collect/reconcile bursts (role-status recompute, membership reconciliation)
+    used to re-fetch the identical /cluster payload several times per hook
+    (~7 fetches/hook measured in round5-test_charm.md).
+    """
+    with _cluster_api_patches() as _parallel:
+        assert patroni.get_primary() == "postgresql-0"
+        assert patroni.get_member_status("postgresql-1") == "streaming"
+        assert patroni.get_member_ip("postgresql-0") == "10.1.1.1"
+        assert patroni.get_running_cluster_members() == ["postgresql-0", "postgresql-1"]
+        assert patroni.get_standby_leader() is None
+        # K8s readiness is "all endpoints running" (only one endpoint patched here).
+        assert patroni.are_all_members_ready() is (patroni.state.substrate == Substrates.VM)
+        assert _parallel.call_count == 1
+
+
+def test_cluster_status_refetched_after_ttl_expiry(patroni):
+    """Once the TTL elapses the next read goes upstream again (no unbounded staleness)."""
+    clock = {"now": 100.0}
+    with (
+        _cluster_api_patches() as _parallel,
+        patch(
+            "single_kernel_postgresql.managers.patroni.monotonic",
+            side_effect=lambda: clock["now"],
+        ),
+    ):
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 1
+
+        clock["now"] += 10.0
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 2
+
+
+def test_cluster_status_failed_fetch_is_not_cached(patroni):
+    """A fetch that reaches no endpoint raises and leaves the cache empty."""
+    with _cluster_api_patches() as _parallel:
+        _parallel.return_value = None
+        with pytest.raises(RetryError):
+            patroni.cluster_status()
+        assert _parallel.call_count == 1
+
+        # The failed round is not a cache entry: the next read goes upstream.
+        _parallel.return_value = {"members": _CLUSTER_MEMBERS}
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 2
+
+
+def test_cluster_status_mutations_invalidate_the_cache(patroni):
+    """Service-control mutations drop the memo so post-mutation reads go upstream."""
+    with _cluster_api_patches() as _parallel:
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 1
+
+        with patch("single_kernel_postgresql.managers.patroni.snap.SnapCache") as _snap_cache:
+            _snap_cache.return_value.__getitem__.return_value.restart.return_value = None
+            _snap_cache.return_value.__getitem__.return_value.services = {
+                "patroni": {"active": True}
+            }
+            assert patroni.restart_patroni() is True
+
+        assert patroni.get_primary() == "postgresql-0"
+        assert _parallel.call_count == 2
+
+
+def test_cluster_status_alternative_endpoints_bypass_the_cache(patroni):
+    """External-cluster reads (alternative_endpoints) are never served from the memo."""
+    with _cluster_api_patches() as _parallel:
+        assert patroni.get_primary(alternative_endpoints=["10.9.9.9"]) == "postgresql-0"
+        assert patroni.get_primary(alternative_endpoints=["10.9.9.9"]) == "postgresql-0"
+        # Two upstream rounds: the alternative (external-cluster) path is never memoized.
+        assert _parallel.call_count == 2

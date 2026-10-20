@@ -6,8 +6,15 @@ from unittest.mock import ANY, MagicMock, Mock, PropertyMock, patch, sentinel
 
 import psycopg2
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from ops.model import ActiveStatus, BlockedStatus, ErrorStatus, UnknownStatus
 from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.literals import (
+    CONFIGURATION_ERROR_MESSAGE,
+    EXTENSION_OBJECT_MESSAGE,
+    EXTENSIONS_DEPENDENCY_MESSAGE,
+)
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.config import ConfigManager
 from single_kernel_postgresql.utils.postgresql import PostgreSQLEnableDisableExtensionError
@@ -1217,6 +1224,97 @@ def test_reconcile_extensions(harness_config, harness, caplog):
         assert isinstance(harness.charm.unit.status, BlockedStatus)
         harness_config.reconcile_extensions(client)
         assert isinstance(harness.charm.unit.status, ActiveStatus)
+
+
+def test_extension_object_block_survives_collect_and_recompute(harness_config, harness):
+    """The plugin-object blocked must survive the collect AND the recompute.
+
+    test_plugin_objects (CI 2026-10-13, all three legs): disabling a plugin
+    with dependent objects wrote the blocked directly, the collect re-added
+    all-active at hook end, and the test's 100s blocked-wait timed out. The
+    configuration-error flag now carries the message and get_statuses
+    replays it.
+    """
+    client = Mock()
+    with patch("single_kernel_postgresql.managers.patroni.PatroniManager.get_primary") as _primary:
+        _primary.return_value = "postgresql-0"
+        client.enable_disable_extensions.side_effect = psycopg2.errors.DependentObjectsStillExist
+        harness_config.reconcile_extensions(client)
+
+    assert harness.charm.state.peer.data["configuration-error"] == EXTENSION_OBJECT_MESSAGE
+    with (
+        patch.object(harness.charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(harness.charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+        assert harness.charm.unit.status == BlockedStatus(EXTENSION_OBJECT_MESSAGE)
+
+        # The update-status recompute wipes the store records; the flag must
+        # bring the blocked back.
+        harness.charm.status_handler._on_update_status(Mock())
+        harness.evaluate_status()
+        assert harness.charm.unit.status == BlockedStatus(EXTENSION_OBJECT_MESSAGE)
+
+    # The self-heal pass (the object still gone) clears the flag.
+    client.enable_disable_extensions.side_effect = None
+    harness_config.reconcile_extensions(client)
+    assert "configuration-error" not in harness.charm.state.peer.data
+    assert isinstance(harness.charm.unit.status, ActiveStatus)
+
+
+def test_extension_dependency_block_replays_with_its_message(harness_config, harness):
+    """The dependency blocked persists with its own message (not the generic one)."""
+    if harness.charm.state.substrate != Substrates.VM:
+        pytest.skip("the K8s test charm does not declare the VM config options")
+    with harness.hooks_disabled():
+        harness.update_config({"plugin-postgis-raster-enable": True})
+    harness.charm.state.__dict__.pop("config", None)
+    client = Mock()
+    with patch("single_kernel_postgresql.managers.patroni.PatroniManager.get_primary") as _primary:
+        _primary.return_value = "postgresql-0"
+        harness_config.reconcile_extensions(client)
+
+    client.enable_disable_extensions.assert_not_called()
+    assert harness.charm.state.peer.data["configuration-error"] == EXTENSIONS_DEPENDENCY_MESSAGE
+    assert harness_config.get_statuses("unit") == [
+        StatusObject(status="blocked", message=EXTENSIONS_DEPENDENCY_MESSAGE)
+    ]
+
+
+def test_clear_configuration_error_is_message_scoped(harness_config):
+    """A message-scoped clear must not lift a different plugin/dependency block."""
+    harness_config.state.peer.data["configuration-error"] = EXTENSION_OBJECT_MESSAGE
+    harness_config.clear_configuration_error(CONFIGURATION_ERROR_MESSAGE)
+    assert harness_config.state.peer.data["configuration-error"] == EXTENSION_OBJECT_MESSAGE
+
+    harness_config.clear_configuration_error()
+    assert "configuration-error" not in harness_config.state.peer.data
+
+
+def test_legacy_sentinel_clears_with_the_generic_message(harness_config):
+    """The legacy '1' sentinel clears on the generic self-heal only.
+
+    A plugin-scoped clear must not lift it: pre-message-fix units would
+    otherwise keep a permanently replayed generic blocked with no clear
+    path.
+    """
+    harness_config.state.peer.data["configuration-error"] = "1"
+    harness_config.state.add_status_if_not_present(  # seed the round-9-era store record
+        GeneralStatuses.CONFIGURATION_ERROR.value, scope="unit", component=harness_config.name
+    )
+    harness_config.clear_configuration_error(EXTENSION_OBJECT_MESSAGE)
+    assert harness_config.state.peer.data["configuration-error"] == "1"
+
+    harness_config.clear_configuration_error(CONFIGURATION_ERROR_MESSAGE)
+    assert "configuration-error" not in harness_config.state.peer.data
+    records = harness_config.state.statuses.get("unit", harness_config.name).root
+    assert not any(r.status == "blocked" for r in records)  # no store residue
+
+
+def test_legacy_configuration_error_sentinel_still_replays(harness_config):
+    """The '1' sentinel form (pre-message fix) still replays the generic block."""
+    harness_config.state.peer.data["configuration-error"] = "1"
+    assert harness_config.get_statuses("unit") == [GeneralStatuses.CONFIGURATION_ERROR.value]
 
 
 @pytest.mark.parametrize("unsettable_status", [ErrorStatus(), UnknownStatus()])

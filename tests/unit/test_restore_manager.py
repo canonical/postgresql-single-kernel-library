@@ -10,6 +10,7 @@ from functools import partial
 from unittest.mock import MagicMock
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
 from lightkube.core.exceptions import ApiError
 from lightkube.models.meta_v1 import Status
 from ops import BlockedStatus
@@ -19,6 +20,7 @@ from single_kernel_postgresql.config.literals import (
     K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
     K8S_POSTGRESQL_SERVICE_NAME,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication
 from single_kernel_postgresql.managers.restore import RestoreManager
 from single_kernel_postgresql.utils.backup import (
@@ -453,3 +455,102 @@ def test_log_pitr_last_transaction_time_reports_missing_time(restore_manager, ca
     assert any(
         "Can't tell last completed transaction time" in record.message for record in caplog.records
     )
+
+
+def test_restoring_backup_holds_maintenance_through_collect(restore_manager):
+    """While a restore is in progress the unit must not report active.
+
+    test_backup_ceph (CI 2026-10-13): the collect re-added all-active right
+    after the restore action, the helper's wait_for_idle(active) unblocked
+    while Patroni was still re-forming, and get-primary found no primary. The
+    restoring_backup flag now replays the maintenance status until the
+    recovery path clears it.
+    """
+    restore_manager.state.application.restoring_backup = "20251013T120000Z"
+    assert restore_manager.get_statuses("unit") == [
+        StatusObject(status="maintenance", message="restoring backup")
+    ]
+    restore_manager.state.application.restoring_backup = ""
+    assert restore_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
+def test_pitr_restore_window_holds_maintenance_through_collect(restore_manager):
+    """The restore-to-time window replays maintenance like the backup-id window.
+
+    Trunk keeps the unit non-active while the cluster re-forms after a PITR
+    restore (the is_cluster_restoring_to_time gate); without the replay the
+    collect reports active mid-window and the pitr wait_for_idle unblocks
+    early.
+    """
+    restore_manager.state.application.data["restore-to-time"] = "20251013T120000Z"
+    assert restore_manager.get_statuses("unit") == [
+        StatusObject(status="maintenance", message="restoring backup")
+    ]
+    restore_manager.state.application.data["restore-to-time"] = ""
+    assert restore_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
+
+
+# -- PITR failure persistence (collect-survivable blocked) -------------------------
+
+
+def test_block_on_pitr_failure_persists_flag_and_store_record(restore_manager):
+    """Blocking on PITR failure marks the per-unit flag and the status store."""
+    restore_manager.block_on_pitr_failure()
+    assert restore_manager.state.peer.data["pitr-failed"] == "True"
+    records = restore_manager.state.statuses.get("unit", restore_manager.name).root
+    assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+
+
+def test_pitr_failure_replays_blocked_through_collect(restore_manager):
+    """The PITR-failure blocked must outrank the in-progress maintenance.
+
+    Live repro (CI 2026-10-15, pitr_* legs): the collect replay re-added
+    maintenance "restoring backup" after the update-status hook wrote the
+    blocked, so the unit flapped back to maintenance and never surfaced
+    CANNOT_RESTORE_PITR (trunk had no collect handler, so its direct write
+    survived).
+    """
+    restore_manager.state.application.data["restore-to-time"] = "20251015T120000Z"
+    restore_manager.block_on_pitr_failure()
+    for recompute in (False, True):
+        assert restore_manager.get_statuses("unit", recompute=recompute) == [
+            StatusObject(status="blocked", message=CANNOT_RESTORE_PITR)
+        ]
+    # A new restore (restore-to-time cleared) must replay maintenance again.
+    restore_manager.state.application.data["restore-to-time"] = ""
+    restore_manager.state.application.restoring_backup = "20251013T120000Z"
+    restore_manager.clear_pitr_failure()
+    assert restore_manager.get_statuses("unit", recompute=True) == [
+        StatusObject(status="maintenance", message="restoring backup")
+    ]
+
+
+def test_clear_pitr_failure_removes_flag_and_store_record(restore_manager):
+    """Clearing drops both the persistent flag and the status-store record."""
+    restore_manager.block_on_pitr_failure()
+    restore_manager.clear_pitr_failure()
+    assert restore_manager.state.peer.data.get("pitr-failed") is None
+    records = restore_manager.state.statuses.get("unit", restore_manager.name).root
+    assert not any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+
+
+def test_clear_pitr_failure_is_a_noop_without_a_block(restore_manager):
+    """Clearing without a prior block must not raise or write."""
+    restore_manager.clear_pitr_failure()
+    assert "pitr-failed" not in restore_manager.state.peer.data
+
+
+def test_restore_clears_stale_pitr_failure_state(restore_manager, substrate):
+    """A new restore clears the previous attempt's PITR-failure block.
+
+    _pre_restore_cluster_checks accepts a CANNOT_RESTORE_PITR block so the user
+    can retry; the retry must start clean, else the blocked outranks the new
+    "restoring backup" maintenance and update-status early-exits on blocked.
+    """
+    restore_manager.block_on_pitr_failure()
+    if substrate == "vm":
+        restore_manager.patroni_manager.get_patroni_restart_condition.return_value = "always"
+    restore_manager.restore((BACKUP_LABEL, "2"), BACKUP_ID, TIMELINE_ID, is_backup_id_real=True)
+    assert restore_manager.state.peer.data.get("pitr-failed") is None
+    records = restore_manager.state.statuses.get("unit", restore_manager.name).root
+    assert not any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
