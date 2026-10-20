@@ -477,12 +477,12 @@ class VMWorkload(BaseWorkload):
         """Store the current data folder in a tar.gz file and return its name."""
         filename = (
             f"{self.paths.data.parent}-"
-            f"{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.xz"
+            f"{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.zst"
         )
         # Input is hardcoded
         subprocess.check_call(  # noqa: S603
-            f"nice -n 9 ionice -c 3 tar -Jcf {filename} {self.paths.data}".split(),
-            env={"XZ_OPT": "-T0"},
+            f"nice -n 9 ionice -c 3 tar --zstd -cf {filename} {self.paths.data}".split(),
+            env={"ZSTD_NBTHREADS": "0"},
         )
         return filename
 
