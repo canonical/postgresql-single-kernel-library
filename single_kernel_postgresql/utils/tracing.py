@@ -6,6 +6,8 @@
 
 import logging
 
+from ops_tracing import set_destination
+
 from single_kernel_postgresql.config.literals import TRACING_PROTOCOL
 from single_kernel_postgresql.lib.charms.grafana_agent.v0.cos_agent import ProtocolNotFoundError
 
@@ -34,6 +36,4 @@ def charm_tracing_config(endpoint_requirer) -> None:
         # charm tracing until we do to prevent tls errors.
         logger.warning("Cannot send traces to an https endpoint without a certificate.")
         return
-    from ops_tracing import set_destination
-
     set_destination(endpoint, None)
