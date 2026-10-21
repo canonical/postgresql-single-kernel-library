@@ -273,8 +273,20 @@ def test_relation_joined_survives_a_torn_relation(substrate, harness, async_rel)
     stale = harness.model.get_relation(REPLICATION_OFFER_RELATION)
     with harness.hooks_disabled():
         harness.remove_relation(async_rel)
-    with patch.object(
-        AsyncReplicationManager, "async_relation", new_callable=PropertyMock, return_value=stale
+    with (
+        patch.object(
+            AsyncReplicationManager,
+            "async_relation",
+            new_callable=PropertyMock,
+            return_value=stale,
+        ),
+        # On K8s the manager resolves the unit IP from the pod's /etc/hosts
+        # (same patch as the joined test above); the address must be resolved
+        # before the torn-relation write defers, and the unit env's /etc/hosts
+        # carries no harness unit.
+        patch.object(
+            AsyncReplicationManager, "unit_ip", new_callable=PropertyMock, return_value=UNIT_IP
+        ),
     ):
         # the VM charm observes relation_joined, the K8s charm relation_created
         join_event = "relation_joined" if substrate == "vm" else "relation_created"
