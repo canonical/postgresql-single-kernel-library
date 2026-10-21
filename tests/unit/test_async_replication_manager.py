@@ -499,3 +499,46 @@ def test_update_primary_cluster_data_on_the_consumer_side(harness, manager):
     data = json.loads(relation.data[harness.charm.model.app]["primary-cluster-data"])
     assert data == {"endpoint": PRIMARY_ENDPOINT}
     get_secret.assert_not_called()
+
+
+def _offer_relation(harness):
+    rel_id = harness.add_relation(REPLICATION_OFFER_RELATION, REMOTE_APP)
+    harness.add_relation_unit(rel_id, f"{REMOTE_APP}/0")
+    return harness.charm.model.relations[REPLICATION_OFFER_RELATION][0]
+
+
+def test_update_async_replication_data_survives_a_stale_relation(harness, manager):
+    """A torn relation cached on the manager must not crash the update."""
+    stale = _offer_relation(harness)
+    harness.remove_relation(stale.id)
+    with patch.object(
+        AsyncReplicationManager, "async_relation", new_callable=PropertyMock, return_value=stale
+    ):
+        manager.update_async_replication_data()
+
+
+def test_update_primary_cluster_data_survives_a_stale_relation(harness, manager):
+    """A torn relation cached on the manager must not crash the primary-data write."""
+    stale = _offer_relation(harness)
+    harness.remove_relation(stale.id)
+    with (
+        patch.object(
+            AsyncReplicationManager,
+            "async_relation",
+            new_callable=PropertyMock,
+            return_value=stale,
+        ),
+        patch.object(
+            AsyncReplicationManager,
+            "primary_cluster_endpoint",
+            new_callable=PropertyMock,
+            return_value=PRIMARY_ENDPOINT,
+        ),
+        patch.object(AsyncReplicationManager, "get_shared_secret", return_value=None),
+    ):
+        manager.update_primary_cluster_data(promoted_cluster_counter=4)
+
+
+def test_get_shared_secret_returns_none_when_the_label_secret_is_missing(harness, manager):
+    """A missing peer app secret must read as 'not created yet', not crash."""
+    assert manager.get_shared_secret() is None

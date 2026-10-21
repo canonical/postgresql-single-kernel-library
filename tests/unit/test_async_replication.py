@@ -5,7 +5,7 @@
 import json
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, ModelError, WaitingStatus
@@ -266,6 +266,49 @@ def test_relation_joined_publishes_the_unit_address_and_counter(substrate, harne
         )
 
     assert _unit_peer_data(harness)["unit-promoted-cluster-counter"] == "4"
+
+
+def test_relation_joined_survives_a_torn_relation(substrate, harness, async_rel):
+    """A torn relation cached on the handler must not crash the joined hook."""
+    stale = harness.model.get_relation(REPLICATION_OFFER_RELATION)
+    with harness.hooks_disabled():
+        harness.remove_relation(async_rel)
+    with patch.object(
+        AsyncReplicationManager, "async_relation", new_callable=PropertyMock, return_value=stale
+    ):
+        # the VM charm observes relation_joined, the K8s charm relation_created
+        join_event = "relation_joined" if substrate == "vm" else "relation_created"
+        getattr(harness.charm.on[REPLICATION_OFFER_RELATION], join_event).emit(
+            stale, app=stale.app
+        )
+
+
+def test_secret_changed_offer_side_survives_a_torn_relation(harness, async_rel):
+    """A torn offer relation must not crash the offer-side secret write."""
+    stale = harness.model.get_relation(REPLICATION_OFFER_RELATION)
+    with harness.hooks_disabled():
+        harness.remove_relation(async_rel)
+    event = MagicMock()
+    event.secret.label = f"{PEER_RELATION}.{harness.charm.app.name}.app"
+    with (
+        patch.object(
+            AsyncReplicationManager,
+            "async_relation",
+            new_callable=PropertyMock,
+            return_value=stale,
+        ),
+        patch.object(
+            AsyncReplicationManager, "get_shared_secret", return_value=Mock(id="secret:x")
+        ),
+        patch.object(
+            AsyncReplicationManager,
+            "primary_cluster_endpoint",
+            new_callable=PropertyMock,
+            return_value=UNIT_IP,
+        ),
+    ):
+        harness.charm.async_replication._on_secret_changed(event)
+    event.defer.assert_not_called()
 
 
 # -- relation changed

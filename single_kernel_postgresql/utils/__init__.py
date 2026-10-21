@@ -7,6 +7,7 @@ import os
 import pwd
 import re
 import secrets
+import ssl
 import string
 from asyncio import as_completed, create_task, run, wait
 from contextlib import suppress
@@ -183,41 +184,66 @@ def _change_owner(substrate: Substrates, path: str) -> None:
         pass
 
 
-async def _httpx_get_request(
-    url: str, cafile: str, auth: BasicAuth | None = None, verify: bool = True
-) -> dict[str, Any] | None:
+def _build_ssl_context(cafile: str, verify: bool = True):
+    """Build the TLS context for one request round (loaded once, not per request)."""
     ssl_ctx = create_default_context()
     if verify:
-        with suppress(FileNotFoundError):
+        # An absent bundle falls back to the default (system trust) context; an
+        # existing but empty or otherwise invalid bundle (e.g. the charm-local
+        # peer_ca_bundle.pem pre-created empty on K8s start, or emptied while
+        # the unit's storage is being detached) raises ssl.SSLError
+        # [X509: NO_CERTIFICATE_OR_CRL_FOUND] here, which previously escaped
+        # get_primary and crashed hooks like data-storage-detaching. Treat it
+        # like a missing bundle so the caller surfaces the intended RetryError.
+        with suppress(FileNotFoundError, ssl.SSLError):
             ssl_ctx.load_verify_locations(cafile=cafile)
     else:
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = CERT_NONE
-    # Patroni is reached directly: never through the proxy configured in the hook environment.
-    async with AsyncClient(
-        auth=auth, timeout=API_REQUEST_TIMEOUT, verify=ssl_ctx, trust_env=False
-    ) as client:
-        try:
-            return (await client.get(url)).raise_for_status().json()
-        except (HTTPError, ValueError):
-            return None
+    return ssl_ctx
+
+
+async def _httpx_get_request(url: str, client: AsyncClient) -> dict[str, Any] | None:
+    try:
+        return (await client.get(url)).raise_for_status().json()
+    except (HTTPError, ValueError):
+        return None
 
 
 async def _async_get_request(
     uri: str, endpoints: list[str], cafile: str, auth: BasicAuth | None, verify: bool = True
 ) -> dict[str, Any] | None:
-    tasks = [
-        create_task(
-            _httpx_get_request(f"https://{bracket_ipv6_host(ip)}:8008{uri}", cafile, auth, verify)
-        )
-        for ip in endpoints
-    ]
-    for task in as_completed(tasks):
-        if result := await task:
-            for task in tasks:
-                task.cancel()
-            await wait(tasks)
+    if not endpoints:
+        return None
+    # One client (and one TLS context) per request round: building an AsyncClient
+    # per request per endpoint forced a fresh TCP+TLS handshake for every member
+    # contact (measured 34.3 handshakes per update-status hook on the round-5
+    # hot path), while a shared client pools the round's connections.
+    # Patroni is reached directly: never through the proxy configured in the hook environment.
+    ssl_ctx = _build_ssl_context(cafile, verify)
+    async with AsyncClient(
+        auth=auth, timeout=API_REQUEST_TIMEOUT, verify=ssl_ctx, trust_env=False
+    ) as client:
+        # Local-first: the unit's own endpoint comes first in the ordered list and
+        # usually answers, so probe it alone before fanning out. The fan-out is
+        # kept as the fallback so the any-member liveness semantics are preserved
+        # (the local unit may be down, e.g. during a refresh).
+        if endpoints and (
+            result := await _httpx_get_request(
+                f"https://{bracket_ipv6_host(endpoints[0])}:8008{uri}", client
+            )
+        ):
             return result
+        tasks = [
+            create_task(_httpx_get_request(f"https://{bracket_ipv6_host(ip)}:8008{uri}", client))
+            for ip in endpoints
+        ]
+        for task in as_completed(tasks):
+            if result := await task:
+                for task in tasks:
+                    task.cancel()
+                await wait(tasks)
+                return result
 
 
 def parallel_patroni_get_request(

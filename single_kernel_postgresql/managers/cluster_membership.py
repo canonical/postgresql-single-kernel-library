@@ -1,0 +1,738 @@
+#!/usr/bin/env python3
+# Copyright 2025 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+"""Cluster membership manager.
+
+Owns the VM cluster-membership orchestration and the RAFT recovery state
+machine, ported from the VM charm's peer-relation handlers.
+"""
+
+import logging
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+from ops import BlockedStatus, MaintenanceStatus, WaitingStatus
+from tenacity import RetryError, Retrying, stop_after_delay, wait_fixed
+
+from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.exceptions import NotReadyError, RemoveRaftMemberFailedError
+from single_kernel_postgresql.config.literals import (
+    DATABASE,
+    PEER_RELATION,
+    PRIMARY_NOT_REACHABLE_MESSAGE,
+    RAFT_PARTNER_PREFIX,
+    RAFT_PORT,
+    REPLICATION_CONSUMER_RELATION,
+    REPLICATION_OFFER_RELATION,
+)
+from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.managers.restore import PITR_FAILED_KEY
+from single_kernel_postgresql.utils import label2name, unit_name_to_pod_name
+
+if TYPE_CHECKING:
+    from ops.model import Relation
+
+    from single_kernel_postgresql.core.state import CharmState
+    from single_kernel_postgresql.managers.async_replication import AsyncReplicationManager
+    from single_kernel_postgresql.managers.raft import RaftManager
+    from single_kernel_postgresql.workload.base import BaseWorkload
+
+logger = logging.getLogger(__name__)
+
+# Return protocol for flows whose defer decision stays with the event handler.
+DEFER = "defer"
+COMPLETED = "completed"
+WAITING = "waiting"
+SKIPPED = "skipped"
+
+
+class ClusterMembershipManager(BaseManager):
+    """Reconfigure the cluster members and recover from a lost RAFT quorum."""
+
+    def __init__(
+        self,
+        state: "CharmState",
+        workload: "BaseWorkload",
+        patroni_manager,
+        update_config: Callable[..., bool],
+        set_unit_status: Callable,
+        watcher_handler,
+        async_replication_manager: "AsyncReplicationManager",
+        update_relation_endpoints: Callable[[], None],
+        raft_manager: "RaftManager",
+        primary_endpoint: Callable[[], str | None],
+        k8s_manager=None,
+        update_certificate: Callable[[], None] | None = None,
+        set_primary_status_message: Callable[[], None] | None = None,
+    ):
+        super().__init__(state, workload, "cluster_membership_manager")
+        self.patroni_manager = patroni_manager
+        self.update_config = update_config
+        self.set_unit_status = set_unit_status
+        self.watcher_handler = watcher_handler
+        self.async_replication_manager = async_replication_manager
+        self.update_relation_endpoints = update_relation_endpoints
+        # Patroni-resolved primary endpoint (None when unreachable); the state's
+        # k8s-service form is never falsy on VM and cannot gate VM flows.
+        self.primary_endpoint = primary_endpoint
+        self.raft_manager = raft_manager
+        self.k8s_manager = k8s_manager
+        # Late-bound bridges (wired by the charm class when the target lands).
+        self.update_certificate = update_certificate
+        self.set_primary_status_message = set_primary_status_message
+
+    # -- Hosts and IP bookkeeping ----------------------------------------------------
+
+    def _peer_relation(self) -> "Relation | None":
+        return self.state.model.get_relation(PEER_RELATION)
+
+    def hosts(self) -> set[str]:
+        """The current Juju hosts (port of the charms' _hosts).
+
+        VM: unit names with '-' instead of '/'; K8s: pod names.
+        """
+        if self.state.substrate == Substrates.K8S:
+            hosts = [unit_name_to_pod_name(self.state.model.unit.name)]
+            if relation := self._peer_relation():
+                hosts.extend(unit_name_to_pod_name(unit.name) for unit in relation.units)
+            return set(hosts)
+        hosts = [self.state.model.unit.name.replace("/", "-")]
+        if relation := self._peer_relation():
+            hosts.extend(unit.name.replace("/", "-") for unit in relation.units)
+        return set(hosts)
+
+    def get_unit_ip(self, unit, relation_name: str = PEER_RELATION) -> str | None:
+        """Get the IP address of a specific unit from its peer databag."""
+        try:
+            if relation := self._peer_relation():
+                return relation.data[unit].get(f"{relation_name}-address")
+        except KeyError:
+            return None
+        return None
+
+    def get_ips_to_remove(self) -> set[str]:
+        """List the IPs that were part of the cluster but departed."""
+        return self.state.application.members_ips - self.units_ips()
+
+    def units_ips(self) -> set[str]:
+        """The current Juju peers' IPs (port of the charm's _units_ips)."""
+        addresses = set()
+        if self.state.unit_ip:
+            addresses.add(self.state.unit_ip)
+        for peer in self.state.application_peers:
+            if ip := peer.data.get(f"{PEER_RELATION}-address"):
+                addresses.add(ip)
+        return addresses
+
+    def add_member_ip(self, ip: str) -> None:
+        """Add one IP to the members list (leader only, port of _add_to_members_ips)."""
+        if not self.state.model.unit.is_leader():
+            return
+        self.state.application.add_member_ip(ip)
+
+    def remove_member_ip(self, ip: str) -> None:
+        """Remove one IP from the members list (leader only, port of _remove_from_members_ips)."""
+        if not self.state.model.unit.is_leader():
+            return
+        self.state.application.remove_member_ip(ip)
+
+    def updated_synchronous_node_count(self) -> bool:
+        """Try to update the synchronous_node_count configuration (port)."""
+        try:
+            self.patroni_manager.update_synchronous_node_count()
+            return True
+        except RetryError:
+            logger.debug("Unable to set synchronous_node_count")
+            return False
+
+    def update_endpoint_addresses(self) -> None:
+        """Update ip addresses for relation endpoints on the unit peer databag (port)."""
+        logger.debug("Updating relation endpoints addresses")
+        updates: dict[str, str] = {}
+        for key, val in (
+            (f"{PEER_RELATION}-address", self.state.unit_ip),
+            (f"{DATABASE}-address", self.state.database_ip),
+            (f"{REPLICATION_OFFER_RELATION}-address", self.state.replication_offer_ip),
+            (f"{REPLICATION_CONSUMER_RELATION}-address", self.state.replication_consumer_ip),
+        ):
+            if val:
+                updates[key] = val
+        self.state.peer.data.update(updates)
+        self.watcher_handler.update_endpoints()
+
+    def update_member_ip(self) -> bool:
+        """Update the member IP in the unit databag (port).
+
+        Returns:
+            Whether the IP was updated.
+        """
+        self.update_endpoint_addresses()
+        # Stop Patroni (and update the member IP) if it was previously isolated
+        # from the cluster network. Patroni will start back when its IP address
+        # is updated in all the units through the peer-relation-changed event.
+        stored_ip = self.state.peer.data.get("ip")
+        current_ip = self.state.unit_ip
+        if stored_ip is None:
+            self.state.peer.data.update({"ip": current_ip})  # ty: ignore[no-matching-overload]
+            return False
+        elif current_ip != stored_ip:
+            logger.info(f"ip changed from {stored_ip} to {current_ip}")
+            self.state.peer.data.update(  # ty: ignore[no-matching-overload]
+                {"ip-to-remove": stored_ip, "ip": current_ip}
+            )
+            self.patroni_manager.stop_patroni()
+            if self.update_certificate:
+                self.update_certificate()
+            # Update the watcher relation: unit address for all units, endpoints
+            # only for the leader.
+            self.watcher_handler.update_unit_address()
+            if self.state.model.unit.is_leader():
+                self.watcher_handler.update_endpoints()
+            return True
+        else:
+            self.state.peer.data.update({"ip-to-remove": ""})
+            return False
+
+    # -- Membership flows -------------------------------------------------------------
+
+    def departed_early_exit(self, event) -> bool:
+        """Whether the departed event must be skipped (port of the early-exit check)."""
+        if not event.departing_unit:
+            logger.debug("Early exit on_peer_relation_departed: No departing unit")
+            return True
+        if event.departing_unit == self.state.model.unit:
+            logger.debug("Early exit on_peer_relation_departed: Skipping departing unit")
+            return True
+        if self.state.has_raft_keys():
+            logger.debug("Early exit on_peer_relation_departed: Raft recovery in progress")
+            return True
+        return False
+
+    def remove_departing_raft_member(self, event) -> str:
+        """Remove the departing member from the raft cluster.
+
+        Returns:
+            "defer" when the removal failed (the handler must defer), "skip"
+            when the member IP could not be resolved, "ok" otherwise.
+        """
+        try:
+            departing_member = event.departing_unit.name.replace("/", "-")
+            if member_ip := self.patroni_manager.get_member_ip(departing_member):
+                self.raft_manager.remove_raft_member(f"{member_ip}:{RAFT_PORT}")
+        except RemoveRaftMemberFailedError:
+            logger.debug(
+                "Deferring on_peer_relation_departed: Failed to remove member from raft cluster"
+            )
+            return DEFER
+        except RetryError:
+            unit = event.departing_unit.name if event.departing_unit else None
+            logger.warning(f"Early exit on_peer_relation_departed: Cannot get {unit} member IP")
+            return SKIPPED
+        return COMPLETED
+
+    def remove_departed_members(self) -> str:
+        """Remove departed members from the cluster, one at a time (leader side).
+
+        Returns:
+            "defer" when the reconfiguration must be retried later, "waiting"
+            when the primary is not reachable (the unit status was set),
+            "completed" otherwise.
+        """
+        # Allow the leader to update the cluster members.
+        if not self.state.model.unit.is_leader():
+            return SKIPPED
+        if (
+            not self.state.application.is_cluster_initialised
+            or not self.updated_synchronous_node_count()
+        ):
+            logger.debug("Deferring on_peer_relation_departed: cluster not initialized")
+            return DEFER
+        for member_ip in self.get_ips_to_remove():
+            # Check that all members are ready before removing the unit.
+            if not self.patroni_manager.are_all_members_ready():
+                logger.info("Deferring reconfigure: another member doing sync right now")
+                return DEFER
+            # Update the list of the current members.
+            self.remove_member_ip(member_ip)
+            self.update_config()
+            if self.primary_endpoint():
+                self.update_relation_endpoints()
+            else:
+                self.set_unit_status(WaitingStatus(PRIMARY_NOT_REACHABLE_MESSAGE))
+                return WAITING
+        return COMPLETED
+
+    def add_cluster_member(self, member: str) -> None:
+        """Add a member to the cluster if all members are ready (port).
+
+        Raises:
+            NotReadyError: if either the new member or the current members are not ready.
+        """
+        unit = self.state.model.get_unit(label2name(member))
+        if member_ip := self.get_unit_ip(unit):
+            if not self.patroni_manager.are_all_members_ready():
+                logger.info("not all members are ready")
+                raise NotReadyError("not all members are ready")
+            # Add the member to the list that should be updated in each other member.
+            self.add_member_ip(member_ip)
+            # Update the Patroni configuration file.
+            try:
+                self.update_config()
+            except RetryError:
+                self.set_unit_status(MaintenanceStatus("cluster member update failed, retrying"))
+        else:
+            self.set_unit_status(WaitingStatus("waiting for peer IP"))
+
+    def add_members(self, event) -> None:
+        """Add new cluster members (port).
+
+        The event is deferred by the caller when one of the current units is
+        copying data from the primary, to avoid multiple units copying data at
+        the same time.
+
+        Raises:
+            NotReadyError: when a member is not ready (caller defers).
+            RetryError: when the cluster members could not be retrieved.
+        """
+        # Do not override the blocked PITR status: the reconfigure cannot succeed
+        # while Patroni is down and would mask the blocked status on every tick.
+        # Trunk inspected the live unit status; here the durable ``pitr-failed``
+        # peer flag is the pre-collect equivalent (the block is replayed from it
+        # on every collect).
+        if self.state.application.is_cluster_restoring_to_time and self.state.peer.data.get(
+            PITR_FAILED_KEY
+        ):
+            logger.debug("Early exit add_members: blocked after failed PITR restore")
+            return
+
+        # Compare the Patroni cluster members with the Juju hosts to avoid
+        # unnecessary reconfiguration.
+        if self.patroni_manager.cluster_members == self.hosts() and self.state.units_ips <= (
+            self.state.application.members_ips
+        ):
+            logger.debug("Early exit add_members: Patroni members equal Juju hosts")
+            return
+        logger.info("Reconfiguring cluster")
+        self.set_unit_status(MaintenanceStatus("reconfiguring cluster"))
+        for member in self.hosts() - self.patroni_manager.cluster_members:
+            logger.debug("Adding %s to cluster", member)
+            self.add_cluster_member(member)
+        if missing_ips := self.state.units_ips - self.state.application.members_ips:
+            for ip in missing_ips:
+                logger.info("Adding new IP %s to the members list", ip)
+                self.add_member_ip(ip)
+            self.update_config()
+        self.patroni_manager.update_synchronous_node_count()
+
+    def reconfigure_cluster(self, event) -> bool:
+        """Reconfigure the cluster by adding and removing member IPs (port).
+
+        Returns:
+            Whether it was possible to reconfigure the cluster.
+        """
+        # The stale-recovery unwedge runs at the caller gates (update-status and
+        # peer-relation-changed): they are the only paths here, and they exit on
+        # has_raft_keys() before this point unless the unwedge already cleared
+        # them — a call here could never observe keys.
+        # Remove departing units when the leader changes.
+        if (
+            self.state.application.is_cluster_initialised
+            and not self.raft_manager.cleanup_raft_cluster()
+        ):
+            logger.debug("Deferring on_peer_relation_changed: failed to remove raft member")
+            return False
+        try:
+            self.add_members(event)
+        except Exception:
+            logger.debug("Deferring on_peer_relation_changed: Unable to add members")
+            return False
+        # Drop leftover partner addresses a departed or re-IP'd unit left
+        # behind (members_ips residue): a stale raft partner would otherwise
+        # survive as a status-0 ghost with a diluted quorum (CI 2026-10-17
+        # stereo_mode: postgresql-2's pre-isolation IP survived its re-IP).
+        for member_ip in self.get_ips_to_remove():
+            try:
+                logger.info(f"Removing stale Raft member: {member_ip}:{RAFT_PORT}")
+                self.raft_manager.remove_raft_member(f"{member_ip}:{RAFT_PORT}")
+            except RemoveRaftMemberFailedError:
+                logger.debug("Deferring on_peer_relation_changed: failed to remove raft member")
+                return False
+            self.remove_member_ip(member_ip)
+        return True
+
+    # -- RAFT recovery state machine (port of the charm's stuck-raft family) ---------
+
+    def has_raft_keys(self) -> bool:
+        """Checks for the presence of raft recovery keys in peer data."""
+        return self.state.has_raft_keys()
+
+    def unwedge_stale_recovery(self) -> bool:
+        """Clear stale raft-recovery keys when the cluster has quorum again.
+
+        A transient quorum-dilution window (e.g. a member re-IP: the new
+        address is added while the old one is still a raft partner) can arm
+        the stuck-raft recovery flag. Once the cluster has quorum again the
+        recovery machine is a false alarm that would otherwise run forever —
+        and worse, ``remove_raft_member`` early-exits while recovery keys
+        exist, so even ``cleanup_raft_cluster`` cannot drop the stale address
+        (CI 2026-10-17 stereo_mode: the app leader stayed Blocked
+        'Raft majority loss' with ``has_quorum`` true). Returns whether stale
+        keys were cleared.
+
+        Never touch a COMMITTED recovery (fix-validation round 1, W1-W3): a
+        ``promote-to-primary`` machine leaves durable markers — ``raft_stopped``
+        on the wiped units' peer data, and ``raft_selected_candidate`` /
+        ``raft_followers_stopped`` / ``raft_reset_primary`` / ``raft_rejoin``
+        on the app data. Wiping those mid-machine would strand the wiped units
+        (Patroni stopped, no ungated start path); post-wipe false alarms cannot
+        exist anyway (all wiped servers are down, so quorum reads False).
+        """
+        if not self.state.has_raft_keys():
+            return False
+        if not self.raft_manager.has_raft_quorum():
+            logger.debug("Raft recovery unwedge: no quorum; keeping the recovery state")
+            return False
+        machine_committed = any(
+            "raft_stopped" in peer.data for peer in self.state.application_peers
+        ) or bool(
+            {
+                "raft_selected_candidate",
+                "raft_followers_stopped",
+                "raft_reset_primary",
+                "raft_rejoin",
+            }
+            & set(self.state.application.data)
+        )
+        if machine_committed:
+            logger.debug("Raft recovery unwedge: recovery machine committed; keeping state")
+            return False
+        logger.info("Raft recovery unwedge: cluster has quorum; clearing stale recovery keys")
+        # The stuck flag is unit-scoped; the committed-machine markers (checked
+        # above) stay untouched.
+        for key in [key for key in self.state.peer.data if key.startswith("raft_")]:
+            self.state.peer.data.pop(key)
+        if self.state.model.unit.is_leader():
+            for key in [key for key in self.state.application.data if key.startswith("raft_")]:
+                self.state.application.data.pop(key)
+        return True
+
+    def stuck_cluster_check(self) -> None:
+        """Check for a stuck raft cluster and select a reinit candidate if safe."""
+        raft_stuck = False
+        all_units_stuck = True
+        candidate = self.state.application.data.get("raft_selected_candidate")
+        candidate_unit: str | None = None
+        for peer in self.state.application_peers:
+            if "raft_stuck" in peer.data:
+                raft_stuck = True
+            else:
+                all_units_stuck = False
+            if not candidate and not candidate_unit and "raft_candidate" in peer.data:
+                candidate_unit = peer.unit.name
+        if not raft_stuck:
+            return
+        if not all_units_stuck:
+            logger.warning("Stuck raft not yet detected on all units")
+            return
+        if not candidate and not candidate_unit:
+            logger.warning("Stuck raft has no candidate")
+            return
+        if "raft_selected_candidate" not in self.state.application.data and candidate_unit:
+            logger.info(f"{candidate_unit} selected for new raft leader")
+            self.state.application.data["raft_selected_candidate"] = candidate_unit
+
+    def stuck_cluster_rejoin(self) -> None:
+        """Reconnect the cluster to a new raft leader."""
+        primary = None
+        for peer in self.state.application_peers:
+            if "raft_primary" in peer.data:
+                primary = peer
+                break
+        if primary and "raft_reset_primary" not in self.state.application.data:
+            logger.info("Updating the primary endpoint")
+            self.state.application.data.pop("members_ips", None)
+            for peer in self.state.application_peers:
+                if ip := peer.data.get(f"{PEER_RELATION}-address"):
+                    self.add_member_ip(ip)
+            if self.state.unit_ip:
+                self.add_member_ip(self.state.unit_ip)
+            self.state.application.data["raft_reset_primary"] = "True"
+            self.update_relation_endpoints()
+        if (
+            "raft_rejoin" not in self.state.application.data
+            and "raft_followers_stopped" in self.state.application.data
+            and "raft_reset_primary" in self.state.application.data
+        ):
+            logger.info("Notify units they can rejoin")
+            self.state.application.data["raft_rejoin"] = "True"
+
+    def stuck_cluster_stopped_check(self) -> None:
+        """Check that the cluster is stopped."""
+        if not self.state.peer:
+            return
+        if "raft_followers_stopped" in self.state.application.data:
+            return
+        for peer in self.state.application_peers:
+            if "raft_stopped" not in peer.data:
+                return
+        logger.info("Cluster is shut down")
+        self.state.application.data["raft_followers_stopped"] = "True"
+
+    def stuck_cluster_cleanup(self) -> None:
+        """Clean the raft app-data flags once every unit dropped its flags."""
+        for peer in self.state.application_peers:
+            if any(flag.startswith("raft_") for flag in peer.data):
+                return
+        logger.info("Cleaning up raft app data")
+        for flag in (
+            "raft_rejoin",
+            "raft_reset_primary",
+            "raft_selected_candidate",
+            "raft_followers_stopped",
+        ):
+            self.state.application.data.pop(flag, None)
+
+    def raft_reinitialisation(self) -> None:
+        """Handle raft cluster loss of quorum (port of the charm's _raft_reinitialisation)."""
+        app_data = self.state.application.data
+        if "raft_rejoin" not in app_data:
+            if self.state.model.unit.is_leader():
+                self.stuck_cluster_check()
+            if not self._reinit_selected_candidate():
+                return
+            if self.state.model.unit.is_leader():
+                self.stuck_cluster_stopped_check()
+            self._reinit_promote_candidate()
+            if self.state.model.unit.is_leader():
+                self.stuck_cluster_rejoin()
+        if "raft_rejoin" in app_data:
+            self._reinit_rejoin_cleanup()
+
+    def _reinit_selected_candidate(self) -> bool:
+        """Stop Patroni and drop the raft data for the selected candidate's unit.
+
+        Returns:
+            False when the RAFT watcher has not disconnected yet (the caller
+            must wait for the next event).
+        """
+        candidate = self.state.application.data.get("raft_selected_candidate")
+        if candidate and "raft_stopped" not in self.state.peer.data:
+            self.state.peer.data.pop("raft_stuck", None)
+            self.state.peer.data.pop("raft_candidate", None)
+            self.raft_manager.remove_raft_data()
+            logger.info(f"Stopping {self.state.model.unit.name}")
+            self.state.peer.data["raft_stopped"] = "True"
+            self.watcher_handler.disable_watcher()
+            if self.watcher_handler.is_active:
+                logger.info("waiting for RAFT watcher to disconnect.")
+                return False
+        return True
+
+    def _reinit_promote_candidate(self) -> None:
+        """Reinitialise this unit as the new raft primary when it is the candidate."""
+        if (
+            self.state.application.data.get("raft_selected_candidate")
+            == self.state.model.unit.name
+            and "raft_primary" not in self.state.peer.data
+            and "raft_followers_stopped" in self.state.application.data
+        ):
+            self.set_unit_status(MaintenanceStatus("Reinitialising raft"))
+            logger.info(f"Reinitialising {self.state.model.unit.name} as primary")
+            self.raft_manager.reinitialise_raft_data()
+            self.state.peer.data["raft_primary"] = "True"
+
+    def _reinit_rejoin_cleanup(self) -> None:
+        """Rejoin the cluster and clean the recovery flags on the leader."""
+        logger.info("Cleaning up raft unit data")
+        self.state.peer.data.pop("raft_primary", None)
+        self.state.peer.data.pop("raft_stopped", None)
+        self.update_config()
+        self.patroni_manager.start_patroni()
+        if self.set_primary_status_message:
+            self.set_primary_status_message()
+        if self.state.model.unit.is_leader():
+            self.stuck_cluster_cleanup()
+
+    def raft_reconnect(self, event) -> str:
+        """Re-add this unit's raft member after a potential stuck connection (port).
+
+        The remove/add dance is retried within a bounded budget matching the
+        in-hook 300s recovery loop (``managers/raft.py``); on exhaustion the
+        flow reports ``DEFER`` so the event handler can defer to the next
+        event (the raft observer timer re-fires every 10s while a partner is
+        stuck).
+
+        Returns:
+            ``COMPLETED`` when there is nothing to do or the re-add succeeded;
+            ``DEFER`` when the retry budget was exhausted.
+        """
+        raft_status = self.raft_manager.get_raft_status()
+        logger.debug(f"Local raft status: {raft_status}")
+        if (
+            not raft_status
+            or not self.state.unit_ip
+            or not self.state.application.is_cluster_initialised
+            or self.state.unit_ip not in self.state.application.members_ips
+            or self.state.has_raft_keys()
+            or (
+                not self.state.application.members_ips
+                and not self.watcher_handler.watcher_raft_address
+            )
+        ):
+            return COMPLETED
+        if all(
+            raft_status[partner] == 2
+            for partner in raft_status
+            if partner.startswith(RAFT_PARTNER_PREFIX)
+        ):
+            logger.debug("All raft members are active.")
+            return COMPLETED
+        logger.info("Potentially stuck Raft connection detected. Re-adding Raft member.")
+        local_addr = f"{self.state.unit_ip}:{RAFT_PORT}"
+        try:
+            for attempt in Retrying(stop=stop_after_delay(300), wait=wait_fixed(5), reraise=True):
+                with attempt:
+                    # Re-evaluate the remote address on each attempt: the watcher
+                    # may have become active mid-retry. Prefer the live raft
+                    # leader (the re-add must reach a running raft server);
+                    # the previous fallback could select the stale ghost itself
+                    # from members_ips and burn the whole retry budget.
+                    leader_addr = getattr(raft_status.get("leader"), "address", None)
+                    if leader_addr == local_addr:
+                        leader_addr = None
+                    remote_addr = leader_addr or (
+                        watcher_addr
+                        if (watcher_addr := self.watcher_handler.watcher_raft_address)
+                        and self.watcher_handler.is_active
+                        else f"{next(member for member in self.state.application.members_ips if member != self.state.unit_ip)}:{RAFT_PORT}"
+                    )
+                    try:
+                        self.raft_manager.remove_raft_member(
+                            local_addr, remote_address=remote_addr, set_raft_flags=False
+                        )
+                    except Exception:
+                        logger.exception("Unable to remove Raft member")
+                        raise
+                    try:
+                        self.raft_manager.add_raft_member(local_addr, remote_address=remote_addr)
+                    except Exception:
+                        logger.exception("Unable to add Raft member")
+                        raise
+        except Exception:
+            logger.warning("Unable to re-add the Raft member within the retry budget; deferring")
+            return DEFER
+        return COMPLETED
+
+    # -- K8s membership (port of the K8s charm's endpoints bookkeeping) --------------
+
+    def get_hostname_from_member(self, member: str) -> str:
+        """Create a DNS name for a Patroni cluster member (K8s port)."""
+        unit_id = member.split("-")[-1]
+        return f"{self.state.model.app.name}-{unit_id}.{self.state.model.app.name}-endpoints"
+
+    def get_hostname_by_unit(self, unit_name: str) -> str:
+        """Create a DNS name for a PostgreSQL unit from its juju name (K8s port)."""
+        unit_id = unit_name.split("/")[1]
+        return f"{self.state.model.app.name}-{unit_id}.{self.state.model.app.name}-endpoints"
+
+    def build_service_name(self, service: str) -> str:
+        """Build a full k8s service name based on the service name (K8s port)."""
+        return f"{self.state.model.app.name}-{service}.{self.state.model.name}.svc.cluster.local"
+
+    def add_endpoint(self, endpoint: str) -> None:
+        """Add one endpoint to the members list (leader only, K8s port)."""
+        if not self.state.model.unit.is_leader():
+            return
+        self.state.application.add_endpoint(endpoint)
+
+    def remove_endpoint(self, endpoint: str) -> None:
+        """Remove one endpoint from the members list (leader only, K8s port)."""
+        if not self.state.model.unit.is_leader():
+            return
+        self.state.application.remove_endpoint(endpoint)
+
+    def get_endpoints_to_remove(self) -> list[str]:
+        """List the endpoints that were part of the cluster but departed (K8s port)."""
+        old = set(self.state.application.endpoints)
+        current = {self.get_hostname_from_member(member) for member in self.hosts()}
+        return list(old - current)
+
+    def remove_departed_endpoints(self) -> list[str]:
+        """Reconcile departed endpoints out of the app databag (K8s port).
+
+        Runs get_endpoints_to_remove() and removes each endpoint from the
+        members list; non-leaders no-op inside remove_endpoint. Returns the
+        removed endpoints.
+        """
+        removed = self.get_endpoints_to_remove()
+        for endpoint in removed:
+            self.remove_endpoint(endpoint)
+            logger.info(f"Removing departed endpoint {endpoint} from cluster members")
+        return removed
+
+    def peer_members_endpoints(self) -> list[str]:
+        """The peer member endpoints minus this unit's own endpoint (K8s port)."""
+        endpoints = list(self.state.application.endpoints)
+        current = self.get_hostname_from_member(unit_name_to_pod_name(self.state.model.unit.name))
+        if current in endpoints:
+            endpoints.remove(current)
+        return endpoints
+
+    def add_cluster_member_k8s(self, member: str) -> None:
+        """K8s variant: add the endpoint and patch the pod labels (port)."""
+        if self.state.substrate != Substrates.K8S:
+            raise NotImplementedError
+        if self.k8s_manager is None:
+            raise RuntimeError("k8s_manager is not wired")
+        hostname = self.get_hostname_from_member(member)
+        if not self.patroni_manager.are_all_members_ready():
+            logger.info("not all members are ready")
+            raise NotReadyError("not all members are ready")
+        # Add the member to the list that should be updated in each other member.
+        self.add_endpoint(hostname)
+        # Add the labels needed for replication in this pod; this also enables
+        # the member as part of the cluster.
+        try:
+            self.k8s_manager.patch_pod_labels(member)
+        except Exception as e:
+            logger.error("failed to patch pod")
+            self.set_unit_status(BlockedStatus(f"failed to patch pod with error {e}"))
+
+    def add_members_k8s(self, event) -> None:
+        """K8s variant: add new cluster members (port).
+
+        The event is deferred by the caller when one of the current units is
+        copying data from the primary.
+        """
+        # Only the leader can reconfigure.
+        if not self.state.model.unit.is_leader():
+            return
+        # Reconfiguration can be successful only if the cluster is initialised.
+        if not self.state.application.is_cluster_initialised:
+            return
+        host_endpoints = {self.get_hostname_from_member(member) for member in self.hosts()}
+        try:
+            # Compare the Patroni cluster members and the Juju hosts to avoid an
+            # unnecessary reconfiguration.
+            if (
+                self.patroni_manager.cluster_members == self.hosts()
+                and set(self.state.application.endpoints) == host_endpoints
+            ):
+                return
+            logger.info("Reconfiguring cluster")
+            self.set_unit_status(MaintenanceStatus("reconfiguring cluster"))
+            missing_endpoints = host_endpoints - set(self.state.application.endpoints)
+            members_to_add = (self.hosts() - self.patroni_manager.cluster_members) | {
+                endpoint.split(".")[0] for endpoint in missing_endpoints
+            }
+            for member in members_to_add:
+                logger.debug("Adding %s to cluster", member)
+                self.add_cluster_member_k8s(member)
+            self.patroni_manager.update_synchronous_node_count()
+        except NotReadyError:
+            logger.info("Deferring reconfigure: another member doing sync right now")
+            event.defer()
+        except RetryError:
+            logger.info("Deferring reconfigure: failed to obtain cluster members from Patroni")
+            event.defer()

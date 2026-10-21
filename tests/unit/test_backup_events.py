@@ -9,7 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from ops.pebble import ExecError
-from single_kernel_postgresql.events.backup import BackupEventsHandler
 from tenacity import RetryError
 
 
@@ -25,7 +24,10 @@ def restore_manager():
 
 @pytest.fixture
 def handler(harness, backup_manager, restore_manager):
-    return BackupEventsHandler(harness.charm, harness.charm.state, backup_manager, restore_manager)
+    handler = harness.charm.backup_events_handler
+    handler.backup_manager = backup_manager
+    handler.restore_manager = restore_manager
+    return handler
 
 
 def make_action_event(params=None):
@@ -56,6 +58,24 @@ def test_credential_changed_defers_on_service_start_retry(handler, backup_manage
     handler._on_s3_credential_changed(event)
     event.defer.assert_called_once()
     backup_manager.initialise_s3_repository.assert_not_called()
+
+
+def test_purge_runs_before_render(handler, backup_manager):
+    """credential_changed_checks reconciles departed endpoints before the render."""
+    from single_kernel_postgresql.managers.backup import BackupManager
+
+    # Drive the REAL credential_changed_checks against the mock manager so the
+    # internal purge/render ordering is observable.
+    backup_manager.state.application.is_cluster_restoring_backup = False
+    backup_manager.state.application.is_cluster_restoring_to_time = False
+    backup_manager.credential_changed_checks = BackupManager.credential_changed_checks.__get__(
+        backup_manager
+    )
+    handler._on_s3_credential_changed(make_action_event())
+    names = [name for name, _args, _kwargs in backup_manager.mock_calls]
+    assert "remove_departed_endpoints" in names
+    assert "_render_pgbackrest_conf_file" in names
+    assert names.index("remove_departed_endpoints") < names.index("_render_pgbackrest_conf_file")
 
 
 def test_credential_changed_initialises_on_primary(harness, handler, backup_manager):

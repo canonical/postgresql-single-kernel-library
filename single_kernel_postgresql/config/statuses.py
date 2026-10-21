@@ -10,6 +10,8 @@ from enum import Enum
 
 from data_platform_helpers.advanced_statuses import StatusObject
 
+from single_kernel_postgresql.config.literals import CONFIGURATION_ERROR_MESSAGE
+
 
 class GeneralStatuses(Enum):
     """Collection of common charm statuses."""
@@ -22,11 +24,15 @@ class GeneralStatuses(Enum):
     FAILED_SETTING_PASSWORDS = StatusObject(
         status="blocked", message="Password setting for system users failed."
     )
+    CONFIGURATION_ERROR = StatusObject(status="blocked", message=CONFIGURATION_ERROR_MESSAGE)
     WAITING_PASSWORDS_GENERATION = StatusObject(
         status="waiting", message="awaiting passwords generation"
     )
     WAITING_DATABASE_TO_START = StatusObject(
         status="waiting", message="awaiting for database to start"
+    )
+    WAITING_FOR_CLUSTER_MEMBERSHIP = StatusObject(
+        status="waiting", message="Waiting for cluster membership"
     )
 
 

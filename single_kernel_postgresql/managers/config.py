@@ -8,6 +8,7 @@ Responsible for managing the configuration of the PostgreSQL instance.
 """
 
 import importlib.resources
+import json
 import logging
 import pathlib
 from collections.abc import Callable
@@ -20,17 +21,35 @@ import psycopg2
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from jinja2 import Template
+from ops.model import (
+    ActiveStatus,
+    BlockedStatus,
+    MaintenanceStatus,
+    Relation,
+    StatusBase,
+    WaitingStatus,
+)
 from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
+from single_kernel_postgresql.compat.postgresql import PostgreSQLUndefinedHostError
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.exceptions import PostgreSQLCannotConnectError
+from single_kernel_postgresql.config.exceptions import (
+    PostgreSQLBaseError,
+    PostgreSQLCannotConnectError,
+)
 from single_kernel_postgresql.config.literals import (
+    CONFIGURATION_ERROR_MESSAGE,
+    EXTENSION_OBJECT_MESSAGE,
+    EXTENSIONS_DEPENDENCY_MESSAGE,
     PG_CRON_DATABASE,
     PGBACKREST_CONF_FILE,
+    PLUGIN_OVERRIDES,
     POSTGRESQL_SNAP_NAME,
     POSTGRESQL_STORAGE_PERMISSIONS,
+    REPLICATION_USER,
     REWIND_USER,
     SHARED_PRELOAD_LIBRARIES,
+    SPI_MODULE,
     USER,
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
@@ -39,7 +58,14 @@ from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.managers.tls import TLSManager
 from single_kernel_postgresql.utils import _change_owner, render_file
-from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
+from single_kernel_postgresql.utils.postgresql import (
+    ACCESS_GROUPS,
+    REQUIRED_PLUGINS,
+    PostgreSQLEnableDisableExtensionError,
+)
+from single_kernel_postgresql.utils.postgresql import (
+    PostgreSQL as PostgreSQLClient,
+)
 from single_kernel_postgresql.workload.base import BaseWorkload, ResourceProvider
 
 if TYPE_CHECKING:
@@ -49,6 +75,10 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
+
+# Per-unit peer-databag flag: the durable invalid-config signal behind the
+# collect replay (see ConfigManager.get_statuses).
+CONFIGURATION_ERROR_KEY = "configuration-error"
 
 
 def _snap_provided_libraries() -> set[str]:
@@ -78,6 +108,8 @@ class ConfigManager(BaseManager):
         resource_provider: Callable[[], ResourceProvider],
         request_restart: Callable[[], None],
         restart_services: Callable[[], None],
+        set_unit_status: Callable[[StatusBase], None],
+        primary_endpoint: Callable[[], str | None],
         logical_replication_slots: Callable[[], dict[str, str]] | None = None,
     ):
         super().__init__(state, workload, "config_manager")
@@ -92,10 +124,19 @@ class ConfigManager(BaseManager):
         # service restarts stay in the charm until their own migration phases.
         self.request_restart = request_restart
         self.restart_services = restart_services
+        # Patroni-resolved primary endpoint (None when unreachable); the state's
+        # k8s-service form is never falsy on VM and cannot gate VM flows.
+        self.primary_endpoint = primary_endpoint
+        # Unit-status bridge: the config-driven flows juggle unit statuses
+        # (the extensions blocked/waiting dance) through the charm's seam.
+        self.set_unit_status = set_unit_status
         # Publishes the managed logical replication slots for the Patroni render and API
         # sync; the callable is wired from the logical replication manager at the
         # composition root and defaults to an empty mapping when absent.
         self.logical_replication_slots = logical_replication_slots or (lambda: {})
+        # Signature of the last Patroni render this unit applied: identical peer-changed
+        # payloads would otherwise re-render + reload Patroni on every hook run.
+        self._last_applied_render: str | None = None
 
     @staticmethod
     def _dict_to_hba_string(_dict: dict[str, Any]) -> str:
@@ -487,6 +528,17 @@ class ConfigManager(BaseManager):
             logger.info("PostgreSQL restart required")
             self.request_restart()
 
+    def _member_started_gate(self, postgresql_client: PostgreSQLClient) -> bool | None:
+        """Early-exit verdict when Patroni has not started yet, or None to continue."""
+        if self.patroni_manager.member_started:
+            return None
+        if self.is_tls_enabled:
+            logger.debug("Early exit update_config: patroni not responding but TLS is enabled.")
+            self.handle_restart_need(postgresql_client, True)
+            return True
+        logger.debug("Early exit update_config: Patroni not started yet")
+        return False
+
     def update_config(
         self,
         postgresql_client: PostgreSQLClient,
@@ -529,7 +581,7 @@ class ConfigManager(BaseManager):
         # Update and reload configuration based on TLS files availability.
         logger.info("Updating Patroni config file")
         logger.debug(f"Calling render_patroni_yml_file with parameters = {pg_parameters}")
-        self.render_patroni_yml_file(
+        rendered = self.render_patroni_yml_file(
             connectivity=self.state.peer.is_connectivity_enabled,
             is_creating_backup=is_creating_backup,
             enable_ldap=self.state.application.is_ldap_enabled,
@@ -563,15 +615,14 @@ class ConfigManager(BaseManager):
             logger.debug("Early exit update_config: Workload not started yet")
             return True
 
-        if not self.patroni_manager.member_started:
-            if self.is_tls_enabled:
-                logger.debug(
-                    "Early exit update_config: patroni not responding but TLS is enabled."
-                )
-                self.handle_restart_need(postgresql_client, True)
-                return True
-            logger.debug("Early exit update_config: Patroni not started yet")
-            return False
+        if (verdict := self._member_started_gate(postgresql_client)) is not None:
+            return verdict
+
+        # Identical rendered parameters → nothing to apply: skip the Patroni API
+        # patch, the reload and the service restarts (trunk re-does them every time).
+        if not rendered:
+            logger.debug("Early exit update_config: Patroni config unchanged")
+            return True
 
         # Try to connect. Patroni's REST API patch (below) doesn't need the PG-client
         # connection, so this standalone gate is VM-only; K8s proceeds straight to it.
@@ -639,7 +690,7 @@ class ConfigManager(BaseManager):
         async_standby_endpoints: list[str] | None = None,
         # VM watcher rel
         watcher_raft_address: str | None = None,
-    ) -> None:
+    ) -> bool:
         """Render the Patroni configuration file.
 
         Args:
@@ -665,6 +716,9 @@ class ConfigManager(BaseManager):
             async_standby_endpoints: Primary async cluster endpoint.
             async_partner_addresses: Primary async cluster endpoint.
             watcher_raft_address: IP address of a related Raft watcher.
+
+        Returns:
+            Whether the configuration was (re-)rendered to disk.
         """
         slots = slots or {}
         ldap_parameters = ldap_parameters or {}
@@ -672,7 +726,7 @@ class ConfigManager(BaseManager):
         async_standby_endpoints = async_standby_endpoints or []
         if not self._are_passwords_set:
             logger.warning("Passwords are not yet generated by the leader")
-            return
+            return False
 
         # Load the template shipped as package data, not relative to the CWD.
         template_source = (
@@ -758,6 +812,12 @@ class ConfigManager(BaseManager):
                 "shared_preload_libraries": ",".join(SHARED_PRELOAD_LIBRARIES),
             })
             perms = 0o644
+        # Skip the render (and the caller's Patroni reload) when nothing changed:
+        # peer-changed fires with identical parameters far more often than not.
+        signature = json.dumps(confs, default=repr, sort_keys=True)
+        if signature == self._last_applied_render:
+            logger.debug("Early exit render_patroni_yml_file: config unchanged")
+            return False
         rendered = template.render(**confs)
         render_file(
             self.state.substrate,
@@ -765,6 +825,207 @@ class ConfigManager(BaseManager):
             rendered,
             perms,
         )
+        self._last_applied_render = signature
+        return True
+
+    @property
+    def is_blocked(self) -> bool:
+        """Whether the unit is in a blocked state (port of the charm's is_blocked)."""
+        return isinstance(self.state.peer.unit.status, BlockedStatus)
+
+    def _restore_unit_status(self, status: StatusBase) -> None:
+        """Restore a previously cached unit status (port of the charm's helper).
+
+        The status getter can return statuses that the setter rejects (e.g. an
+        "error" status left over from a previously failed hook). Skip restoring
+        any status juju does not allow us to set, to avoid an InvalidStatusError
+        that would deadlock the unit.
+        """
+        if isinstance(status, ActiveStatus | BlockedStatus | MaintenanceStatus | WaitingStatus):
+            self.set_unit_status(status)
+
+    def get_plugins(self) -> list[str]:
+        """Return the list of enabled plugins (port of the charm's get_plugins)."""
+        plugins = [
+            "_".join(plugin.split("_")[1:-1])
+            for plugin in self.state.config.plugin_keys()
+            if self.state.config[plugin]
+        ]
+        plugins = [PLUGIN_OVERRIDES.get(plugin, plugin) for plugin in plugins]
+        if "spi" in plugins:
+            plugins.remove("spi")
+            for ext in SPI_MODULE:
+                plugins.append(ext)
+        return plugins
+
+    def reconcile_extensions(
+        self, postgresql_client: PostgreSQLClient, database: str | None = None
+    ) -> None:
+        """Enable/disable PostgreSQL extensions set through config options.
+
+        Port of the charm's ``enable_disable_extensions`` (renamed here so it
+        does not shadow the client's SQL executor of the same name).
+        """
+        if self.patroni_manager.get_primary() is None:
+            logger.debug("Early exit reconcile_extensions: standby cluster")
+            return
+        original_status = self.state.peer.unit.status
+        extensions: dict[str, bool] = {}
+        # Collect extensions.
+        for plugin in self.state.config.plugin_keys():
+            enable = self.state.config[plugin]
+            extension = "_".join(plugin.split("_")[1:-1])
+            if extension == "spi":
+                for ext in SPI_MODULE:
+                    extensions[ext] = enable
+                continue
+            extension = PLUGIN_OVERRIDES.get(extension, extension)
+            if self._check_extension_dependencies(extension, enable):
+                self.block_on_configuration_error(EXTENSIONS_DEPENDENCY_MESSAGE)
+                self.set_unit_status(BlockedStatus(EXTENSIONS_DEPENDENCY_MESSAGE))
+                return
+            extensions[extension] = enable
+        if (
+            self.is_blocked
+            and self.state.peer.unit.status.message == EXTENSIONS_DEPENDENCY_MESSAGE
+        ):
+            self.clear_configuration_error()
+            self.set_unit_status(ActiveStatus())
+            original_status = self.state.peer.unit.status
+        self.set_unit_status(WaitingStatus("Updating extensions"))
+        try:
+            postgresql_client.enable_disable_extensions(extensions, database)
+        except psycopg2.errors.DependentObjectsStillExist as e:  # ty: ignore[possibly-missing-submodule]
+            logger.error(
+                "Failed to disable plugin: %s\n"
+                "Was the plugin enabled manually? If so, update charm config with "
+                "`juju config postgresql plugin-<plugin_name>-enable=True`",
+                str(e),
+            )
+            self.block_on_configuration_error(EXTENSION_OBJECT_MESSAGE)
+            self.set_unit_status(BlockedStatus(EXTENSION_OBJECT_MESSAGE))
+            return
+        except (PostgreSQLEnableDisableExtensionError, PostgreSQLUndefinedHostError) as e:
+            logger.exception("failed to change plugins: %s", str(e))
+        if original_status.message == EXTENSION_OBJECT_MESSAGE:
+            self.clear_configuration_error()
+            self.set_unit_status(ActiveStatus())
+            return
+        self._restore_unit_status(original_status)
+
+    def _check_extension_dependencies(self, extension: str, enable: bool) -> bool:
+        """Whether enabling the extension needs other plugins enabled first (port)."""
+        skip = False
+        if enable and extension in REQUIRED_PLUGINS:
+            for ext in REQUIRED_PLUGINS[extension]:
+                if not self.state.config[f"plugin_{ext}_enable"]:
+                    skip = True
+                    logger.exception(
+                        "cannot enable %s, extension required %s to be enabled before",
+                        extension,
+                        ext,
+                    )
+        return skip
+
+    def validate_config_options(self, postgresql_client: PostgreSQLClient) -> None:
+        """Validate config options that need access to the database (port)."""
+        if (
+            self.state.config.instance_default_text_search_config
+            not in postgresql_client.get_postgresql_text_search_configs()
+        ):
+            raise ValueError(
+                "instance_default_text_search_config config option has an invalid value"
+            )
+
+        if not postgresql_client.validate_group_map(self.state.config.ldap_map):
+            raise ValueError("ldap_map config option has an invalid value")
+
+        if self.state.config.request_date_style and not postgresql_client.validate_date_style(
+            self.state.config.request_date_style
+        ):
+            raise ValueError("request_date_style config option has an invalid value")
+
+        if self.state.config.request_time_zone not in postgresql_client.get_postgresql_timezones():
+            raise ValueError("request_time_zone config option has an invalid value")
+
+        if (
+            self.state.config.storage_default_table_access_method
+            not in postgresql_client.get_postgresql_default_table_access_methods()
+        ):
+            raise ValueError(
+                "storage_default_table_access_method config option has an invalid value"
+            )
+
+    def build_relations_user_databases_map(
+        self, postgresql_client: PostgreSQLClient, client_relations: list[Relation]
+    ) -> dict:
+        """Build the user->databases map for all relations (port).
+
+        The Patroni render turns the map into per-user pg_hba rules.
+        """
+        # Copy relations users directly instead of waiting for them to be created.
+        user_database_map = self.database_manager.collect_user_relations()
+
+        if (
+            not self.state.application.is_cluster_initialised
+            or not self.patroni_manager.member_started
+        ):
+            user_database_map.update({
+                USER: "all",
+                REPLICATION_USER: "all",
+                REWIND_USER: "all",
+            })
+            return user_database_map
+        hosts = (
+            [True, False]
+            if self.state.peer.is_connectivity_enabled and self.primary_endpoint()
+            else [self.state.peer.is_connectivity_enabled]
+        )
+        for current_host in hosts:
+            try:
+                for user in postgresql_client.list_users(current_host=current_host):
+                    if user in (
+                        "backup",
+                        "monitoring",
+                        "operator",
+                        "postgres",
+                        "replication",
+                        "rewind",
+                        "charmed_databases_owner",
+                    ):
+                        continue
+                    if databases := ",".join(
+                        sorted(
+                            postgresql_client.list_accessible_databases_for_user(
+                                user, current_host=current_host
+                            )
+                        )
+                    ):
+                        user_database_map[user] = databases
+                    else:
+                        logger.debug(f"User {user} has no databases to connect to")
+                    # Add "landscape" superuser by default when a "db-admin" relation exists.
+                    if any(True for relation in client_relations if relation.name == "db-admin"):
+                        user_database_map["landscape"] = "all"
+                if postgresql_client.list_access_groups(current_host=current_host) != set(
+                    ACCESS_GROUPS
+                ):
+                    user_database_map.update({
+                        USER: "all",
+                        REPLICATION_USER: "all",
+                        REWIND_USER: "all",
+                    })
+                return user_database_map
+            except PostgreSQLBaseError as e:
+                logger.debug(f"Failing to get users with {e}")
+                continue
+        logger.debug("build_relations_user_databases_map: Unable to get users")
+        user_database_map.update({
+            USER: "all",
+            REPLICATION_USER: "all",
+            REWIND_USER: "all",
+        })
+        return user_database_map
 
     @property
     def _are_passwords_set(self) -> bool:
@@ -781,5 +1042,35 @@ class ConfigManager(BaseManager):
     def get_statuses(
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
-        """Compute the manager's statuses."""
+        """Compute the manager's statuses.
+
+        The invalid-config blocked must be re-surfaced here on EVERY collect:
+        ops applies the collect result last, so a directly-written blocked
+        only lives until hook end, and the status store is wiped by the
+        update-status recompute. The durable signal is a per-unit peer-databag
+        flag (the LogicalReplicationManager pattern).
+        """
+        if scope == "unit" and (message := self.state.peer.data.get(CONFIGURATION_ERROR_KEY)):
+            return [StatusObject(status="blocked", message=message)]
         return [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def block_on_configuration_error(self, message: str = CONFIGURATION_ERROR_MESSAGE) -> None:
+        """Persist an invalid-config state (unit scope) for the collect replay."""
+        self.state.peer.data[CONFIGURATION_ERROR_KEY] = message
+        self.state.add_status_if_not_present(
+            StatusObject(status="blocked", message=message), scope="unit", component=self.name
+        )
+
+    def clear_configuration_error(self, message: str | None = None) -> None:
+        """Clear the persisted invalid-config state once its condition resolves.
+
+        With a message, only clear when the stored message matches, so the
+        config-validation sites never lift a plugin/dependency block.
+        """
+        stored = self.state.peer.data.get(CONFIGURATION_ERROR_KEY)
+        if stored is None or (message is not None and stored != message):
+            return
+        self.state.peer.data.pop(CONFIGURATION_ERROR_KEY, None)
+        self.state.remove_status_if_present(
+            StatusObject(status="blocked", message=stored), scope="unit", component=self.name
+        )
