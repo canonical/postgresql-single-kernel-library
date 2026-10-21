@@ -121,10 +121,10 @@ def patch_crypto():
 def _update_config_is_a_noop(request, substrate):
     """The charm suites always patched charm.update_config.
 
-    The real body needs a live database; the vm_charm bridge tests opt out and
-    exercise the real body.
+    The real body needs a live database; the vm_charm/k8s_charm bridge tests opt
+    out and exercise the real body.
     """
-    if request.module.__name__.endswith("test_vm_charm"):
+    if request.module.__name__.endswith(("test_vm_charm", "test_k8s_charm")):
         yield
         return
     target = (
@@ -133,6 +133,25 @@ def _update_config_is_a_noop(request, substrate):
         else "single_kernel_postgresql.charms.k8s_charm.PostgreSQLK8sCharm.update_config"
     )
     patcher = patch(target, return_value=True)
+    patcher.start()
+    yield
+    patcher.stop()
+
+
+@pytest.fixture(autouse=True)
+def _fix_leader_annotation_is_a_stub(request, substrate):
+    """The K8s leader-elected flow calls the charm's fix_leader_annotation.
+
+    Its lightkube Client cannot be built in the unit env; the k8s_charm tests
+    opt out and exercise the real method.
+    """
+    if substrate != Substrates.K8S or request.module.__name__.endswith("test_k8s_charm"):
+        yield
+        return
+    patcher = patch(
+        "single_kernel_postgresql.charms.k8s_charm.PostgreSQLK8sCharm.fix_leader_annotation",
+        return_value=True,
+    )
     patcher.start()
     yield
     patcher.stop()
@@ -157,6 +176,15 @@ def harness(substrate, test_charm_path):
             meta=meta,
             actions=actions,
         )
+        # The K8s reload bridge writes the charm-local Patroni CA bundle to /tmp on
+        # every tls_files_pushed; PatroniManager reads the same path for its REST
+        # verify= in OTHER tests' k8s legs, and non-PEM sentinels break httpx there.
+        # Point the bundle at a throwaway path for the unit suite.
+        patcher = patch(
+            "single_kernel_postgresql.charms.k8s_charm.TLS_CA_BUNDLE_FILE",
+            "peer_ca_bundle.unit-test.pem",
+        )
+        patcher.start()
     peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
     # The status machinery (DPH StatusesState) persists component statuses in
@@ -237,6 +265,15 @@ def harness(substrate, test_charm_path):
                     return_value={},
                 )
             )
+            # Unit tests never talk to the K8s API: the leader-elected flow's
+            # resource cleanup and service creation run through the real manager.
+            # Client-class patches in the k8s manager tests override this guard.
+            stack.enter_context(
+                patch(
+                    "single_kernel_postgresql.managers.k8s.Client",
+                    return_value=MagicMock(),
+                )
+            )
             systemd_mock = MagicMock()
             for name in systemd_names:
                 stack.enter_context(
@@ -244,4 +281,6 @@ def harness(substrate, test_charm_path):
                 )
             harness.begin()
             yield harness
+    if substrate == "k8s":
+        patcher.stop()
     harness.cleanup()

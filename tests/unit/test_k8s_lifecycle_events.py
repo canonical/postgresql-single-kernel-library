@@ -47,16 +47,23 @@ modules["charms.certificate_transfer_interface.v0.certificate_transfer"] = _cert
 
 from single_kernel_postgresql.config.enums import Substrates  # noqa: E402
 from single_kernel_postgresql.config.exceptions import (  # noqa: E402
+    DeployedWithoutTrustError,
     SwitchoverFailedError,
     SwitchoverNotSyncError,
 )
 from single_kernel_postgresql.config.literals import (  # noqa: E402
+    APP_SCOPE,
     EXTENSION_OBJECT_MESSAGE,
     INSUFFICIENT_SIZE_WARNING,
+    MONITORING_PASSWORD_KEY,
+    PATRONI_PASSWORD_KEY,
     PEER_RELATION,
+    REPLICATION_PASSWORD_KEY,
+    REWIND_PASSWORD_KEY,
+    USER_PASSWORD_KEY,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses  # noqa: E402
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication  # noqa: E402
-from single_kernel_postgresql.events.tls_transfer import TLSTransfer  # noqa: E402
 from single_kernel_postgresql.utils.postgresql import (  # noqa: E402
     PostgreSQLCreatePredefinedRolesError,
     PostgreSQLCreateUserError,
@@ -81,6 +88,8 @@ def handler(harness):
     handler.backup_manager = Mock()
     handler.restore_manager = Mock()
     handler.k8s_manager = Mock()
+    handler.charm.tls_transfer = MagicMock()
+    handler.charm.tls_transfer.get_ca_secret_names.return_value = iter(())
     return handler
 
 
@@ -142,6 +151,73 @@ def test_pebble_ready_creates_pgdata_and_defers_for_unready_replica(handler, con
     event.defer.assert_called_once()
 
 
+def test_pebble_ready_replica_membership_wait_persists_through_collect(
+    handler, harness, container
+):
+    """A replica stuck on the members-list gate surfaces a collect-surviving waiting.
+
+    The silent defer+return left juju reporting active while the replica had
+    not joined yet, releasing the deploy's all-active gate mid-join
+    (test_symlinks pg_wal symlink failure, CI 2026-10-15).
+    """
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    harness.set_leader(False)
+    _set_cluster_initialised(harness, rel_id)
+    event = Mock(workload=container, defer=Mock())
+    container.can_connect.return_value = True
+    with (
+        patch.object(type(handler.charm), "create_pgdata"),
+        patch.object(
+            type(handler.charm),
+            "primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="10.1.1.1",
+        ),
+    ):
+        handler._on_postgresql_pebble_ready(event)
+    event.defer.assert_called_once()
+    records = handler.state.statuses.get("unit", handler.cluster_manager.name).root
+    assert records == [GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value]
+    with patch.object(handler.refresh_manager, "reconcile_refresh_status"):
+        harness.evaluate_status()
+    assert harness.charm.unit.status == WaitingStatus("Waiting for cluster membership")
+
+    # The leader adds this unit's endpoint: re-firing clears the wait.
+    _set_endpoints_with_self(harness, rel_id)
+    with (
+        patch.object(type(handler.charm), "create_pgdata"),
+        patch.object(type(handler.charm), "fix_pod"),
+        patch.object(
+            type(handler.charm),
+            "primary_endpoint",
+            new_callable=PropertyMock,
+            return_value="10.1.1.1",
+        ),
+        patch.object(type(handler.state), "get_secret", return_value="ca"),
+        patch.object(
+            type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
+        ),
+        patch.object(type(handler.charm), "update_pebble_layers"),
+        patch.object(type(handler.charm), "update_config", return_value=True),
+        patch.object(handler, "_set_active_status"),
+        patch.object(
+            type(handler.async_replication_manager),
+            "async_relation",
+            new_callable=PropertyMock,
+            return_value=None,
+        ),
+        patch.object(type(handler.patroni_manager), "is_replication_hba_ready", return_value=True),
+    ):
+        assert handler._replica_can_start() is True
+        handler._on_postgresql_pebble_ready(event)
+    event.defer.assert_called_once()
+    records = handler.state.statuses.get("unit", handler.cluster_manager.name).root
+    assert GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value not in records
+    with patch.object(handler.refresh_manager, "reconcile_refresh_status"):
+        harness.evaluate_status()
+    assert harness.charm.unit.status != WaitingStatus("Waiting for cluster membership")
+
+
 def test_pebble_ready_generates_internal_cert_chain(handler, harness, container):
     harness.set_leader(False)
     event = Mock(workload=container, defer=Mock())
@@ -156,7 +232,6 @@ def test_pebble_ready_generates_internal_cert_chain(handler, harness, container)
             new_callable=PropertyMock,
             return_value=False,
         ),
-        patch.object(TLSTransfer, "get_ca_secret_names", return_value=iter(())),
         patch.object(type(handler.tls_manager), "generate_internal_peer_cert") as gen_cert,
         patch.object(type(handler.tls_manager), "push_tls_files") as push_tls,
         patch.object(type(handler.charm), "sync_tls_trust_store_and_bundle") as sync_tls,
@@ -173,6 +248,7 @@ def test_pebble_ready_defers_when_ca_push_fails(handler, harness, container):
     harness.set_leader(False)
     event = Mock(workload=container, defer=Mock())
     container.can_connect.return_value = True
+    handler.charm.tls_transfer.get_ca_secret_names.return_value = iter(["ca-secret"])
     with (
         patch.object(type(handler.charm), "create_pgdata"),
         patch.object(handler, "_replica_can_start", return_value=True),
@@ -180,7 +256,6 @@ def test_pebble_ready_defers_when_ca_push_fails(handler, harness, container):
         patch.object(
             type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
         ),
-        patch.object(TLSTransfer, "get_ca_secret_names", return_value=["ca-secret"]),
         patch.object(
             type(handler.charm),
             "push_ca_file_into_workload",
@@ -192,7 +267,8 @@ def test_pebble_ready_defers_when_ca_push_fails(handler, harness, container):
 
 
 def test_pebble_ready_member_gate_and_leader_bootstrap(handler, harness, container):
-    harness.set_leader(True)
+    with harness.hooks_disabled():
+        harness.set_leader(True)
     event = Mock(workload=container, defer=Mock())
     container.can_connect.return_value = True
     with (
@@ -202,7 +278,6 @@ def test_pebble_ready_member_gate_and_leader_bootstrap(handler, harness, contain
         patch.object(
             type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
         ),
-        patch.object(TLSTransfer, "get_ca_secret_names", return_value=iter(())),
         patch.object(
             type(handler.patroni_manager),
             "member_started",
@@ -223,7 +298,6 @@ def test_pebble_ready_member_gate_and_leader_bootstrap(handler, harness, contain
         patch.object(
             type(handler.state.peer), "internal_cert", new_callable=PropertyMock, return_value=True
         ),
-        patch.object(TLSTransfer, "get_ca_secret_names", return_value=iter(())),
         patch.object(
             type(handler.patroni_manager),
             "member_started",
@@ -529,11 +603,49 @@ def test_was_restore_successful_blocks_on_pitr_failure(handler, harness, contain
     handler.restore_manager.block_on_pitr_failure.assert_called_once_with()
 
 
+def test_was_restore_successful_pitr_branch_ignores_stale_failure(handler, harness, container):
+    """A prior restore's failure line must not re-block a later valid restore.
+
+    CI 2026-10-18 (K8s pitr wave): the scan reads the lifetime-accumulated
+    pebble service logs, so a negative control's terminal failure line still
+    matched while the next valid restore ran; every hook that evaluated during
+    the restore window re-blocked it and the test timed out waiting for
+    active. Only a NEW bootstrap failure may re-block; the durable
+    ``pitr-failed`` flag already persists the blocked through the collect
+    replay.
+    """
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(
+            rel_id, harness.charm.app.name, {"restore-to-time": "2023-01-01"}
+        )
+    service = Mock(current=ServiceStatus.ACTIVE)
+    with (
+        patch.object(handler.restore_manager, "is_pitr_failed", return_value=(True, False)),
+        patch.object(
+            type(handler.patroni_manager),
+            "member_started",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch(TIMELINE_PATCH, return_value="3"),
+        patch.object(type(handler.charm), "update_config", return_value=True),
+        patch.object(handler.restore_manager, "restore_patroni_restart_condition"),
+        patch.object(handler.backup_manager, "can_use_s3_repository", return_value=(True, None)),
+        patch.object(type(handler.cluster_manager), "setup_instance_users_k8s"),
+    ):
+        assert handler._was_restore_successful_k8s(container, service) is True
+    handler.restore_manager.log_pitr_last_transaction_time.assert_not_called()
+    handler.restore_manager.block_on_pitr_failure.assert_not_called()
+    handler.restore_manager.clear_pitr_failure.assert_called_once_with()
+
+
 # -- peer-relation flows -----------------------------------------------------------
 
 
 def test_peer_relation_changed_initialises_on_leader(handler, harness):
-    harness.set_leader(True)
+    with harness.hooks_disabled():
+        harness.set_leader(True)
     event = Mock(defer=Mock())
     # A successful bootstrap defers: the full flow re-runs on the re-emitted event.
     with patch.object(handler, "_initialize_cluster", return_value=True) as initialize:
@@ -551,7 +663,8 @@ def test_peer_relation_changed_non_leader_uninitialised_is_silent(handler):
 def test_peer_relation_changed_leader_adds_members(handler, harness):
     rel_id = harness.model.get_relation(PEER_RELATION).id
     _set_cluster_initialised(harness, rel_id)
-    harness.set_leader(True)
+    with harness.hooks_disabled():
+        harness.set_leader(True)
     with patch.object(type(handler.membership_manager), "add_members_k8s") as add_members:
         handler._on_peer_relation_changed(Mock(defer=Mock()))
     add_members.assert_called_once()
@@ -624,7 +737,8 @@ def test_peer_relation_changed_tls_server_ping_roundtrip(handler, harness, conta
 def test_peer_relation_departed_leader_removes_endpoints(handler, harness):
     rel_id = harness.model.get_relation(PEER_RELATION).id
     _set_cluster_initialised(harness, rel_id)
-    harness.set_leader(True)
+    with harness.hooks_disabled():
+        harness.set_leader(True)
     membership = handler.membership_manager
     event = Mock(departing_unit=MagicMock(__eq__=MagicMock(return_value=False)))
     with (
@@ -877,3 +991,112 @@ def test_on_start_touches_ca_bundle_only(handler):
     path.assert_called_once()
     path.return_value.touch.assert_called_once_with()
     start_primary.assert_not_called()
+
+
+# -- leader-elected ----------------------------------------------------------------
+
+
+def _seed_leader(handler, harness):
+    with harness.hooks_disabled():
+        harness.set_leader(True)
+    handler.charm.fix_leader_annotation = Mock(return_value=True)
+
+
+def test_leader_elected_k8s_runs_the_full_flow(patch_crypto, handler, harness):
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    _seed_leader(handler, harness)
+    with patch.object(handler.membership_manager, "add_members_k8s") as add_members:
+        handler._on_leader_elected(Mock())
+
+    for key in (
+        USER_PASSWORD_KEY,
+        REPLICATION_PASSWORD_KEY,
+        REWIND_PASSWORD_KEY,
+        MONITORING_PASSWORD_KEY,
+        PATRONI_PASSWORD_KEY,
+    ):
+        assert handler.state.get_secret(APP_SCOPE, key)
+    endpoints = json.loads(harness.get_relation_data(rel_id, harness.charm.app.name)["endpoints"])
+    assert handler.state.endpoint in endpoints
+    handler.k8s_manager.cleanup_old_cluster_resources.assert_called_once()
+    handler.k8s_manager.create_services.assert_called_once()
+    add_members.assert_called_once()
+
+
+def test_leader_elected_k8s_blocks_when_service_creation_fails(handler, harness):
+    _seed_leader(handler, harness)
+    handler.k8s_manager.create_services.side_effect = _fake_api_error()
+    with patch.object(handler.membership_manager, "add_members_k8s") as add_members:
+        handler._on_leader_elected(Mock())
+    assert harness.charm.unit.status.name == "blocked"
+    assert harness.charm.unit.status.message == "failed to create k8s services"
+    add_members.assert_not_called()
+
+
+def test_leader_elected_k8s_stops_before_services_when_annotation_fix_fails(handler, harness):
+    _seed_leader(handler, harness)
+    handler.charm.fix_leader_annotation = Mock(return_value=False)
+    with patch.object(handler.membership_manager, "add_members_k8s") as add_members:
+        handler._on_leader_elected(Mock())
+    handler.charm.fix_leader_annotation.assert_called_once()
+    handler.k8s_manager.create_services.assert_not_called()
+    add_members.assert_not_called()
+
+
+def test_leader_elected_k8s_skips_service_creation_during_refresh(handler, harness):
+    _seed_leader(handler, harness)
+    handler.refresh_manager.refresh.in_progress = True
+    event = Mock()
+    with patch.object(handler.membership_manager, "add_members_k8s") as add_members:
+        handler._on_leader_elected(event)
+    handler.k8s_manager.create_services.assert_not_called()
+    add_members.assert_called_once()
+    event.defer.assert_not_called()
+
+
+# -- restart -----------------------------------------------------------------------
+
+
+def test_restart_k8s_reconciles_the_pebble_layers(handler):
+    handler.patroni_manager = Mock()
+    handler.cluster_manager = Mock()
+    handler.postgresql = Mock()
+    event = Mock()
+    with patch.object(handler.charm, "update_pebble_layers") as update_layers:
+        handler._restart(event)
+    update_layers.assert_called_once()
+    assert handler.state.peer.data.get("postgresql_restarted") is None
+    event.defer.assert_not_called()
+
+
+def test_leader_elected_k8s_blocks_without_trust_and_continues(handler, harness):
+    """A 403 during the resource cleanup blocks the unit; the flow still proceeds."""
+    _seed_leader(handler, harness)
+    handler.k8s_manager.cleanup_old_cluster_resources.side_effect = DeployedWithoutTrustError()
+    on_deployed = patch.object(handler.charm, "on_deployed_without_trust").start()
+    with patch.object(handler.membership_manager, "add_members_k8s") as add_members:
+        handler._on_leader_elected(Mock())
+    on_deployed.assert_called_once()
+    handler.k8s_manager.create_services.assert_called_once()
+    add_members.assert_called_once()
+
+
+# -- replica-can-start -------------------------------------------------------------
+
+
+def test_replica_can_start_probes_the_primary_endpoint(handler, harness):
+    """The HBA probe targets the primary's endpoint (trunk parity).
+
+    The port originally passed the primary Service DNS name; trunk probes the
+    primary member's endpoint, and the Service form wedged replica starts
+    during the scaled-up relation churn (test_new_relations_1, CI 2026-10-13).
+    """
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    _set_endpoints_with_self(harness, rel_id)
+    handler.patroni_manager = Mock()
+    handler.patroni_manager.is_replication_hba_ready.return_value = True
+    with patch.object(
+        type(handler.charm), "primary_endpoint", new_callable=PropertyMock, return_value="10.1.1.1"
+    ):
+        assert handler._replica_can_start() is True
+    handler.patroni_manager.is_replication_hba_ready.assert_called_once_with("10.1.1.1")

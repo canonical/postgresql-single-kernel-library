@@ -177,6 +177,16 @@ class ClusterManager(BaseManager):
         self, scope: AdvancedStatusesScope, recompute: bool = False
     ) -> list[StatusObject]:
         """Compute the manager's statuses."""
+        if (
+            scope == "unit"
+            and self.state.substrate == Substrates.K8S
+            and not self.state.model.unit.is_leader()
+            and self.state.endpoint not in self.state.endpoints
+        ):
+            # Re-surface the pending join on every collect and recompute: the
+            # silent pre-join window read as active to anything polling juju
+            # status (test_symlinks pg_wal symlink failure, CI 2026-10-15).
+            return [GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value]
         if not self.workload.workload_present:
             return [GeneralStatuses.MAINTAINENANCE_INSTALLING.value]
         try:

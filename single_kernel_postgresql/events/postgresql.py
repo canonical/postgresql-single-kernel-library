@@ -40,8 +40,8 @@ from tenacity import RetryError, Retrying, stop_after_attempt, stop_after_delay,
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import (
     CannotConnectError,
+    DeployedWithoutTrustError,
     RaftRecoveryTimeoutError,
-    SettingSystemPasswordError,
     StorageUnavailableError,
     SwitchoverFailedError,
     SwitchoverNotSyncError,
@@ -91,7 +91,6 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLUpdateUserPasswordError,
 )
 from single_kernel_postgresql.workload.base import BaseWorkload
-from single_kernel_postgresql.workload.vm import VMWorkload
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -112,6 +111,7 @@ if TYPE_CHECKING:
     from single_kernel_postgresql.managers.restore import RestoreManager
     from single_kernel_postgresql.utils.postgresql import PostgreSQL as PostgreSQLClient
     from single_kernel_postgresql.workload.k8s import K8sWorkload
+    from single_kernel_postgresql.workload.vm import VMWorkload
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +157,6 @@ class PostgreSQLEventsHandler(Object):
         self.k8s_manager = k8s_manager
 
         # Charm events
-        self.framework.observe(self.charm.on.install, self._on_install)
         self.framework.observe(self.charm.on.start, self._on_start)
         self.framework.observe(self.charm.on.leader_elected, self._on_leader_elected)
         self.framework.observe(self.charm.on.config_changed, self._on_config_changed)
@@ -179,11 +178,6 @@ class PostgreSQLEventsHandler(Object):
                 self.charm.on.postgresql_pebble_ready, self._on_postgresql_pebble_ready
             )
             self.framework.observe(
-                self.charm.on[PEER_RELATION].relation_changed, self._on_peer_relation_changed
-            )
-            # The charm re-runs the full peer-relation flow on secret changes too.
-            self.framework.observe(self.charm.on.secret_changed, self._on_peer_relation_changed)
-            self.framework.observe(
                 self.charm.on[PEER_RELATION].relation_departed, self._on_peer_relation_departed
             )
             self.framework.observe(
@@ -192,7 +186,7 @@ class PostgreSQLEventsHandler(Object):
             self.framework.observe(self.charm.on.upgrade_charm, self._on_upgrade_charm)
             self.framework.observe(self.charm.on.stop, self._on_stop)
         if self.state.substrate == Substrates.VM:
-            self.framework.observe(self.charm.on.secret_changed, self._on_secret_changed)
+            self.framework.observe(self.charm.on.install, self._on_install)
             self.framework.observe(
                 getattr(
                     self.charm.on,
@@ -217,8 +211,12 @@ class PostgreSQLEventsHandler(Object):
     def _on_install(self, event: InstallEvent) -> None:
         """Install prerequisites for the application."""
         logger.debug("Install start time: %s", datetime.now())
-        if self.charm.substrate == Substrates.VM and isinstance(self.workload, VMWorkload):
-            self._check_detached_storage(self.workload)
+        if self.charm.substrate == Substrates.VM:
+            # Imported lazily: the k8s-flavored install carries no vm-extra (psutil).
+            from single_kernel_postgresql.workload.vm import VMWorkload
+
+            if isinstance(self.workload, VMWorkload):
+                self._check_detached_storage(self.workload)
 
         self.state.add_status_if_not_present(
             GeneralStatuses.MAINTAINENANCE_INSTALLING.value,
@@ -260,8 +258,7 @@ class PostgreSQLEventsHandler(Object):
 
         # Defer replica bootstrap until the leader added this unit's endpoint: without
         # the pg_hba replication entry pg_basebackup is rejected and Patroni wipes pgdata.
-        if not self.state.model.unit.is_leader() and not self._replica_can_start():
-            event.defer()
+        if not self._replica_membership_gate(event):
             return
 
         if not self.state.get_secret(APP_SCOPE, "internal-ca"):
@@ -297,6 +294,50 @@ class PostgreSQLEventsHandler(Object):
         self.backup_manager.start_stop_pgbackrest_service()
 
         self._set_active_status()
+
+    def _pre_gate_pgbackrest_render(self) -> None:
+        """Re-render the pgBackRest config before the member-started status gate.
+
+        A recreated pod boots with the image default pgbackrest.conf; the
+        post-gate render (below) can lose the race against a wait_for_idle-
+        gated capture. Re-render the backup config before the status gate
+        when a stanza exists (idempotent, cheap; wave-2 K8S-117102348440).
+        """
+        if not self.state.cluster_stanza:
+            return
+        self.backup_manager.remove_departed_endpoints()
+        if (
+            self.state.application.is_cluster_restoring_backup
+            or self.state.application.is_cluster_restoring_to_time
+        ):
+            return
+        self.backup_manager._render_pgbackrest_conf_file()
+
+    def _replica_membership_gate(self, event: "HookEvent") -> bool:
+        """Defer a replica whose endpoint is not yet in the members list (gate).
+
+        Returns True when the unit may proceed with the bootstrap flow. While the
+        leader has not added this unit's endpoint, persist the wait through the
+        status machinery so the collect handler replays it instead of leaving the
+        pre-join window silently active (test_symlinks pg_wal symlink failure,
+        CI 2026-10-15).
+        """
+        if not self.state.model.unit.is_leader() and not self._replica_can_start():
+            if self.state.endpoint not in self.state.endpoints:
+                self.state.add_status_if_not_present(
+                    GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value,
+                    scope="unit",
+                    component=self.cluster_manager.name,
+                )
+            event.defer()
+            return False
+        if not self.state.model.unit.is_leader():
+            self.state.remove_status_if_present(
+                GeneralStatuses.WAITING_FOR_CLUSTER_MEMBERSHIP.value,
+                scope="unit",
+                component=self.cluster_manager.name,
+            )
+        return True
 
     def _pre_gate_pgbackrest_render(self) -> None:
         """Re-render the pgBackRest config before the member-started status gate.
@@ -358,26 +399,7 @@ class PostgreSQLEventsHandler(Object):
     def _on_leader_elected(self, event: LeaderElectedEvent) -> None:
         """Event handler for leader elected event (port of the VM charm's flow)."""
         if self.state.substrate == Substrates.K8S:
-            # The K8s leader-elected flow is ported by the K8s slice; keep the
-            # previously-ported behavior until then.
-            try:
-                self.cluster_manager.configure_system_passwords()
-            except SettingSystemPasswordError:
-                self.state.add_status_if_not_present(
-                    GeneralStatuses.FAILED_SETTING_PASSWORDS.value,
-                    scope="unit",
-                    component=self.cluster_manager.name,
-                )
-                event.defer()
-                return
-
-            self.tls_manager.configure_internal_peer_ca()
-
-            # Render the Patroni configuration — required for bootstrap (the real charm
-            # renders on leader-elected); route through the charm bridge for the per-user
-            # pg_hba map the real charm passes.
-            if self.charm.substrate == Substrates.VM:
-                self.charm.update_config()
+            self._k8s_leader_elected(event)
             return
 
         # Consider configured system user passwords.
@@ -413,6 +435,78 @@ class PostgreSQLEventsHandler(Object):
         self._update_leader_cluster_members(event)
 
         self._update_leader_endpoints()
+
+    def _k8s_leader_elected(self, event: LeaderElectedEvent) -> None:
+        """Leader-elected on K8s (port)."""
+        # Consider configured system user passwords, then set the needed
+        # passwords if they weren't set before (the K8s charm has no raft).
+        system_user_passwords = self._ensure_system_passwords(event)
+        for key in (
+            USER_PASSWORD_KEY,
+            REPLICATION_PASSWORD_KEY,
+            REWIND_PASSWORD_KEY,
+            MONITORING_PASSWORD_KEY,
+            PATRONI_PASSWORD_KEY,
+        ):
+            if self.state.get_secret(APP_SCOPE, key) is None:
+                if key in system_user_passwords:
+                    # Use provided passwords for system-users if available.
+                    self.state.set_secret(APP_SCOPE, key, system_user_passwords[key])
+                    logger.info(f"Using configured password for {key}")
+                else:
+                    # Generate a password for this user if not provided.
+                    self.state.set_secret(APP_SCOPE, key, new_password())
+                    logger.info(f"Generated new password for {key}")
+
+        # Add this unit to the list of cluster members (the cluster should start
+        # with only this member).
+        endpoint = self.state.endpoint
+        if endpoint is not None and endpoint not in self.state.endpoints:
+            self.membership_manager.add_endpoint(endpoint)
+
+        if not self.state.get_secret(APP_SCOPE, "internal-ca"):
+            self.tls_manager.generate_internal_peer_ca()
+
+        # Delete kubernetes services and endpoints from previous deployments; a
+        # 403 blocks the unit and the flow continues (union order).
+        try:
+            self._k8s_manager.cleanup_old_cluster_resources()
+        except DeployedWithoutTrustError:
+            self.charm.on_deployed_without_trust()
+
+        if not self.charm.fix_leader_annotation():
+            return
+
+        # Create resources and add labels needed for replication.
+        if not self._k8s_create_services():
+            return
+
+        # Remove departing units when the leader changes.
+        for endpoint in self.membership_manager.get_endpoints_to_remove():
+            self.membership_manager.remove_endpoint(endpoint)
+
+        self.membership_manager.add_members_k8s(event)
+
+    def _k8s_create_services(self) -> bool:
+        """Create the K8s services unless a refresh is in progress (port).
+
+        Returns:
+            False when the services failed to create (the unit was blocked).
+        """
+        from lightkube.core.exceptions import ApiError
+
+        if not (
+            self.refresh_manager.refresh is not None
+            and not self.refresh_manager.refresh.in_progress
+        ):
+            return True
+        try:
+            self._k8s_manager.create_services()
+        except ApiError:
+            logger.exception("failed to create k8s services")
+            self.charm.set_unit_status(BlockedStatus("failed to create k8s services"))
+            return False
+        return True
 
     def _update_leader_endpoints(self) -> None:
         """Generate the internal CA, render, and refresh the endpoints (port)."""
@@ -476,8 +570,12 @@ class PostgreSQLEventsHandler(Object):
 
     def _can_start(self, event: StartEvent) -> bool:
         """Returns whether the workload can be started on this unit."""
-        if self.charm.substrate == Substrates.VM and isinstance(self.workload, VMWorkload):
-            self._check_detached_storage(self.workload)
+        if self.charm.substrate == Substrates.VM:
+            # Imported lazily: the k8s-flavored install carries no vm-extra (psutil).
+            from single_kernel_postgresql.workload.vm import VMWorkload
+
+            if isinstance(self.workload, VMWorkload):
+                self._check_detached_storage(self.workload)
 
         # Safeguard against starting while refreshing.
         if self.refresh_manager.refresh is None:
@@ -880,8 +978,6 @@ class PostgreSQLEventsHandler(Object):
         self.async_replication_manager.clear_stale_promotion()
         self.backup_manager.coordinate_stanza_fields()
 
-        # self.logical_replication.retry_validations()
-
         self._set_active_status()
 
     def _on_update_status_early_exit_checks(self, container) -> bool:
@@ -953,12 +1049,6 @@ class PostgreSQLEventsHandler(Object):
                     BlockedStatus(app_data["s3-initialization-block-message"])
                 )
                 return
-            # if self.unit.is_leader() and (
-            #     self.app_peer_data.get("logical-replication-validation") == "error"
-            #     or self.logical_replication.has_remote_publisher_errors()
-            # ):
-            #     self.set_unit_status(BlockedStatus(LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS))
-            #     return
             unit_name = self.state.model.unit.name
             is_standby_leader = (
                 self.patroni_manager.get_standby_leader(unit_name_pattern=True) == unit_name
@@ -983,6 +1073,11 @@ class PostgreSQLEventsHandler(Object):
 
     def _was_restore_successful_k8s(self, container, service) -> bool:
         """Complete a restore: verify, clean the flags, and revalidate S3 (K8s port)."""
+        # Trunk parity: only a NEW bootstrap failure blocks. The pebble service
+        # log accumulates across restores, so a prior restore's failure line
+        # (e.g. a negative control) must not re-block a valid restore in
+        # progress (CI 2026-10-18 pitr wave); the ``pitr-failed`` flag already
+        # persists the blocked through the collect replay.
         if self.state.application.is_cluster_restoring_to_time and all(
             self.restore_manager.is_pitr_failed()
         ):
@@ -1152,8 +1247,10 @@ class PostgreSQLEventsHandler(Object):
             return
 
         try:
+            logger.debug("Restarting PostgreSQL")
             self.patroni_manager.restart_postgresql()
-            self.state.peer.data["postgresql_restarted"] = "True"
+            if self.state.substrate == Substrates.VM:
+                self.state.peer.data["postgresql_restarted"] = "True"
         except RetryError:
             error_message = "failed to restart PostgreSQL"
             logger.exception(error_message)
@@ -1289,7 +1386,7 @@ class PostgreSQLEventsHandler(Object):
         logger.debug(f"Removing secret with label {event.secret.label} revision {event.revision}")
         event.remove_revision()
 
-    def _check_detached_storage(self, workload: VMWorkload) -> None:
+    def _check_detached_storage(self, workload: "VMWorkload") -> None:
         """Wait for storage to become available.
 
         Workaround for lxd containers not getting storage attached on startups.

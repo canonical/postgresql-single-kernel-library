@@ -118,6 +118,9 @@ def test_reparent_services_on_stop(harness, k8s_manager):
     # The same Patroni-created resource is listed twice (Service + Endpoints) and
     # reparented on each sighting — faithful to the charm's double-listing flow.
     assert client.apply.call_count == 4
+    # The charm builds its stop-flow Client with field_manager=self.model.app.name:
+    # lightkube's APPLY patch requires one (bare Client() + apply() raises ValueError).
+    assert all(call.kwargs.get("field_manager") == app for call in client.apply.call_args_list)
 
 
 def test_cleanup_old_cluster_resources_deletes_suffixes(harness, k8s_manager):
@@ -130,6 +133,32 @@ def test_cleanup_old_cluster_resources_deletes_suffixes(harness, k8s_manager):
     }
 
 
+def test_cleanup_old_cluster_resources_blocks_without_trust(harness, k8s_manager):
+    """A 403 blocks the unit (on_deployed_without_trust) instead of being swallowed."""
+    client = Mock()
+    error = ApiError(status=SimpleNamespace(code=403, message="Forbidden"))
+    client.delete.side_effect = error
+    with (
+        patch("single_kernel_postgresql.managers.k8s.Client", return_value=client),
+        patch.object(k8s_manager, "on_deployed_without_trust") as no_trust,
+    ):
+        k8s_manager.cleanup_old_cluster_resources()
+    no_trust.assert_called_once()
+    client.delete.assert_called_once()
+
+
+def test_cleanup_old_cluster_resources_reraises_unexpected_api_errors(harness, k8s_manager):
+    """Only 404 (absent) is tolerated; any other code propagates."""
+    client = Mock()
+    error = ApiError(status=SimpleNamespace(code=500, message="boom"))
+    client.delete.side_effect = error
+    with (
+        patch("single_kernel_postgresql.managers.k8s.Client", return_value=client),
+        pytest.raises(ApiError),
+    ):
+        k8s_manager.cleanup_old_cluster_resources()
+
+
 def test_membership_hosts_are_pod_names(harness, membership):
     hosts = membership.hosts()
     assert all("/" not in host for host in hosts)
@@ -138,7 +167,8 @@ def test_membership_hosts_are_pod_names(harness, membership):
 
 def test_membership_endpoints_writers_leader_gated(harness, membership):
     rel_id = _rel_id(harness)
-    harness.set_leader(True)
+    with harness.hooks_disabled():
+        harness.set_leader(True)
     membership.add_endpoint("host-0")
     membership.add_endpoint("host-0")
     assert json.loads(harness.get_relation_data(rel_id, harness.charm.app.name)["endpoints"]) == [
