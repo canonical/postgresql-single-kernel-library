@@ -50,7 +50,7 @@ def observer_manager(harness):
     return ObserverManager(harness.charm.state, harness.charm.workload)
 
 
-def test_start_observer(observer_manager, harness, monkeypatch):
+def test_start_observer(observer_manager, substrate, harness, monkeypatch):
     monkeypatch.setenv("PYTHONPATH", "/tmp/lib/python/site-packages")
     monkeypatch.setenv("JUJU_CONTEXT_ID", "test-context")
     with (
@@ -81,6 +81,15 @@ def test_start_observer(observer_manager, harness, monkeypatch):
             return_value={"2.2.2.2"},
         ),
         patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.is_cluster_initialised",
+            new_callable=PropertyMock,
+            return_value=True,
+        ) as _cluster_initialised,
+        patch(
+            "single_kernel_postgresql.workload.k8s.K8sWorkload.container_ready",
+            return_value=True,
+        ) as _container_ready,
+        patch(
             "single_kernel_postgresql.core.state.CharmState.peer_relation",
             new_callable=PropertyMock,
             return_value=harness.charm.model.get_relation(PEER_RELATION),
@@ -109,8 +118,23 @@ def test_start_observer(observer_manager, harness, monkeypatch):
         observer_manager.start_observer()
         _popen.assert_not_called()
 
-        # Test that the observer process is started.
+        # Test that nothing is done before the cluster is initialised
+        # (the AuthorisationRulesObserver trunk-parity gate).
         _peers.return_value = harness.charm.model.get_relation(PEER_RELATION)
+        _cluster_initialised.return_value = False
+        observer_manager.start_observer()
+        _popen.assert_not_called()
+        _cluster_initialised.return_value = True
+
+        # Test that nothing is done on K8s while the workload container
+        # isn't connected yet (the AuthorisationRulesObserver trunk-parity gate).
+        if substrate == "k8s":
+            _container_ready.return_value = False
+            observer_manager.start_observer()
+            _popen.assert_not_called()
+            _container_ready.return_value = True
+
+        # Test that the observer process is started.
         _popen.return_value = Mock(pid=123)
         observer_manager.start_observer()
         _popen.assert_called_once()
@@ -152,6 +176,17 @@ def test_start_observer_already_running(observer_manager, harness, monkeypatch):
             "single_kernel_postgresql.core.state.CharmState.peer_members_ips",
             new_callable=PropertyMock,
             return_value={"2.2.2.2"},
+        ),
+        # The merge gates the observer on an initialised cluster and, on K8s,
+        # a connected container.
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.is_cluster_initialised",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch(
+            "single_kernel_postgresql.workload.k8s.K8sWorkload.container_ready",
+            return_value=True,
         ),
         patch(
             "single_kernel_postgresql.core.state.CharmState.peer_relation",
@@ -352,7 +387,7 @@ def test_cluster_topology_check_for_database_changes():
             _subprocess.run.assert_not_called()
 
 
-def test_start_raft_observer(observer_manager):
+def test_start_raft_observer(observer_manager, substrate):
     with (
         patch("single_kernel_postgresql.managers.observer.daemon_reload") as _daemon_reload,
         patch("single_kernel_postgresql.managers.observer.service_enable") as _service_enable,
@@ -362,6 +397,17 @@ def test_start_raft_observer(observer_manager):
             return_value={"ENV": "var"},
         ) as _copy_environment,
     ):
+        observer_manager.start_raft_observer()
+
+        if substrate != "vm":
+            # The merge restricts the raft-observer timer to the VM substrate:
+            # nothing is rendered or enabled on K8s.
+            _daemon_reload.assert_not_called()
+            _service_enable.assert_not_called()
+            _render_file.assert_not_called()
+            _copy_environment.assert_not_called()
+            return
+
         # Get the expected content from a file.
         with open("single_kernel_postgresql/templates/vm/raft-observer.service.j2") as file:
             contents = file.read()
@@ -373,8 +419,6 @@ def test_start_raft_observer(observer_manager):
             contents = file.read()
             template = Template(contents)
         expected_timer = template.render()
-
-        observer_manager.start_raft_observer()
 
         _daemon_reload.assert_called_once_with()
         _service_enable.assert_called_once_with("/etc/systemd/system/raft-observer.timer", "--now")

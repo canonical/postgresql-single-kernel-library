@@ -8,14 +8,23 @@ from pathlib import Path
 from unittest.mock import Mock, PropertyMock, patch, sentinel
 
 import pytest
+from data_platform_helpers.advanced_statuses import StatusObject
+from ops import BlockedStatus
 from pysyncobj.utility import UtilityException
 from single_kernel_postgresql.config.exceptions import (
     AddRaftMemberFailedError,
+    RaftRecoveryTimeoutError,
     RemoveRaftMemberFailedError,
 )
-from single_kernel_postgresql.config.literals import RAFT_PARTNER_PREFIX, RAFT_PORT
+from single_kernel_postgresql.config.literals import (
+    PEER_RELATION,
+    RAFT_MAJORITY_LOSS_MESSAGE,
+    RAFT_PARTNER_PREFIX,
+    RAFT_PORT,
+)
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.managers.raft import RaftManager
-from tenacity import wait_fixed
+from tenacity import stop_after_attempt, wait_fixed
 
 
 @pytest.fixture()
@@ -277,6 +286,11 @@ def test_remove_raft_member_no_quorum(raft_manager):
         raft_manager.remove_raft_member(f"1.2.3.4:{RAFT_PORT}")
 
         assert raft_manager.state.peer.data == {"raft_stuck": "True"}
+        # The first no-quorum path blocks the unit with the trunk-parity message;
+        # the stuck flag then short-circuits the further removals.
+        assert raft_manager.set_unit_status.call_count == 1
+        raft_manager.set_unit_status.assert_any_call(BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE))
+        # The old charm-funct emit is gone; the leader re-emits through the charm events.
         assert not raft_manager.peer_relation_changed.emit.called
 
 
@@ -329,3 +343,99 @@ def test_reinitialise_raft_data(raft_manager):
         patroni_manager.restart_patroni.assert_called_once_with()
         assert _psutil.process_iter.call_count == 2
         _psutil.process_iter.assert_any_call(["name"])
+
+
+def test_set_stuck_raft_flag_reemits_peer_relation_changed_on_the_leader(raft_manager, harness):
+    """The leader re-emits the peer-relation-changed event through the charm events."""
+    relation = harness.charm.model.get_relation(PEER_RELATION)
+    unit = harness.charm.state.peer.unit
+    events = Mock()
+    with (
+        patch(
+            "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.is_app_leader",
+            new_callable=PropertyMock,
+            return_value=True,
+        ),
+        patch.object(harness.charm.state, "charm", events),
+    ):
+        raft_manager._set_stuck_raft_flag()
+
+    assert harness.charm.state.peer.data["raft_stuck"] == "True"
+    raft_manager.set_unit_status.assert_called_once_with(BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE))
+    relation_changed = getattr(events.on, f"{PEER_RELATION.replace('-', '_')}_relation_changed")
+    relation_changed.emit.assert_called_once_with(relation, app=unit.app, unit=unit)
+
+
+def test_get_statuses(raft_manager):
+    """The manager reports the stuck-raft block only at unit scope."""
+    active_idle = [GeneralStatuses.ACTIVE_IDLE.value]
+    assert raft_manager.get_statuses("unit") == active_idle
+    assert raft_manager.get_statuses("app") == active_idle
+
+    raft_manager.state.peer.data.update({"raft_stuck": "True"})
+
+    assert raft_manager.get_statuses("unit") == [
+        StatusObject(status="blocked", message=RAFT_MAJORITY_LOSS_MESSAGE)
+    ]
+    assert raft_manager.get_statuses("app") == active_idle
+
+
+def test_remove_raft_data_times_out(raft_manager):
+    """A wedged postgres stop defers the hook instead of hanging it."""
+    with (
+        patch("single_kernel_postgresql.managers.raft.psutil") as _psutil,
+        patch(
+            "single_kernel_postgresql.managers.raft.stop_after_delay",
+            return_value=stop_after_attempt(1),
+        ),
+        patch("shutil.rmtree") as _rmtree,
+    ):
+        proc = Mock()
+        proc.name.return_value = "postgres"
+        _psutil.process_iter.return_value = [proc]
+
+        with pytest.raises(RaftRecoveryTimeoutError):
+            raft_manager.remove_raft_data()
+
+        raft_manager.patroni_manager.stop_patroni.assert_called_once_with()
+        assert not _rmtree.called
+
+
+def test_reinitialise_raft_data_times_out_waiting_for_promotion(raft_manager):
+    """A promotion that never completes defers the hook instead of hanging it."""
+    patroni_manager = raft_manager.patroni_manager
+    patroni_manager.get_patroni_health.return_value = {"role": "replica", "state": "streaming"}
+    with (
+        patch(
+            "single_kernel_postgresql.managers.raft.stop_after_delay",
+            return_value=stop_after_attempt(1),
+        ),
+        pytest.raises(RaftRecoveryTimeoutError),
+    ):
+        raft_manager.reinitialise_raft_data()
+
+    raft_manager.update_config.assert_called_once_with(no_peers=True)
+    patroni_manager.start_patroni.assert_called_once_with()
+    patroni_manager.restart_patroni.assert_not_called()
+
+
+def test_reinitialise_raft_data_times_out_waiting_for_postgresql(raft_manager):
+    """A postgres that never comes back defers the hook instead of hanging it."""
+    patroni_manager = raft_manager.patroni_manager
+    patroni_manager.get_patroni_health.return_value = {"role": "leader", "state": "running"}
+    with (
+        patch("single_kernel_postgresql.managers.raft.psutil") as _psutil,
+        patch(
+            "single_kernel_postgresql.managers.raft.stop_after_delay",
+            return_value=stop_after_attempt(2),
+        ),
+        patch("single_kernel_postgresql.managers.raft.wait_fixed", return_value=wait_fixed(0)),
+    ):
+        proc = Mock()
+        proc.name.return_value = "not-postgres"
+        _psutil.process_iter.return_value = [proc]
+
+        with pytest.raises(RaftRecoveryTimeoutError):
+            raft_manager.reinitialise_raft_data()
+
+    patroni_manager.restart_patroni.assert_called_once_with()
