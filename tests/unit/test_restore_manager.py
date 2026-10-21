@@ -22,7 +22,7 @@ from single_kernel_postgresql.config.literals import (
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication
-from single_kernel_postgresql.managers.restore import RestoreManager
+from single_kernel_postgresql.managers.restore import PITR_FAILED_KEY, RestoreManager
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     CANNOT_RESTORE_PITR,
@@ -126,6 +126,22 @@ def test_pre_restore_checks_rejects_blocking_state(harness, restore_manager):
 def test_pre_restore_checks_allows_pitr_blocked_status(harness, restore_manager):
     """A PITR failure blocked state must not block a new restore request."""
     harness.charm.unit.status = BlockedStatus(CANNOT_RESTORE_PITR)
+    ok, _ = restore_manager.pre_restore_checks(BACKUP_ID, None)
+    assert ok
+
+
+def test_pre_restore_checks_allows_retry_after_durable_pitr_failure(harness, restore_manager):
+    """A durable ``pitr-failed`` flag must re-allow a new restore attempt.
+
+    CI 2026-10-17 (K8s pitr_aws): after a terminal PITR failure the service-failed
+    branch of the completion check rewrites the live unit status to 'Failed to
+    restore backup' in the same process, so the message-based allow-list never
+    matches and every retry is rejected with 'Cluster or unit is in a blocking
+    state'. The durable flag — the sole writer is block_on_pitr_failure — is the
+    authoritative signal that the block is a re-runnable PITR failure.
+    """
+    harness.charm.unit.status = BlockedStatus("Failed to restore backup")
+    restore_manager.state.peer.data[PITR_FAILED_KEY] = "True"
     ok, _ = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert ok
 
@@ -432,6 +448,37 @@ def test_is_pitr_failed_k8s_scans_pebble_logs(restore_manager, substrate):
     restore_manager.workload.pitr_bootstrap_failure_logs.return_value = (
         (
             "2024-01-01T00:00:00.000Z [postgresql] patroni.exceptions.PatroniFatalException:"
+            " Failed to bootstrap cluster"
+        ),
+        False,
+    )
+    assert restore_manager.is_pitr_failed() == (True, True)
+
+
+def test_is_pitr_failed_novelty_survives_peer_data_round_trip(restore_manager, substrate):
+    """The novelty key must be type-stable across the peer-databag round-trip.
+
+    The id is written by one hook and read back by the next; the databag
+    serializes values, so the stored id must already be a plain string. A
+    stale failure line (a prior restore's failure, still in the scanned logs)
+    must read back as NOT new, while a new failure line (new timestamp) reads
+    back as new.
+    """
+    if substrate != "k8s":
+        pytest.skip("K8s-only pebble logs")
+    failure_line = (
+        "2024-01-01T00:00:00.000Z [postgresql] patroni.exceptions.PatroniFatalException:"
+        " Failed to bootstrap cluster"
+    )
+    restore_manager.workload.pitr_bootstrap_failure_logs.return_value = (failure_line, False)
+    assert restore_manager.is_pitr_failed() == (True, True)
+    # The id as the NEXT hook reads it back from the databag: a plain string.
+    restore_manager.state.peer.data["last_pitr_fail_id"] = "2024-01-01T00:00:00.000Z"
+    assert restore_manager.is_pitr_failed() == (True, False)
+    # A genuinely new failure (new timestamp) is a new event.
+    restore_manager.workload.pitr_bootstrap_failure_logs.return_value = (
+        (
+            "2024-01-02T00:00:00.000Z [postgresql] patroni.exceptions.PatroniFatalException:"
             " Failed to bootstrap cluster"
         ),
         False,
