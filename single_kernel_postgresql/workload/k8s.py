@@ -160,7 +160,10 @@ class K8sWorkload(BaseWorkload):
                     "command": "/start-ldap-synchronizer.sh",
                     "startup": "disabled",
                 }),
-                K8S_METRICS_SERVER_SERVICE_NAME: self._generate_metrics_service(spec),
+                K8S_METRICS_SERVER_SERVICE_NAME: self.generate_metrics_service(
+                    monitoring_password=spec.monitoring_password,
+                    postgresql_service=K8S_POSTGRESQL_SERVICE_NAME,
+                ),
                 K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME: (
                     self._generate_pgbackrest_metrics_service()
                 ),
@@ -186,13 +189,6 @@ class K8sWorkload(BaseWorkload):
             },
         })
         return Layer(layer_config)
-
-    def _generate_metrics_service(self, spec: PebbleLayerSpec) -> ServiceDict:
-        """Generate the metrics service definition (single implementation below)."""
-        return self.generate_metrics_service(
-            monitoring_password=spec.monitoring_password,
-            postgresql_service=K8S_POSTGRESQL_SERVICE_NAME,
-        )
 
     def _generate_pgbackrest_metrics_service(self) -> ServiceDict:
         """Generate the pgbackrest metrics service definition."""
