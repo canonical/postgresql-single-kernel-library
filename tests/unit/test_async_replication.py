@@ -484,7 +484,10 @@ def test_secret_changed_syncs_the_internal_secret(harness):
         )
 
     # Emitted through the framework, so the observer registration is itself exercised.
-    with patch.object(CharmState, "set_secret") as set_secret:
+    with (
+        patch.object(CharmState, "set_secret") as set_secret,
+        patch("single_kernel_postgresql.charms.vm_charm.snap.SnapCache"),
+    ):
         harness.set_secret_content(secret_id, {"replication-password": "pw"})
 
     set_secret.assert_called_once_with("app", "replication-password", "pw")
