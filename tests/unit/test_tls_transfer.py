@@ -1,17 +1,25 @@
 # Copyright 2022 Canonical Ltd.
 # See LICENSE file for licensing details.
-from sys import modules
 from unittest.mock import Mock
 
+import pytest
 from ops.pebble import ConnectionError as PebbleConnectionError
 from single_kernel_postgresql.config.literals import PEER_RELATION
-
-# Need to mock the module before importing the tested module
-modules["charms.certificate_transfer_interface.v0.certificate_transfer"] = Mock()
-
-from single_kernel_postgresql.events.tls_transfer import TLSTransfer  # noqa: E402
+from single_kernel_postgresql.events.tls_transfer import TLSTransfer
 
 SCOPE = "unit"
+
+
+@pytest.fixture(autouse=True)
+def _stub_certificate_transfer_requirer(monkeypatch):
+    """The real vendored requirer needs a bound charm framework.
+
+    These tests drive TLSTransfer's handler logic against a Mock charm, so the
+    requirer class is stubbed (it is only constructed, never exercised here).
+    """
+    monkeypatch.setattr(
+        "single_kernel_postgresql.events.tls_transfer.CertificateTransferRequires", Mock()
+    )
 
 
 def test_on_ca_certificate_added():

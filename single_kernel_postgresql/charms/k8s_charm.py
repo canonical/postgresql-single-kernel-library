@@ -10,7 +10,7 @@ import os
 import sys
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import psycopg2
 from lightkube import Client
@@ -31,6 +31,7 @@ from single_kernel_postgresql.config.literals import (
     DATABASE_DEFAULT_NAME,
     K8S_LDAP_SYNC_SERVICE_NAME,
     K8S_METRICS_SERVER_SERVICE_NAME,
+    K8S_POSTGRES_LOG_FILES,
     K8S_POSTGRESQL_SERVICE_NAME,
     METRICS_PORT,
     MONITORING_PASSWORD_KEY,
@@ -41,8 +42,16 @@ from single_kernel_postgresql.config.literals import (
     USER,
     USER_PASSWORD_KEY,
 )
+from single_kernel_postgresql.lib.charms.grafana_k8s.v0.grafana_dashboard import (
+    GrafanaDashboardProvider,
+)
+from single_kernel_postgresql.lib.charms.loki_k8s.v1.loki_push_api import LogProxyConsumer
+from single_kernel_postgresql.lib.charms.prometheus_k8s.v0.prometheus_scrape import (
+    MetricsEndpointProvider,
+)
 from single_kernel_postgresql.managers.k8s import K8sManager
 from single_kernel_postgresql.utils import unit_name_to_pod_name
+from single_kernel_postgresql.utils.payloads import payload_dir
 from single_kernel_postgresql.utils.postgresql import (
     PostgreSQL as PostgreSQLClient,
 )
@@ -51,8 +60,6 @@ from single_kernel_postgresql.workload.base import BaseWorkload, PebbleLayerSpec
 from single_kernel_postgresql.workload.k8s import K8sWorkload
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     import charm_refresh
 
 
@@ -62,8 +69,10 @@ logger = logging.getLogger(__name__)
 class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     """PostgreSQL K8s Charm."""
 
-    # COS requirers are constructed charm-side and assigned by the consuming charm.
-    metrics_endpoint: Any = None
+    # COS requirers are constructed by this class at the end of __init__ (the
+    # vendored charm libs live in the library package now); the attribute is
+    # absent until then because charm_refresh may call request_restart mid-init.
+    metrics_endpoint: MetricsEndpointProvider
 
     # Built by build_k8s_manager() while the abstract __init__ wires the
     # async-replication subsystem; never None on the K8s substrate.
@@ -72,16 +81,14 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
     def __init__(
         self,
         *args,
-        restart_lock_acquire: "Callable[[], None] | None" = None,
     ):
         """Initialize the PostgreSQL Kubernetes Charm.
 
-        The thin consuming charm constructs the COS requirers and the TLS-transfer
-        handler (their charm libs stay charm-side) and passes them in, alongside the
-        rolling-restart lock acquisition.
+        The COS requirers (prometheus scrape, grafana dashboards, loki log proxy)
+        and the rolling-restart seam are constructed here, in the library — the
+        thin consuming charm carries no wiring at all.
         """
         super().__init__(*args)
-        self.restart_lock_acquire = restart_lock_acquire
         assert isinstance(self.workload, K8sWorkload), (  # noqa: S101
             "Workload must be an instance of K8sWorkload"
         )
@@ -116,6 +123,25 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
             )
             self.set_unit_status(BlockedStatus("Disabled"))
             sys.exit(0)
+
+        # COS requirers (the vendored charm libs live in the library package now):
+        # prometheus scrape jobs, grafana dashboards and the loki log proxy, with
+        # the payload data served from the package (substrate-specific copies).
+        self.metrics_endpoint = MetricsEndpointProvider(
+            self,
+            refresh_event=[self.on.start],
+            jobs=self._generate_metrics_jobs(self.is_tls_enabled),
+            alert_rules_path=str(payload_dir("k8s", "prometheus_alert_rules")),
+        )
+        self.grafana_dashboards = GrafanaDashboardProvider(
+            self, dashboards_path=str(payload_dir("k8s", "grafana_dashboards"))
+        )
+        self.loki_push = LogProxyConsumer(
+            self,
+            logs_scheme={"postgresql": {"log-files": K8S_POSTGRES_LOG_FILES}},
+            relation_name="logging",
+            alert_rules_path=str(payload_dir("k8s", "loki_alert_rules")),
+        )
 
     def build_k8s_manager(self) -> K8sManager:
         """Build the K8s API seam the async-replication subsystem consumes."""

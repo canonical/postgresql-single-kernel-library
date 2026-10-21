@@ -7,51 +7,25 @@ action flows; the pinned status strings must match charm 16/edge exactly.
 """
 
 import json
-from sys import modules
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
 
 import pytest
 from lightkube.core.exceptions import ApiError
-
-# Mock the charm-lib module before importing TLSTransfer (mirrors test_tls_transfer);
-# the requirer fake must expose real ops BoundEvents for framework.observe.
 from ops import (
     ActiveStatus,
     BlockedStatus,
-    EventBase,
-    EventSource,
     MaintenanceStatus,
-    Object,
-    ObjectEvents,
     WaitingStatus,
 )
 from ops.pebble import ChangeError, PathError, ServiceStatus
-
-
-class _FakeTransferEvents(ObjectEvents):
-    certificate_available = EventSource(EventBase)
-    certificate_removed = EventSource(EventBase)
-
-
-class _FakeCertificateTransferRequires(Object):
-    on = _FakeTransferEvents()
-
-    def __init__(self, charm, relation_name):
-        super().__init__(charm, "fake-certificate-transfer-requires")
-
-
-_cert_transfer_lib = MagicMock()
-_cert_transfer_lib.CertificateTransferRequires = _FakeCertificateTransferRequires
-modules["charms.certificate_transfer_interface.v0.certificate_transfer"] = _cert_transfer_lib
-
-from single_kernel_postgresql.config.enums import Substrates  # noqa: E402
-from single_kernel_postgresql.config.exceptions import (  # noqa: E402
+from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.exceptions import (
     DeployedWithoutTrustError,
     SwitchoverFailedError,
     SwitchoverNotSyncError,
 )
-from single_kernel_postgresql.config.literals import (  # noqa: E402
+from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
     EXTENSION_OBJECT_MESSAGE,
     INSUFFICIENT_SIZE_WARNING,
@@ -62,15 +36,15 @@ from single_kernel_postgresql.config.literals import (  # noqa: E402
     REWIND_PASSWORD_KEY,
     USER_PASSWORD_KEY,
 )
-from single_kernel_postgresql.config.statuses import GeneralStatuses  # noqa: E402
-from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication  # noqa: E402
-from single_kernel_postgresql.utils.postgresql import (  # noqa: E402
+from single_kernel_postgresql.config.statuses import GeneralStatuses
+from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication
+from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLCreatePredefinedRolesError,
     PostgreSQLCreateUserError,
     PostgreSQLGrantDatabasePrivilegesToUserError,
     PostgreSQLListUsersError,
 )
-from tenacity import RetryError  # noqa: E402
+from tenacity import RetryError
 
 TIMELINE_PATCH = "single_kernel_postgresql.utils.postgresql.PostgreSQL.get_current_timeline"
 

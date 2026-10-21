@@ -10,29 +10,12 @@ from unittest.mock import MagicMock, PropertyMock, patch, sentinel
 
 import pytest
 import requests
-from ops import EventBase, EventSource, Object, ObjectEvents
 from ops.testing import Harness
 from single_kernel_postgresql.config.enums import Substrates
-from single_kernel_postgresql.config.literals import PEER_RELATION, STATUS_PEERS_RELATION
-
-
-class _FakeTransferEvents(ObjectEvents):
-    certificate_available = EventSource(EventBase)
-    certificate_removed = EventSource(EventBase)
-
-
-class _FakeCertificateTransferRequires(Object):
-    on = _FakeTransferEvents()
-
-    def __init__(self, charm, relation_name):
-        super().__init__(charm, "fake-certificate-transfer-requires")
-
-
-# The k8s charm imports the certificate-transfer charm-lib at module top; register
-# the stub before any test module imports the lib chain (conftest imports first).
-# The fake carries real ops BoundEvents so harness-based tests can observe.
-sys.modules["charms.certificate_transfer_interface.v0.certificate_transfer"] = MagicMock(
-    CertificateTransferRequires=_FakeCertificateTransferRequires,
+from single_kernel_postgresql.config.literals import (
+    PEER_RELATION,
+    RESTART_RELATION,
+    STATUS_PEERS_RELATION,
 )
 
 
@@ -73,6 +56,9 @@ def mock_refresh(request, monkeypatch):
     """
     monkeypatch.setattr("charm_refresh.Machines", _MockRefresh)
     monkeypatch.setattr("charm_refresh.Kubernetes", _MockRefresh)
+    # The COS-agent provider reads the snap name at construction; the minimal
+    # versions file above carries no [snap] section, so patch the getter too.
+    monkeypatch.setattr("charm_refresh.snap_name", lambda: "charmed-postgresql")
 
     # Anchor on the setup-time working directory: other fixtures may chdir for the
     # duration of a test, and the shared monkeypatch undo runs after this teardown.
@@ -193,6 +179,13 @@ def harness(substrate, test_charm_path):
     if STATUS_PEERS_RELATION in meta:
         status_rel_id = harness.add_relation(STATUS_PEERS_RELATION, "postgresql-single-kernel")
         harness.add_relation_unit(status_rel_id, "postgresql-single-kernel/0")
+    # The rolling-ops manager is constructed in the abstract init tail and reads
+    # its peer relation AT construction (trunk parity: the thin charm built it in
+    # production where juju always provides the peer relation before the first
+    # hook) — the harness must provide it before begin().
+    if RESTART_RELATION in meta:
+        restart_rel_id = harness.add_relation(RESTART_RELATION, "postgresql-single-kernel")
+        harness.add_relation_unit(restart_rel_id, "postgresql-single-kernel/0")
     # Set before begin(): Model.name (K8s namespace) is read by substrate-aware
     # state accessors (e.g. common_hosts Service FQDNs).
     harness.set_model_name("test-model")

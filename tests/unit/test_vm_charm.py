@@ -381,11 +381,11 @@ def test_refresh_resume_during_init_request_restart_needs_no_lock_yet(resuming_r
     """charm_refresh.Machines runs its state machine AT construction time.
 
     A force-refresh-start reaches request_restart INSIDE the abstract
-    __init__ (via the refresh manager), before the substrate subclass
-    assigns restart_lock_acquire: the guarded read must not raise
+    __init__ (via the refresh manager), before the abstract init tail
+    assigns the lib-owned lock seam: the guarded read must not raise
     AttributeError, and no lock may be invoked during construction.
     """
-    assert charm.restart_lock_acquire is None  # class default, nothing injected yet
+    assert callable(charm.restart_lock_acquire)  # the lib sets its own seam post-init
 
     lock = Mock()
     charm.restart_lock_acquire = lock
