@@ -4,11 +4,14 @@
 
 """Base interface for common workload operations."""
 
+import json
+import os
 import pathlib
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -20,6 +23,8 @@ from ops.pebble import Error as PebbleError
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
+    BACKUP_SAFETY_MANIFEST_NAME,
+    BACKUP_SAFETY_SCHEMA_VERSION,
     DIR_PERMISSIONS_READONLY,
     ORIGINAL_PATRONI_ON_FAILURE_CONDITION,
 )
@@ -123,6 +128,71 @@ class BackupConfig:
     def pg_controldata(self, major_version: str) -> str:
         """Path of the pg_controldata binary for the given major version."""
         return f"{self.bin_path}/{major_version}/bin/pg_controldata"
+
+
+@dataclass(frozen=True)
+class SafetyCopyInfo:
+    """Metadata of one preserved copy under the data-safety root."""
+
+    copy_id: str
+    operation: str
+    created: str
+    path: str
+    manifest: dict
+
+    @property
+    def total_size_bytes(self) -> int:
+        """Sum of the compressed tarball sizes recorded in the manifest."""
+        return sum(int(entry.get("size_bytes", 0)) for entry in self.manifest.get("contents", []))
+
+
+def safety_copy_id(operation: str, now: datetime) -> str:
+    """Build a copy directory name, e.g. 'restore-20261022T1015Z'."""
+    return f"{operation}-{now.strftime('%Y%m%dT%H%MZ')}"
+
+
+def build_safety_manifest(
+    *,
+    schema_version: int,
+    operation: str,
+    created: str,
+    cluster_name: str,
+    system_identifier: str,
+    model: str,
+    unit: str,
+    versions: dict,
+) -> dict:
+    """Build the manifest dict; `contents` is appended by the workload impl."""
+    return {
+        "schema_version": schema_version,
+        "operation": operation,
+        "created": created,
+        "cluster_name": cluster_name,
+        "system_identifier": system_identifier,
+        "model": model,
+        "unit": unit,
+        "versions": versions,
+    }
+
+
+def write_safety_manifest(copy_dir: PathProtocol, manifest: dict) -> None:
+    """Write the manifest atomically (tmp file + rename), so presence means complete."""
+    target = copy_dir / BACKUP_SAFETY_MANIFEST_NAME
+    tmp = copy_dir / f"{BACKUP_SAFETY_MANIFEST_NAME}.tmp"
+    tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    os.replace(str(tmp), str(target))
+
+
+def read_safety_manifest(copy_dir: PathProtocol) -> dict | None:
+    """Read a manifest; None when absent or unparsable (marks the copy incomplete)."""
+    path = copy_dir / BACKUP_SAFETY_MANIFEST_NAME
+    if not path.exists():
+        return None
+    try:
+        manifest = json.loads(path.read_text())
+    except (ValueError, OSError):
+        return None
+    return manifest if isinstance(manifest, dict) else None
 
 
 class ResourceProvider(Protocol):

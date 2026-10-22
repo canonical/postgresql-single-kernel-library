@@ -58,6 +58,15 @@ VM_DATA_LOGS_PATH = "data/logs"
 VM_TEMP_PATH = "data/temp"
 VM_PGBACKREST_LOGS_PATH = "var/log/pgbackrest"
 
+# -- Data safety (pre-wipe preservation) ------------------------------------------
+# Directory (under snap_common / PVC root) holding verified copies taken before a
+# destructive data-removal operation (restore, async-replication standby conversion).
+BACKUP_SAFETY_DIR_NAME = "backup-safety"
+BACKUP_SAFETY_MANIFEST_NAME = "manifest.json"
+BACKUP_SAFETY_SCHEMA_VERSION = 1
+SAFETY_OPERATIONS = ("restore", "async-conversion")
+SAFETY_PARAM_VALUES = ("local", "none")
+
 ## K8s Paths
 K8S_DATA_PATH = "var/lib/pg/data"
 K8S_ARCHIVE_PATH = "var/lib/pg/archive"
