@@ -3,6 +3,7 @@
 
 """Machine Workload."""
 
+import hashlib
 import importlib.resources
 import logging
 import os
@@ -14,13 +15,14 @@ import shlex
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from http.client import HTTPException
 from pathlib import Path
 from signal import SIGHUP, SIGINT
 from subprocess import run
+from typing import Any
 
 import charm_refresh
 import psutil
@@ -28,10 +30,15 @@ import tomli
 from charmlibs import pathops, snap
 from charmlibs.pathops import PathProtocol
 
-from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
+from single_kernel_postgresql.config.exceptions import (
+    DataSafetyError,
+    PostgreSQLFileOperationError,
+)
 from single_kernel_postgresql.config.literals import (
+    BACKUP_SAFETY_DIR_NAME,
     PATRONICTL_REMOVE_CONFIRMATION,
     POSTGRESQL_SNAP_NAME,
+    SAFETY_OPERATIONS,
     SNAP,
     SNAP_OOM_SCORE_ADJUST_MIN,
     SNAP_USER,
@@ -42,7 +49,15 @@ from single_kernel_postgresql.config.literals import (
     VM_PGBACKREST_SERVICE_NAME,
     VM_ROTATE_LOGS_LOG_FILE,
 )
-from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
+from single_kernel_postgresql.workload.base import (
+    BackupConfig,
+    BaseWorkload,
+    CommandResult,
+    SafetyCopyInfo,
+    read_safety_manifest,
+    safety_copy_id,
+    write_safety_manifest,
+)
 from single_kernel_postgresql.workload.paths.vm import VMPaths
 
 logger = logging.getLogger(__name__)
@@ -496,15 +511,162 @@ class VMWorkload(BaseWorkload):
         ).split(" ")[-1]
         return system_identifier, None
 
-    def create_data_backup_tarball(self) -> str:
-        """Store the current data folder in a tar.gz file and return its name."""
-        filename = (
-            f"{self.paths.data.parent}-"
-            f"{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.gz"
+    # -- Data safety (pre-wipe preservation) -----------------------------------------
+
+    def data_safety_root(self) -> PathProtocol:
+        """Directory where pre-wipe data copies are stored (snap-common/backup-safety)."""
+        root = self.paths.snap_common / BACKUP_SAFETY_DIR_NAME
+        if not root.is_dir():
+            root.mkdir(parents=True)
+        return root
+
+    def dir_size(self, path: PathProtocol) -> int:
+        """Total size in bytes of a directory tree."""
+        return sum(entry.stat().st_size for entry in Path(str(path)).rglob("*") if entry.is_file())
+
+    def free_space(self, path: PathProtocol) -> int:
+        """Free space in bytes on the filesystem containing `path`."""
+        return shutil.disk_usage(str(path)).free
+
+    def preserve_data_directories(
+        self,
+        operation: str,
+        sources: Sequence[tuple[str, PathProtocol]],
+        manifest: dict[str, Any],
+    ) -> SafetyCopyInfo:
+        """Copy `sources` into a verified tarball set under the safety root (see base)."""
+        if operation not in SAFETY_OPERATIONS:
+            raise DataSafetyError(f"unknown operation {operation!r}")
+        now = datetime.now(UTC)
+        copy_id = safety_copy_id(operation, now)
+        copy_dir = Path(str(self.data_safety_root())) / copy_id
+        if copy_dir.exists():
+            # Same-minute collision (double re-entry): disambiguate instead of merging.
+            copy_id = f"{copy_id}-{now.microsecond:06d}"
+            copy_dir = Path(str(self.data_safety_root())) / copy_id
+        try:
+            copy_dir.mkdir(parents=True)
+            contents = []
+            for role, directory in sources:
+                directory_path = Path(str(directory))
+                if not directory_path.is_dir():
+                    # Absent directories are tolerated by the wipe paths; preserve them too.
+                    continue
+                tarball = copy_dir / f"{role}.tar.zst"
+                tar_command = [
+                    "nice", "-n", "9", "ionice", "-c", "3",
+                    "tar", "--zstd", "-cf", str(tarball),
+                    "-C", str(directory_path.parent), directory_path.name,
+                ]
+                # Absorbed from PR #375: nice/ionice deprioritization and zstd multithreading.
+                subprocess.check_call(tar_command, env={**os.environ, "ZSTD_NBTHREADS": "0"})  # noqa: S603
+                digest = self._verify_tarball(tarball)
+                contents.append(
+                    {
+                        "name": tarball.name,
+                        "source_path": str(directory_path),
+                        "size_bytes": tarball.stat().st_size,
+                        "sha256": digest,
+                    }
+                )
+            manifest = dict(manifest)
+            manifest["contents"] = contents
+            write_safety_manifest(copy_dir, manifest)
+        except (OSError, subprocess.SubprocessError) as e:
+            shutil.rmtree(copy_dir, ignore_errors=True)
+            raise DataSafetyError(
+                f"Failed to preserve {operation} data under {copy_dir}: {e!s}"
+            ) from e
+        return SafetyCopyInfo(
+            copy_id=copy_id,
+            operation=operation,
+            created=manifest["created"],
+            path=str(copy_dir),
+            manifest=manifest,
         )
-        # Input is hardcoded
-        subprocess.check_call(f"tar -zcf {filename} {self.paths.data}".split())  # noqa: S603
-        return filename
+
+    def _verify_tarball(self, tarball: Path) -> str:
+        """Single full-read pass: decompress end-to-end and hash the stream.
+
+        Raises:
+            subprocess.SubprocessError: when the archive is truncated or corrupt
+                (zstd exits non-zero).
+        """
+        digest = hashlib.sha256()
+        zstd_command = ["zstd", "-dc", str(tarball)]
+        with subprocess.Popen(  # noqa: S603
+            zstd_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ) as process:
+            with process.stdout:
+                while chunk := process.stdout.read(1 << 20):
+                    digest.update(chunk)
+            process.stderr.close()
+            if process.wait() != 0:
+                raise subprocess.CalledProcessError(process.returncode, "zstd -dc")
+        return digest.hexdigest()
+
+    def list_data_safety_copies(self) -> list[SafetyCopyInfo]:
+        """Read the safety copies present on the workload."""
+        root = Path(str(self.data_safety_root()))
+        if not root.is_dir():
+            return []
+        copies = []
+        for copy_dir in sorted(root.iterdir()):
+            manifest = read_safety_manifest(copy_dir)
+            if manifest is None:
+                # Incomplete (crash residue); the preflight GC removes these.
+                continue
+            copies.append(
+                SafetyCopyInfo(
+                    copy_id=copy_dir.name,
+                    operation=manifest.get("operation", ""),
+                    created=manifest.get("created", ""),
+                    path=str(copy_dir),
+                    manifest=manifest,
+                )
+            )
+        return copies
+
+    def evict_data_safety_copies(self, needed_bytes: int) -> list[str]:
+        """Remove oldest complete copies until at least `needed_bytes` bytes are freed."""
+        root = Path(str(self.data_safety_root()))
+        evicted: list[str] = []
+        if root.is_dir():
+            for copy_dir in sorted(root.iterdir()):
+                if read_safety_manifest(copy_dir) is None:
+                    shutil.rmtree(copy_dir, ignore_errors=True)
+                    logger.warning("Removed incomplete data-safety copy %s", copy_dir.name)
+                    evicted.append(copy_dir.name)
+        if needed_bytes <= 0:
+            return evicted
+        freed = 0
+        for info in sorted(self.list_data_safety_copies(), key=lambda c: (c.created, c.copy_id)):
+            copy_dir = Path(info.path)
+            freed += info.total_size_bytes
+            shutil.rmtree(copy_dir, ignore_errors=True)
+            logger.warning("Evicted data-safety copy %s to free space", info.copy_id)
+            evicted.append(info.copy_id)
+            if freed >= needed_bytes:
+                break
+        return evicted
+
+    def read_data_safety_copy(self, copy_id: str) -> SafetyCopyInfo:
+        """Load one safety copy's manifest by id."""
+        if "/" in copy_id or copy_id in (".", ".."):
+            raise DataSafetyError(f"Invalid data-safety copy id: {copy_id}")
+        copy_dir = Path(str(self.data_safety_root())) / copy_id
+        manifest = read_safety_manifest(copy_dir)
+        if manifest is None:
+            raise DataSafetyError(f"No complete data-safety copy {copy_id}")
+        return SafetyCopyInfo(
+            copy_id=copy_id,
+            operation=manifest.get("operation", ""),
+            created=manifest.get("created", ""),
+            path=str(copy_dir),
+            manifest=manifest,
+        )
 
     def clear_data_directories(self) -> None:
         """Remove the contents of the data directories to initialise a new cluster."""

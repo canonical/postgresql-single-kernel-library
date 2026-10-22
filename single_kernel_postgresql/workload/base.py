@@ -8,12 +8,12 @@ import json
 import os
 import pathlib
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import tomli
 from charmlibs import pathops
@@ -24,7 +24,6 @@ from ops.pebble import Error as PebbleError
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
     BACKUP_SAFETY_MANIFEST_NAME,
-    BACKUP_SAFETY_SCHEMA_VERSION,
     DIR_PERMISSIONS_READONLY,
     ORIGINAL_PATRONI_ON_FAILURE_CONDITION,
 )
@@ -500,8 +499,60 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
-    def create_data_backup_tarball(self) -> str:
-        """Store the current data folder in a tar.gz file and return its name."""
+    def data_safety_root(self) -> PathProtocol:
+        """Directory where pre-wipe data copies are stored."""
+        pass
+
+    @abstractmethod
+    def dir_size(self, path: PathProtocol) -> int:
+        """Total size in bytes of a directory tree."""
+        pass
+
+    @abstractmethod
+    def free_space(self, path: PathProtocol) -> int:
+        """Free space in bytes on the filesystem containing `path`."""
+        pass
+
+    @abstractmethod
+    def preserve_data_directories(
+        self,
+        operation: str,
+        sources: Sequence[tuple[str, PathProtocol]],
+        manifest: dict[str, Any],
+    ) -> SafetyCopyInfo:
+        """Copy `sources` into a verified tarball set under the safety root.
+
+        The copy is the single recovery point for the destructive operation that
+        follows (a wrong restore target, an unwanted standby conversion); the
+        implementation must abort — and remove any partial copy — on the first
+        failure, leaving the original data untouched.
+
+        Args:
+            operation: one of `SAFETY_OPERATIONS` (restore, async-conversion).
+            sources: (role, path) pairs; the role names the tarball (pgdata,
+                wal, archive) per the spec layout.
+            manifest: metadata built by the manager (schema version, operation,
+                creation timestamp, cluster identity); the implementation
+                records it under the copy directory.
+
+        Returns:
+            The SafetyCopyInfo describing the completed, verified copy.
+        """
+        pass
+
+    @abstractmethod
+    def list_data_safety_copies(self) -> list[SafetyCopyInfo]:
+        """Read the safety copies present on the workload."""
+        pass
+
+    @abstractmethod
+    def evict_data_safety_copies(self, needed_bytes: int) -> list[str]:
+        """Remove oldest complete copies until at least `needed_bytes` bytes are freed."""
+        pass
+
+    @abstractmethod
+    def read_data_safety_copy(self, copy_id: str) -> SafetyCopyInfo:
+        """Load one safety copy's manifest by id."""
         pass
 
     @abstractmethod
