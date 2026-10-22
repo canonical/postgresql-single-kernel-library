@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 """Unit tests for the observer events handler (VM)."""
 
+from datetime import datetime
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -31,6 +32,22 @@ def test_raft_reconnect_is_not_observed_by_the_observer_handler():
     """raft_reconnect has exactly one registration (postgresql events handler)."""
     _, handler = _handler()
     assert not hasattr(handler, "_on_raft_reconnect")
+
+
+def test_on_databases_change_keys_the_timestamp_on_the_substrate(substrate):
+    """The K8s charm's authorisation-rules flow keys on pg_hba_needs_update_timestamp."""
+    charm, handler = _handler()
+    charm.state.substrate = Substrates.K8S if substrate == "k8s" else Substrates.VM
+
+    handler._on_databases_change(MagicMock())
+
+    charm.update_config.assert_called_once_with()
+    charm.state.peer.data.update.assert_called_once()
+    (data,) = charm.state.peer.data.update.call_args.args
+    # The VM charm keys on timestamp, the K8s charm on pg_hba_needs_update_timestamp.
+    key = "pg_hba_needs_update_timestamp" if substrate == "k8s" else "timestamp"
+    assert set(data) == {key}
+    datetime.fromisoformat(data[key])
 
 
 def test_cluster_topology_change_gates_on_the_patroni_primary_endpoint():

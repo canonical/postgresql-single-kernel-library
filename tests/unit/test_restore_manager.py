@@ -162,7 +162,9 @@ def test_pre_restore_checks_rejects_multiple_units(harness, restore_manager, mon
 
 
 def test_pre_restore_checks_rejects_active_async_relation(harness, restore_manager):
-    harness.add_relation("replication", "other-postgresql")
+    # relation_created (k8s) resolves the unit IP from the host's /etc/hosts.
+    with harness.hooks_disabled():
+        harness.add_relation("replication", "other-postgresql")
     ok, message = restore_manager.pre_restore_checks(BACKUP_ID, None)
     assert not ok
     assert message == "Unit cannot restore backup with an active async replication relation"
