@@ -203,7 +203,7 @@ def test_restore_action_maps_invalid_target(handler, restore_manager):
     event.fail.assert_called_once_with("Invalid backup-id: x")
 
 
-def test_restore_action_sets_maintenance_and_results(harness, handler, restore_manager):
+def test_restore_action_sets_maintenance_and_results(harness, handler, restore_manager, substrate):
     restore_manager.pre_restore_checks.return_value = (True, "")
     restore_manager.resolve_restore_target.return_value = (
         ("model.cluster", "2"),
@@ -211,10 +211,14 @@ def test_restore_action_sets_maintenance_and_results(harness, handler, restore_m
         "",
     )
     restore_manager.restore.return_value = (True, "restore started")
+    # Nothing was preserved (e.g. safety=none or an already-restoring unit):
+    # the results must then carry only the restore status.
+    restore_manager.last_preserved = None
     event = make_action_event({"restore-to-time": "2024-01-02 10:10:10"})
     handler._on_restore_action(event)
+    safety = "none" if substrate == "k8s" else "local"
     restore_manager.restore.assert_called_once_with(
-        ("model.cluster", "2"), None, "2024-01-02 10:10:10", False
+        ("model.cluster", "2"), None, "2024-01-02 10:10:10", False, safety=safety
     )
     event.set_results.assert_called_once_with({"restore-status": "restore started"})
     assert harness.charm.unit.status.name == "maintenance"
@@ -228,3 +232,38 @@ def test_restore_action_maps_restore_failure(harness, handler, restore_manager):
     handler._on_restore_action(event)
     event.fail.assert_called_once_with("Failed to stop database service")
     event.set_results.assert_not_called()
+
+
+# -- safety parameter ---------------------------------------------------------------
+
+
+def test_restore_action_rejects_bogus_safety(handler, restore_manager):
+    event = make_action_event({"backup-id": "2024-01-01T10:10:10Z", "safety": "bogus"})
+    handler._on_restore_action(event)
+    event.fail.assert_called_once_with("Invalid safety parameter: bogus. Valid choices: local, none")
+    restore_manager.restore.assert_not_called()
+
+
+def test_restore_action_fails_fast_on_s3(handler, restore_manager):
+    event = make_action_event({"backup-id": "2024-01-01T10:10:10Z", "safety": "s3"})
+    handler._on_restore_action(event)
+    event.fail.assert_called_once_with("safety=s3 is not supported yet")
+    restore_manager.restore.assert_not_called()
+
+
+def test_restore_action_reports_the_safety_copy(handler, restore_manager):
+    from single_kernel_postgresql.workload.base import SafetyCopyInfo
+
+    restore_manager.pre_restore_checks.return_value = (True, "")
+    restore_manager.resolve_restore_target.return_value = (("model.cluster", "2"), True, "")
+    restore_manager.restore.return_value = (True, "restore started")
+    restore_manager.last_preserved = SafetyCopyInfo(
+        copy_id="restore-20261022T1015Z",
+        operation="restore",
+        created="2026-10-22T10:15:00Z",
+        path="/tmp/x",
+        manifest={},
+    )
+    event = make_action_event({"backup-id": "2024-01-01T10:10:10Z", "safety": "local"})
+    handler._on_restore_action(event)
+    assert event.set_results.call_args[0][0]["safety-copy"] == "restore-20261022T1015Z"

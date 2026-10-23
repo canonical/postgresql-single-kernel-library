@@ -17,7 +17,9 @@ from ops.charm import ActionEvent
 from ops.pebble import ExecError
 from tenacity import RetryError
 
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import ListBackupsError
+from single_kernel_postgresql.config.literals import SAFETY_PARAM_VALUES
 from single_kernel_postgresql.managers.backup import BackupManager
 from single_kernel_postgresql.utils.backup import STANDBY_CLUSTER_LIST_BACKUPS_ERROR_MESSAGE
 
@@ -126,8 +128,28 @@ class BackupEventsHandler(Object):
             logger.exception(e)
             event.fail(f"Failed to list PostgreSQL backups with error: {e!s}")
 
+    def _resolve_safety_param(self, event: ActionEvent) -> str | None:
+        """Validate the safety action parameter; substrate-aware default (spec §6).
+
+        Returns the validated value, or None after failing the action.
+        """
+        default = "local" if self.state.substrate == Substrates.VM else "none"
+        safety = event.params.get("safety", default)
+        if safety == "s3":
+            event.fail("safety=s3 is not supported yet")
+            return None
+        if safety not in SAFETY_PARAM_VALUES:
+            event.fail(
+                f"Invalid safety parameter: {safety}. Valid choices: {', '.join(SAFETY_PARAM_VALUES)}"
+            )
+            return None
+        return safety
+
     def _on_restore_action(self, event: ActionEvent) -> None:
         """Request that pgBackRest restores a backup."""
+        safety = self._resolve_safety_param(event)
+        if safety is None:
+            return
         backup_id = event.params.get("backup-id")
         restore_to_time = event.params.get("restore-to-time")
         logger.info(
@@ -160,13 +182,18 @@ class BackupEventsHandler(Object):
             event.fail(error_message)
             return
 
-        self.charm.set_unit_status(MaintenanceStatus("restoring backup"))
+        if safety == "local":
+            self.charm.set_unit_status(MaintenanceStatus("preserving data before removal"))
         ok, message = self.restore_manager.restore(
-            restore_stanza_timeline, backup_id, restore_to_time, is_backup_id_real
+            restore_stanza_timeline, backup_id, restore_to_time, is_backup_id_real, safety=safety
         )
         if not ok:
             logger.error(f"Restore failed: {message}")
             event.fail(message)
             return
 
-        event.set_results({"restore-status": "restore started"})
+        self.charm.set_unit_status(MaintenanceStatus("restoring backup"))
+        results = {"restore-status": "restore started"}
+        if (copy := self.restore_manager.last_preserved) is not None:
+            results["safety-copy"] = copy.copy_id
+        event.set_results(results)

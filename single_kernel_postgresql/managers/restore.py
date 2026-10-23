@@ -22,12 +22,15 @@ from typing import TYPE_CHECKING
 with suppress(ImportError):
     from lightkube.core.exceptions import ApiError
 
+from charmlibs.pathops import PathProtocol
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops.pebble import ChangeError, ExecError
 
 from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.exceptions import DataSafetyError
 from single_kernel_postgresql.config.literals import (
+    BACKUP_SAFETY_DIR_NAME,
     K8S_PGBACK_REST_SERVER_SERVICE_NAME,
     K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME,
     K8S_POSTGRESQL_SERVICE_NAME,
@@ -44,6 +47,7 @@ from single_kernel_postgresql.managers.backup import (
     UpdateConfigFunction,
 )
 from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.managers.data_safety import DataSafetyManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
@@ -54,7 +58,7 @@ from single_kernel_postgresql.utils.backup import (
     get_nearest_timeline,
     is_psql_timestamp,
 )
-from single_kernel_postgresql.workload.base import PebbleLayerSpec
+from single_kernel_postgresql.workload.base import PebbleLayerSpec, SafetyCopyInfo
 
 if TYPE_CHECKING:
     from single_kernel_postgresql.core.state import CharmState
@@ -113,6 +117,7 @@ class RestoreManager(BaseManager):
         self.update_config = update_config
         self.backup_manager = backup_manager
         self._is_standby_cluster_bridge = is_standby_cluster
+        self.last_preserved: SafetyCopyInfo | None = None
 
     # -- Substrate-bridged predicates -------------------------------------------
 
@@ -372,6 +377,7 @@ class RestoreManager(BaseManager):
         backup_id: str | None,
         restore_to_time: str | None,
         is_backup_id_real: bool,
+        safety: str = "local",
     ) -> tuple[bool, str]:
         """Restore a pgBackRest backup (optionally to a point in time).
 
@@ -379,11 +385,16 @@ class RestoreManager(BaseManager):
         pre_restore_checks and resolve_restore_target (the events layer calls
         them to fail the action before any service disruption).
 
+        With ``safety="local"`` (the default) the data directories are
+        preserved into a verified safety copy before they are wiped;
+        ``safety="none"`` skips the preservation entirely.
+
         Returns:
             (success, message) tuple; message is "restore started" on success or
             the failure reason otherwise. The restore proceeds asynchronously as
             Patroni bootstraps the restored cluster.
         """
+        self.last_preserved = None
         # Temporarily disabling patroni service auto-restart. This is required as
         # point-in-time-recovery can fail on restore, therefore during cluster
         # bootstrapping process. In this case, we need be able to check patroni
@@ -409,6 +420,20 @@ class RestoreManager(BaseManager):
         if error_message:
             logger.error(f"Restore failed: {error_message}")
             return False, error_message
+
+        if safety == "local" and not self.state.application.restoring_backup:
+            error_message = self._preserve_before_removal(
+                "restore",
+                [
+                    ("pgdata", self.workload.paths.data),
+                    ("wal", self.workload.paths.wal),
+                    ("archive", self.workload.paths.archive),
+                ],
+            )
+            if error_message:
+                logger.error(f"Restore failed: {error_message}")
+                self._restart_database()
+                return False, error_message
 
         error_message = self._remove_cluster_info_before_wiping()
         if error_message:
@@ -485,6 +510,20 @@ class RestoreManager(BaseManager):
                 return "Failed to remove contents of the data directory"
         except ExecError as e:
             return f"Failed to remove contents of the data directory with error: {e!s}"
+        return None
+
+    def _preserve_before_removal(
+        self, operation: str, copies: list[tuple[str, PathProtocol]]
+    ) -> str | None:
+        """Create the verified pre-wipe copy; returns an error message on failure."""
+        logger.info("Preserving a safety copy of the data directories")
+        try:
+            info = DataSafetyManager(self.state, self.workload).preserve(operation, copies)
+        except DataSafetyError as e:
+            return f"Failed to preserve the data before removal: {e!s}"
+        logger.info("Safety copy %s created under %s", info.copy_id, info.path)
+        self.last_preserved = info
+        self.state.application.backup_safety_copy_id = info.copy_id
         return None
 
     def _remove_cluster_info_after_start(self) -> str | None:
@@ -744,7 +783,13 @@ class RestoreManager(BaseManager):
                 self.state.application.restoring_backup
                 or self.state.application.is_cluster_restoring_to_time
             ):
-                return [StatusObject(status="maintenance", message="restoring backup")]
+                message = "restoring backup"
+                if copy_id := self.state.application.backup_safety_copy_id:
+                    message = (
+                        f"restoring backup (previous data preserved under "
+                        f"{BACKUP_SAFETY_DIR_NAME}/{copy_id})"
+                    )
+                return [StatusObject(status="maintenance", message=message)]
         return [GeneralStatuses.ACTIVE_IDLE.value]
 
     def block_on_pitr_failure(self) -> None:

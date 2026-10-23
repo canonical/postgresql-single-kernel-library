@@ -722,6 +722,20 @@ class PostgreSQLApplication(PeerRelationState):
         self.relation.data[self.app]["restoring-backup"] = value
 
     @property
+    def backup_safety_copy_id(self) -> str | None:
+        """Get the pre-wipe safety copy id from the app peer relation data."""
+        if not self.relation:
+            return None
+        return self.relation.data[self.app].get("backup-safety-copy-id")
+
+    @backup_safety_copy_id.setter
+    def backup_safety_copy_id(self, value: str) -> None:
+        """Set the pre-wipe safety copy id in the app peer relation data."""
+        if not self.relation:
+            return
+        self.relation.data[self.app]["backup-safety-copy-id"] = value
+
+    @property
     def restore_stanza(self) -> str | None:
         """Get the restore-stanza name from the app peer relation data."""
         if not self.relation:
