@@ -20,6 +20,7 @@ from single_kernel_postgresql.config.literals import (
     BACKUP_SAFETY_MANIFEST_NAME,
     SAFETY_OPERATIONS,
 )
+from single_kernel_postgresql.managers.data_safety import DataSafetyManager
 from single_kernel_postgresql.workload.base import (
     SafetyCopyInfo,
     build_safety_manifest,
@@ -275,3 +276,104 @@ def test_k8s_stubs_raise():
     for method, args in method_args.items():
         with pytest.raises(NotImplementedError):
             getattr(workload, method)(*args)
+
+
+# -- DataSafetyManager ----------------------------------------------------------------
+
+
+@pytest.fixture
+def data_safety_manager(vm_workload, monkeypatch):
+    """A DataSafetyManager over a redirected VM workload with canned manifest inputs."""
+    from single_kernel_postgresql.managers.data_safety import DataSafetyManager
+
+    workload, paths = vm_workload
+    _make_tree(paths)
+    # The manifest builder reads these from the workload; patch to canned values
+    # so the tests do not depend on a live snap.
+    monkeypatch.setattr(type(workload), "get_system_identifier", lambda self: ("7389", None))
+    monkeypatch.setattr(type(workload), "get_workload_version", lambda self: "16.9")
+    state = MagicMock()
+    state.cluster_name = "prod-db"
+    state.model.name = "mymodel"
+    state.model.unit.name = "postgresql/0"
+    return DataSafetyManager(state, workload)
+
+
+def test_preserve_success_writes_copy_and_returns_info(data_safety_manager):
+    info = data_safety_manager.preserve(
+        "restore",
+        [
+            ("pgdata", data_safety_manager.workload.paths.data),
+            ("wal", data_safety_manager.workload.paths.wal),
+        ],
+    )
+    assert info.operation == "restore"
+    assert info.manifest["cluster_name"] == "prod-db"
+    assert info.manifest["unit"] == "postgresql/0"
+    assert info.manifest["contents"]
+
+
+def test_preflight_refuses_when_space_is_short_even_with_no_copies(data_safety_manager, monkeypatch):
+    monkeypatch.setattr(type(data_safety_manager.workload), "free_space", lambda self, path: 1)
+    with pytest.raises(DataSafetyPreflightError) as exc:
+        data_safety_manager.preflight("restore", [("pgdata", data_safety_manager.workload.paths.data)])
+    assert "Not enough free space" in str(exc.value)
+    assert "safety=none" in str(exc.value)
+
+
+def test_preflight_gcs_incomplete_copies_first(data_safety_manager):
+    junk = (
+        Path(str(data_safety_manager.workload.paths.snap_common))
+        / BACKUP_SAFETY_DIR_NAME
+        / "restore-junk"
+    )
+    junk.mkdir(parents=True)
+    (junk / "pgdata.tar.zst").write_bytes(b"x" * 1024 * 5)  # big junk dir
+    data_safety_manager.preflight("restore", [("pgdata", data_safety_manager.workload.paths.data)])
+    assert not junk.exists()
+
+
+def test_preflight_evicts_the_oldest_complete_copy_to_fit(data_safety_manager, monkeypatch):
+    info_a = data_safety_manager.preserve(
+        "restore", [("pgdata", data_safety_manager.workload.paths.data)]
+    )
+    real_free_space = type(data_safety_manager.workload).free_space
+    first_call = {"done": False}
+
+    def short_then_real(self, path):
+        """Short only on the preflight's first reading; real afterwards (the eviction freed bytes)."""
+        if not first_call["done"]:
+            first_call["done"] = True
+            return 1
+        return real_free_space(self, path)
+
+    monkeypatch.setattr(type(data_safety_manager.workload), "free_space", short_then_real)
+    info_b = data_safety_manager.preserve(
+        "restore", [("pgdata", data_safety_manager.workload.paths.data)]
+    )
+    remaining = {c.copy_id for c in data_safety_manager.workload.list_data_safety_copies()}
+    assert info_a.copy_id not in remaining  # the oldest complete copy was evicted
+    assert info_b.copy_id in remaining
+
+
+def test_postcopy_gate_raises_when_space_is_short(data_safety_manager, monkeypatch):
+    real_free_space = type(data_safety_manager.workload).free_space
+    calls = {"n": 0}
+
+    def short_after_tar(self, path):
+        """Real during preflight, short for the post-copy re-check."""
+        calls["n"] += 1
+        return 1 if calls["n"] > 2 else real_free_space(self, path)
+
+    monkeypatch.setattr(type(data_safety_manager.workload), "free_space", short_after_tar)
+    with pytest.raises(DataSafetyPostflightError):
+        data_safety_manager.preserve("restore", [("pgdata", data_safety_manager.workload.paths.data)])
+
+
+def test_preserve_wraps_notimplementederror_for_k8s(monkeypatch):
+    workload = MagicMock()
+    workload.evict_data_safety_copies.side_effect = NotImplementedError("k8s stub")
+    manager = DataSafetyManager(MagicMock(), workload)
+    with pytest.raises(DataSafetyError) as exc:
+        manager.preserve("restore", [("pgdata", MagicMock())])
+    assert "not supported on this substrate" in str(exc.value)
