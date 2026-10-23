@@ -241,6 +241,33 @@ class AsyncReplicationManager(BaseManager):
         logger.debug("Partner addresses: []")
         return []
 
+    @property
+    def was_backup_made(self) -> bool:
+        """Check if backup of the initial data was already made."""
+        for async_relation in [
+            self.state.model.get_relation(REPLICATION_OFFER_RELATION),
+            self.state.model.get_relation(REPLICATION_CONSUMER_RELATION),
+        ]:
+            if async_relation is None:
+                continue
+            for databag in [
+                (async_relation.data[async_relation.app]),
+                (async_relation.data[self.state.model.app]),
+            ]:
+                if "backup-data" in databag:
+                    return True
+        return False
+
+    def set_backup_flag(self) -> None:
+        """Set the relation backup flag."""
+        for async_relation in [
+            self.state.model.get_relation(REPLICATION_OFFER_RELATION),
+            self.state.model.get_relation(REPLICATION_CONSUMER_RELATION),
+        ]:
+            if async_relation is None:
+                continue
+            async_relation.data[self.state.model.app]["backup-data"] = "True"
+
     def get_primary_cluster(self) -> Application | None:
         """Return the primary cluster."""
         primary_cluster = None
@@ -806,7 +833,9 @@ class AsyncReplicationManager(BaseManager):
         system_identifier, error = self.workload.get_system_identifier()
         if error is not None:
             raise AsyncReplicationError(error)
-        if system_identifier != _safe_databag_get(relation.data[relation.app], "system-id"):
+        if not self.was_backup_made and system_identifier != _safe_databag_get(
+            relation.data[relation.app], "system-id"
+        ):
             # Store current data in a tar.gz file.
             logger.info(
                 "Creating backup of pgdata folder" if k8s else "Creating backup of data folder"
@@ -819,6 +848,7 @@ class AsyncReplicationManager(BaseManager):
                 self.k8s_manager.delete_patroni_cluster_resources()
         else:
             self.state.application.data["suppress-oversee-users"] = "true"
+        self.set_backup_flag()
         return True
 
     def _stop_database(self, event: RelationChangedEvent) -> bool:
