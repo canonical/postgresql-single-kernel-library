@@ -23,6 +23,7 @@ from single_kernel_postgresql.managers.async_replication import (
     AsyncReplicationManager,
 )
 from single_kernel_postgresql.managers.patroni import PatroniManager
+from single_kernel_postgresql.workload.base import SafetyCopyInfo
 
 SYSTEM_IDENTIFIER = "7000000001"
 UNIT_IP = "10.0.0.5"
@@ -350,7 +351,7 @@ def test_relation_changed_exits_early_for_a_following_non_leader(substrate, harn
 
 
 def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
-    substrate, harness, async_rel
+    substrate, harness, async_rel, tmp_path
 ):
     harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
 
@@ -370,11 +371,25 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
         patch.object(
             type(harness.charm.workload), "get_system_identifier", return_value=("7001", None)
         ),
+        patch.object(type(harness.charm.workload), "get_workload_version", return_value="16.9"),
+        patch.object(type(harness.charm.workload), "dir_size", return_value=10),
+        patch.object(type(harness.charm.workload), "free_space", return_value=1 << 30),
         patch.object(
             type(harness.charm.workload),
-            "create_data_backup_tarball",
-            return_value="backup.tar.gz",
+            "data_safety_root",
+            return_value=tmp_path / "backup-safety",
         ),
+        patch.object(
+            type(harness.charm.workload),
+            "preserve_data_directories",
+            return_value=SafetyCopyInfo(
+                copy_id="async-conversion-20261022T1400Z",
+                operation="async-conversion",
+                created="2026-10-22T14:00:00Z",
+                path="/tmp/backup-safety/async-conversion-20261022T1400Z",
+                manifest={"contents": [{"name": "pgdata.tar.zst", "size_bytes": 10, "sha256": "0" * 64}]},
+            ),
+        ) as preserve_copy,
         patch.object(type(harness.charm.workload), "clear_data_directories"),
         patch.object(type(harness.charm.workload), "init_storage") as init_storage,
         patch.object(PatroniManager, "stop_patroni", return_value=True),
@@ -660,8 +675,8 @@ def test_create_replication_fails_when_the_system_identifier_errors(harness, asy
     assert exc.value.message == "Failed to get system identifier"
 
 
-def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness, async_rel):
-    """The standby reconfiguration backs up pgdata before the system id changes."""
+def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness, async_rel, tmp_path):
+    """The standby reconfiguration preserves pgdata before the system id changes."""
     harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
 
     @contextmanager
@@ -680,11 +695,25 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
         patch.object(
             type(harness.charm.workload), "get_system_identifier", return_value=("7001", None)
         ),
+        patch.object(type(harness.charm.workload), "get_workload_version", return_value="16.9"),
+        patch.object(type(harness.charm.workload), "dir_size", return_value=10),
+        patch.object(type(harness.charm.workload), "free_space", return_value=1 << 30),
         patch.object(
             type(harness.charm.workload),
-            "create_data_backup_tarball",
-            return_value="backup.tar.gz",
-        ) as create_tarball,
+            "data_safety_root",
+            return_value=tmp_path / "backup-safety",
+        ),
+        patch.object(
+            type(harness.charm.workload),
+            "preserve_data_directories",
+            return_value=SafetyCopyInfo(
+                copy_id="async-conversion-20261022T1400Z",
+                operation="async-conversion",
+                created="2026-10-22T14:00:00Z",
+                path="/tmp/backup-safety/async-conversion-20261022T1400Z",
+                manifest={"contents": [{"name": "pgdata.tar.zst", "size_bytes": 10, "sha256": "0" * 64}]},
+            ),
+        ) as preserve_copy,
         patch.object(type(harness.charm.workload), "clear_data_directories"),
         patch.object(type(harness.charm.workload), "init_storage") as init_storage,
         patch.object(PatroniManager, "stop_patroni", return_value=True),
@@ -694,7 +723,11 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
     ):
         harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
 
-    create_tarball.assert_called_once()
+    if substrate == "vm":
+        preserve_copy.assert_called_once()
+    else:
+        # k8s parity is deferred (spec §6): the k8s default is safety=none.
+        preserve_copy.assert_not_called()
     if substrate == "k8s":
         # D3: the K8s leader recreates pgdata right after clearing it.
         init_storage.assert_called_once()
@@ -811,3 +844,127 @@ def test_relation_broken_survives_teardown_update_config_failures(harness, async
 
     update_config.assert_called_once()
     assert _peer_app_data(harness).get("promoted-cluster-counter") in (None, "")
+
+
+# -- safety param on the standby conversion -----------------------------------------
+
+
+def test_standby_conversion_preserves_data_with_default_safety(substrate, harness, async_rel, tmp_path):
+    """VM conversion preserves the data before the wipe; k8s defaults to safety=none."""
+    harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
+
+    @contextmanager
+    def _standby_teardown_patches():
+        if substrate == "k8s":
+            with (
+                patch.object(type(harness.charm.workload), "stop"),
+                patch.object(harness.charm.k8s_manager, "delete_patroni_cluster_resources"),
+            ):
+                yield
+        else:
+            with patch.object(type(harness.charm.workload), "remove_raft_state"):
+                yield
+
+    with (
+        patch.object(
+            type(harness.charm.workload), "get_system_identifier", return_value=("7001", None)
+        ),
+        patch.object(type(harness.charm.workload), "get_workload_version", return_value="16.9"),
+        patch.object(type(harness.charm.workload), "dir_size", return_value=10),
+        patch.object(type(harness.charm.workload), "free_space", return_value=1 << 30),
+        patch.object(
+            type(harness.charm.workload),
+            "data_safety_root",
+            return_value=tmp_path / "backup-safety",
+        ),
+        patch.object(
+            type(harness.charm.workload),
+            "preserve_data_directories",
+            return_value=SafetyCopyInfo(
+                copy_id="async-conversion-20261022T1400Z",
+                operation="async-conversion",
+                created="2026-10-22T14:00:00Z",
+                path="/tmp/x",
+                manifest={"contents": []},
+            ),
+        ) as preserve_copy,
+        patch.object(type(harness.charm.workload), "clear_data_directories"),
+        patch.object(PatroniManager, "stop_patroni", return_value=True),
+        patch.object(PatroniManager, "get_standby_leader", return_value=None),
+        patch.object(harness.charm, "update_config"),
+        patch.object(type(harness.charm.workload), "init_storage"),
+        _standby_teardown_patches(),
+    ):
+        harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
+    if substrate == "vm":
+        preserve_copy.assert_called_once()
+    else:
+        # k8s parity is deferred (spec §6): the k8s default is safety=none.
+        preserve_copy.assert_not_called()
+
+
+def test_standby_conversion_skips_preservation_on_safety_none(substrate, harness, async_rel):
+    """An explicit safety=none on the async relation skips the pre-wipe copy."""
+    harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
+    harness.update_relation_data(async_rel, REMOTE_APP, {"create-replication-safety": "none"})
+
+    @contextmanager
+    def _standby_teardown_patches():
+        if substrate == "k8s":
+            with (
+                patch.object(type(harness.charm.workload), "stop"),
+                patch.object(harness.charm.k8s_manager, "delete_patroni_cluster_resources"),
+            ):
+                yield
+        else:
+            with patch.object(type(harness.charm.workload), "remove_raft_state"):
+                yield
+
+    with (
+        patch.object(
+            type(harness.charm.workload), "get_system_identifier", return_value=("7001", None)
+        ),
+        patch.object(type(harness.charm.workload), "preserve_data_directories") as preserve_copy,
+        patch.object(type(harness.charm.workload), "clear_data_directories"),
+        patch.object(PatroniManager, "stop_patroni", return_value=True),
+        patch.object(PatroniManager, "get_standby_leader", return_value=None),
+        patch.object(harness.charm, "update_config"),
+        patch.object(type(harness.charm.workload), "init_storage"),
+        _standby_teardown_patches(),
+    ):
+        harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
+    preserve_copy.assert_not_called()
+
+
+def test_standby_conversion_is_idempotent_via_backup_data_flag(substrate, harness, async_rel):
+    """A recorded backup-data flag makes the conversion skip a second preservation."""
+    harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
+
+    @contextmanager
+    def _standby_teardown_patches():
+        if substrate == "k8s":
+            with (
+                patch.object(type(harness.charm.workload), "stop"),
+                patch.object(harness.charm.k8s_manager, "delete_patroni_cluster_resources"),
+            ):
+                yield
+        else:
+            with patch.object(type(harness.charm.workload), "remove_raft_state"):
+                yield
+
+    with (
+        patch.object(
+            type(harness.charm.workload), "get_system_identifier", return_value=("7001", None)
+        ),
+        patch.object(type(harness.charm.workload), "preserve_data_directories") as preserve_copy,
+        patch.object(type(harness.charm.workload), "clear_data_directories"),
+        patch.object(PatroniManager, "stop_patroni", return_value=True),
+        patch.object(PatroniManager, "get_standby_leader", return_value=None),
+        patch.object(harness.charm, "update_config"),
+        patch.object(type(harness.charm.workload), "init_storage"),
+        _standby_teardown_patches(),
+    ):
+        harness.update_relation_data(
+            async_rel, REMOTE_APP, {"promoted-cluster-counter": "1", "backup-data": "True"}
+        )
+    preserve_copy.assert_not_called()
