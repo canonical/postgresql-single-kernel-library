@@ -538,12 +538,12 @@ class VMWorkload(BaseWorkload):
         if operation not in SAFETY_OPERATIONS:
             raise DataSafetyError(f"unknown operation {operation!r}")
         now = datetime.now(UTC)
-        copy_id = safety_copy_id(operation, now)
+        # Always-unique: the minute-granular base plus a microsecond suffix. Two
+        # preserves within one minute must yield distinct copy ids — the first
+        # copy may legitimately have been evicted (freeing the base name), and
+        # external references to a copy id must never be recycled.
+        copy_id = f"{safety_copy_id(operation, now)}-{now.microsecond:06d}"
         copy_dir = Path(str(self.data_safety_root())) / copy_id
-        if copy_dir.exists():
-            # Same-minute collision (double re-entry): disambiguate instead of merging.
-            copy_id = f"{copy_id}-{now.microsecond:06d}"
-            copy_dir = Path(str(self.data_safety_root())) / copy_id
         try:
             copy_dir.mkdir(parents=True)
             contents = []
