@@ -22,7 +22,7 @@ from http.client import HTTPException
 from pathlib import Path
 from signal import SIGHUP, SIGINT
 from subprocess import run
-from typing import Any
+from typing import IO, Any, cast
 
 import charm_refresh
 import psutil
@@ -513,9 +513,12 @@ class VMWorkload(BaseWorkload):
 
     # -- Data safety (pre-wipe preservation) -----------------------------------------
 
-    def data_safety_root(self) -> PathProtocol:
+    def data_safety_root(self) -> pathops.LocalPath:
         """Directory where pre-wipe data copies are stored (snap-common/backup-safety)."""
-        root = self.paths.snap_common / BACKUP_SAFETY_DIR_NAME
+        # The paths namespace is annotated PathProtocol, but on the VM substrate the
+        # values are LocalPath (a pathlib.Path subclass) — cast keeps the checker on
+        # the truth without giving up the concrete pathlib API the impl needs.
+        root = cast("pathops.LocalPath", self.paths.snap_common / BACKUP_SAFETY_DIR_NAME)
         if not root.is_dir():
             root.mkdir(parents=True)
         return root
@@ -543,7 +546,7 @@ class VMWorkload(BaseWorkload):
         # copy may legitimately have been evicted (freeing the base name), and
         # external references to a copy id must never be recycled.
         copy_id = f"{safety_copy_id(operation, now)}-{now.microsecond:06d}"
-        copy_dir = Path(str(self.data_safety_root())) / copy_id
+        copy_dir = self.data_safety_root() / copy_id
         try:
             copy_dir.mkdir(parents=True)
             contents = []
@@ -554,21 +557,29 @@ class VMWorkload(BaseWorkload):
                     continue
                 tarball = copy_dir / f"{role}.tar.zst"
                 tar_command = [
-                    "nice", "-n", "9", "ionice", "-c", "3",
-                    "tar", "--zstd", "-cf", str(tarball),
-                    "-C", str(directory_path.parent), directory_path.name,
+                    "nice",
+                    "-n",
+                    "9",
+                    "ionice",
+                    "-c",
+                    "3",
+                    "tar",
+                    "--zstd",
+                    "-cf",
+                    str(tarball),
+                    "-C",
+                    str(directory_path.parent),
+                    directory_path.name,
                 ]
                 # Absorbed from PR #375: nice/ionice deprioritization and zstd multithreading.
                 subprocess.check_call(tar_command, env={**os.environ, "ZSTD_NBTHREADS": "0"})  # noqa: S603
                 digest = self._verify_tarball(tarball)
-                contents.append(
-                    {
-                        "name": tarball.name,
-                        "source_path": str(directory_path),
-                        "size_bytes": tarball.stat().st_size,
-                        "sha256": digest,
-                    }
-                )
+                contents.append({
+                    "name": tarball.name,
+                    "source_path": str(directory_path),
+                    "size_bytes": tarball.stat().st_size,
+                    "sha256": digest,
+                })
             manifest = dict(manifest)
             manifest["contents"] = contents
             write_safety_manifest(copy_dir, manifest)
@@ -599,17 +610,21 @@ class VMWorkload(BaseWorkload):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         ) as process:
-            with process.stdout:
-                while chunk := process.stdout.read(1 << 20):
+            # PIPE guarantees both streams; cast keeps the checker quiet without
+            # an unreachable runtime branch.
+            stdout = cast("IO[bytes]", process.stdout)
+            stderr = cast("IO[bytes]", process.stderr)
+            with stdout:
+                while chunk := stdout.read(1 << 20):
                     digest.update(chunk)
-            process.stderr.close()
+            stderr.close()
             if process.wait() != 0:
                 raise subprocess.CalledProcessError(process.returncode, "zstd -dc")
         return digest.hexdigest()
 
     def list_data_safety_copies(self) -> list[SafetyCopyInfo]:
         """Read the safety copies present on the workload."""
-        root = Path(str(self.data_safety_root()))
+        root = self.data_safety_root()
         if not root.is_dir():
             return []
         copies = []
@@ -631,7 +646,7 @@ class VMWorkload(BaseWorkload):
 
     def evict_data_safety_copies(self, needed_bytes: int) -> list[str]:
         """Remove oldest complete copies until at least `needed_bytes` bytes are freed."""
-        root = Path(str(self.data_safety_root()))
+        root = self.data_safety_root()
         evicted: list[str] = []
         if root.is_dir():
             for copy_dir in sorted(root.iterdir()):
@@ -656,7 +671,7 @@ class VMWorkload(BaseWorkload):
         """Load one safety copy's manifest by id."""
         if "/" in copy_id or copy_id in (".", ".."):
             raise DataSafetyError(f"Invalid data-safety copy id: {copy_id}")
-        copy_dir = Path(str(self.data_safety_root())) / copy_id
+        copy_dir = self.data_safety_root() / copy_id
         manifest = read_safety_manifest(copy_dir)
         if manifest is None:
             raise DataSafetyError(f"No complete data-safety copy {copy_id}")

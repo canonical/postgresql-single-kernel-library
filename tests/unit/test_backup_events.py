@@ -240,7 +240,9 @@ def test_restore_action_maps_restore_failure(harness, handler, restore_manager):
 def test_restore_action_rejects_bogus_safety(handler, restore_manager):
     event = make_action_event({"backup-id": "2024-01-01T10:10:10Z", "safety": "bogus"})
     handler._on_restore_action(event)
-    event.fail.assert_called_once_with("Invalid safety parameter: bogus. Valid choices: local, none")
+    event.fail.assert_called_once_with(
+        "Invalid safety parameter: bogus. Valid choices: local, none"
+    )
     restore_manager.restore.assert_not_called()
 
 

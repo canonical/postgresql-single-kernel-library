@@ -14,10 +14,8 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-
-from charmlibs.pathops import PathProtocol
 
 from single_kernel_postgresql.config.exceptions import (
     DataSafetyError,
@@ -25,10 +23,12 @@ from single_kernel_postgresql.config.exceptions import (
     DataSafetyPreflightError,
 )
 from single_kernel_postgresql.config.literals import BACKUP_SAFETY_SCHEMA_VERSION
-from single_kernel_postgresql.workload.base import BaseWorkload, SafetyCopyInfo
 
 if TYPE_CHECKING:
+    from charmlibs.pathops import PathProtocol
+
     from single_kernel_postgresql.core.state import CharmState
+    from single_kernel_postgresql.workload.base import BaseWorkload, SafetyCopyInfo
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def _lib_version() -> str:
 class DataSafetyManager:
     """Pre-wipe preservation orchestration for destructive operations."""
 
-    def __init__(self, state: "CharmState", workload: BaseWorkload):
+    def __init__(self, state: CharmState, workload: BaseWorkload):
         self.state = state
         self.workload = workload
 
@@ -72,7 +72,7 @@ class DataSafetyManager:
         return {
             "schema_version": BACKUP_SAFETY_SCHEMA_VERSION,
             "operation": operation,
-            "created": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "created": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "cluster_name": self.state.cluster_name,
             "system_identifier": system_identifier or "",
             "model": self.state.model.name,

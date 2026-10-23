@@ -313,10 +313,14 @@ def test_preserve_success_writes_copy_and_returns_info(data_safety_manager):
     assert info.manifest["contents"]
 
 
-def test_preflight_refuses_when_space_is_short_even_with_no_copies(data_safety_manager, monkeypatch):
+def test_preflight_refuses_when_space_is_short_even_with_no_copies(
+    data_safety_manager, monkeypatch
+):
     monkeypatch.setattr(type(data_safety_manager.workload), "free_space", lambda self, path: 1)
     with pytest.raises(DataSafetyPreflightError) as exc:
-        data_safety_manager.preflight("restore", [("pgdata", data_safety_manager.workload.paths.data)])
+        data_safety_manager.preflight(
+            "restore", [("pgdata", data_safety_manager.workload.paths.data)]
+        )
     assert "Not enough free space" in str(exc.value)
     assert "safety=none" in str(exc.value)
 
@@ -367,7 +371,9 @@ def test_postcopy_gate_raises_when_space_is_short(data_safety_manager, monkeypat
 
     monkeypatch.setattr(type(data_safety_manager.workload), "free_space", short_after_tar)
     with pytest.raises(DataSafetyPostflightError):
-        data_safety_manager.preserve("restore", [("pgdata", data_safety_manager.workload.paths.data)])
+        data_safety_manager.preserve(
+            "restore", [("pgdata", data_safety_manager.workload.paths.data)]
+        )
 
 
 def test_preserve_wraps_notimplementederror_for_k8s(monkeypatch):

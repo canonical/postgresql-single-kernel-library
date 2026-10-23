@@ -387,9 +387,11 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
                 operation="async-conversion",
                 created="2026-10-22T14:00:00Z",
                 path="/tmp/backup-safety/async-conversion-20261022T1400Z",
-                manifest={"contents": [{"name": "pgdata.tar.zst", "size_bytes": 10, "sha256": "0" * 64}]},
+                manifest={
+                    "contents": [{"name": "pgdata.tar.zst", "size_bytes": 10, "sha256": "0" * 64}]
+                },
             ),
-        ) as preserve_copy,
+        ),
         patch.object(type(harness.charm.workload), "clear_data_directories"),
         patch.object(type(harness.charm.workload), "init_storage") as init_storage,
         patch.object(PatroniManager, "stop_patroni", return_value=True),
@@ -675,7 +677,9 @@ def test_create_replication_fails_when_the_system_identifier_errors(harness, asy
     assert exc.value.message == "Failed to get system identifier"
 
 
-def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness, async_rel, tmp_path):
+def test_relation_changed_tars_pgdata_when_system_ids_differ(
+    substrate, harness, async_rel, tmp_path
+):
     """The standby reconfiguration preserves pgdata before the system id changes."""
     harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
 
@@ -711,7 +715,9 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
                 operation="async-conversion",
                 created="2026-10-22T14:00:00Z",
                 path="/tmp/backup-safety/async-conversion-20261022T1400Z",
-                manifest={"contents": [{"name": "pgdata.tar.zst", "size_bytes": 10, "sha256": "0" * 64}]},
+                manifest={
+                    "contents": [{"name": "pgdata.tar.zst", "size_bytes": 10, "sha256": "0" * 64}]
+                },
             ),
         ) as preserve_copy,
         patch.object(type(harness.charm.workload), "clear_data_directories"),
@@ -849,7 +855,9 @@ def test_relation_broken_survives_teardown_update_config_failures(harness, async
 # -- safety param on the standby conversion -----------------------------------------
 
 
-def test_standby_conversion_preserves_data_with_default_safety(substrate, harness, async_rel, tmp_path):
+def test_standby_conversion_preserves_data_with_default_safety(
+    substrate, harness, async_rel, tmp_path
+):
     """VM conversion preserves the data before the wipe; k8s defaults to safety=none."""
     harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
 

@@ -841,29 +841,29 @@ class AsyncReplicationManager(BaseManager):
         if (
             not self.was_backup_made
             and system_identifier != _safe_databag_get(relation.data[relation.app], "system-id")
+            and safety != "none"
         ):
-            if safety != "none":
-                logger.info("Preserving a safety copy of the data directories")
-                self.set_unit_status(MaintenanceStatus("preserving data before removal"))
-                copies = [("pgdata", self.workload.paths.data)]
-                if not k8s:
-                    copies.append(("wal", self.workload.paths.wal))
-                try:
-                    info = DataSafetyManager(self.state, self.workload).preserve(
-                        "async-conversion", copies
-                    )
-                except DataSafetyError as e:
-                    logger.error(f"Failed to preserve data before the standby setup: {e!s}")
-                    raise AsyncReplicationError(
-                        f"Failed to preserve the data before removal: {e!s}"
-                    ) from e
-                logger.warning(
-                    "Safety copy %s under %s; remove it once no longer needed"
-                    " (see the recovery runbook)",
-                    info.copy_id,
-                    info.path,
+            logger.info("Preserving a safety copy of the data directories")
+            self.set_unit_status(MaintenanceStatus("preserving data before removal"))
+            copies = [("pgdata", self.workload.paths.data)]
+            if not k8s:
+                copies.append(("wal", self.workload.paths.wal))
+            try:
+                info = DataSafetyManager(self.state, self.workload).preserve(
+                    "async-conversion", copies
                 )
-                self.state.application.backup_safety_copy_id = info.copy_id
+            except DataSafetyError as e:
+                logger.error(f"Failed to preserve data before the standby setup: {e!s}")
+                raise AsyncReplicationError(
+                    f"Failed to preserve the data before removal: {e!s}"
+                ) from e
+            logger.warning(
+                "Safety copy %s under %s; remove it once no longer needed"
+                " (see the recovery runbook)",
+                info.copy_id,
+                info.path,
+            )
+            self.state.application.backup_safety_copy_id = info.copy_id
         self.set_backup_flag()
         if k8s:
             # Remove the Kubernetes resources left by the previous cluster.

@@ -656,7 +656,9 @@ def test_restore_aborts_when_preservation_fails(restore_manager, workload):
     workload.dir_size.return_value = 10
     workload.free_space.return_value = 1
     workload.evict_data_safety_copies.return_value = []
-    ok, message = restore_manager.restore(("model.cluster", "1"), BACKUP_ID, None, True, safety="local")
+    ok, message = restore_manager.restore(
+        ("model.cluster", "1"), BACKUP_ID, None, True, safety="local"
+    )
     assert not ok
     assert "Failed to preserve" in message
     assert "preserve_data_directories" not in [c[0] for c in workload.mock_calls]
