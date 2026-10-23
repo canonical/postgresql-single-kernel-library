@@ -44,6 +44,7 @@ from single_kernel_postgresql.compat.postgresql import PostgreSQLBaseError
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import (
     ClusterNotPromotedError,
+    DataSafetyError,
     NotReadyError,
     StandbyClusterAlreadyPromotedError,
 )
@@ -57,6 +58,7 @@ from single_kernel_postgresql.config.literals import (
 )
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
+from single_kernel_postgresql.managers.data_safety import DataSafetyManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.workload.base import BaseWorkload
 
@@ -140,6 +142,33 @@ class AsyncReplicationManager(BaseManager):
         self.re_emit_relation_changed = re_emit_relation_changed
         self.k8s_manager = k8s_manager
         self.watcher = watcher
+
+    @property
+    def was_backup_made(self) -> bool:
+        """Check if backup of the initial data was already made (absorbed from PR #375)."""
+        for async_relation in [
+            self.state.model.get_relation(REPLICATION_OFFER_RELATION),
+            self.state.model.get_relation(REPLICATION_CONSUMER_RELATION),
+        ]:
+            if async_relation is None:
+                continue
+            for databag in [
+                async_relation.data[async_relation.app],
+                async_relation.data[self.state.model.app],
+            ]:
+                if "backup-data" in databag:
+                    return True
+        return False
+
+    def set_backup_flag(self) -> None:
+        """Set the relation backup flag (absorbed from PR #375)."""
+        for async_relation in [
+            self.state.model.get_relation(REPLICATION_OFFER_RELATION),
+            self.state.model.get_relation(REPLICATION_CONSUMER_RELATION),
+        ]:
+            if async_relation is None:
+                continue
+            async_relation.data[self.state.model.app]["backup-data"] = "True"
 
     @property
     def async_relation(self) -> Relation | None:
@@ -806,13 +835,36 @@ class AsyncReplicationManager(BaseManager):
         system_identifier, error = self.workload.get_system_identifier()
         if error is not None:
             raise AsyncReplicationError(error)
-        if system_identifier != _safe_databag_get(relation.data[relation.app], "system-id"):
-            # Store current data in a tar.gz file.
-            logger.info(
-                "Creating backup of pgdata folder" if k8s else "Creating backup of data folder"
+        safety = _safe_databag_get(relation.data[relation.app], "create-replication-safety") or (
+            "none" if k8s else "local"
+        )
+        if (
+            not self.was_backup_made
+            and system_identifier != _safe_databag_get(relation.data[relation.app], "system-id")
+            and safety != "none"
+        ):
+            logger.info("Preserving a safety copy of the data directories")
+            self.set_unit_status(MaintenanceStatus("preserving data before removal"))
+            copies = [("pgdata", self.workload.paths.data)]
+            if not k8s:
+                copies.append(("wal", self.workload.paths.wal))
+            try:
+                info = DataSafetyManager(self.state, self.workload).preserve(
+                    "async-conversion", copies
+                )
+            except DataSafetyError as e:
+                logger.error(f"Failed to preserve data before the standby setup: {e!s}")
+                raise AsyncReplicationError(
+                    f"Failed to preserve the data before removal: {e!s}"
+                ) from e
+            logger.warning(
+                "Safety copy %s under %s; remove it once no longer needed"
+                " (see the recovery runbook)",
+                info.copy_id,
+                info.path,
             )
-            filename = self.workload.create_data_backup_tarball()
-            logger.warning("Please review the backup file %s and handle its removal", filename)
+            self.state.application.backup_safety_copy_id = info.copy_id
+        self.set_backup_flag()
         if k8s:
             # Remove the Kubernetes resources left by the previous cluster.
             if self.k8s_manager is not None:

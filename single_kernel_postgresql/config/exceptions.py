@@ -97,3 +97,19 @@ class BackupRunError(PostgreSQLBaseError):
 
 class ListBackupsError(PostgreSQLBaseError):
     """Raised when pgBackRest fails to list backups."""
+
+
+class DataSafetyError(Exception):
+    """A data-safety (pre-wipe preservation) operation failed.
+
+    Deliberately not a ``PostgreSQLBaseError``: a preservation failure must stay
+    distinct from PostgreSQL operation errors so generic handlers cannot mask it.
+    """
+
+
+class DataSafetyPreflightError(DataSafetyError):
+    """The pre-wipe preservation was refused before creating the copy."""
+
+
+class DataSafetyPostflightError(DataSafetyError):
+    """The copy exists but there is not enough space to re-materialize the data."""

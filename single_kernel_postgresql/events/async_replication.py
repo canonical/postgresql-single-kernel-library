@@ -226,6 +226,14 @@ class PostgreSQLAsyncReplication(Object):
             {"name": event.params["name"]}
         )
 
+        # Set the safety choice for the standby-side conversion (spec §6); the
+        # fallback mirrors the substrate-aware default (none on k8s until the
+        # k8s preservation seam lands).
+        default = "none" if self.state.substrate == Substrates.K8S else "local"
+        self.manager.async_relation.data[self.state.model.app].update(  # type: ignore
+            {"create-replication-safety": event.params.get("safety") or default}
+        )
+
         # Set the status.
         self.charm.set_unit_status(MaintenanceStatus("Creating replication..."))
 

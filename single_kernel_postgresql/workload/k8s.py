@@ -9,10 +9,10 @@ import pathlib
 import shlex
 import signal
 import uuid
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from charmlibs import pathops
@@ -69,6 +69,7 @@ from single_kernel_postgresql.workload.base import (
     BaseWorkload,
     CommandResult,
     PebbleLayerSpec,
+    SafetyCopyInfo,
 )
 from single_kernel_postgresql.workload.paths.base import Paths as BasePaths
 from single_kernel_postgresql.workload.paths.k8s import K8sPaths
@@ -623,13 +624,41 @@ class K8sWorkload(BaseWorkload):
         ).split(" ")[-1]
         return system_identifier, None
 
-    def create_data_backup_tarball(self) -> str:
-        """Store the current pgdata folder in a tar.gz file and return its name."""
-        filename = (
-            f"{self.paths.data}-{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.gz"
-        )
-        self.container.exec(f"tar -zcf {filename} {self.paths.data}".split()).wait_output()
-        return filename
+    # -- Data safety (pre-wipe preservation) -----------------------------------------
+    # K8s parity lands in the follow-up PR (spec §6); every seam raises until then.
+
+    def data_safety_root(self) -> PathProtocol:
+        """Directory where pre-wipe data copies are stored (k8s lands later)."""
+        raise NotImplementedError("k8s data-safety primitives land in the follow-up PR")
+
+    def dir_size(self, path: PathProtocol) -> int:
+        """Total size in bytes of a directory tree (k8s lands later)."""
+        raise NotImplementedError("k8s data-safety primitives land in the follow-up PR")
+
+    def free_space(self, path: PathProtocol) -> int:
+        """Free space in bytes on the filesystem containing `path` (k8s lands later)."""
+        raise NotImplementedError("k8s data-safety primitives land in the follow-up PR")
+
+    def preserve_data_directories(
+        self,
+        operation: str,
+        sources: Sequence[tuple[str, PathProtocol]],
+        manifest: dict[str, Any],
+    ) -> SafetyCopyInfo:
+        """Copy `sources` into a verified tarball set under the safety root (k8s lands later)."""
+        raise NotImplementedError("k8s data-safety primitives land in the follow-up PR")
+
+    def list_data_safety_copies(self) -> list[SafetyCopyInfo]:
+        """Read the safety copies present on the workload (k8s lands later)."""
+        raise NotImplementedError("k8s data-safety primitives land in the follow-up PR")
+
+    def evict_data_safety_copies(self, needed_bytes: int) -> list[str]:
+        """Remove oldest complete copies until at least `needed_bytes` bytes are freed (k8s lands later)."""
+        raise NotImplementedError("k8s data-safety primitives land in the follow-up PR")
+
+    def read_data_safety_copy(self, copy_id: str) -> SafetyCopyInfo:
+        """Load one safety copy's manifest by id (k8s lands later)."""
+        raise NotImplementedError("k8s data-safety primitives land in the follow-up PR")
 
     def clear_data_directories(self) -> None:
         """Remove the contents of the data directories to enable replication."""

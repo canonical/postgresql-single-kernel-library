@@ -28,7 +28,7 @@ from single_kernel_postgresql.utils.backup import (
     CANNOT_RESTORE_PITR,
     STANDBY_CLUSTER_RESTORE_ERROR_MESSAGE,
 )
-from single_kernel_postgresql.workload.base import CommandResult
+from single_kernel_postgresql.workload.base import CommandResult, SafetyCopyInfo
 from single_kernel_postgresql.workload.vm import VMWorkload
 
 BACKUP_ID = "2024-01-01T10:10:10Z"
@@ -37,11 +37,31 @@ TIMELINE_ID = "2024-01-02T10:10:10Z"
 
 
 @pytest.fixture
-def workload(substrate):
+def safety_copy_info():
+    """A real SafetyCopyInfo the mocked workload's preserve seam returns."""
+    return SafetyCopyInfo(
+        copy_id="restore-20261022T1015Z",
+        operation="restore",
+        created="2026-10-22T10:15:00Z",
+        path="/tmp/backup-safety/restore-20261022T1015Z",
+        manifest={"contents": [{"name": "pgdata.tar.zst", "size_bytes": 10, "sha256": "0" * 64}]},
+    )
+
+
+@pytest.fixture
+def workload(substrate, safety_copy_info):
     """A mock workload for the restore seams."""
     workload = MagicMock()
     workload.empty_data_files.return_value = True
     workload.remove_cluster_info.return_value = CommandResult(return_code=0)
+    # Data-safety defaults: the preflight/preserve seams succeed so the
+    # pre-existing tests keep exercising the same flow (safety defaults to
+    # "local"); the safety tests below override these per case.
+    workload.dir_size.return_value = 0
+    workload.free_space.return_value = 1 << 30
+    workload.get_system_identifier.return_value = ("7389", None)
+    workload.get_workload_version.return_value = "16.9"
+    workload.preserve_data_directories.return_value = safety_copy_info
     if substrate == "k8s":
         workload.workload_present = True
     return workload
@@ -603,3 +623,43 @@ def test_restore_clears_stale_pitr_failure_state(restore_manager, substrate):
     assert restore_manager.state.peer.data.get("pitr-failed") is None
     records = restore_manager.state.statuses.get("unit", restore_manager.name).root
     assert not any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+
+
+# -- safety preservation -----------------------------------------------------------
+
+
+def test_restore_preserves_data_before_emptying(restore_manager, workload, safety_copy_info):
+    workload.dir_size.return_value = 10
+    workload.free_space.return_value = 1 << 30
+    workload.get_system_identifier.return_value = ("7389", None)
+    ok, _ = restore_manager.restore(("model.cluster", "1"), BACKUP_ID, None, True, safety="local")
+    assert ok
+    calls = [c[0] for c in workload.mock_calls]
+    assert calls.index("preserve_data_directories") < calls.index("empty_data_files")
+    assert restore_manager.last_preserved.copy_id == "restore-20261022T1015Z"
+
+
+def test_restore_skips_preservation_when_already_restoring(restore_manager, workload):
+    restore_manager.state.application.restoring_backup = "2024-01-01T10:10:10Z"
+    ok, _ = restore_manager.restore(("model.cluster", "1"), BACKUP_ID, None, True, safety="local")
+    assert ok
+    assert "preserve_data_directories" not in [c[0] for c in workload.mock_calls]
+
+
+def test_restore_skips_preservation_on_safety_none(restore_manager, workload):
+    ok, _ = restore_manager.restore(("model.cluster", "1"), BACKUP_ID, None, True, safety="none")
+    assert ok
+    assert "preserve_data_directories" not in [c[0] for c in workload.mock_calls]
+
+
+def test_restore_aborts_when_preservation_fails(restore_manager, workload):
+    workload.dir_size.return_value = 10
+    workload.free_space.return_value = 1
+    workload.evict_data_safety_copies.return_value = []
+    ok, message = restore_manager.restore(
+        ("model.cluster", "1"), BACKUP_ID, None, True, safety="local"
+    )
+    assert not ok
+    assert "Failed to preserve" in message
+    assert "preserve_data_directories" not in [c[0] for c in workload.mock_calls]
+    assert "empty_data_files" not in [c[0] for c in workload.mock_calls]

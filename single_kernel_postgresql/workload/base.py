@@ -4,13 +4,16 @@
 
 """Base interface for common workload operations."""
 
+import json
+import os
 import pathlib
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import tomli
 from charmlibs import pathops
@@ -20,6 +23,7 @@ from ops.pebble import Error as PebbleError
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
+    BACKUP_SAFETY_MANIFEST_NAME,
     DIR_PERMISSIONS_READONLY,
     ORIGINAL_PATRONI_ON_FAILURE_CONDITION,
 )
@@ -123,6 +127,71 @@ class BackupConfig:
     def pg_controldata(self, major_version: str) -> str:
         """Path of the pg_controldata binary for the given major version."""
         return f"{self.bin_path}/{major_version}/bin/pg_controldata"
+
+
+@dataclass(frozen=True)
+class SafetyCopyInfo:
+    """Metadata of one preserved copy under the data-safety root."""
+
+    copy_id: str
+    operation: str
+    created: str
+    path: str
+    manifest: dict
+
+    @property
+    def total_size_bytes(self) -> int:
+        """Sum of the compressed tarball sizes recorded in the manifest."""
+        return sum(int(entry.get("size_bytes", 0)) for entry in self.manifest.get("contents", []))
+
+
+def safety_copy_id(operation: str, now: datetime) -> str:
+    """Build a copy directory name, e.g. 'restore-20261022T1015Z'."""
+    return f"{operation}-{now.strftime('%Y%m%dT%H%MZ')}"
+
+
+def build_safety_manifest(
+    *,
+    schema_version: int,
+    operation: str,
+    created: str,
+    cluster_name: str,
+    system_identifier: str,
+    model: str,
+    unit: str,
+    versions: dict,
+) -> dict:
+    """Build the manifest dict; `contents` is appended by the workload impl."""
+    return {
+        "schema_version": schema_version,
+        "operation": operation,
+        "created": created,
+        "cluster_name": cluster_name,
+        "system_identifier": system_identifier,
+        "model": model,
+        "unit": unit,
+        "versions": versions,
+    }
+
+
+def write_safety_manifest(copy_dir: PathProtocol, manifest: dict) -> None:
+    """Write the manifest atomically (tmp file + rename), so presence means complete."""
+    target = copy_dir / BACKUP_SAFETY_MANIFEST_NAME
+    tmp = copy_dir / f"{BACKUP_SAFETY_MANIFEST_NAME}.tmp"
+    tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+    os.replace(str(tmp), str(target))
+
+
+def read_safety_manifest(copy_dir: PathProtocol) -> dict | None:
+    """Read a manifest; None when absent or unparsable (marks the copy incomplete)."""
+    path = copy_dir / BACKUP_SAFETY_MANIFEST_NAME
+    if not path.exists():
+        return None
+    try:
+        manifest = json.loads(path.read_text())
+    except (ValueError, OSError):
+        return None
+    return manifest if isinstance(manifest, dict) else None
 
 
 class ResourceProvider(Protocol):
@@ -430,8 +499,60 @@ class BaseWorkload(ABC):
         pass
 
     @abstractmethod
-    def create_data_backup_tarball(self) -> str:
-        """Store the current data folder in a tar.gz file and return its name."""
+    def data_safety_root(self) -> PathProtocol:
+        """Directory where pre-wipe data copies are stored."""
+        pass
+
+    @abstractmethod
+    def dir_size(self, path: PathProtocol) -> int:
+        """Total size in bytes of a directory tree."""
+        pass
+
+    @abstractmethod
+    def free_space(self, path: PathProtocol) -> int:
+        """Free space in bytes on the filesystem containing `path`."""
+        pass
+
+    @abstractmethod
+    def preserve_data_directories(
+        self,
+        operation: str,
+        sources: Sequence[tuple[str, PathProtocol]],
+        manifest: dict[str, Any],
+    ) -> SafetyCopyInfo:
+        """Copy `sources` into a verified tarball set under the safety root.
+
+        The copy is the single recovery point for the destructive operation that
+        follows (a wrong restore target, an unwanted standby conversion); the
+        implementation must abort — and remove any partial copy — on the first
+        failure, leaving the original data untouched.
+
+        Args:
+            operation: one of `SAFETY_OPERATIONS` (restore, async-conversion).
+            sources: (role, path) pairs; the role names the tarball (pgdata,
+                wal, archive) per the spec layout.
+            manifest: metadata built by the manager (schema version, operation,
+                creation timestamp, cluster identity); the implementation
+                records it under the copy directory.
+
+        Returns:
+            The SafetyCopyInfo describing the completed, verified copy.
+        """
+        pass
+
+    @abstractmethod
+    def list_data_safety_copies(self) -> list[SafetyCopyInfo]:
+        """Read the safety copies present on the workload."""
+        pass
+
+    @abstractmethod
+    def evict_data_safety_copies(self, needed_bytes: int) -> list[str]:
+        """Remove oldest complete copies until at least `needed_bytes` bytes are freed."""
+        pass
+
+    @abstractmethod
+    def read_data_safety_copy(self, copy_id: str) -> SafetyCopyInfo:
+        """Load one safety copy's manifest by id."""
         pass
 
     @abstractmethod
