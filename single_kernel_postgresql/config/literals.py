@@ -19,6 +19,7 @@ SNAP_VITALITY_MAX_SNAPS = 100
 # Relations
 PEER_RELATION = "database-peers"
 STATUS_PEERS_RELATION = "status-peers"
+RESTART_RELATION = "restart"
 S3_RELATION_NAME = "s3-parameters"
 
 # Users.
@@ -215,6 +216,18 @@ RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 # VM services
 VM_PATRONI_SERVICE_NAME = f"snap.{POSTGRESQL_SNAP_NAME}.patroni.service"
 VM_PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{VM_PATRONI_SERVICE_NAME}"
+VM_METRICS_SERVICE_NAME = "prometheus-postgres-exporter"
+VM_PGBACKREST_METRICS_SERVICE_NAME = "pgbackrest-exporter"
+UPDATE_CERTS_BIN_PATH = "/usr/sbin/update-ca-certificates"
+CERTS_PATH = "/usr/local/share/ca-certificates"
+EXTENSIONS_DEPENDENCY_MESSAGE = "Unsatisfied plugin dependencies. Please check the logs"
+EXTENSION_OBJECT_MESSAGE = "Cannot disable plugins: Existing objects depend on it. See logs"
+# K8s charm constant: blocks the unit when the pgdata volume drops under 10% free.
+INSUFFICIENT_SIZE_WARNING = "<10% free space on pgdata volume."
+POSTGRESQL_LOGS_PATTERN = "*.log"
+RAFT_MAJORITY_LOSS_MESSAGE = "Raft majority loss, run: promote-to-primary"
+CONFIGURATION_ERROR_MESSAGE = "Configuration Error. Please check the logs"
+PRIMARY_NOT_REACHABLE_MESSAGE = "waiting for primary to be reachable from this unit"
 VM_PGBACKREST_SERVICE_NAME = "pgbackrest-service"
 VM_ROTATE_LOGS_LOG_FILE = "/var/log/rotate_logs.log"
 
@@ -228,15 +241,18 @@ K8S_DEBIAN_DATA_SYMLINK = "var/lib/postgresql/16"
 K8S_POSTGRESQL_LOGS_SYMLINK_PATH = "var/log/postgresql"
 K8S_PATRONI_LOGS_SYMLINK_PATH = "var/log/patroni"
 K8S_PGBACKREST_LOGS_SYMLINK_PATH = "var/log/pgbackrest"
+# K8s LogProxyConsumer log-files scheme (the K8s charm's POSTGRES_LOG_FILES).
+K8S_POSTGRES_LOG_FILES = [
+    f"/{K8S_LOGS_STORAGE_PATH}/{K8S_PGBACKREST_LOGS_PATH}/*",
+    f"/{K8S_LOGS_STORAGE_PATH}/{K8S_PATRONI_LOGS_PATH}/patroni.log",
+    f"/{K8S_LOGS_STORAGE_PATH}/{K8S_PG_LOGS_PATH}/postgresql*.log",
+]
 
 ## Restore
 VM_PATRONICTL_EXECUTABLE = "charmed-postgresql.patronictl"
 PATRONICTL_REMOVE_CONFIRMATION = "Yes I am aware"
 RESTORE_REPEAT_CAUSE = "restore-backup"
 
-# Watcher relation
-RAFT_PORT = 2222
-RAFT_PARTNER_PREFIX = "partner_node_status_server_"
 # Refresh (charm_refresh integration)
 WORKLOAD_NAME = "PostgreSQL"
 VM_CHARM_NAME = "postgresql"

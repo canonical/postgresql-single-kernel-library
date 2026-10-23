@@ -5,11 +5,18 @@ import importlib.util
 import pathlib
 import shutil
 import sys
-from unittest.mock import patch, sentinel
+from contextlib import ExitStack
+from unittest.mock import MagicMock, PropertyMock, patch, sentinel
 
 import pytest
+import requests
 from ops.testing import Harness
-from single_kernel_postgresql.config.literals import PEER_RELATION
+from single_kernel_postgresql.config.enums import Substrates
+from single_kernel_postgresql.config.literals import (
+    PEER_RELATION,
+    RESTART_RELATION,
+    STATUS_PEERS_RELATION,
+)
 
 
 def _test_charm_class(test_charm_path: str, module_name: str):
@@ -49,6 +56,9 @@ def mock_refresh(request, monkeypatch):
     """
     monkeypatch.setattr("charm_refresh.Machines", _MockRefresh)
     monkeypatch.setattr("charm_refresh.Kubernetes", _MockRefresh)
+    # The COS-agent provider reads the snap name at construction; the minimal
+    # versions file above carries no [snap] section, so patch the getter too.
+    monkeypatch.setattr("charm_refresh.snap_name", lambda: "charmed-postgresql")
 
     # Anchor on the setup-time working directory: other fixtures may chdir for the
     # duration of a test, and the shared monkeypatch undo runs after this teardown.
@@ -93,6 +103,46 @@ def patch_crypto():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _update_config_is_a_noop(request, substrate):
+    """The charm suites always patched charm.update_config.
+
+    The real body needs a live database; the vm_charm/k8s_charm bridge tests opt
+    out and exercise the real body.
+    """
+    if request.module.__name__.endswith(("test_vm_charm", "test_k8s_charm")):
+        yield
+        return
+    target = (
+        "single_kernel_postgresql.charms.vm_charm.PostgreSQLVMCharm.update_config"
+        if substrate == Substrates.VM
+        else "single_kernel_postgresql.charms.k8s_charm.PostgreSQLK8sCharm.update_config"
+    )
+    patcher = patch(target, return_value=True)
+    patcher.start()
+    yield
+    patcher.stop()
+
+
+@pytest.fixture(autouse=True)
+def _fix_leader_annotation_is_a_stub(request, substrate):
+    """The K8s leader-elected flow calls the charm's fix_leader_annotation.
+
+    Its lightkube Client cannot be built in the unit env; the k8s_charm tests
+    opt out and exercise the real method.
+    """
+    if substrate != Substrates.K8S or request.module.__name__.endswith("test_k8s_charm"):
+        yield
+        return
+    patcher = patch(
+        "single_kernel_postgresql.charms.k8s_charm.PostgreSQLK8sCharm.fix_leader_annotation",
+        return_value=True,
+    )
+    patcher.start()
+    yield
+    patcher.stop()
+
+
 @pytest.fixture
 def harness(substrate, test_charm_path):
     """A begun Harness for the substrate's test charm, with the peer relation added."""
@@ -112,8 +162,30 @@ def harness(substrate, test_charm_path):
             meta=meta,
             actions=actions,
         )
+        # The K8s reload bridge writes the charm-local Patroni CA bundle to /tmp on
+        # every tls_files_pushed; PatroniManager reads the same path for its REST
+        # verify= in OTHER tests' k8s legs, and non-PEM sentinels break httpx there.
+        # Point the bundle at a throwaway path for the unit suite.
+        patcher = patch(
+            "single_kernel_postgresql.charms.k8s_charm.TLS_CA_BUNDLE_FILE",
+            "peer_ca_bundle.unit-test.pem",
+        )
+        patcher.start()
     peer_rel_id = harness.add_relation(PEER_RELATION, "postgresql-single-kernel")
     harness.add_relation_unit(peer_rel_id, "postgresql-single-kernel/0")
+    # The status machinery (DPH StatusesState) persists component statuses in
+    # the status-peers relation databag; without the relation every write is
+    # silently dropped ("No databag present for statuses").
+    if STATUS_PEERS_RELATION in meta:
+        status_rel_id = harness.add_relation(STATUS_PEERS_RELATION, "postgresql-single-kernel")
+        harness.add_relation_unit(status_rel_id, "postgresql-single-kernel/0")
+    # The rolling-ops manager is constructed in the abstract init tail and reads
+    # its peer relation AT construction (trunk parity: the thin charm built it in
+    # production where juju always provides the peer relation before the first
+    # hook) — the harness must provide it before begin().
+    if RESTART_RELATION in meta:
+        restart_rel_id = harness.add_relation(RESTART_RELATION, "postgresql-single-kernel")
+        harness.add_relation_unit(restart_rel_id, "postgresql-single-kernel/0")
     # Set before begin(): Model.name (K8s namespace) is read by substrate-aware
     # state accessors (e.g. common_hosts Service FQDNs).
     harness.set_model_name("test-model")
@@ -124,6 +196,84 @@ def harness(substrate, test_charm_path):
         "single_kernel_postgresql.workload.base.BaseWorkload.get_postgresql_version",
         return_value="16.0",
     ):
-        harness.begin()
-        yield harness
+        # Unit tests never talk to REST APIs or the host's systemd: the migrated
+        # VM flows walk the Patroni/raft REST surface and drive systemd services
+        # (snap start/stop/enable, daemon-reload), so fail REST instantly and
+        # no-op every systemd call (a real systemctl call blocks ~25s on D-Bus
+        # in the test container).
+        systemd_names = (
+            "daemon_reload",
+            "service_disable",
+            "service_enable",
+            "service_failed",
+            "service_pause",
+            "service_reload",
+            "service_restart",
+            "service_resume",
+            "service_running",
+            "service_start",
+            "service_stop",
+        )
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch(
+                    "requests.get",
+                    side_effect=requests.ConnectionError("no REST in unit tests"),
+                )
+            )
+            patroni = "single_kernel_postgresql.managers.patroni.PatroniManager"
+            stack.enter_context(
+                patch(f"{patroni}.update_synchronous_node_count", return_value=None)
+            )
+            stack.enter_context(
+                patch(f"{patroni}.cluster_members", new_callable=PropertyMock, return_value=set())
+            )
+            stack.enter_context(patch(f"{patroni}.are_all_members_ready", return_value=True))
+            stack.enter_context(
+                patch(f"{patroni}.member_started", new_callable=PropertyMock, return_value=True)
+            )
+            stack.enter_context(
+                patch(f"{patroni}.member_inactive", new_callable=PropertyMock, return_value=False)
+            )
+            stack.enter_context(patch(f"{patroni}.get_member_ip", return_value=None))
+            stack.enter_context(patch(f"{patroni}.get_member_status", return_value="running"))
+            stack.enter_context(patch(f"{patroni}.get_primary", return_value=None))
+            stack.enter_context(patch(f"{patroni}.get_standby_leader", return_value=None))
+            stack.enter_context(patch(f"{patroni}.restart_patroni", return_value=True))
+            stack.enter_context(patch(f"{patroni}.restart_postgresql", return_value=None))
+            stack.enter_context(patch(f"{patroni}.start_patroni", return_value=True))
+            stack.enter_context(patch(f"{patroni}.stop_patroni", return_value=True))
+            stack.enter_context(patch(f"{patroni}.bootstrap_cluster", return_value=True))
+            stack.enter_context(patch(f"{patroni}.switchover", return_value=None))
+            stack.enter_context(patch(f"{patroni}.get_running_cluster_members", return_value=[]))
+            stack.enter_context(patch(f"{patroni}.online_cluster_members", return_value=None))
+            stack.enter_context(patch(f"{patroni}.get_patroni_health", return_value={}))
+            stack.enter_context(patch(f"{patroni}.is_member_isolated", return_value=False))
+            stack.enter_context(
+                patch(f"{patroni}.is_member_registered_in_cluster", return_value=False)
+            )
+            stack.enter_context(
+                patch(
+                    "single_kernel_postgresql.managers.raft.RaftManager.get_raft_status",
+                    return_value={},
+                )
+            )
+            # Unit tests never talk to the K8s API: the leader-elected flow's
+            # resource cleanup and service creation run through the real manager.
+            # Client-class patches in the k8s manager tests override this guard.
+            stack.enter_context(
+                patch(
+                    "single_kernel_postgresql.managers.k8s.Client",
+                    return_value=MagicMock(),
+                )
+            )
+            systemd_mock = MagicMock()
+            for name in systemd_names:
+                stack.enter_context(
+                    patch(f"charmlibs.systemd.{name}", getattr(systemd_mock, name))
+                )
+            harness.begin()
+            yield harness
+    if substrate == "k8s":
+        patcher.stop()
     harness.cleanup()

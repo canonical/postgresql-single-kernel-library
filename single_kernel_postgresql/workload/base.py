@@ -345,6 +345,10 @@ class BaseWorkload(ABC):
         """Check if the Patroni service is running."""
         pass
 
+    def container_ready(self) -> bool:
+        """Whether the workload container (K8s) is connected; always true on VM."""
+        return True
+
     @abstractmethod
     def start_service_only(self):
         """Start the actual service only (snap / pebble)."""
@@ -459,7 +463,7 @@ class BaseWorkload(ABC):
         """
         pass
 
-    def init_storage(self) -> None:
+    def init_storage(self, *, clear_stale_replica: bool = False) -> None:
         """Create the PostgreSQL data directories (K8s-only seam)."""
         raise NotImplementedError
 
@@ -493,6 +497,10 @@ class BaseWorkload(ABC):
 
     def stop_rotate_logs_loop(self, pid: int) -> bool:
         """Send SIGINT to the rotate-logs loop; False when the PID is gone (VM-only seam)."""
+        raise NotImplementedError
+
+    def ensure_storage_layout(self) -> None:
+        """Recreate the versioned temp dir and chown the versioned parents (VM-only seam)."""
         raise NotImplementedError
 
     def get_postgresql_version(self) -> str:

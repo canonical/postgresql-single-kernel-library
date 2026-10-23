@@ -5,7 +5,7 @@
 
 import logging
 
-from ops import BlockedStatus, ModelError, Object, RelationBrokenEvent, RelationDepartedEvent
+from ops import ModelError, Object, RelationBrokenEvent, RelationDepartedEvent
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import DATABASE, DATABASE_PORT
@@ -115,7 +115,7 @@ class DatabaseEventsHandler(Object):
         try:
             requested_entity_secret_content = event.requested_entity_secret_content
         except ModelError:
-            self.charm.set_unit_status(BlockedStatus(NO_ACCESS_TO_SECRET_MSG))
+            self.manager.block_on_request_error(NO_ACCESS_TO_SECRET_MSG)
             return
 
         request = DatabaseRequest(
@@ -170,14 +170,12 @@ class DatabaseEventsHandler(Object):
         except self.manager.request_errors as e:
             if self.state.substrate == Substrates.K8S:
                 logger.exception(e)
-            self.charm.set_unit_status(
-                BlockedStatus(
-                    e.message
-                    if isinstance(e, PostgreSQLCreateDatabaseError | PostgreSQLCreateUserError)
-                    and e.message is not None
-                    # The clearer of the two charms' wordings, now shared by both.
-                    else f"Failed to initialize {self.relation_name} relation"
-                )
+            self.manager.block_on_request_error(
+                e.message
+                if isinstance(e, PostgreSQLCreateDatabaseError | PostgreSQLCreateUserError)
+                and e.message is not None
+                # The clearer of the two charms' wordings, now shared by both.
+                else f"Failed to initialize {self.relation_name} relation"
             )
             return
 

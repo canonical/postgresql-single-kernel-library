@@ -14,7 +14,9 @@ import os
 import re
 from contextlib import suppress
 from functools import cached_property
+from time import monotonic
 from typing import Any, Literal, TypedDict
+from urllib.parse import urljoin
 
 # Platform specific imports
 with suppress(ImportError):
@@ -68,7 +70,16 @@ from single_kernel_postgresql.utils import (
 )
 from single_kernel_postgresql.workload.base import BaseWorkload
 
+ORIGINAL_PATRONI_ON_FAILURE_CONDITION = "always"  # the Patroni default on-failure action
+
 logger = logging.getLogger(__name__)
+
+
+# Hook-local cluster-status memo TTL (see PatroniManager._cached_cluster_status):
+# short enough that every deliberate wait-spaced poll (>= 1s between tenacity
+# attempts) reads fresh data, long enough to collapse the back-to-back read
+# bursts of a single hook into one upstream fetch.
+CLUSTER_STATUS_CACHE_TTL_SECONDS = 1.0
 
 
 class ClusterMember(TypedDict):
@@ -104,11 +115,16 @@ class PatroniManager(BaseManager):
         else:
             # CA bundle is not secret
             self.verify = f"/tmp/{TLS_CA_BUNDLE_FILE}"  # noqa: S108
+        # Hook-local cluster-status memo (see cluster_status).
+        self._cluster_status_cache: list[ClusterMember] | None = None
+        self._cluster_status_cached_at: float = float("-inf")
 
     def start_patroni(self) -> bool:
         """Start Patroni."""
         if self.state.substrate == Substrates.VM:
-            return self.workload.start_patroni()  # type: ignore
+            started = self.workload.start_patroni()  # type: ignore
+            self._invalidate_cluster_status_cache()
+            return started
         else:
             # TODO: Implement for other substrates
             return False
@@ -196,6 +212,28 @@ class PatroniManager(BaseManager):
         """Cached cluster status."""
         return self.cluster_status()
 
+    def _cached_cluster_status(self) -> list[ClusterMember] | None:
+        """Return the hook-local memoized cluster status, or None when stale.
+
+        The status/membership read bursts inside one hook (role-status recompute,
+        membership reconciliation, async app-status recompute) used to re-fetch the
+        identical /cluster payload several times per hook (~7 fetches/hook measured
+        in ci-invest/round5-test_charm.md). A short TTL collapses those
+        back-to-back fetches while keeping every deliberate wait-spaced poll fresh:
+        all tenacity polling loops around cluster reads wait >= 1s between attempts
+        (wait_fixed(1) at worst), so a 1s TTL never serves a poll a stale answer.
+        """
+        if self._cluster_status_cache is None:
+            return None
+        if monotonic() - self._cluster_status_cached_at >= CLUSTER_STATUS_CACHE_TTL_SECONDS:
+            return None
+        return self._cluster_status_cache
+
+    def _invalidate_cluster_status_cache(self) -> None:
+        """Drop the hook-local cluster-status memo (after service-control mutations)."""
+        self._cluster_status_cache = None
+        self._cluster_status_cached_at = float("-inf")
+
     def cluster_status(self, alternative_endpoints: list | None = None) -> list[ClusterMember]:
         """Query the cluster status."""
         if not self._patroni_async_auth:
@@ -206,8 +244,12 @@ class PatroniManager(BaseManager):
         # TODO we don't know the other cluster's ca
         verify = not bool(alternative_endpoints)
         if alternative_endpoints:
+            # External cluster: never served from (nor stored in) the hook-local memo.
             endpoints = alternative_endpoints
         else:
+            if cached := self._cached_cluster_status():
+                logger.debug("API cluster_status: memoized (%d members)", len(cached))
+                return cached
             endpoints = []
             if self.state.endpoint:
                 endpoints.append(self.state.endpoint)
@@ -222,7 +264,11 @@ class PatroniManager(BaseManager):
             verify,
         ):
             logger.debug("API cluster_status: %s", response["members"])
-            return response["members"]
+            members = response["members"]
+            if not alternative_endpoints:
+                self._cluster_status_cache = members
+                self._cluster_status_cached_at = monotonic()
+            return members
         raise RetryError(
             last_attempt=Future.construct(1, Exception("Unable to reach any units"), True)
         )
@@ -516,6 +562,7 @@ class PatroniManager(BaseManager):
         )
         if "standby_cluster" not in config_response.json():
             raise StandbyClusterAlreadyPromotedError("standby cluster is already promoted")
+        self._invalidate_cluster_status_cache()
         r = requests.patch(
             f"{self.state.patroni_url}/config",
             verify=self.verify,
@@ -590,11 +637,70 @@ class PatroniManager(BaseManager):
             cache = snap.SnapCache()
             selected_snap = cache["charmed-postgresql"]
             selected_snap.stop(services=["patroni"])
+            self._invalidate_cluster_status_cache()
             return not selected_snap.services["patroni"]["active"]
         except snap.SnapError as e:
             error_message = "Failed to stop patroni snap service"
             logger.exception(error_message, exc_info=e)
             return False
+
+    def _switchover_endpoints(self, current_primary: str | None) -> list[str]:
+        """Build the ordered list of switchover endpoints to try.
+
+        The current leader/standby leader's API URL comes first (the member that
+        processes the switchover), then the other running members' API URLs, and
+        the local Patroni endpoint last as a fallback (the previous behavior).
+        """
+        try:
+            members = self.cluster_status()
+        except RetryError:
+            members = []
+        running = {
+            member["name"]: urljoin(member["api_url"], "switchover")
+            for member in members
+            if member.get("state") in RUNNING_STATES
+        }
+        endpoints = []
+        if current_primary is not None and current_primary in running:
+            endpoints.append(running[current_primary])
+        for name, url in running.items():
+            if name != current_primary and url not in endpoints:
+                endpoints.append(url)
+        endpoints.append(f"{self.state.patroni_url}/switchover")
+        return endpoints
+
+    def _post_switchover(self, endpoints: list[str], body: dict[str, Any]) -> requests.Response:
+        """POST the switchover request to the first endpoint that responds.
+
+        Connection errors hop to the next endpoint (the local unit may be down during a
+        refresh); if every endpoint is unreachable, re-raise the last ConnectionError so
+        tenacity retries the whole attempt.
+        """
+        last_error: Exception = requests.exceptions.ConnectionError(
+            "No switchover endpoint was reachable"
+        )
+        for endpoint in endpoints:
+            try:
+                return requests.post(
+                    endpoint,
+                    json=body,
+                    verify=self.verify,
+                    auth=self._patroni_auth,
+                    timeout=API_REQUEST_TIMEOUT,
+                )
+            except requests.exceptions.ConnectionError as exc:
+                logger.debug("API switchover: endpoint %s is unreachable: %s", endpoint, exc)
+                last_error = exc
+        raise last_error
+
+    def _determine_current_primary(self, async_cluster: bool) -> str | None:
+        """Resolve the current primary; fail fast rather than POST a leader-less switchover."""
+        current_primary = self.get_primary() if not async_cluster else self.get_standby_leader()
+        if current_primary is None:
+            raise SwitchoverFailedError(
+                "Unable to determine the current primary; not POSTing a leader-less switchover"
+            )
+        return current_primary
 
     def switchover(
         self, candidate: str | None = None, async_cluster: bool = False, wait: bool = True
@@ -603,6 +709,11 @@ class PatroniManager(BaseManager):
         # Try to trigger the switchover.
         if candidate is not None:
             candidate = candidate.replace("/", "-")
+
+        # The POST below changes cluster roles: start the flow from fresh data and
+        # never serve the pre-switchover membership from the hook-local memo.
+        self._invalidate_cluster_status_cache()
+        current_primary = self._determine_current_primary(async_cluster)
 
         for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
             with attempt:
@@ -616,14 +727,9 @@ class PatroniManager(BaseManager):
                 body = {"leader": current_primary}
                 if candidate:
                     body["candidate"] = candidate
-                r = requests.post(
-                    f"{self.state.patroni_url}/switchover",
-                    json=body,
-                    verify=self.verify,
-                    auth=self._patroni_auth,
-                    timeout=API_REQUEST_TIMEOUT,
-                )
+                r = self._post_switchover(self._switchover_endpoints(current_primary), body)
                 logger.debug("API switchover: %s (%s)", r, r.elapsed.total_seconds())
+                self._invalidate_cluster_status_cache()
 
         # Check whether the switchover was unsuccessful.
         if r.status_code != 200:
@@ -693,6 +799,7 @@ class PatroniManager(BaseManager):
             cache = snap.SnapCache()
             selected_snap = cache["charmed-postgresql"]
             selected_snap.restart(services=["patroni"])
+            self._invalidate_cluster_status_cache()
             return selected_snap.services["patroni"]["active"]
         except snap.SnapError as e:
             error_message = "Failed to start patroni snap service"
@@ -710,6 +817,7 @@ class PatroniManager(BaseManager):
             timeout=API_REQUEST_TIMEOUT,
         )
         logger.debug("API restart_postgresql: %s (%s)", r, r.elapsed.total_seconds())
+        self._invalidate_cluster_status_cache()
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def bulk_update_parameters_controller_by_patroni(
@@ -856,12 +964,18 @@ class PatroniManager(BaseManager):
         try:
             for attempt in Retrying(stop=stop_after_delay(10), wait=wait_fixed(1)):
                 with attempt:
-                    r = requests.get(
-                        f"https://{bracket_ipv6_host(self.state.primary_endpoint)}:8008/health",
-                        verify=self.verify,
-                        auth=self._patroni_auth,
-                        timeout=API_REQUEST_TIMEOUT,
-                    )
+                    try:
+                        r = requests.get(
+                            f"https://{bracket_ipv6_host(self.state.primary_endpoint)}:8008/health",
+                            verify=self.verify,
+                            auth=self._patroni_auth,
+                            timeout=API_REQUEST_TIMEOUT,
+                        )
+                    except requests.exceptions.ConnectionError:
+                        # Connection-level errors (DNS or service down) only resolve via
+                        # the pebble-ready defer's retry cadence, so fail fast instead
+                        # of burning the retry budget inside every hook.
+                        return False
                     if r.json()["state"] not in RUNNING_STATES:
                         raise EndpointNotReadyError
         except RetryError:
@@ -905,3 +1019,53 @@ class PatroniManager(BaseManager):
         # if self.workload.workload_present and self.state.substrate == Substrates.VM and not self.member_started:
         #    return [PatroniStatuses.WAITING_MEMBER_START.value]
         return [GeneralStatuses.ACTIVE_IDLE.value]
+
+    def override_on_failure_condition(self, new_condition: str, repeat_cause: str | None) -> bool:
+        """Temporarily override the Patroni pebble service on-failure condition (port).
+
+        Executes only on the current unit. The repeat-cause guard blocks repeated
+        overrides with a distinct or absent cause while an override is active.
+        """
+        if "patroni-on-failure-condition-override" in self.state.peer.data:
+            current_condition = self.state.peer.data["patroni-on-failure-condition-override"]
+            if repeat_cause is None:
+                logger.error(
+                    f"failure trying to override patroni on-failure condition to {new_condition}"
+                    f"as it already overridden from {ORIGINAL_PATRONI_ON_FAILURE_CONDITION} to {current_condition}"
+                )
+                return False
+            previous_repeat_cause = self.state.peer.data.get(
+                "overridden-patroni-on-failure-condition-repeat-cause", None
+            )
+            if previous_repeat_cause != repeat_cause:
+                logger.error(
+                    f"failure trying to override patroni on-failure condition to {new_condition}"
+                    f"as it already overridden from {ORIGINAL_PATRONI_ON_FAILURE_CONDITION} to {current_condition}"
+                    f"and repeat cause is not equal: {previous_repeat_cause} != {repeat_cause}"
+                )
+                return False
+            self.state.peer.data["patroni-on-failure-condition-override"] = new_condition
+            self.update_pebble_layers(replan=False)
+            logger.debug(
+                f"Patroni on-failure condition re-overridden to {new_condition} within repeat cause {repeat_cause}"
+                f"(original on-failure condition reference is untouched and is {ORIGINAL_PATRONI_ON_FAILURE_CONDITION})"
+            )
+            return True
+
+        self.state.peer.data["patroni-on-failure-condition-override"] = new_condition
+        if repeat_cause:
+            self.state.peer.data["overridden-patroni-on-failure-condition-repeat-cause"] = (
+                repeat_cause
+            )
+        self.update_pebble_layers(replan=False)
+        logger.debug(
+            f"Patroni on-failure condition overridden from {ORIGINAL_PATRONI_ON_FAILURE_CONDITION} to {new_condition}"
+            f"{' with repeat cause ' + repeat_cause if repeat_cause is not None else ''}"
+        )
+        return True
+
+    def update_pebble_layers(self, replan: bool = True) -> None:
+        """Re-layer the workload from the current state (the K8s charm bridge)."""
+        from single_kernel_postgresql.workload.base import PebbleLayerSpec
+
+        self.workload.update_pebble_layers(PebbleLayerSpec.from_state(self.state), replan=replan)

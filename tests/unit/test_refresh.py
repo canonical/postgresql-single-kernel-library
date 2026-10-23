@@ -8,8 +8,10 @@ import pathlib
 from unittest.mock import MagicMock, patch
 
 import charm_refresh
+import httpx
 import psycopg2
 import pytest
+import requests
 from charm_refresh import CharmVersion, PrecheckFailed
 from data_platform_helpers.advanced_statuses import StatusObject
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, UnknownStatus, WaitingStatus
@@ -20,7 +22,7 @@ from single_kernel_postgresql.managers.refresh import (
     PostgreSQLRefreshK8s,
     RefreshManager,
 )
-from tenacity import RetryError, stop_after_attempt
+from tenacity import Future, RetryError, stop_after_attempt
 
 
 @pytest.fixture
@@ -155,11 +157,15 @@ def test_pre_refresh_check_after_1_unit_refreshed_switches_primary(
         "postgresql-k8s-2",
     ]
     charm.patroni_manager.get_primary.return_value = "postgresql-k8s/2"
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/2"
     charm.get_async_primary_cluster_endpoint.return_value = endpoint
 
     refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
 
-    charm.patroni_manager.get_primary.assert_called_once_with(unit_name_pattern=True)
+    if expected_async_cluster:
+        charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
+    else:
+        charm.patroni_manager.get_primary.assert_called_once_with(unit_name_pattern=True)
     charm.patroni_manager.switchover.assert_called_once_with(
         candidate="postgresql-k8s/0", async_cluster=expected_async_cluster
     )
@@ -175,6 +181,7 @@ def test_pre_refresh_check_after_1_unit_refreshed_already_primary(refresh_k8s, c
         "postgresql-k8s-2",
     ]
     charm.patroni_manager.get_primary.return_value = "postgresql-k8s/0"
+    charm.get_async_primary_cluster_endpoint.return_value = None
 
     refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
 
@@ -195,6 +202,160 @@ def test_pre_refresh_check_after_1_unit_refreshed_switchover_failed(refresh_k8s,
 
     with pytest.raises(PrecheckFailed, match=r"Unable to switch primary"):
         refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_standby_already_primary(refresh_k8s, charm):
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/0"
+    charm.get_async_primary_cluster_endpoint.return_value = "primary.async-replication:5432"
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
+    charm.patroni_manager.switchover.assert_not_called()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_standby_switches(refresh_k8s, charm):
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/2"
+    charm.get_async_primary_cluster_endpoint.return_value = "primary.async-replication:5432"
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
+    charm.patroni_manager.switchover.assert_called_once_with(
+        candidate="postgresql-k8s/0", async_cluster=True
+    )
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_switchover_retry_error_maps_to_precheck_failed(
+    refresh_k8s, charm
+):
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
+    charm.patroni_manager.get_primary.return_value = "postgresql-k8s/2"
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.switchover.side_effect = RetryError(
+        Future.construct(1, requests.exceptions.ConnectionError(), True)
+    )
+
+    with pytest.raises(PrecheckFailed, match=r"Unable to switch primary"):
+        refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_status_unreachable_still_attempts_switchover(
+    refresh_k8s, charm
+):
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
+    charm.patroni_manager.get_primary.side_effect = RetryError(
+        Future.construct(1, Exception("Unable to reach any units"), True)
+    )
+    # The primary probe raises, but the role-based fallback resolves the standby
+    # leader, so the switchover is still attempted (as an async switchover).
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/2"
+    charm.get_async_primary_cluster_endpoint.return_value = None
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
+    charm.patroni_manager.switchover.assert_called_once_with(
+        candidate="postgresql-k8s/0", async_cluster=True
+    )
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_stub_getter_standby_already_primary(
+    refresh_k8s, charm
+):
+    # The explicit None mirrors the k8s_charm.py getter stub; it reflects the lib
+    # behavior, not a convenience stub (a bare MagicMock would be truthy).
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/0"
+    _arrange_running_members(charm)
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.switchover.assert_not_called()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_stub_getter_standby_switches(refresh_k8s, charm):
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = "postgresql-k8s/2"
+    _arrange_running_members(charm)
+
+    refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+    charm.patroni_manager.get_standby_leader.assert_called_once_with(unit_name_pattern=True)
+    charm.patroni_manager.switchover.assert_called_once_with(
+        candidate="postgresql-k8s/0", async_cluster=True
+    )
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_stub_getter_cannot_determine_primary_blocks(
+    refresh_k8s, charm
+):
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.return_value = None
+    _arrange_running_members(charm)
+
+    with pytest.raises(PrecheckFailed, match=r"Unable to determine the current primary"):
+        refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+
+def test_pre_refresh_check_after_1_unit_refreshed_standby_probe_retry_error_maps_to_precheck_failed(
+    refresh_k8s, charm
+):
+    charm.get_async_primary_cluster_endpoint.return_value = None
+    charm.patroni_manager.get_primary.return_value = None
+    charm.patroni_manager.get_standby_leader.side_effect = RetryError(
+        Future.construct(1, requests.exceptions.ConnectionError(), True)
+    )
+    _arrange_running_members(charm)
+
+    with pytest.raises(PrecheckFailed, match=r"Unable to determine the current primary"):
+        refresh_k8s.run_pre_refresh_checks_after_1_unit_refreshed()
+
+
+def _arrange_running_members(charm) -> None:
+    charm.app.planned_units.return_value = 3
+    charm.app.name = "postgresql-k8s"
+    charm.patroni_manager.is_creating_backup = False
+    charm.patroni_manager.get_running_cluster_members.return_value = [
+        "postgresql-k8s-0",
+        "postgresql-k8s-1",
+        "postgresql-k8s-2",
+    ]
 
 
 def test_pre_refresh_check_before_any_units_refreshed_members_not_ready(refresh_k8s, charm):
@@ -246,6 +407,63 @@ def test_refresh_manager_peer_relation_not_ready(state, charm, set_default_statu
             charm=charm,
             set_default_status=set_default_status,
         )
+    assert manager.refresh is None
+    assert manager.can_set_app_status is True
+
+
+@pytest.mark.parametrize("substrate", [Substrates.K8S, Substrates.VM])
+def test_refresh_manager_constructor_retries_transient_transport_error(
+    substrate, state, charm, set_default_status, monkeypatch
+):
+    """A transient K8s API transport error in the charm_refresh constructor is retried.
+
+    CI 2026-10-17 (K8s pitr_aws attempt 3): an httpx.ConnectTimeout raised by the
+    blocking SelfSubjectAccessReview round-trip inside charm_refresh.Kubernetes()
+    propagated out of RefreshManager.__init__ (the except chain only covers
+    KubernetesJujuAppNotTrusted/PeerRelationNotReady/UnitTearingDown), crashed the
+    install hook and put the charm container into CrashLoopBackOff.
+    """
+    state.substrate = substrate
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda _: None)
+    target = (
+        "charm_refresh.Kubernetes" if substrate == Substrates.K8S else "charm_refresh.Machines"
+    )
+    constructed = MagicMock(name="refresh")
+    with (
+        patch(target, side_effect=[httpx.ConnectTimeout("timed out"), constructed]) as construct,
+        # The mock refresh object would leak Mocks into the machinery-status
+        # JSON file; the reconciliation is out of scope for this test.
+        patch.object(RefreshManager, "reconcile_refresh_status"),
+        patch.object(RefreshManager, "_persist_machinery_status"),
+    ):
+        manager = RefreshManager(
+            state=state,
+            workload=MagicMock(),
+            charm=charm,
+            set_default_status=set_default_status,
+        )
+    assert construct.call_count == 2
+    assert manager.refresh is constructed
+
+
+@pytest.mark.parametrize("substrate", [Substrates.K8S, Substrates.VM])
+def test_refresh_manager_constructor_transport_exhaustion_degrades(
+    substrate, state, charm, set_default_status, monkeypatch
+):
+    """Exhausted transport retries degrade to refresh=None instead of crashing."""
+    state.substrate = substrate
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda _: None)
+    target = (
+        "charm_refresh.Kubernetes" if substrate == Substrates.K8S else "charm_refresh.Machines"
+    )
+    with patch(target, side_effect=httpx.ConnectTimeout("timed out")) as construct:
+        manager = RefreshManager(
+            state=state,
+            workload=MagicMock(),
+            charm=charm,
+            set_default_status=set_default_status,
+        )
+    assert construct.call_count == 3
     assert manager.refresh is None
     assert manager.can_set_app_status is True
 
@@ -413,6 +631,145 @@ def test_get_statuses_persists_active_idle_for_unsettled_unit_status(refresh_man
     )
 
 
+def test_get_statuses_snapshots_an_active_role_status(refresh_manager, charm):
+    """An ActiveStatus carrying a role message survives the machinery record.
+
+    The charm's update-status handler writes ActiveStatus('Primary') as its
+    last statement; the collect-phase recompute must replay the message
+    instead of wiping it to bare active (roles-family '' != 'Primary' after a
+    fast self-heal, CI 2026-10-17). Only the active rank relaxes: waiting,
+    maintenance and blocked statuses the refresh did not set keep the
+    ACTIVE_IDLE fallback, whose record would never clear once the underlying
+    condition resolved. A bare active() write clears the record on the next
+    evaluation.
+    """
+    refresh_manager.refresh.unit_status_higher_priority = None
+    charm.unit.status = ActiveStatus("Primary")
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    record = StatusObject(status="active", message="Primary")
+    assert statuses == [record]
+    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+
+
+def test_get_statuses_does_not_snapshot_a_bare_active_status(refresh_manager, charm):
+    """A bare active() the refresh did not set keeps the ACTIVE_IDLE record.
+
+    The empty message is the no-role-information surface: replaying it is
+    indistinguishable from ACTIVE_IDLE, and snapshotting every bare active()
+    would only churn the record between equivalent values.
+    """
+    refresh_manager.refresh.unit_status_higher_priority = None
+    charm.unit.status = ActiveStatus()
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_called_once_with(
+        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
+    )
+
+
+def test_get_statuses_does_not_snapshot_a_non_refresh_unit_status(refresh_manager, charm):
+    """The machinery record must not snapshot statuses the refresh did not set.
+
+    A snapshot of an unrelated status (e.g. the cluster manager's "awaiting
+    passwords generation") would be re-fed through the collect handler forever:
+    waiting outranks active there, so the record would never clear even after
+    the underlying condition resolved.
+    """
+    refresh_manager.refresh.unit_status_higher_priority = None
+    charm.unit.status = WaitingStatus("awaiting passwords generation")
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_called_once_with(
+        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
+    )
+
+
+def test_get_statuses_snapshots_a_refresh_set_status(refresh_manager, charm):
+    """A status the refresh itself set keeps being snapshotted."""
+    higher = WaitingStatus("refresh queued")
+    refresh_manager.refresh.unit_status_higher_priority = higher
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    record = StatusObject(status="waiting", message="refresh queued")
+    assert statuses == [record]
+    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+
+
+@pytest.fixture
+def persisted_statuses(refresh_manager):
+    """A fake status store so the replay of the persisted record is observable."""
+    store: dict = {}
+
+    def fake_set(record, scope, name):
+        store[(scope, name)] = [record]
+
+    def fake_get(scope, name):
+        entry = MagicMock(name="statuses entry")
+        entry.root = store.get((scope, name), [])
+        return entry
+
+    refresh_manager.state.statuses.set.side_effect = fake_set
+    refresh_manager.state.statuses.get.side_effect = fake_get
+    return store
+
+
+@pytest.mark.parametrize(
+    "role_message", ["Primary", "Primary (degraded)", "Primary (read-only)", "Standby"]
+)
+def test_get_statuses_recompute_persists_the_default_role_status(
+    refresh_manager, charm, set_default_status, role_message
+):
+    """Recompute with no refresh must surface AND persist the freshly computed role status.
+
+    Otherwise every hook's collect wipes the mid-hook write to a bare active()
+    and juju flaps between the two (primary-flap regression).
+    """
+
+    def compute_default():
+        charm.unit.status = ActiveStatus(role_message)
+
+    set_default_status.side_effect = compute_default
+    refresh_manager.refresh = None
+    charm.unit.status = ActiveStatus()
+    refresh_manager.state.statuses.set.reset_mock()
+
+    statuses = refresh_manager.get_statuses("unit", recompute=True)
+
+    set_default_status.assert_called_once()
+    record = StatusObject(status="active", message=role_message)
+    assert statuses == [record]
+    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+
+
+def test_get_statuses_replays_the_persisted_role_status_without_recompute(
+    refresh_manager, charm, set_default_status, persisted_statuses
+):
+    """A later hook's collect replays the stored role record.
+
+    Keeps the unit status message stable between update-status recomputes.
+    """
+    set_default_status.side_effect = lambda: setattr(charm.unit, "status", ActiveStatus("Primary"))
+    refresh_manager.refresh = None
+    charm.unit.status = ActiveStatus()
+
+    refresh_manager.get_statuses("unit", recompute=True)
+
+    assert refresh_manager.get_statuses("unit") == [
+        StatusObject(status="active", message="Primary")
+    ]
+
+
 def test_get_statuses_returns_cached_active_idle_for_app_scope_without_recompute(
     refresh_manager,
 ):
@@ -473,6 +830,25 @@ def test_refresh_snap_runs_the_post_refresh_flow(refresh_vm, charm):
     charm.update_config.assert_called_once_with(refresh=refresh)
     charm.workload.install_snap_package.assert_called_once_with(revision="366", refresh=refresh)
     charm.refresh_manager.post_snap_refresh.assert_called_once_with(refresh)
+
+
+def test_pre_refresh_check_before_any_units_refreshed_switchover_retry_error_maps_to_precheck_failed(
+    refresh_vm, charm
+):
+    charm.patroni_manager.are_all_members_ready.return_value = True
+    charm.patroni_manager.is_creating_backup = False
+    charm.postgresql._connect_to_database.return_value.cursor.return_value.fetchone.return_value = [
+        0
+    ]
+    charm.unit.name = "postgresql/2"
+    charm.state.peer_relation = MagicMock(units=[])
+    charm.patroni_manager.get_primary.return_value = "postgresql-0"
+    charm.patroni_manager.switchover.side_effect = RetryError(
+        Future.construct(1, requests.exceptions.ConnectionError(), True)
+    )
+
+    with pytest.raises(PrecheckFailed, match=r"Unable to switch primary"):
+        refresh_vm.run_pre_refresh_checks_before_any_units_refreshed()
 
 
 def test_post_snap_refresh_blocks_when_patroni_fails_to_start(vm_manager, charm):

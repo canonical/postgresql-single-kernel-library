@@ -35,6 +35,10 @@ class RaftPostgresqlStillUpError(PostgreSQLBaseError):
     """Postgresql not yet down."""
 
 
+class RaftRecoveryTimeoutError(PostgreSQLBaseError):
+    """A raft-recovery wait exceeded its bound; the flow must defer, not hang."""
+
+
 class RaftNotPromotedError(PostgreSQLBaseError):
     """Leader not yet set when reinitialising raft."""
 
@@ -73,6 +77,10 @@ class SwitchoverNotSyncError(SwitchoverFailedError):
 
 class UpdateSyncNodeCountError(PostgreSQLBaseError):
     """Raised when updating synchronous_node_count failed for some reason."""
+
+
+class CannotConnectError(PostgreSQLBaseError):
+    """Cannot run the connectivity check against the database."""
 
 
 class DeployedWithoutTrustError(PostgreSQLBaseError):

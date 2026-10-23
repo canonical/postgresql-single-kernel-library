@@ -3,6 +3,7 @@
 
 """Kubernetes Workload."""
 
+import json
 import logging
 import pathlib
 import shlex
@@ -12,6 +13,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from charmlibs import pathops
 from charmlibs.pathops import PathProtocol
@@ -33,6 +35,8 @@ from ops.pebble import (
 
 from single_kernel_postgresql.config.exceptions import PostgreSQLFileOperationError
 from single_kernel_postgresql.config.literals import (
+    DATABASE_DEFAULT_NAME,
+    DATABASE_PORT,
     DIR_PERMISSIONS_READONLY,
     K8S_ARCHIVE_PATH,
     K8S_DATA_PATH,
@@ -59,6 +63,7 @@ from single_kernel_postgresql.config.literals import (
     REPLICATION_USER,
     USER,
 )
+from single_kernel_postgresql.utils.postgresql import ACCESS_GROUP_IDENTITY
 from single_kernel_postgresql.workload.base import (
     BackupConfig,
     BaseWorkload,
@@ -155,7 +160,10 @@ class K8sWorkload(BaseWorkload):
                     "command": "/start-ldap-synchronizer.sh",
                     "startup": "disabled",
                 }),
-                K8S_METRICS_SERVER_SERVICE_NAME: self._generate_metrics_service(spec),
+                K8S_METRICS_SERVER_SERVICE_NAME: self.generate_metrics_service(
+                    monitoring_password=spec.monitoring_password,
+                    postgresql_service=K8S_POSTGRESQL_SERVICE_NAME,
+                ),
                 K8S_PGBACKREST_METRICS_SERVER_SERVICE_NAME: (
                     self._generate_pgbackrest_metrics_service()
                 ),
@@ -181,25 +189,6 @@ class K8sWorkload(BaseWorkload):
             },
         })
         return Layer(layer_config)
-
-    def _generate_metrics_service(self, spec: PebbleLayerSpec) -> ServiceDict:
-        """Generate the metrics service definition."""
-        return {
-            "override": "replace",
-            "summary": "postgresql metrics exporter",
-            "command": "/start-exporter.sh",
-            "startup": "enabled" if spec.monitoring_password is not None else "disabled",
-            "after": [K8S_POSTGRESQL_SERVICE_NAME],
-            "user": K8S_WORKLOAD_OS_USER,
-            "group": K8S_WORKLOAD_OS_GROUP,
-            "environment": {
-                "DATA_SOURCE_NAME": (
-                    f"user={MONITORING_USER} "
-                    f"password={spec.monitoring_password} "
-                    "host=/var/run/postgresql port=5432 database=postgres"
-                ),
-            },
-        }
 
     def _generate_pgbackrest_metrics_service(self) -> ServiceDict:
         """Generate the pgbackrest metrics service definition."""
@@ -323,6 +312,10 @@ class K8sWorkload(BaseWorkload):
             len(self.container.pebble.get_services(names=[service])) > 0
         )
 
+    def container_ready(self) -> bool:
+        """Whether the postgresql container is connected."""
+        return self.container.can_connect()
+
     def service_is_running(self, service: str) -> bool:
         """Check whether a named Pebble service is running.
 
@@ -378,13 +371,12 @@ class K8sWorkload(BaseWorkload):
         client.delete(Endpoints, name=f"{cluster_name}-config", namespace=namespace)
         return CommandResult(return_code=0)
 
-    def init_storage(self) -> None:
+    def init_storage(self, *, clear_stale_replica: bool = False) -> None:
         """Create the PostgreSQL data directories, clearing stale data if needed.
 
-        Port of the K8s charm's _create_pgdata/_ensure_pgdata_dirs_and_symlinks
-        helpers. The stale-data clearing branch of the pebble-ready helper (replica
-        joins on an initialized cluster) does not apply here: the restore action only
-        runs on the leader unit.
+        Port of the K8s charm's _ensure_pgdata_dirs_and_symlinks helper, plus the
+        replica stale-clear branch of _create_pgdata when the caller asks for it
+        (the charm owns the leader/cluster-initialised guards).
         """
         logs_storage = self.root / K8S_LOGS_STORAGE_PATH
         waldir_path = logs_storage / self.paths.versioned_path / K8S_WAL_DIR
@@ -393,6 +385,10 @@ class K8sWorkload(BaseWorkload):
         )
         archive_path = self.root / K8S_ARCHIVE_PATH / self.paths.versioned_path
         pgdata_path = self.paths.data
+
+        # Clear stale storage directories when a replica joins an initialized cluster.
+        if clear_stale_replica:
+            self._clear_stale_replica_paths(pgdata_path, waldir_path, temp_tablespace_path)
 
         # Create the pgdata directory on the storage mount (e.g., /var/lib/pg/data/16/main)
         if not self.container.exists(str(pgdata_path)):
@@ -479,6 +475,37 @@ class K8sWorkload(BaseWorkload):
         ]:
             self.container.exec(["chown", f"{self.user}:{self.group}", str(path)]).wait()
 
+    def _clear_stale_replica_paths(
+        self,
+        pgdata_path: PathProtocol,
+        waldir_path: PathProtocol,
+        temp_tablespace_path: PathProtocol,
+    ) -> None:
+        """Clear the WAL and temp-tablespace paths left by a previous pod (port).
+
+        PersistentVolumes may retain data from previous pods, and pg_basebackup
+        requires empty --waldir and --tablespace directories. Clear on every call
+        until pgdata is populated (PG_VERSION exists), since pg_basebackup can fail
+        and leave stale files that prevent retries.
+        """
+        pgdata_populated = self.container.exists(str(pgdata_path / "PG_VERSION"))
+        if pgdata_populated:
+            return
+        for path in [waldir_path, temp_tablespace_path]:
+            if self.container.exists(str(path)):
+                try:
+                    self.container.exec([
+                        "find",
+                        str(path),
+                        "-mindepth",
+                        "1",
+                        "-delete",
+                    ]).wait_output()
+                    logger.info(f"Cleared stale content from {path} for replica initialization")
+                except ExecError as e:
+                    if "No such file or directory" not in str(e.stderr):
+                        logger.warning(f"Failed to clear {path}: {e}")
+
     def _ensure_log_symlink(self, target_name: str, symlink_path: PathProtocol) -> None:
         """Ensure symlink_path points to target in the logs storage."""
         path_info = self._get_container_path_info(str(symlink_path))
@@ -498,7 +525,7 @@ class K8sWorkload(BaseWorkload):
         self.container.exec([
             "ln",
             "-sfn",
-            str(logs_storage / self.paths.versioned_path / target_name),
+            str(logs_storage / target_name),
             str(symlink_path),
         ]).wait()
         self.container.exec([
@@ -723,3 +750,75 @@ class K8sWorkload(BaseWorkload):
             return container.can_connect()
         except (RuntimeError, ModelError):
             return False
+
+    # -- K8s container seams (port of the K8s charm's file/trust-store helpers) -------
+
+    def push_file(self, file_path: str, file_data: str) -> None:
+        """Upload a file into the workload container (port of _push_file_to_workload)."""
+        self.container.push(
+            file_path,
+            file_data,
+            make_dirs=True,
+            permissions=0o400,
+            user=self.user,
+            group=self.group,
+        )
+
+    def sync_tls_trust_store(self, ca: str | None, certs_path: str) -> None:
+        """Push the operator CA into the container system trust store (port).
+
+        The charm-local peer CA bundle lives on the unit filesystem, not in the
+        container: the Patroni REST client (requests, verify=) runs on the unit.
+        """
+        if ca is not None and self.container.can_connect():
+            self.push_file(f"{certs_path}/ca.crt", ca)
+            self.container.exec(["update-ca-certificates"]).wait()
+
+    def generate_ldap_service(
+        self,
+        ldap_params: dict,
+        group_mappings: dict,
+        operator_password: str,
+        postgresql_service: str,
+    ) -> dict:
+        """Generate the LDAP synchronizer service definition (port)."""
+        ldap_url = urlparse(ldap_params["ldapurl"])
+        return {
+            "override": "replace",
+            "summary": "synchronize LDAP users",
+            "command": "/start-ldap-synchronizer.sh",
+            "startup": "enabled",
+            "environment": {
+                "LDAP_HOST": ldap_url.hostname,
+                "LDAP_PORT": ldap_url.port,
+                "LDAP_BASE_DN": ldap_params["ldapbasedn"],
+                "LDAP_BIND_USERNAME": ldap_params["ldapbinddn"],
+                "LDAP_BIND_PASSWORD": ldap_params["ldapbindpasswd"],
+                "LDAP_GROUP_IDENTITY": json.dumps(ACCESS_GROUP_IDENTITY),
+                "LDAP_GROUP_MAPPINGS": json.dumps(group_mappings),
+                "POSTGRES_HOST": "127.0.0.1",
+                "POSTGRES_PORT": DATABASE_PORT,
+                "POSTGRES_DATABASE": DATABASE_DEFAULT_NAME,
+                "POSTGRES_USERNAME": USER,
+                "POSTGRES_PASSWORD": operator_password,
+            },
+        }
+
+    def generate_metrics_service(
+        self, monitoring_password: str | None, postgresql_service: str
+    ) -> ServiceDict:
+        """Generate the metrics exporter service definition (port)."""
+        return {
+            "override": "replace",
+            "summary": "postgresql metrics exporter",
+            "command": "/usr/bin/prometheus-postgres-exporter",
+            "startup": ("enabled" if monitoring_password is not None else "disabled"),
+            "after": [postgresql_service],
+            "user": self.user,
+            "group": self.group,
+            "environment": {
+                "DATA_SOURCE_URI": ":5432/postgres?host=/var/run/postgresql",
+                "DATA_SOURCE_USER": MONITORING_USER,
+                "DATA_SOURCE_PASS": str(monitoring_password),
+            },
+        }

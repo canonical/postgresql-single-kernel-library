@@ -30,7 +30,8 @@ ops = ">=2.0.0"
 poetry-core = "*"
 # data_platform_libs/v0/data_models.py
 pydantic = "*"
-# loki_k8s/v1/loki_push_api.py and prometheus_k8s/v0/prometheus_scrape.py
-cosl = ">=0.0.50"
+# COS charm libs vendored inside single_kernel_postgresql (prometheus/loki/
+# grafana/certificate_transfer/grafana_agent/rolling_ops): their python deps.
+cosl = ">=0.0.53"
 # certificate_transfer_interface/v0/certificate_transfer.py
 jsonschema = "*"

@@ -17,9 +17,17 @@ from typing import TYPE_CHECKING
 
 import jinja2
 from botocore.exceptions import ClientError, ParamValidationError, SSLError
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import ActiveStatus, BlockedStatus, JujuVersion, MaintenanceStatus
 from ops.pebble import ExecError
-from tenacity import RetryError, Retrying, stop_after_attempt, wait_fixed
+from tenacity import (
+    RetryError,
+    Retrying,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_fixed,
+)
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import (
@@ -35,6 +43,7 @@ from single_kernel_postgresql.config.literals import (
     PGBACKREST_LOG_LEVEL_STDERR,
     PGBACKREST_LOGROTATE_FILE,
 )
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.state import CharmState
 from single_kernel_postgresql.managers.base import BaseManager
 from single_kernel_postgresql.managers.patroni import PatroniManager
@@ -45,6 +54,7 @@ from single_kernel_postgresql.utils.backup import (
     CANNOT_RESTORE_PITR,
     CLUSTER_PRIMARY_CREATE_BACKUP_ERROR_MESSAGE,
     FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE,
+    FAILED_TO_CHECK_STANZA_ERROR_MESSAGE,
     FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE,
     NOT_RUNNING_CREATE_BACKUP_ERROR_MESSAGE,
     OFFLINE_DATABASE_CREATE_BACKUP_ERROR_MESSAGE,
@@ -80,6 +90,21 @@ type IsStandbyClusterFunction = Callable[[], bool]
 # the cluster is never a standby cluster.
 STANZA_CREATE_CONNECTION_TIMEOUT_ERROR_CODE = 49
 
+# Bounded pgBackRest exec timeouts: healthy stanza-create/check run in seconds
+# (2-4 s observed); these caps keep a hung-peer attempt well inside a hook
+# window instead of occupying the hook for ~19 minutes (CI legs
+# 116790839245/116790839584).
+PGBACKREST_STANZA_CREATE_TIMEOUT = 120
+PGBACKREST_CHECK_TIMEOUT = 300
+
+
+class _StanzaTimeoutExhaustedError(TimeoutError):
+    """A pgBackRest stanza exec timed out on its final allowed attempt.
+
+    Subclasses TimeoutError so the existing outer handling (K8s failure
+    mapping / VM re-raise) applies; tenacity is configured not to retry it.
+    """
+
 
 class BackupManager(BaseManager):
     """In this class, we manage PostgreSQL backups."""
@@ -98,6 +123,7 @@ class BackupManager(BaseManager):
         is_standby_cluster: IsStandbyClusterFunction | None = None,
         set_unit_status: Callable[..., None] | None = None,
         refresh_primary_status: Callable[[], None] | None = None,
+        remove_departed_endpoints: Callable[[], list[str]] | None = None,
     ):
         """Manager of PostgreSQL backups."""
         super().__init__(state, workload, "backup")
@@ -108,6 +134,16 @@ class BackupManager(BaseManager):
         self.set_unit_status = set_unit_status
         self.refresh_primary_status = refresh_primary_status
         self._is_standby_cluster_bridge = is_standby_cluster
+        # Membership-reconciliation seam: reconciles departed endpoints out of
+        # the app databag before pgBackRest renders/execs. No-op when omitted
+        # (e.g. consumers that have not wired the callable yet).
+        self._remove_departed_endpoints_bridge = remove_departed_endpoints
+
+    def remove_departed_endpoints(self) -> None:
+        """Reconcile departed endpoints out of the cluster members (no-op without a bridge)."""
+        if self._remove_departed_endpoints_bridge is None:
+            return
+        self._remove_departed_endpoints_bridge()
 
     @property
     def stanza_name(self) -> str:
@@ -147,6 +183,30 @@ class BackupManager(BaseManager):
         command.extend(config.extra_args)
         command.extend(args)
         return self.workload.run_cmd(shlex.join(command), timeout=timeout)
+
+    def _reconcile_and_exec(
+        self, args: list[str], timeout: float, timed_out: list[bool]
+    ) -> CommandResult:
+        """Reconcile departed endpoints, re-render the conf, then exec pgBackRest.
+
+        The attempt-entry reconcile + re-render may fix a conf that carries
+        stale pgN-host blocks for departed members. A first exec timeout is
+        re-raised for tenacity to retry (once); a second consecutive timeout
+        raises the sentinel that stops the retry loop.
+        """
+        self.remove_departed_endpoints()
+        self._render_pgbackrest_conf_file()
+        try:
+            return self._execute_pgbackrest(args, timeout=timeout)
+        except (TimeoutError, subprocess.TimeoutExpired) as e:
+            if timed_out[0]:
+                raise _StanzaTimeoutExhaustedError from e
+            timed_out[0] = True
+            logger.warning(
+                f"pgbackrest {args[-1]} timed out; reconciling departed member endpoints"
+                " and retrying once"
+            )
+            raise
 
     # -- Substrate-bridged predicates -------------------------------------------
 
@@ -233,6 +293,24 @@ class BackupManager(BaseManager):
         self.state.application.s3_initialization_start = time.asctime(time.gmtime())
         self.state.application.stanza = ""
         self.state.application.s3_initialization_done = ""
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses (the DPH component contract).
+
+        Replays the persisted s3-initialization block message so it survives
+        the collect (the direct write only lives until hook end).
+        """
+        if scope == "unit" and (
+            message := (
+                self.state.application.s3_initialization_block_message
+                if self.state.peer.is_app_leader
+                else self.state.peer.s3_initialization_block_message
+            )
+        ):
+            return [StatusObject(status="blocked", message=message)]
+        return [GeneralStatuses.ACTIVE_IDLE.value]
 
     # -- Stanza configuration rendering ----------------------------------------
 
@@ -376,6 +454,7 @@ class BackupManager(BaseManager):
 
     def _create_stanza(self) -> bool:
         """Run stanza-create with the charms' retry and failure semantics."""
+        timed_out = [False]
         try:
             if self.set_unit_status:
                 self.set_unit_status(MaintenanceStatus("initialising stanza"))
@@ -383,12 +462,21 @@ class BackupManager(BaseManager):
             # successfully complete validation, and upon receiving the same parent event other units should start it.
             # Therefore, the first retry may fail due to the delay of these other units to start this service. 60s given
             # for that or else the s3 initialization sequence will fail.
-            for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(10), reraise=True):
+            for attempt in Retrying(
+                stop=stop_after_attempt(6),
+                wait=wait_fixed(10),
+                reraise=True,
+                retry=retry_if_not_exception_type(_StanzaTimeoutExhaustedError),
+            ):
                 with attempt:
-                    result = self._execute_pgbackrest([
-                        f"--stanza={self.stanza_name}",
-                        "stanza-create",
-                    ])
+                    result = self._reconcile_and_exec(
+                        [
+                            f"--stanza={self.stanza_name}",
+                            "stanza-create",
+                        ],
+                        PGBACKREST_STANZA_CREATE_TIMEOUT,
+                        timed_out,
+                    )
                     if self.state.substrate == Substrates.VM:
                         if result.return_code == STANZA_CREATE_CONNECTION_TIMEOUT_ERROR_CODE:
                             # Raise an error if the connection timeouts, so the user has the possibility to
@@ -401,6 +489,13 @@ class BackupManager(BaseManager):
                         if result.return_code != 0:
                             raise StanzaOperationError(result.stderr)
         except TimeoutError as e:
+            if self.state.substrate == Substrates.K8S:
+                # A K8s exec timeout is folded into the initialization-failure
+                # path after the single reconciled retry (stanza-create keeps
+                # the initialize message).
+                logger.exception("Failed to initialise stanza:")
+                self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
+                return False
             raise e
         except ExecError:
             # On K8s a failed stanza-create surfaces as pebble ExecError.
@@ -437,14 +532,24 @@ class BackupManager(BaseManager):
 
     def _check_stanza_command(self) -> bool:
         """Run the pgbackrest stanza check with the charms' retry semantics."""
+        timed_out = [False]
         try:
             # If the tls is enabled, it requires all the units in the cluster to run the pgBackRest service to
             # successfully complete validation, and upon receiving the same parent event other units should start it.
             # Therefore, the first retry may fail due to the delay of these other units to start this service. 60s given
             # for that or else the s3 initialization sequence will fail.
-            for attempt in Retrying(stop=stop_after_attempt(6), wait=wait_fixed(10), reraise=True):
+            for attempt in Retrying(
+                stop=stop_after_attempt(6),
+                wait=wait_fixed(10),
+                reraise=True,
+                retry=retry_if_not_exception_type(_StanzaTimeoutExhaustedError),
+            ):
                 with attempt:
-                    result = self._execute_pgbackrest([f"--stanza={self.stanza_name}", "check"])
+                    result = self._reconcile_and_exec(
+                        [f"--stanza={self.stanza_name}", "check"],
+                        PGBACKREST_CHECK_TIMEOUT,
+                        timed_out,
+                    )
                     if self.state.substrate == Substrates.VM:
                         if result.return_code == PGBACKREST_ARCHIVE_TIMEOUT_ERROR_CODE:
                             # Raise an error if the archive command timeouts, so the user has the possibility
@@ -466,10 +571,11 @@ class BackupManager(BaseManager):
                 self.refresh_primary_status()
         except TimeoutError as e:
             if self.state.substrate == Substrates.K8S:
-                # The K8s charm folds every failure (including timeouts) into the
-                # initialization-failure path instead of re-raising.
+                # The K8s charm folds every failure (including timeouts, after
+                # the single reconciled retry) into the check-failure path
+                # instead of re-raising.
                 logger.exception("Failed to check stanza:")
-                self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
+                self._s3_initialization_set_failure(FAILED_TO_CHECK_STANZA_ERROR_MESSAGE)
                 return False
             # Re-raise to put charm in error state (not blocked), allowing juju resolve
             raise e
@@ -478,7 +584,7 @@ class BackupManager(BaseManager):
             # and rollback the configuration. Only the VM charm rolls the
             # configuration back here; the K8s charm logs and blocks.
             logger.exception("Failed to check stanza:")
-            self._s3_initialization_set_failure(FAILED_TO_INITIALIZE_STANZA_ERROR_MESSAGE)
+            self._s3_initialization_set_failure(FAILED_TO_CHECK_STANZA_ERROR_MESSAGE)
             if self.state.substrate == Substrates.VM:
                 self.update_config()
             return False
@@ -945,7 +1051,7 @@ Stderr:
         List contains successful and failed backups in order of ascending time.
         """
         backup_list = []
-        result = self._execute_pgbackrest(["info", "--output=json"])
+        result = self._execute_pgbackrest(["info", "--output=json"], timeout=30)
         if self.state.substrate == Substrates.VM and result.return_code != 0:
             extracted_error = extract_error_message(
                 result.stderr, str(self.workload.backup_config.logs_path)
@@ -1015,7 +1121,7 @@ Stderr:
             a dict of previously created backups: id => (stanza, timeline) or an empty dict if there is no backups in
                 the S3 bucket.
         """
-        result = self._execute_pgbackrest(["info", "--output=json"])
+        result = self._execute_pgbackrest(["info", "--output=json"], timeout=30)
         if self.state.substrate == Substrates.VM and result.return_code != 0:
             extracted_error = extract_error_message(
                 result.stderr, str(self.workload.backup_config.logs_path)
@@ -1047,14 +1153,17 @@ Stderr:
         Returns:
             a dict of timelines: id => (stanza, timeline) or an empty dict if there is no timelines in the S3 bucket.
         """
-        result = self._execute_pgbackrest([
-            "repo-ls",
-            "archive",
-            "--recurse",
-            "--filter",
-            "\\.history$",
-            "--output=json",
-        ])
+        result = self._execute_pgbackrest(
+            [
+                "repo-ls",
+                "archive",
+                "--recurse",
+                "--filter",
+                "\\.history$",
+                "--output=json",
+            ],
+            timeout=30,
+        )
         if self.state.substrate == Substrates.VM and result.return_code != 0:
             extracted_error = extract_error_message(
                 result.stderr, str(self.workload.backup_config.logs_path)
@@ -1139,6 +1248,9 @@ Stderr:
             logger.info("Cannot change S3 configuration during restore")
             return False, True
 
+        # Reconcile departed endpoints before rendering: a shrunken member set
+        # must not leak stale pgN-host blocks into pgbackrest.conf.
+        self.remove_departed_endpoints()
         if not self._render_pgbackrest_conf_file():
             logger.debug("Cannot set pgBackRest configurations, missing configurations.")
             return False, False
@@ -1154,6 +1266,9 @@ Stderr:
         Renamed port of the charms' _on_s3_credential_changed_primary: no event
         semantics, returns success. The stanza must be cleared before calling.
         """
+        # Reconcile departed endpoints first: this also covers the peer-changed
+        # re-init path, which does not pass through credential_changed_checks.
+        self.remove_departed_endpoints()
         self.update_config()
 
         try:

@@ -12,17 +12,26 @@ from typing import TYPE_CHECKING
 with suppress(ImportError):
     import psutil
     from pysyncobj.utility import TcpUtility, UtilityException
+from data_platform_helpers.advanced_statuses import StatusObject
+from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
 from ops import BlockedStatus
-from tenacity import Retrying, wait_fixed
+from tenacity import RetryError, Retrying, stop_after_delay, wait_fixed
 
 from single_kernel_postgresql.config.exceptions import (
     AddRaftMemberFailedError,
     RaftNotPromotedError,
     RaftPostgresqlNotUpError,
     RaftPostgresqlStillUpError,
+    RaftRecoveryTimeoutError,
     RemoveRaftMemberFailedError,
 )
-from single_kernel_postgresql.config.literals import PEER_RELATION, RAFT_PARTNER_PREFIX, RAFT_PORT
+from single_kernel_postgresql.config.literals import (
+    PEER_RELATION,
+    RAFT_MAJORITY_LOSS_MESSAGE,
+    RAFT_PARTNER_PREFIX,
+    RAFT_PORT,
+)
+from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.managers.base import BaseManager
 
 if TYPE_CHECKING:
@@ -87,11 +96,15 @@ class RaftManager(BaseManager):
         self.patroni_manager.stop_patroni()
 
         logger.info("Wait for postgresql to stop")
-        for attempt in Retrying(wait=wait_fixed(5)):
-            with attempt:
-                for proc in psutil.process_iter(["name"]):
-                    if proc.name() == "postgres":
-                        raise RaftPostgresqlStillUpError()
+        # Bounded: an unbounded wait here would hang the hook on a wedged stop.
+        try:
+            for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(300)):
+                with attempt:
+                    for proc in psutil.process_iter(["name"]):
+                        if proc.name() == "postgres":
+                            raise RaftPostgresqlStillUpError()
+        except RetryError:
+            raise RaftRecoveryTimeoutError("Timed out waiting for postgresql to stop") from None
 
         logger.info("Removing raft data")
         try:
@@ -113,26 +126,34 @@ class RaftManager(BaseManager):
         self.patroni_manager.start_patroni()
 
         logger.info("Waiting for new raft cluster to initialise")
-        for attempt in Retrying(wait=wait_fixed(5)):
-            with attempt:
-                health_status = self.patroni_manager.get_patroni_health()
-                if (
-                    health_status["role"] not in ["leader", "master"]
-                    or health_status["state"] != "running"
-                ):
-                    raise RaftNotPromotedError()
+        # Bounded: promotion may never complete; defer instead of hanging.
+        try:
+            for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(300)):
+                with attempt:
+                    health_status = self.patroni_manager.get_patroni_health()
+                    if (
+                        health_status["role"] not in ["leader", "master"]
+                        or health_status["state"] != "running"
+                    ):
+                        raise RaftNotPromotedError()
+        except RetryError:
+            raise RaftRecoveryTimeoutError("Timed out waiting for raft promotion") from None
 
         logger.info("Restarting patroni")
         self.patroni_manager.restart_patroni()
-        for attempt in Retrying(wait=wait_fixed(5)):
-            with attempt:
-                found_postgres = False
-                for proc in psutil.process_iter(["name"]):
-                    if proc.name() == "postgres":
-                        found_postgres = True
-                        break
-                if not found_postgres:
-                    raise RaftPostgresqlNotUpError()
+        # Bounded: postgres may never come back; defer instead of hanging.
+        try:
+            for attempt in Retrying(wait=wait_fixed(5), stop=stop_after_delay(300)):
+                with attempt:
+                    found_postgres = False
+                    for proc in psutil.process_iter(["name"]):
+                        if proc.name() == "postgres":
+                            found_postgres = True
+                            break
+                    if not found_postgres:
+                        raise RaftPostgresqlNotUpError()
+        except RetryError:
+            raise RaftRecoveryTimeoutError("Timed out waiting for postgresql to start") from None
         logger.info("Raft should be unstuck")
 
     def cleanup_raft_cluster(self) -> bool:
@@ -168,17 +189,23 @@ class RaftManager(BaseManager):
 
     def _set_stuck_raft_flag(self) -> None:
         # TODO factor out
-        self.set_unit_status(BlockedStatus("Raft majority loss, run: promote-to-primary"))
+        self.set_unit_status(BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE))
         logger.warning("Remove raft member: Stuck raft cluster detected")
         self.state.peer.data.update({"raft_stuck": "True"})
 
         # Leader doesn't always trigger when changing it's own peer data.
         if self.state.peer.is_app_leader:
             # TODO Factor out
-            self.peer_relation_changed.emit(
-                unit=self.state.peer.unit,
-                app=self.state.peer.unit.app,
-                relation=self.state.model.get_relation(PEER_RELATION),
+            relation = self.state.model.get_relation(PEER_RELATION)
+            relation_unit = self.state.peer.unit
+            relation_changed = getattr(
+                self.state.charm.on,
+                f"{PEER_RELATION.replace('-', '_')}_relation_changed",
+            )
+            relation_changed.emit(
+                relation,
+                app=relation_unit.app,
+                unit=relation_unit,
             )
 
     def get_raft_status(self) -> dict | None:
@@ -189,6 +216,14 @@ class RaftManager(BaseManager):
         raft_host = f"127.0.0.1:{RAFT_PORT}"
         with suppress(UtilityException):
             return syncobj_util.executeCommand(raft_host, ["status"])
+
+    def get_statuses(
+        self, scope: AdvancedStatusesScope, recompute: bool = False
+    ) -> list[StatusObject]:
+        """Compute the manager's statuses (the DPH component contract)."""
+        if scope == "unit" and self.state.peer.data.get("raft_stuck") == "True":
+            return [StatusObject(status="blocked", message=RAFT_MAJORITY_LOSS_MESSAGE)]
+        return [GeneralStatuses.ACTIVE_IDLE.value]
 
     def remove_raft_member(
         self, member_address: str, remote_address: str | None = None, set_raft_flags: bool = True

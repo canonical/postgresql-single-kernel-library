@@ -6,16 +6,17 @@
 import logging
 from collections.abc import Iterator
 
-# Charmlib import. Should be made available in the charm itself
-from charms.certificate_transfer_interface.v0.certificate_transfer import (  # type: ignore
-    CertificateAvailableEvent,
-    CertificateRemovedEvent,
-    CertificateTransferRequires,
-)
 from ops.framework import Object
 from ops.pebble import ConnectionError as PebbleConnectionError
 from ops.pebble import PathError, ProtocolError
 from tenacity import RetryError
+
+# The certificate-transfer charm lib is vendored in the library package now.
+from single_kernel_postgresql.lib.charms.certificate_transfer_interface.v0.certificate_transfer import (
+    CertificateAvailableEvent,
+    CertificateRemovedEvent,
+    CertificateTransferRequires,
+)
 
 logger = logging.getLogger(__name__)
 SCOPE = "unit"
@@ -45,7 +46,7 @@ class TLSTransfer(Object):
             return
 
         secret_name = f"ca-{relation.app.name}"
-        self.charm.set_secret(SCOPE, secret_name, event.ca)
+        self.charm.state.set_secret(SCOPE, secret_name, event.ca)
 
         try:
             if not self.charm.push_ca_file_into_workload(secret_name):
@@ -65,7 +66,7 @@ class TLSTransfer(Object):
             return
 
         secret_name = f"ca-{relation.app.name}"
-        self.charm.set_secret(SCOPE, secret_name, None)
+        self.charm.state.set_secret(SCOPE, secret_name, None)
 
         try:
             if not self.charm.clean_ca_file_from_workload(secret_name):

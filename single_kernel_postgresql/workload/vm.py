@@ -289,6 +289,29 @@ class VMWorkload(BaseWorkload):
         except OSError:
             return False
 
+    # -- Storage layout (VM) ---------------------------------------------------------
+
+    def ensure_storage_layout(self) -> None:
+        """Recreate the versioned temp dir and chown the versioned parents.
+
+        Port of the VM charm's ``_ensure_storage_layout``: the versioned
+        temp dir may live on a tmpfs mount that is wiped on reboot, so it
+        is recreated unconditionally; the versioned parents must be
+        _daemon_-owned so the snap daemon can remove/rename the versioned
+        subdirectories (CREATE TABLESPACE, ``patronictl reinit``, snap
+        rollbacks).  The data dir leaf itself is only chowned-in-parent —
+        the snap's migrate-data.sh creates it.
+        """
+        temp_dir = self.paths.temp
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        shutil.chown(str(temp_dir), user=self.user, group=self.group)
+        if temp_dir.parent.exists():
+            shutil.chown(str(temp_dir.parent), user=self.user, group=self.group)
+
+        data_parent = self.paths.data.parent
+        if data_parent.exists():
+            shutil.chown(str(data_parent), user=self.user, group=self.group)
+
     def is_service_started(self, paused: bool | None = False) -> bool:
         """Check if the snap service is running.
 

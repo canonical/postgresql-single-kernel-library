@@ -59,6 +59,7 @@ class CharmState(Object):
     ) -> None:
         """Initialize the CharmState object."""
         super().__init__(charm, "charm_state")
+        self.charm = charm
         self.substrate = substrate
         self.peer_app_interface = DataPeerData(model=charm.model, relation_name=PEER_RELATION)
         self.peer_unit_interface = DataPeerUnitData(model=charm.model, relation_name=PEER_RELATION)
@@ -176,8 +177,9 @@ class CharmState(Object):
     @property
     def unit_ip(self) -> str | None:
         """Current unit ip."""
-        if binding := self.model.get_binding(PEER_RELATION):
-            return str(binding.network.bind_address)
+        with suppress(RelationNotFoundError):
+            if binding := self.model.get_binding(PEER_RELATION):
+                return str(binding.network.bind_address)
 
     @property
     def database_ip(self) -> str | None:
