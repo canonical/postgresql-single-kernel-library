@@ -858,8 +858,10 @@ class AsyncReplicationManager(BaseManager):
 
     def _stop_patroni_with_retries(self, event: RelationChangedEvent) -> bool:
         """Stop Patroni, retrying a few times; True when the event is deferred."""
-        if self.watcher is not None:
+        if self.watcher is not None and self.watcher.is_active:
             self.watcher.disable_watcher()
+            event.defer()
+            return False
 
         try:
             for attempt in Retrying(stop=stop_after_attempt(5), wait=wait_fixed(3)):

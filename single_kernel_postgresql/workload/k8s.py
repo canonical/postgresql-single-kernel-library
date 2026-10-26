@@ -626,9 +626,12 @@ class K8sWorkload(BaseWorkload):
     def create_data_backup_tarball(self) -> str:
         """Store the current pgdata folder in a tar.gz file and return its name."""
         filename = (
-            f"{self.paths.data}-{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.gz"
+            f"{self.paths.data}-{str(datetime.now()).replace(' ', '-').replace(':', '-')}.tar.zst"
         )
-        self.container.exec(f"tar -zcf {filename} {self.paths.data}".split()).wait_output()
+        self.container.exec(
+            f"nice -n 9 ionice -c 3 tar --zstd -cf {filename} {self.paths.data}".split(),
+            environment={"ZSTD_NBTHREADS": "0"},
+        ).wait_output()
         return filename
 
     def clear_data_directories(self) -> None:
