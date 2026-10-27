@@ -41,7 +41,7 @@ postgresql = [
 vm = [
     "pysyncobj>=0.3.15; python_version >= '3.12'",
     "psutil>=7.2.2; python_version >= '3.12'",
-    "charmlibs-snap>=1.0.1,<2; python_version >= '3.12'",
+    "charmlibs-snap>=2,<3; python_version >= '3.12'",
     "charmlibs-systemd>=1.0.0.post0; python_version >= '3.12'",
     "cosl>=0.0.53; python_version >= '3.12'",
 ]
