@@ -67,14 +67,14 @@ module-root = ""
 
 [dependency-groups]
 format = [
-    "ruff==0.17.0"
+    "ruff==0.17.2"
 ]
 lint = [
     "codespell==2.4.3",
-    "ty==0.0.86"
+    "ty==0.0.91"
 ]
 unit = [
-    "coverage[toml]==7.16.2",
+    "coverage[toml]==7.17.0",
     "pytest==9.1.1"
 ]
 
