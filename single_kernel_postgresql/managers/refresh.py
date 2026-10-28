@@ -700,7 +700,14 @@ class RefreshManager(BaseManager):
 
     def _execute_temp_tablespace_migration(self, target_host: str) -> bool:
         """Execute the temp tablespace DDL migration on the given host."""
-        temp_storage_path = str(self._charm.workload.paths.temp.parent)
+        # Locations the temp tablespace can legitimately occupy before the
+        # migration: the pre-refactoring storage root (what the snap's
+        # migrate-data.sh migrates away from) and the intermediate versioned
+        # parent directory.
+        pre_migration_locations = (
+            str(self._charm.workload.paths.temp_storage),
+            str(self._charm.workload.paths.temp.parent),
+        )
         temp_data_dir = str(self._charm.workload.paths.temp)
         connection = None
         cursor = None
@@ -720,19 +727,18 @@ class RefreshManager(BaseManager):
             if current_location == temp_data_dir:
                 return True
 
-            if current_location != temp_storage_path:
+            if current_location not in pre_migration_locations:
                 logger.warning(
                     "Skipping temp tablespace migration: unexpected location %s "
-                    "(expected %s or %s)",
+                    "(expected one of %s)",
                     current_location,
-                    temp_storage_path,
-                    temp_data_dir,
+                    ", ".join((*pre_migration_locations, temp_data_dir)),
                 )
                 return True
 
             logger.info(
                 "Migrating temp tablespace location from %s to %s",
-                temp_storage_path,
+                current_location,
                 temp_data_dir,
             )
             cursor.execute("DROP TABLESPACE temp;")
