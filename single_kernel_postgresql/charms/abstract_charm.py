@@ -363,7 +363,15 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             and self.state.model.get_relation(REPLICATION_OFFER_RELATION) is None
         ):
             return False
-        return not self.async_replication_manager.is_primary_cluster()
+        if self.state.application.data.get("promoted-cluster-counter") == "0":
+            # An explicitly stored "0" counter marks a teardown leftover that stays a
+            # read-only standby until promoted (mirrors set_app_status semantics).
+            return True
+        primary_cluster = self.async_replication_manager.get_primary_cluster()
+        # A fresh deployment publishes no promoted-cluster-counter yet: get_primary_cluster()
+        # returns None for BOTH sides, which must not classify both clusters as read-only
+        # standbys (DPE-11713). Only a positively identified foreign primary is a standby.
+        return primary_cluster is not None and primary_cluster != self.state.model.app
 
     # Postgresql Client
     @property
