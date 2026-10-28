@@ -131,6 +131,68 @@ def _unit_peer_data(harness):
     return harness.get_relation_data(_peer_rel_id(harness), harness.charm.unit.name)
 
 
+def _store_promoted_cluster_counter(harness, counter):
+    """Store the promoted-cluster-counter in this application's peer databag."""
+    harness.update_relation_data(_peer_rel_id(harness), harness.charm.app.name, {
+        "promoted-cluster-counter": counter
+    })
+
+
+def _empty_counter(databag):
+    """Make a databag read the counter as an empty string (stored post-teardown).
+
+    The Harness drops empty-string values, but Juju stores them, so the stored-empty
+    case is simulated at the databag-read level.
+    """
+    return patch.object(
+        databag,
+        "get",
+        side_effect=lambda key, default="0": "" if key == "promoted-cluster-counter" else default,
+    )
+
+
+# -- standby-cluster classification
+
+
+def test_is_standby_cluster_is_false_without_an_async_relation(harness):
+    """A normal cluster without async relations is never a standby."""
+    _set_leader(harness)
+    _initialise_cluster(harness)
+
+    assert harness.charm._is_standby_cluster() is False
+
+
+def test_is_standby_cluster_is_false_for_a_fresh_pair(harness, async_rel):
+    """A fresh pair published no promoted-cluster-counter yet: neither side is a standby (DPE-11713)."""
+    assert harness.charm._is_standby_cluster() is False
+
+
+def test_is_standby_cluster_is_true_when_the_remote_cluster_is_the_primary(harness, async_rel):
+    _set_primary_cluster(harness, async_rel, "5")
+
+    assert harness.charm._is_standby_cluster() is True
+
+
+def test_is_standby_cluster_is_false_when_this_cluster_was_promoted(harness, async_rel):
+    _store_promoted_cluster_counter(harness, "7")
+
+    assert harness.charm._is_standby_cluster() is False
+
+
+def test_is_standby_cluster_is_true_for_a_stored_zero_counter_leftover(harness, async_rel):
+    """An explicitly stored "0" counter marks a teardown leftover that stays a read-only standby."""
+    _store_promoted_cluster_counter(harness, "0")
+
+    assert harness.charm._is_standby_cluster() is True
+
+
+def test_is_standby_cluster_tolerates_an_empty_counter(harness, async_rel):
+    """An empty stored counter (post-teardown primary) must not crash and is not a standby."""
+    relation = harness.model.get_relation(REPLICATION_OFFER_RELATION)
+    with _empty_counter(relation.data[relation.app]):
+        assert harness.charm._is_standby_cluster() is False
+
+
 # -- create-replication action
 
 

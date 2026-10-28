@@ -155,6 +155,31 @@ def test_primary_cluster_resolution_skips_unreadable_remote(harness, manager):
         assert manager.get_highest_promoted_cluster_counter_value() == "5"
 
 
+def test_primary_cluster_resolution_tolerates_empty_counters(harness, manager):
+    """Empty stored counters are legal (teardown leftovers) and resolve to no primary.
+
+    The Harness drops empty-string values, so the stored-empty case is simulated at
+    the databag-read level on both sides.
+    """
+    _add_relation(harness, REPLICATION_OFFER_RELATION)
+    relation = harness.model.get_relation(REPLICATION_OFFER_RELATION)
+    peer_databag = harness.model.get_relation(PEER_RELATION).data[harness.model.app]
+    with (
+        patch.object(
+            relation.data[relation.app],
+            "get",
+            side_effect=lambda key, default="0": "" if key == "promoted-cluster-counter" else default,
+        ),
+        patch.object(
+            peer_databag,
+            "get",
+            side_effect=lambda key, default="0": "" if key == "promoted-cluster-counter" else default,
+        ),
+    ):
+        assert manager.get_primary_cluster() is None
+        assert manager.get_highest_promoted_cluster_counter_value() == "0"
+
+
 # endpoints
 
 
