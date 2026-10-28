@@ -168,12 +168,16 @@ def test_primary_cluster_resolution_tolerates_empty_counters(harness, manager):
         patch.object(
             relation.data[relation.app],
             "get",
-            side_effect=lambda key, default="0": "" if key == "promoted-cluster-counter" else default,
+            side_effect=lambda key, default="0": (
+                "" if key == "promoted-cluster-counter" else default
+            ),
         ),
         patch.object(
             peer_databag,
             "get",
-            side_effect=lambda key, default="0": "" if key == "promoted-cluster-counter" else default,
+            side_effect=lambda key, default="0": (
+                "" if key == "promoted-cluster-counter" else default
+            ),
         ),
     ):
         assert manager.get_primary_cluster() is None

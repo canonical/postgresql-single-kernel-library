@@ -133,9 +133,9 @@ def _unit_peer_data(harness):
 
 def _store_promoted_cluster_counter(harness, counter):
     """Store the promoted-cluster-counter in this application's peer databag."""
-    harness.update_relation_data(_peer_rel_id(harness), harness.charm.app.name, {
-        "promoted-cluster-counter": counter
-    })
+    harness.update_relation_data(
+        _peer_rel_id(harness), harness.charm.app.name, {"promoted-cluster-counter": counter}
+    )
 
 
 def _empty_counter(databag):
