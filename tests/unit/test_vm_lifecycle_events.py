@@ -137,11 +137,14 @@ def test_storage_detaching_noop_on_scale_down(handler, harness):
 
 
 def test_storage_detaching_stops_on_teardown(handler, harness):
-    with patch.object(
-        type(handler.state.application),
-        "planned_units",
-        new_callable=PropertyMock,
-        return_value=0,
+    with (
+        patch.object(
+            type(handler.state.application),
+            "planned_units",
+            new_callable=PropertyMock,
+            return_value=0,
+        ),
+        patch("single_kernel_postgresql.events.postgresql.snap.stop"),
     ):
         handler._on_storage_detaching(Mock())
     handler.observer_manager.stop_observer.assert_called_once()
