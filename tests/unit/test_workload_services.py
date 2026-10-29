@@ -310,17 +310,50 @@ def test_vm_service_is_running(substrate, workload, services, expected):
         assert workload.service_is_running(PGBACKREST_SERVICE) is expected
 
 
-def test_vm_service_is_running_snap_error_reads_as_not_running(substrate, workload):
+def test_vm_is_patroni_running_selects_patroni(substrate, workload):
     if substrate == Substrates.K8S:
         pytest.skip("VM only")
-        return
     with patch(
         "single_kernel_postgresql.workload.vm.service_states",
-        side_effect=snap.NotInstalledError(
-            "no snap", kind="snap-not-found", value="charmed-postgresql"
-        ),
+        return_value={PGBACKREST_SERVICE: False, "patroni": True},
     ):
-        assert workload.service_is_running(PGBACKREST_SERVICE) is False
+        assert workload.is_patroni_running() is True
+
+
+@pytest.mark.parametrize(
+    "services,expected",
+    [
+        pytest.param({"patroni": False}, True, id="stopped"),
+        pytest.param({}, False, id="missing"),
+    ],
+)
+def test_vm_service_exists(substrate, workload, services, expected):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+    with patch("single_kernel_postgresql.workload.vm.service_states", return_value=services):
+        assert workload.service_exists("patroni") is expected
+
+
+@pytest.mark.parametrize("probe", ["is_patroni_running", "service_exists", "service_is_running"])
+@pytest.mark.parametrize(
+    "error",
+    [
+        snap.NotInstalledError("missing", kind="snap-not-found", value="charmed-postgresql"),
+        snap.ConnectionError("unavailable"),
+        snap.APIError("query failed", kind="failure", value=None),
+    ],
+)
+def test_vm_service_probe_error_policy(substrate, workload, probe, error):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+    args = () if probe == "is_patroni_running" else ("patroni",)
+    with patch("single_kernel_postgresql.workload.vm.service_states", side_effect=error):
+        if isinstance(error, snap.NotInstalledError):
+            assert getattr(workload, probe)(*args) is False
+        else:
+            with pytest.raises(type(error)) as caught:
+                getattr(workload, probe)(*args)
+            assert caught.value is error
 
 
 # --- service control: K8s

@@ -10,9 +10,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
+from charmlibs import snap
 from ops import BlockedStatus, ModelError
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PEER_RELATION
+from single_kernel_postgresql.managers.patroni import PatroniManager
 from single_kernel_postgresql.utils.backup import (
     FAILED_TO_CHECK_STANZA_ERROR_MESSAGE,
     S3_BLOCK_MESSAGES,
@@ -144,9 +146,10 @@ def test_storage_detaching_stops_on_teardown(handler, harness):
             new_callable=PropertyMock,
             return_value=0,
         ),
-        patch("single_kernel_postgresql.events.postgresql.snap.stop"),
+        patch("single_kernel_postgresql.events.postgresql.snap.stop") as stop,
     ):
         handler._on_storage_detaching(Mock())
+    stop.assert_called_once_with("charmed-postgresql", disable=True)
     handler.observer_manager.stop_observer.assert_called_once()
     handler.backup_manager.stop_log_rotation.assert_called_once()
 
@@ -154,3 +157,30 @@ def test_storage_detaching_stops_on_teardown(handler, harness):
 def test_check_stanza_message_is_an_s3_block_message():
     """The check-stanza failure message is appended to S3_BLOCK_MESSAGES (lock)."""
     assert FAILED_TO_CHECK_STANZA_ERROR_MESSAGE in S3_BLOCK_MESSAGES
+
+
+def test_process_recovery_propagates_running_probe_failure(request):
+    member_inactive = PatroniManager.member_inactive
+    handler = request.getfixturevalue("handler")
+    error = snap.TimeoutError("snapd query timed out")
+    with (
+        patch.object(PatroniManager, "member_inactive", member_inactive),
+        patch.object(
+            type(handler.membership_manager.state.application),
+            "members_ips",
+            new_callable=PropertyMock,
+            return_value={handler.state.unit_ip},
+        ),
+        patch("single_kernel_postgresql.workload.vm.service_states", side_effect=error) as query,
+        patch("single_kernel_postgresql.events.postgresql.os.listdir") as listdir,
+        patch("single_kernel_postgresql.events.postgresql.os.rename") as rename,
+        patch.object(handler.patroni_manager, "restart_patroni") as restart,
+        pytest.raises(snap.TimeoutError) as caught,
+    ):
+        handler._handle_processes_failures()
+    assert caught.value is error
+    query.assert_called_once_with("charmed-postgresql")
+    listdir.assert_not_called()
+    rename.assert_not_called()
+    restart.assert_not_called()
+    handler.observer_manager.start_observer.assert_not_called()
