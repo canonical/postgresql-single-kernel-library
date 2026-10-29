@@ -583,3 +583,77 @@ def test_pitr_failure_persists_blocked_through_collect(charm, harness):
     ):
         harness.evaluate_status()
         assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
+
+
+@pytest.mark.parametrize("active", [True, False])
+@pytest.mark.parametrize(
+    "service,method",
+    [
+        ("prometheus-postgres-exporter", "_setup_exporter"),
+        ("pgbackrest-exporter", "_setup_pgbackrest_exporter"),
+    ],
+)
+def test_exporters_start_enabled_or_restart(charm, active, service, method):
+    with (
+        patch(
+            "single_kernel_postgresql.charms.vm_charm.service_states",
+            return_value={service: active},
+        ),
+        patch("single_kernel_postgresql.charms.vm_charm.snap.set") as set_config,
+        patch("single_kernel_postgresql.charms.vm_charm.snap.start") as start,
+        patch("single_kernel_postgresql.charms.vm_charm.snap.restart") as restart,
+        patch.object(charm.state, "get_secret", return_value=None),
+    ):
+        getattr(charm, method)()
+    if active:
+        restart.assert_called_once_with("charmed-postgresql", services=[service])
+        start.assert_not_called()
+    else:
+        start.assert_called_once_with("charmed-postgresql", services=[service], enable=True)
+        restart.assert_not_called()
+    if method == "_setup_exporter":
+        set_config.assert_called_once_with(
+            "charmed-postgresql", {"exporter.user": "monitoring", "exporter.password": "None"}
+        )
+
+
+def test_metrics_password_uses_scalar_read(charm):
+    with (
+        patch(
+            "single_kernel_postgresql.charms.vm_charm.snap.get_one", return_value="current"
+        ) as get_one,
+        patch.object(charm.state, "get_secret", return_value="current"),
+        patch.object(charm, "_setup_exporter") as setup,
+    ):
+        charm._restart_metrics_service()
+    get_one.assert_called_once_with("charmed-postgresql", "exporter.password")
+    setup.assert_not_called()
+
+
+def test_ldap_config_preserves_string_values(charm):
+    charm.ldap = Mock()
+    charm.ldap.get_ldap_parameters.return_value = {
+        "ldapurl": "ldap://ldap.example:389",
+        "ldapbasedn": "dc=example",
+        "ldapbinddn": "cn=reader",
+        "ldapbindpasswd": "secret",
+    }
+    with (
+        patch.object(
+            type(charm),
+            "postgresql",
+            new_callable=PropertyMock,
+            return_value=Mock(build_postgresql_group_map=Mock(return_value={})),
+        ),
+        patch.object(type(charm), "_get_password", new_callable=PropertyMock, return_value=None),
+        patch("single_kernel_postgresql.charms.vm_charm.snap.set") as set_config,
+        patch("single_kernel_postgresql.charms.vm_charm.snap.restart") as restart,
+    ):
+        charm._setup_ldap_sync()
+    name, config = set_config.call_args.args
+    assert name == "charmed-postgresql"
+    assert config["ldap-sync.ldap_port"] == "389"
+    assert config["ldap-sync.postgres_port"] == "5432"
+    assert config["ldap-sync.postgres_password"] == "None"
+    assert all(isinstance(value, str) for value in config.values())
+    restart.assert_called_once_with("charmed-postgresql", services=["ldap-sync"])

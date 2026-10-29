@@ -366,23 +366,36 @@ def test_start_patroni(substrate, patroni):
         assert not patroni.start_patroni()
 
 
-def test_stop_patroni(substrate, patroni):
+@pytest.mark.parametrize(
+    "states,expected", [({"patroni": False}, True), ({"patroni": True}, False), ({}, False)]
+)
+def test_stop_patroni(substrate, patroni, states, expected):
     if substrate == Substrates.K8S:
         pytest.skip("VM only")
-        return
+    with (
+        patch("single_kernel_postgresql.managers.patroni.snap.stop") as stop,
+        patch("single_kernel_postgresql.managers.patroni.service_states", return_value=states),
+    ):
+        assert patroni.stop_patroni() is expected
+        stop.assert_called_once_with("charmed-postgresql", services=[PATRONI_SERVICE])
+
+
+def test_stop_patroni_handles_errors(substrate, patroni):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
     with (
         patch(
             "single_kernel_postgresql.managers.patroni.snap.stop",
-            side_effect=[None, snap.Error("failed")],
+            side_effect=snap.Error("failed"),
         ) as stop,
-        patch(
-            "single_kernel_postgresql.managers.patroni.service_states",
-            return_value={"patroni": False},
-        ),
+        patch("single_kernel_postgresql.managers.patroni.service_states") as query,
     ):
-        assert patroni.stop_patroni()
-        stop.assert_called_once_with("charmed-postgresql", services=[PATRONI_SERVICE])
         assert not patroni.stop_patroni()
+        query.assert_not_called()
+        stop.side_effect = None
+        query.side_effect = snap.ConnectionError("failed query")
+        assert not patroni.stop_patroni()
+        query.assert_called_once_with("charmed-postgresql")
 
 
 def test_switchover(patroni):
@@ -838,9 +851,18 @@ def test_patroni_logs(substrate, patroni):
     if substrate == Substrates.K8S:
         pytest.skip("VM only")
         return
-    with patch("single_kernel_postgresql.managers.patroni.logs_by_identifier") as logs:
-        logs.return_value = "fake-logs"
+
+    with patch(
+        "single_kernel_postgresql.managers.patroni.logs_by_identifier", return_value="fake-logs"
+    ) as logs:
         assert patroni.patroni_logs() == "fake-logs"
+        assert patroni.patroni_logs("all") == "fake-logs"
+        assert patroni.patroni_logs(2) == "fake-logs"
+        assert logs.call_args_list == [
+            call("charmed-postgresql", "charmed-postgresql.patroni", limit=10),
+            call("charmed-postgresql", "charmed-postgresql.patroni", limit=None),
+            call("charmed-postgresql", "charmed-postgresql.patroni", limit=2),
+        ]
         logs.side_effect = snap.Error("failed")
         assert patroni.patroni_logs() == ""
 

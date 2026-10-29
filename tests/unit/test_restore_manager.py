@@ -6,10 +6,13 @@
 """Tests for the RestoreManager (restore checks, PITR helpers and orchestration)."""
 
 import logging
+import time
+from datetime import datetime
 from functools import partial
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+from charmlibs import snap
 from data_platform_helpers.advanced_statuses import StatusObject
 from lightkube.core.exceptions import ApiError
 from lightkube.models.meta_v1 import Status
@@ -23,6 +26,7 @@ from single_kernel_postgresql.config.literals import (
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.core.peer_relation import PostgreSQLApplication
 from single_kernel_postgresql.managers.restore import PITR_FAILED_KEY, RestoreManager
+from single_kernel_postgresql.utils import snap as snap_utils
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
     CANNOT_RESTORE_PITR,
@@ -421,20 +425,43 @@ def test_restore_finalization_swallows_second_replan_failure(restore_manager, su
 # -- PITR helpers ---------------------------------------------------------------------
 
 
-def test_is_pitr_failed_tracks_new_failures(restore_manager, substrate):
+def test_is_pitr_failed_tracks_new_failures(restore_manager, substrate, monkeypatch):
     if substrate != "vm":
         pytest.skip("VM-only patroni logs")
-    restore_manager.patroni_manager.patroni_logs.return_value = (
-        "2024-01-01T00:00:00.000Z localhost patroni.exceptions.PatroniFatalException:"
-        " Failed to bootstrap cluster"
-    )
-    assert restore_manager.is_pitr_failed() == (True, True)
-    assert restore_manager.is_pitr_failed() == (True, False)
-    restore_manager.patroni_manager.patroni_logs.return_value = (
-        "2024-01-02T00:00:00.000Z localhost patroni.exceptions.PatroniFatalException:"
-        " Failed to bootstrap cluster"
-    )
-    assert restore_manager.is_pitr_failed() == (True, True)
+    try:
+        with monkeypatch.context() as local:
+            local.setenv("TZ", "UTC")
+            time.tzset()
+            expected = (
+                "2026-10-26T13:41:19Z charmed-postgresql.patroni[53233]: "
+                "patroni.exceptions.PatroniFatalException: Failed to bootstrap cluster\n"
+            )
+            restore_manager.patroni_manager.patroni_logs.return_value = expected
+            assert restore_manager.is_pitr_failed() == (True, True)
+            log = snap.LogEntry(
+                datetime.fromisoformat("2026-10-26T13:41:19.340706+00:00"),
+                "charmed-postgresql.patroni",
+                53233,
+                "patroni.exceptions.PatroniFatalException: Failed to bootstrap cluster",
+            )
+            with patch.object(snap, "logs", return_value=[log]):
+                formatted = snap_utils.logs_by_identifier(
+                    "charmed-postgresql", "charmed-postgresql.patroni"
+                )
+            restore_manager.patroni_manager.patroni_logs.return_value = formatted
+            assert restore_manager.is_pitr_failed() == (True, False)
+            assert restore_manager.state.peer.data["last_pitr_fail_id"] == "2026-10-26T13:41:19Z"
+            later = snap.LogEntry(log.timestamp.replace(minute=42), log.sid, log.pid, log.message)
+            with patch.object(snap, "logs", return_value=[log, later]):
+                restore_manager.patroni_manager.patroni_logs.return_value = (
+                    snap_utils.logs_by_identifier(
+                        "charmed-postgresql", "charmed-postgresql.patroni"
+                    )
+                )
+            assert restore_manager.is_pitr_failed() == (True, True)
+            assert restore_manager.state.peer.data["last_pitr_fail_id"] == "2026-10-26T13:42:19Z"
+    finally:
+        time.tzset()
 
 
 def test_is_pitr_failed_reports_no_failure(restore_manager, substrate):
