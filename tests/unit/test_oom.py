@@ -3,7 +3,7 @@
 
 import json
 from http.client import IncompleteRead
-from unittest.mock import call, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 import single_kernel_postgresql.workload.vm as oom
@@ -16,24 +16,27 @@ def config(hint):
 
 @pytest.fixture
 def snap_factory():
-    with patch("single_kernel_postgresql.workload.vm.snap.Snap", autospec=True) as factory:
-        yield factory
+    with (
+        patch("single_kernel_postgresql.workload.vm.snap.get") as get,
+        patch("single_kernel_postgresql.workload.vm.snap.set") as set_config,
+    ):
+        calls = Mock()
+        calls.attach_mock(get, "get")
+        calls.attach_mock(set_config, "set")
+        yield calls
 
 
 @pytest.mark.parametrize("initial", [{}, {"resilience": {}}, config("")])
 def test_missing_or_empty_hint(snap_factory, initial):
-    read = snap_factory.return_value.get
+    read = snap_factory.get
     read.side_effect = [initial, config("charmed-postgresql")]
 
     assert oom.ensure_snap_oom_protection("charmed-postgresql") == -899
 
-    snap_factory.assert_called_once_with(
-        name="system", state=snap.SnapState.Present, channel="", revision="", confinement=""
-    )
-    assert snap_factory.return_value.mock_calls == [
-        call.get(None, typed=True),
-        call.set({"resilience.vitality-hint": "charmed-postgresql"}),
-        call.get(None, typed=True),
+    assert snap_factory.mock_calls == [
+        call.get("system"),
+        call.set("system", {"resilience.vitality-hint": "charmed-postgresql"}),
+        call.get("system"),
     ]
 
 
@@ -46,15 +49,15 @@ def test_missing_or_empty_hint(snap_factory, initial):
     ],
 )
 def test_append_preserves_order_and_duplicates(snap_factory, hint, rank):
-    read, write = snap_factory.return_value.get, snap_factory.return_value.set
+    read, write = snap_factory.get, snap_factory.set
     updated = f"{hint},charmed-postgresql"
     read.side_effect = [config(hint), config(updated), config(updated)]
 
     assert oom.ensure_snap_oom_protection("charmed-postgresql") == -900 + rank
     assert oom.ensure_snap_oom_protection("charmed-postgresql") == -900 + rank
 
-    assert snap_factory.call_count == 2
-    write.assert_called_once_with({"resilience.vitality-hint": updated})
+    assert read.call_count == 3
+    write.assert_called_once_with("system", {"resilience.vitality-hint": updated})
 
 
 @pytest.mark.parametrize(
@@ -68,22 +71,21 @@ def test_append_preserves_order_and_duplicates(snap_factory, hint, rank):
     ],
 )
 def test_existing_hint_uses_last_rank_without_write(snap_factory, hint, rank):
-    read, write = snap_factory.return_value.get, snap_factory.return_value.set
+    read, write = snap_factory.get, snap_factory.set
     read.return_value = config(hint)
 
     assert oom.ensure_snap_oom_protection("charmed-postgresql") == -900 + rank
     assert oom.ensure_snap_oom_protection("charmed-postgresql") == -900 + rank
 
-    assert snap_factory.call_count == 2
-    assert read.call_args_list == [call(None, typed=True)] * 2
+    assert read.call_args_list == [call("system")] * 2
     write.assert_not_called()
 
 
 def test_full_hint_does_not_write(snap_factory):
-    read, write = snap_factory.return_value.get, snap_factory.return_value.set
+    read, write = snap_factory.get, snap_factory.set
     read.return_value = config(",".join(f"snap-{i}" for i in range(100)))
 
-    with pytest.raises(snap.SnapError, match="full"):
+    with pytest.raises(snap.Error, match="full"):
         oom.ensure_snap_oom_protection("charmed-postgresql")
 
     write.assert_not_called()
@@ -106,10 +108,10 @@ def test_full_hint_does_not_write(snap_factory):
     ],
 )
 def test_invalid_configuration_does_not_write(snap_factory, value):
-    read, write = snap_factory.return_value.get, snap_factory.return_value.set
+    read, write = snap_factory.get, snap_factory.set
     read.return_value = value
 
-    with pytest.raises(snap.SnapError):
+    with pytest.raises(snap.Error):
         oom.ensure_snap_oom_protection("charmed-postgresql")
 
     write.assert_not_called()
@@ -119,16 +121,16 @@ def test_invalid_configuration_does_not_write(snap_factory, value):
     "error",
     [
         OSError("snap missing"),
-        snap.SnapError("snap get failed"),
-        snap.SnapAPIError({}, 500, "Internal Server Error", "snapd unavailable"),
+        snap.Error("snap get failed"),
+        snap.APIError("snapd unavailable", kind="", value=None, status_code=500),
         json.JSONDecodeError("invalid system configuration", "", 0),
     ],
 )
 def test_read_failure_does_not_write(snap_factory, error):
-    read, write = snap_factory.return_value.get, snap_factory.return_value.set
+    read, write = snap_factory.get, snap_factory.set
     read.side_effect = error
 
-    with pytest.raises(snap.SnapError) as exc:
+    with pytest.raises(snap.Error) as exc:
         oom.ensure_snap_oom_protection("charmed-postgresql")
 
     assert exc.value.__cause__ is error
@@ -140,17 +142,17 @@ def test_read_failure_does_not_write(snap_factory, error):
     [
         OSError("snap socket unavailable"),
         IncompleteRead(b"truncated snapd response"),
-        snap.SnapError("configuration change failed"),
-        snap.SnapAPIError({}, 500, "Internal Server Error", "snapd unavailable"),
+        snap.Error("configuration change failed"),
+        snap.APIError("snapd unavailable", kind="", value=None, status_code=500),
         TimeoutError("configuration change timed out"),
     ],
 )
 def test_write_failure_does_not_retry(snap_factory, error):
-    read, write = snap_factory.return_value.get, snap_factory.return_value.set
+    read, write = snap_factory.get, snap_factory.set
     read.return_value = config("postgresql")
     write.side_effect = error
 
-    with pytest.raises(snap.SnapError) as exc:
+    with pytest.raises(snap.Error) as exc:
         oom.ensure_snap_oom_protection("charmed-postgresql")
 
     assert exc.value.__cause__ is error
@@ -169,25 +171,25 @@ def test_write_failure_does_not_retry(snap_factory, error):
         config(None),
         "bad-json",
         json.JSONDecodeError("invalid system configuration", "", 0),
-        snap.SnapError("verification read failed"),
-        snap.SnapAPIError({}, 500, "Internal Server Error", "snapd unavailable"),
+        snap.Error("verification read failed"),
+        snap.APIError("snapd unavailable", kind="", value=None, status_code=500),
     ],
 )
 def test_verification_failure_does_not_overwrite_again(snap_factory, verified):
-    read, write = snap_factory.return_value.get, snap_factory.return_value.set
+    read, write = snap_factory.get, snap_factory.set
     read.side_effect = [config("postgresql,other,postgresql"), verified]
 
-    with pytest.raises(snap.SnapError):
+    with pytest.raises(snap.Error):
         oom.ensure_snap_oom_protection("charmed-postgresql")
 
     assert read.call_count == 2
-    write.assert_called_once_with({
-        "resilience.vitality-hint": "postgresql,other,postgresql,charmed-postgresql"
-    })
+    write.assert_called_once_with(
+        "system", {"resilience.vitality-hint": "postgresql,other,postgresql,charmed-postgresql"}
+    )
 
 
 def test_rank_comes_from_verified_configuration(snap_factory):
-    read = snap_factory.return_value.get
+    read = snap_factory.get
     read.side_effect = [
         config("postgresql"),
         config("postgresql,charmed-postgresql,other,charmed-postgresql"),

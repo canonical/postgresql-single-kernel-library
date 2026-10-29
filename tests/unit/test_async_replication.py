@@ -548,7 +548,13 @@ def test_secret_changed_syncs_the_internal_secret(harness):
     # Emitted through the framework, so the observer registration is itself exercised.
     with (
         patch.object(CharmState, "set_secret") as set_secret,
-        patch("single_kernel_postgresql.charms.vm_charm.snap.SnapCache"),
+        patch("single_kernel_postgresql.charms.vm_charm.snap.set"),
+        patch("single_kernel_postgresql.charms.vm_charm.snap.start"),
+        patch("single_kernel_postgresql.charms.vm_charm.snap.restart"),
+        patch(
+            "single_kernel_postgresql.charms.vm_charm.service_states",
+            return_value={"prometheus-postgres-exporter": False, "pgbackrest-exporter": False},
+        ),
     ):
         harness.set_secret_content(secret_id, {"replication-password": "pw"})
 
