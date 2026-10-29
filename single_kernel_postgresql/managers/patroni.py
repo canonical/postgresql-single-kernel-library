@@ -22,6 +22,8 @@ from urllib.parse import urljoin
 with suppress(ImportError):
     from charmlibs import snap
     from charmlibs.systemd import daemon_reload
+
+    from single_kernel_postgresql.utils.snap import logs_by_identifier, service_states
 import psycopg2
 import psycopg2.extras
 import requests
@@ -597,11 +599,11 @@ class PatroniManager(BaseManager):
         """
         try:
             logger.debug("Getting Patroni logs...")
-            cache = snap.SnapCache()
-            selected_snap = cache["charmed-postgresql"]
-            # Lib definition of num_lines only allows int
-            return selected_snap.logs(services=["patroni"], num_lines=num_lines)  # pyright: ignore
-        except snap.SnapError as e:
+            limit = None if num_lines == "all" else num_lines or 10
+            return logs_by_identifier(
+                "charmed-postgresql", "charmed-postgresql.patroni", limit=limit
+            )
+        except snap.Error as e:
             error_message = "Failed to get logs from patroni snap service"
             logger.exception(error_message, exc_info=e)
             return ""
@@ -634,12 +636,10 @@ class PatroniManager(BaseManager):
         """
         try:
             logger.debug("Stopping Patroni...")
-            cache = snap.SnapCache()
-            selected_snap = cache["charmed-postgresql"]
-            selected_snap.stop(services=["patroni"])
+            snap.stop("charmed-postgresql", services=["patroni"])
             self._invalidate_cluster_status_cache()
-            return not selected_snap.services["patroni"]["active"]
-        except snap.SnapError as e:
+            return service_states("charmed-postgresql").get("patroni") is False
+        except snap.Error as e:
             error_message = "Failed to stop patroni snap service"
             logger.exception(error_message, exc_info=e)
             return False
@@ -796,12 +796,10 @@ class PatroniManager(BaseManager):
         """
         try:
             logger.debug("Restarting Patroni...")
-            cache = snap.SnapCache()
-            selected_snap = cache["charmed-postgresql"]
-            selected_snap.restart(services=["patroni"])
+            snap.restart("charmed-postgresql", services=["patroni"])
             self._invalidate_cluster_status_cache()
-            return selected_snap.services["patroni"]["active"]
-        except snap.SnapError as e:
+            return service_states("charmed-postgresql").get("patroni", False)
+        except snap.Error as e:
             error_message = "Failed to start patroni snap service"
             logger.exception(error_message, exc_info=e)
             return False

@@ -42,6 +42,7 @@ from single_kernel_postgresql.config.literals import (
     VM_PGBACKREST_SERVICE_NAME,
     VM_ROTATE_LOGS_LOG_FILE,
 )
+from single_kernel_postgresql.utils.snap import service_states
 from single_kernel_postgresql.workload.base import BackupConfig, BaseWorkload, CommandResult
 from single_kernel_postgresql.workload.paths.vm import VMPaths
 
@@ -85,9 +86,9 @@ def _find_service_pid(service: str) -> int | None:
     return None
 
 
-def _read_vitality_hint(system_snap: snap.Snap) -> str:
+def _read_vitality_hint() -> str:
     """Read the hint without confusing a failed query with an absent setting."""
-    config = system_snap.get(None, typed=True)
+    config = snap.get("system")
     if not isinstance(config, dict):
         raise ValueError("Snap system configuration must be an object")
     resilience = config.get("resilience", {})
@@ -110,22 +111,14 @@ def ensure_snap_oom_protection(snap_name: str) -> int:
     Existing processes keep their adjustment until their normal next startup.
     """
     try:
-        # Only the name is used by get/set; the remaining metadata are placeholders.
-        system_snap = snap.Snap(
-            name="system",
-            state=snap.SnapState.Present,
-            channel="",
-            revision="",
-            confinement="",
-        )
-        hint = _read_vitality_hint(system_snap)
+        hint = _read_vitality_hint()
         entries = hint.split(",") if hint else []
         if snap_name not in entries:
             if len(entries) >= SNAP_VITALITY_MAX_SNAPS:
                 raise ValueError("Snap vitality hint is full")
             updated_hint = f"{hint},{snap_name}" if hint else snap_name
-            system_snap.set({SNAP_VITALITY_HINT: updated_hint})
-            verified_hint = _read_vitality_hint(system_snap)
+            snap.set("system", {SNAP_VITALITY_HINT: updated_hint})
+            verified_hint = _read_vitality_hint()
             verified_entries = verified_hint.split(",") if verified_hint else []
             if verified_entries[: len(entries)] != entries or snap_name not in verified_entries:
                 raise ValueError("Snap vitality hint verification failed")
@@ -134,7 +127,7 @@ def ensure_snap_oom_protection(snap_name: str) -> int:
         rank = len(entries) - entries[::-1].index(snap_name)
         return SNAP_OOM_SCORE_ADJUST_MIN + rank
     except (snap.Error, OSError, HTTPException, ValueError) as exc:
-        raise snap.SnapError(f"Failed to configure OOM protection for {snap_name}: {exc}") from exc
+        raise snap.Error(f"Failed to configure OOM protection for {snap_name}: {exc}") from exc
 
 
 class VMWorkload(BaseWorkload):
@@ -161,11 +154,9 @@ class VMWorkload(BaseWorkload):
 
     def create_snap_alias(self, alias_name: str) -> None:
         """Create alias for the snap binary."""
-        cache = snap.SnapCache()
-        postgres_snap = cache[charm_refresh.snap_name()]
         try:
-            postgres_snap.alias(alias_name)
-        except snap.SnapError:
+            snap.alias(charm_refresh.snap_name(), alias_name, alias_name)
+        except snap.Error:
             logger.warning("Unable to create %s alias", alias_name)
 
     def install_snap_package(
@@ -191,14 +182,17 @@ class VMWorkload(BaseWorkload):
                 raise
         try:
             ensure_snap_oom_protection(charm_refresh.snap_name())
-            snap_cache = snap.SnapCache()
-            snap_package = snap_cache[charm_refresh.snap_name()]
-            if not snap_package.present or refresh is not None:
-                snap_package.ensure(snap.SnapState.Present, revision=revision)
+            try:
+                snap.list_one(charm_refresh.snap_name())
+                present = True
+            except snap.NotInstalledError:
+                present = False
+            if not present or refresh is not None:
+                snap.ensure_installed(charm_refresh.snap_name(), revision=revision)
                 if refresh is not None:
                     refresh.update_snap_revision()
-                snap_package.hold()
-        except (snap.SnapError, snap.SnapNotFoundError) as e:
+                snap.hold(charm_refresh.snap_name())
+        except snap.Error as e:
             logger.error(
                 "An exception occurred when installing %s. Reason: %s",
                 charm_refresh.snap_name(),
@@ -214,11 +208,9 @@ class VMWorkload(BaseWorkload):
         """
         try:
             logger.debug("Starting Patroni...")
-            cache = snap.SnapCache()
-            selected_snap = cache[POSTGRESQL_SNAP_NAME]
-            selected_snap.start(services=["patroni"])
-            return selected_snap.services["patroni"]["active"]
-        except snap.SnapError as e:
+            snap.start(POSTGRESQL_SNAP_NAME, services=["patroni"])
+            return service_states(POSTGRESQL_SNAP_NAME).get("patroni", False)
+        except snap.Error as e:
             error_message = "Failed to start patroni snap service"
             logger.exception(error_message, exc_info=e)
             return False
@@ -226,10 +218,8 @@ class VMWorkload(BaseWorkload):
     def is_patroni_running(self) -> bool:
         """Check if the Patroni service is running."""
         try:
-            cache = snap.SnapCache()
-            selected_snap = cache[POSTGRESQL_SNAP_NAME]
-            return selected_snap.services["patroni"]["active"]
-        except snap.SnapError as e:
+            return service_states(POSTGRESQL_SNAP_NAME).get("patroni", False)
+        except snap.NotInstalledError as e:
             logger.debug(f"Failed to check Patroni service: {e}")
             return False
 
@@ -371,15 +361,15 @@ class VMWorkload(BaseWorkload):
 
     def start_service(self, service: str) -> None:
         """Start a named snap service."""
-        snap.SnapCache()[POSTGRESQL_SNAP_NAME].start(services=[service])
+        snap.start(POSTGRESQL_SNAP_NAME, services=[service])
 
     def stop_service(self, service: str) -> None:
         """Stop a named snap service."""
-        snap.SnapCache()[POSTGRESQL_SNAP_NAME].stop(services=[service])
+        snap.stop(POSTGRESQL_SNAP_NAME, services=[service])
 
     def restart_service(self, service: str) -> None:
         """Restart a named snap service."""
-        snap.SnapCache()[POSTGRESQL_SNAP_NAME].restart(services=[service])
+        snap.restart(POSTGRESQL_SNAP_NAME, services=[service])
 
     def reload_service(self, service: str) -> None:
         """Reload a named snap service.
@@ -402,8 +392,8 @@ class VMWorkload(BaseWorkload):
     def service_exists(self, service: str) -> bool:
         """Whether the snap declares the named service."""
         try:
-            services = snap.SnapCache()[POSTGRESQL_SNAP_NAME].services
-        except snap.SnapError:
+            services = service_states(POSTGRESQL_SNAP_NAME)
+        except snap.NotInstalledError:
             return False
         return service in services
 
@@ -414,10 +404,10 @@ class VMWorkload(BaseWorkload):
         mapping; that reads as not running.
         """
         try:
-            services = snap.SnapCache()[POSTGRESQL_SNAP_NAME].services
-        except (snap.SnapError, snap.SnapNotFoundError):
+            services = service_states(POSTGRESQL_SNAP_NAME)
+        except snap.NotInstalledError:
             return False
-        return services.get(service, {}).get("active", False)
+        return services.get(service, False)
 
     def empty_data_files(self) -> bool:
         """Empty the PostgreSQL data directory in preparation of backup restore."""
@@ -611,10 +601,10 @@ class VMWorkload(BaseWorkload):
     def workload_present(self) -> bool:
         """Flag to check if workload is present and ready."""
         # check if snap is installed as an indicator of workload presence
-        cache = snap.SnapCache()
         try:
-            return cache[charm_refresh.snap_name()].present
-        except snap.SnapError:
+            snap.list_one(charm_refresh.snap_name())
+            return True
+        except snap.NotInstalledError:
             return False
 
     def get_available_memory(self) -> int:
@@ -632,5 +622,4 @@ class VMWorkload(BaseWorkload):
 
     def get_snap_revision(self) -> str:
         """Returns the installed workload snap revision."""
-        cache = snap.SnapCache()
-        return cache[charm_refresh.snap_name()].revision
+        return snap.list_one(charm_refresh.snap_name()).revision
