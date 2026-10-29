@@ -208,8 +208,8 @@ class AsyncReplicationManager(BaseManager):
                 self.state.application.data,
             ]:
                 try:
-                    relation_promoted_cluster_counter = databag.get(
-                        "promoted-cluster-counter", "0"
+                    relation_promoted_cluster_counter = (
+                        databag.get("promoted-cluster-counter", "0") or "0"
                     )
                 except ModelError:
                     # A force-removed dead DC leaves its databag unreadable; skip the
@@ -258,8 +258,8 @@ class AsyncReplicationManager(BaseManager):
                 if app is None:
                     continue
                 try:
-                    relation_promoted_cluster_counter = databag.get(
-                        "promoted-cluster-counter", "0"
+                    relation_promoted_cluster_counter = (
+                        databag.get("promoted-cluster-counter", "0") or "0"
                     )
                 except ModelError:
                     # A force-removed dead DC leaves its databag unreadable; skip the
