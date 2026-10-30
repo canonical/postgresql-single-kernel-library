@@ -136,6 +136,7 @@ bootstrap:
         set_user.superuser_allowlist: '+charmed_dba'
         max_replication_slots: 25
         max_wal_senders: 25
+        max_connections: {{ max_connections }}
     {%- if slots or is_vm %}
     slots:
     {%- for slot, database in slots.items() %}
@@ -227,8 +228,6 @@ postgresql:
     {{key}}: {{value}}
     {%- endfor -%}
     {% endif %}
-    max_replication_slots: 25
-    max_wal_senders: 25
   pgpass: /tmp/pgpass
   pg_hba:
     - local all backup peer map=operator
