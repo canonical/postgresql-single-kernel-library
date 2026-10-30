@@ -1520,6 +1520,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                 "connection",
                 "cpu",
                 "durability",
+                "experimental",
                 "instance",
                 "logging",
                 "memory",
@@ -1533,6 +1534,8 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
                 continue
             separator = "-" if "-" in config else "_"
             parameter = "_".join(config.split(separator)[1:])
+            if config.startswith("experimental") and parameter not in ("max_connections"):
+                continue
             if parameter in ["date_style", "time_zone"]:
                 parameter = "".join(x.capitalize() for x in parameter.split("_"))
             elif parameter.startswith("pg_stat_statements"):
