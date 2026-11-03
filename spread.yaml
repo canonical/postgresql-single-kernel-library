@@ -1,0 +1,156 @@
+project: postgresql-single-kernel-library
+
+# The charms under test are not packed here: the `.charm` files must be in the project root
+# before running spread (CI downloads them from the calling operator's build artifact; locally,
+# pack them in the operator repo and copy them here).
+#
+# Each suite declares:
+#   SUITE_SUBSTRATE         vm | k8s (selects the Juju controller & the K8s readiness wait)
+#   SUITE_CONCIERGE_CONFIG  concierge config used to provision the machine for that suite
+# Variants (`VAR/<variant>`) specific to a suite must be declared in that suite, not globally,
+# so they don't multiply the jobs of the other suites.
+
+backends:
+  # Derived from https://github.com/jnsgruk/zinc-k8s-operator/blob/a21eae8399eb3b9df4ddb934b837af25ef831976/spread.yaml#L11
+  lxd-vm:
+    # TODO: remove after https://github.com/canonical/spread/pull/185 merged & in charmcraft
+    type: adhoc
+    allocate: |
+      hash=$(python3 -c "import hashlib; print(hashlib.sha256('$SPREAD_PASSWORD'.encode()).hexdigest()[:6])")
+      VM_NAME="${VM_NAME:-${SPREAD_SYSTEM//./-}-${hash}}"
+      DISK="${DISK:-20}"
+      CPU="${CPU:-4}"
+      MEM="${MEM:-8}"
+
+      cloud_config="#cloud-config
+      ssh_pwauth: true
+      users:
+        - default
+        - name: runner
+          plain_text_passwd: $SPREAD_PASSWORD
+          lock_passwd: false
+          sudo: ALL=(ALL) NOPASSWD:ALL
+      "
+
+      lxc launch --vm \
+        "${SPREAD_SYSTEM//-/:}" \
+        "${VM_NAME}" \
+        -c user.user-data="${cloud_config}" \
+        -c limits.cpu="${CPU}" \
+        -c limits.memory="${MEM}GiB" \
+        -d root,size="${DISK}GiB"
+
+      # Wait for the runner user
+      while ! lxc exec "${VM_NAME}" -- id -u runner &>/dev/null; do sleep 0.5; done
+
+      # Set the instance address for spread
+      ADDRESS "$(lxc ls -f csv | grep "${VM_NAME}" | cut -d"," -f3 | cut -d" " -f1)"
+    discard: |
+      hash=$(python3 -c "import hashlib; print(hashlib.sha256('$SPREAD_PASSWORD'.encode()).hexdigest()[:6])")
+      VM_NAME="${VM_NAME:-${SPREAD_SYSTEM//./-}-${hash}}"
+      lxc delete --force "${VM_NAME}"
+    systems:
+      - ubuntu-24.04:
+          username: runner
+    prepare: |
+      systemctl disable --now unattended-upgrades.service
+      systemctl mask unattended-upgrades.service
+    # Only restore on lxd backend—no need to restore on CI
+    restore-each: |
+      cd "$SPREAD_PATH"
+      # Revert python-libjuju version override
+      git restore pyproject.toml uv.lock
+
+      # Use instead of `concierge restore` to save time between tests
+      # For example, with microk8s, using `concierge restore` takes twice as long as this (e.g. 6
+      # min instead of 3 min between every spread job)
+      if [[ "$SUITE_SUBSTRATE" == "k8s" ]]; then
+        controller=concierge-k8s
+      else
+        controller=concierge-lxd
+      fi
+      juju destroy-model --force --no-wait --destroy-storage --no-prompt testing
+      juju kill-controller --no-prompt "$controller"
+    restore: |
+      rm -rf "$SPREAD_PATH"
+
+  github-ci:
+    type: adhoc
+    # Only run on CI
+    manual: true
+    # HACK: spread requires runners to be accessible via SSH
+    # Configure local sshd & instruct spread to connect to the same machine spread is running on
+    # (spread cannot provision GitHub Actions runners, so we provision a GitHub Actions runner for
+    # each spread job & select a single job when running spread)
+    # Derived from https://github.com/jnsgruk/zinc-k8s-operator/blob/a21eae8399eb3b9df4ddb934b837af25ef831976/spread.yaml#L47
+    allocate: |
+      sudo tee /etc/ssh/sshd_config.d/10-spread-github-ci.conf << 'EOF'
+      PasswordAuthentication yes
+      EOF
+
+      echo "runner:$SPREAD_PASSWORD" | sudo chpasswd
+
+      # Remove the preinstalled lxd
+      sudo snap remove --purge --terminate lxd
+
+      ADDRESS localhost
+
+    # HACK: spread does not pass environment variables set on runner
+    # Manually pass specific environment variables
+    environment:
+      CI: '$(HOST: echo $CI)'
+    systems:
+      - ubuntu-24.04:
+          username: runner
+      - ubuntu-24.04-arm:
+          username: runner
+
+suites:
+  tests/spread/pgwatcher/:
+    summary: PostgreSQL watcher (VM)
+    environment:
+      SUITE_SUBSTRATE: vm
+      SUITE_CONCIERGE_CONFIG: tests/concierge/pgwatcher.yaml
+
+path: /root/spread_project
+
+kill-timeout: 3h
+environment:
+  PATH: $PATH:$(pipx environment --value PIPX_BIN_DIR)
+  CONCIERGE_JUJU_CHANNEL/juju36: 3.6/stable
+prepare: |
+  snap refresh --hold
+  chown -R root:root "$SPREAD_PATH"
+  cd "$SPREAD_PATH"
+  snap install --classic concierge
+
+  # pipx is preinstalled on GitHub runners but not on the lxd-vm image
+  # (concierge can't install it here: its config is per suite, see prepare-each)
+  if ! command -v pipx >/dev/null; then
+    apt-get update
+    apt-get install -y pipx
+  fi
+  pipx install tox
+  pipx install uv
+prepare-each: |
+  cd "$SPREAD_PATH"
+  # `concierge prepare` needs to be run for each spread job in case Juju version changed,
+  # and each suite brings its own config (lxd for VM, k8s for K8s)
+  concierge prepare --trace -c "$SUITE_CONCIERGE_CONFIG"
+
+  if [[ "$SUITE_SUBSTRATE" == "k8s" ]]; then
+    # k8s status --wait-ready returns as soon as 1 node is ready
+    # (see https://github.com/canonical/k8s-snap/issues/1789)
+    # but Cilium, CoreDNS, and storage may still be initialising
+    for res in deployment/cilium-operator deployment/coredns deployment/metrics-server daemonset/cilium daemonset/ck-storage-rawfile-csi-node statefulset/ck-storage-rawfile-csi-controller; do
+      if k8s kubectl -n kube-system get "$res" >/dev/null 2>&1; then
+        k8s kubectl -n kube-system rollout status "$res" --timeout=5m
+      else
+        echo "Skipping rollout status for missing $res"
+      fi
+    done
+  fi
+
+  # Unable to set constraint on all models because of Juju bug:
+  # https://bugs.launchpad.net/juju/+bug/2065050
+  juju set-model-constraints arch="$(dpkg --print-architecture)"

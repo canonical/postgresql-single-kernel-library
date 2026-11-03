@@ -6,6 +6,11 @@ on:
   push:
     branches:
       - 16/edge
+    # Test-only changes don't change the published package
+    paths-ignore:
+      - 'tests/**'
+      - spread.yaml
+      - '.github/workflows/integration_test.yaml'
 
 concurrency:
   # Prevent race conditions (if multiple commits have been pushed since the last release)
