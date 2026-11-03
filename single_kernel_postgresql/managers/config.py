@@ -770,6 +770,7 @@ class ConfigManager(BaseManager):
             "slots": slots,
             "instance_password_encryption": self.state.config.instance_password_encryption,
             "extra_replication_endpoints": async_standby_endpoints,
+            "max_connections": self.state.config.experimental_max_connections,
         }
         if self.state.substrate == Substrates.VM:
             # The installed snap may predate a library the charm pins (e.g.
