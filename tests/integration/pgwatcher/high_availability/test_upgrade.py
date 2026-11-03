@@ -170,8 +170,9 @@ def test_fail_and_rollback(juju: Juju, charm: str, continuous_writes) -> None:
 
 def inject_dependency_fault(juju: Juju, app_name: str, charm_file: str | Path) -> None:
     """Inject a dependency fault into the PostgreSQL charm."""
-    with Path("refresh_versions.toml").open("rb") as file:
-        versions = tomli.load(file)
+    # Read it from the charm: the working directory is this repository, with its own file
+    with zipfile.ZipFile(charm_file) as charm_zip:
+        versions = tomli.loads(charm_zip.read("refresh_versions.toml").decode())
 
     versions["charm"] = "16/0.0.0"
     versions["snap"]["revisions"][platform.machine()] = "1"
