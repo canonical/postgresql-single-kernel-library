@@ -54,6 +54,9 @@ bootstrap:
         set_user.block_log_statement: 'on'
         set_user.exit_on_error: 'on'
         set_user.superuser_allowlist: '+charmed_dba'
+        max_replication_slots: 25
+        max_wal_senders: 25
+        max_connections: 100
     {%- if slots %}
     slots:
     {%- for slot, database in slots.items() %}
