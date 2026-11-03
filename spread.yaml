@@ -118,6 +118,8 @@ kill-timeout: 3h
 environment:
   PATH: $PATH:$(pipx environment --value PIPX_BIN_DIR)
   CONCIERGE_JUJU_CHANNEL/juju36: 3.6/stable
+  # pytest-operator's `ops_test` fixture requires charmcraft on PATH, even if nothing is packed
+  CONCIERGE_EXTRA_SNAPS: charmcraft
 prepare: |
   snap refresh --hold
   chown -R root:root "$SPREAD_PATH"
