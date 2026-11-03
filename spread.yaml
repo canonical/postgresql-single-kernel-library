@@ -112,6 +112,12 @@ suites:
       SUITE_SUBSTRATE: vm
       SUITE_CONCIERGE_CONFIG: tests/concierge/pgwatcher.yaml
 
+  tests/spread/pgbouncer/vm/:
+    summary: PGBouncer (VM)
+    environment:
+      SUITE_SUBSTRATE: vm
+      SUITE_CONCIERGE_CONFIG: tests/concierge/pgbouncer_vm.yaml
+
 path: /root/spread_project
 
 kill-timeout: 3h

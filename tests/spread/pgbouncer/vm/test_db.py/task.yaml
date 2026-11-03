@@ -1,0 +1,9 @@
+summary: test_db.py
+environment:
+  TEST_MODULE: relations/test_db.py
+execute: |
+  tox run -e integration -- "tests/integration/pgbouncer/vm/$TEST_MODULE" --model testing --alluredir="$SPREAD_TASK/allure-results"
+artifacts:
+  - allure-results
+variants:
+  - -juju36_pg16

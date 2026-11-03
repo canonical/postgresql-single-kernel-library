@@ -1,0 +1,9 @@
+summary: test_upgrade_from_stable.py
+environment:
+  TEST_MODULE: test_upgrade_from_stable.py
+execute: |
+  tox run -e integration -- "tests/integration/pgbouncer/vm/$TEST_MODULE" --model testing --alluredir="$SPREAD_TASK/allure-results"
+artifacts:
+  - allure-results
+variants:
+  - -juju36_pg16
