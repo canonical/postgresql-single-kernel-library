@@ -4,123 +4,132 @@
 import re
 import time
 
+import jubilant
 import psycopg2
 import pytest
+from jubilant import Juju
+from single_kernel_postgresql.config import literals
+from tenacity import Retrying, stop_after_attempt, wait_exponential
 
-from .adapters import JujuFixture
-from .jubilant_helpers import (
-    METADATA,
+from tests.integration.charm.helpers import (
     check_patroni,
-    db_connect,
     get_password,
     get_primary,
-    get_unit_address,
     restart_patroni,
     run_command_on_unit,
     set_password,
 )
+from tests.integration.helpers.juju import (
+    fast_forward,
+    get_app_units,
+    get_unit_address,
+    wait_for_apps_status,
+)
+from tests.integration.helpers.postgresql import db_connect
+from tests.integration.types import Substrate
 
-APP_NAME = METADATA["name"]
+# Directory of the PostgreSQL logs on each substrate.
+VM_POSTGRESQL_LOGS_DIR = f"{literals.BASE_SNAP_DIR}/{literals.SNAP_COMMON}/{literals.VM_LOGS_PATH}"
+K8S_POSTGRESQL_LOGS_DIR = f"/{literals.K8S_LOGS_STORAGE_PATH}/{literals.K8S_PG_LOGS_PATH}"
+
+
+def _wait_for_active(juju: Juju, app_name: str, timeout: float = 1000) -> None:
+    juju.wait(
+        wait_for_apps_status(jubilant.all_active, app_name),
+        error=jubilant.any_error,
+        timeout=timeout,
+    )
 
 
 @pytest.mark.abort_on_fail
-@pytest.mark.skip_if_deployed
-def test_deploy_active(juju: JujuFixture, charm):
-    """Build the charm and deploy it."""
-    with juju.ext.fast_forward():
-        juju.ext.model.deploy(
+def test_deploy(
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+) -> None:
+    """Deploy three units of PostgreSQL."""
+    with fast_forward(juju):
+        juju.deploy(
             charm,
-            application_name=APP_NAME,
-            num_units=3,
+            app=app_name,
+            base="ubuntu@24.04",
             config={"profile": "testing"},
+            num_units=3,
+            resources=charm_resources,
+            trust=substrate == Substrate.k8s,
         )
-        juju.ext.model.wait_for_idle(apps=[APP_NAME], status="active", timeout=1500)
+        _wait_for_active(juju, app_name, timeout=1500)
 
 
-def test_password_rotation(juju: JujuFixture):
+def test_password_rotation(juju: Juju, app_name: str) -> None:
     """Test password rotation action."""
     # Get the initial passwords set for the system users.
-    superuser_password = get_password()
-    replication_password = get_password("replication")
-    monitoring_password = get_password("monitoring")
-    backup_password = get_password("backup")
-    rewind_password = get_password("rewind")
-    patroni_password = get_password("patroni")
+    superuser_password = get_password(juju, app_name)
+    passwords = {
+        user: get_password(juju, app_name, user)
+        for user in ("replication", "monitoring", "backup", "rewind")
+    }
 
     # Change both passwords.
-    set_password(juju, password="test-password")
-    juju.ext.model.wait_for_idle(apps=[APP_NAME], status="active", timeout=1000)
-    new_superuser_password = get_password()
-    assert superuser_password != new_superuser_password
+    set_password(juju, app_name, password="test-password")
+    _wait_for_active(juju, app_name)
+    for attempt in Retrying(
+        stop=stop_after_attempt(10), wait=wait_exponential(multiplier=1, min=2, max=30)
+    ):
+        with attempt:
+            assert superuser_password != get_password(juju, app_name)
 
-    # For replication, generate a specific password and pass it to the action.
-    new_replication_password = "test-password"
-    set_password(juju, username="replication", password=new_replication_password)
-    juju.ext.model.wait_for_idle(apps=[APP_NAME], status="active", timeout=1000)
-    assert new_replication_password == get_password("replication")
-    assert replication_password != new_replication_password
+    # For the other users, generate a specific password and pass it to the action.
+    new_password = "test-password"
+    for user, old_password in passwords.items():
+        set_password(juju, app_name, username=user, password=new_password)
+        _wait_for_active(juju, app_name)
+        for attempt in Retrying(
+            stop=stop_after_attempt(10), wait=wait_exponential(multiplier=1, min=2, max=30)
+        ):
+            with attempt:
+                assert new_password == get_password(juju, app_name, user)
+                assert old_password != new_password
 
-    # For monitoring, generate a specific password and pass it to the action.
-    new_monitoring_password = "test-password"
-    set_password(juju, username="monitoring", password=new_monitoring_password)
-    juju.ext.model.wait_for_idle(apps=[APP_NAME], status="active", timeout=1000)
-    assert new_monitoring_password == get_password("monitoring")
-    assert monitoring_password != new_monitoring_password
-
-    # For backup, generate a specific password and pass it to the action.
-    new_backup_password = "test-password"
-    set_password(juju, username="backup", password=new_backup_password)
-    juju.ext.model.wait_for_idle(apps=[APP_NAME], status="active", timeout=1000)
-    assert new_backup_password == get_password("backup")
-    assert backup_password != new_backup_password
-
-    # For rewind, generate a specific password and pass it to the action.
-    new_rewind_password = "test-password"
-    set_password(juju, username="rewind", password=new_rewind_password)
-    juju.ext.model.wait_for_idle(apps=[APP_NAME], status="active", timeout=1000)
-    assert new_rewind_password == get_password("rewind")
-    assert rewind_password != new_rewind_password
+    patroni_password = get_password(juju, app_name, "patroni")
 
     # Restart Patroni on any non-leader unit and check that
     # Patroni and PostgreSQL continue to work.
     restart_time = time.time()
-    for unit in juju.ext.model.applications[APP_NAME].units:
-        if not unit.is_leader_from_status():
-            restart_patroni(juju, unit.name, patroni_password)
-            assert check_patroni(juju, unit.name, restart_time)
+    for unit_name, unit in get_app_units(juju, app_name).items():
+        if not unit.leader:
+            restart_patroni(juju, unit_name, patroni_password)
+            assert check_patroni(juju, unit_name, restart_time)
 
 
-def test_db_connection_with_empty_password(juju: JujuFixture):
+def test_db_connection_with_empty_password(juju: Juju, app_name: str) -> None:
     """Test that user can't connect with empty password."""
-    primary = get_primary(juju, f"{APP_NAME}/0")
+    primary = get_primary(juju, f"{app_name}/0")
     address = get_unit_address(juju, primary)
     with pytest.raises(psycopg2.Error), db_connect(address, "") as connection:
         connection.close()
 
 
-def test_no_password_change_on_invalid_password(juju: JujuFixture) -> None:
+def test_no_password_change_on_invalid_password(juju: Juju, app_name: str) -> None:
     """Test that in general, there is no change when password validation fails."""
-    password1 = get_password(username="replication")
+    password1 = get_password(juju, app_name, "replication")
     # The password has to be minimum 3 characters
-    set_password(juju, username="replication", password="1")
-    password2 = get_password(username="replication")
+    set_password(juju, app_name, username="replication", password="1")
+    password2 = get_password(juju, app_name, "replication")
     # The password didn't change
     assert password1 == password2
 
 
-def test_no_password_exposed_on_logs(juju: JujuFixture) -> None:
+def test_no_password_exposed_on_logs(juju: Juju, app_name: str, substrate: Substrate) -> None:
     """Test that passwords don't get exposed on postgresql logs."""
-    for unit in juju.ext.model.applications[APP_NAME].units:
+    logs_dir = VM_POSTGRESQL_LOGS_DIR if substrate == Substrate.vm else K8S_POSTGRESQL_LOGS_DIR
+    for unit_name in get_app_units(juju, app_name):
         try:
             logs = run_command_on_unit(
-                juju,
-                unit.name,
-                "grep PASSWORD /var/snap/charmed-postgresql/common/var/log/postgresql/postgresql-*.log",
+                juju, unit_name, f"grep PASSWORD {logs_dir}/postgresql-*.log", substrate
             )
         except Exception:
             continue
         regex = re.compile("(PASSWORD )(?!<REDACTED>)")
         logs_without_false_positives = regex.findall(logs)
         assert len(logs_without_false_positives) == 0, (
-            f"Sensitive information detected on {unit.name} logs"
+            f"Sensitive information detected on {unit_name} logs"
         )
