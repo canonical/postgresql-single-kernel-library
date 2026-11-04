@@ -3,7 +3,8 @@
 
 """Juju helpers that don't depend on the charm under test."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 
 import jubilant
 from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
@@ -80,6 +81,22 @@ def get_secret_by_label(juju: jubilant.Juju, label: str) -> dict[str, str]:
         if revealed.label == label:
             return revealed.content
     raise AssertionError(f"Secret with label {label} not found")
+
+
+@contextmanager
+def fast_forward(juju: jubilant.Juju, interval: str = "10s") -> Generator[None]:
+    """Run update-status hooks every `interval` inside the context (back to 5m on exit)."""
+    juju.model_config({"update-status-hook-interval": interval})
+    try:
+        yield
+    finally:
+        juju.model_config({"update-status-hook-interval": "5m"})
+
+
+def remove_application(juju: jubilant.Juju, app_name: str, timeout: float = 1000) -> None:
+    """Remove an application and wait until it is gone from the model."""
+    juju.remove_application(app_name)
+    juju.wait(lambda status: app_name not in status.apps, timeout=timeout)
 
 
 def wait_for_apps_status(status_fn: Callable[..., bool], *apps: str) -> StatusFn:

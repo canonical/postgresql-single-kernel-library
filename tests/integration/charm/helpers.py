@@ -12,7 +12,13 @@ from enum import Enum
 import jubilant
 import requests
 from single_kernel_postgresql.config.literals import PEER_RELATION
-from tenacity import Retrying, stop_after_delay, wait_fixed
+from tenacity import (
+    Retrying,
+    stop_after_attempt,
+    stop_after_delay,
+    wait_exponential,
+    wait_fixed,
+)
 
 from tests.integration.helpers.juju import (
     get_app_leader,
@@ -62,6 +68,128 @@ def get_primary(juju: jubilant.Juju, unit_name: str) -> str:
 def get_db_primary_unit(juju: jubilant.Juju, app_name: str) -> str:
     """Return the primary unit of a cluster."""
     return get_primary(juju, get_app_leader(juju, app_name))
+
+
+def wait_for_idle_on_blocked(
+    juju: jubilant.Juju,
+    database_app_name: str,
+    unit_number: int,
+    other_app_name: str,
+    status_message: str,
+    timeout: float = 10 * MINUTE_SECS,
+) -> None:
+    """Wait for other_app_name to be active and a database unit to be blocked with a message."""
+    unit = f"{database_app_name}/{unit_number}"
+    juju.wait(
+        wait_for_apps_status(jubilant.all_active, other_app_name),
+        error=lambda status: jubilant.any_error(status, other_app_name),
+        timeout=timeout,
+    )
+    juju.wait(
+        lambda status: (
+            status.apps[database_app_name].units[unit].is_blocked
+            and status.apps[database_app_name].units[unit].workload_status.message
+            == status_message
+        ),
+        timeout=timeout,
+    )
+
+
+def get_cluster_roles(juju: jubilant.Juju, unit_name: str) -> dict[str, list[str]]:
+    """Return the unit names of the cluster members by role, asking the Patroni API."""
+    unit_address = get_unit_address(juju, unit_name)
+    members = {"replicas": [], "primaries": [], "sync_standbys": []}
+    member_list = requests.get(f"https://{unit_address}:8008/cluster", verify=False).json()[
+        "members"
+    ]
+    logging.info(f"Cluster members are: {member_list}")
+    for member in member_list:
+        role = member["role"]
+        name = "/".join(member["name"].rsplit("-", 1))
+        if role == "leader":
+            members["primaries"].append(name)
+        elif role == "sync_standby":
+            members["sync_standbys"].append(name)
+        else:
+            members["replicas"].append(name)
+    return members
+
+
+def check_cluster_members(juju: jubilant.Juju, app_name: str, substrate: Substrate) -> None:
+    """Check that the Patroni cluster members are the application units.
+
+    On VM the member hosts are also checked against the unit addresses.
+    """
+    for attempt in Retrying(
+        stop=stop_after_attempt(10), wait=wait_exponential(multiplier=1, min=2, max=30)
+    ):
+        with attempt:
+            units = get_app_units(juju, app_name)
+            primary = get_primary(juju, next(iter(units)))
+            address = get_unit_address(juju, primary)
+
+            members = requests.get(f"https://{address}:8008/cluster", verify=False).json()[
+                "members"
+            ]
+            assert [member["name"] for member in members] == [
+                name.replace("/", "-") for name in units
+            ]
+            if substrate == Substrate.vm:
+                assert [member["host"] for member in members] == [
+                    unit.public_address for unit in units.values()
+                ]
+
+
+def scale_application(
+    juju: jubilant.Juju, app_name: str, count: int, substrate: Substrate
+) -> None:
+    """Scale an application to a number of units and wait for it to be active.
+
+    On VM the first units are removed; on K8s only the last pods can be removed.
+    """
+    units = list(get_app_units(juju, app_name))
+    change = count - len(units)
+    if change > 0:
+        juju.add_unit(app_name, num_units=change)
+    elif change < 0:
+        if substrate == Substrate.vm:
+            juju.remove_unit(*units[:-change], destroy_storage=True)
+        else:
+            juju.remove_unit(app_name, num_units=-change)
+    juju.wait(
+        lambda status: (
+            wait_for_apps_status(jubilant.all_active, app_name)(status)
+            and len(status.get_units(app_name)) == count
+        ),
+        error=jubilant.any_error,
+        timeout=2000,
+    )
+
+
+def switchover(
+    juju: jubilant.Juju, current_primary: str, password: str, candidate: str | None = None
+) -> None:
+    """Trigger a switchover with the Patroni API and wait for the sync standbys to be back."""
+    primary_address = get_unit_address(juju, current_primary)
+    response = requests.post(
+        f"https://{primary_address}:8008/switchover",
+        json={
+            "leader": current_primary.replace("/", "-"),
+            "candidate": candidate.replace("/", "-") if candidate else None,
+        },
+        auth=requests.auth.HTTPBasicAuth("patroni", password),
+        verify=False,
+    )
+    assert response.status_code == 200
+    app_name = current_primary.split("/")[0]
+    for attempt in Retrying(stop=stop_after_attempt(30), wait=wait_fixed(2), reraise=True):
+        with attempt:
+            response = requests.get(f"https://{primary_address}:8008/cluster", verify=False)
+            assert response.status_code == 200
+            standbys = [
+                member for member in response.json()["members"] if member["role"] == "sync_standby"
+            ]
+            assert len(standbys) == len(get_app_units(juju, app_name)) - 1
 
 
 def count_switchovers(juju: jubilant.Juju, app_name: str) -> int:
