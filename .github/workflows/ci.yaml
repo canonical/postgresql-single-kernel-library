@@ -68,6 +68,7 @@ jobs:
     # The test charms can't use data-platform-workflows build_charm.yaml: scripts/build_charm.sh
     # has to copy the library into them before packing
     strategy:
+      fail-fast: false
       matrix:
         substrate:
           - vm
