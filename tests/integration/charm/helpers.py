@@ -15,6 +15,8 @@ from enum import Enum
 import jubilant
 import requests
 import yaml
+from lightkube import Client
+from lightkube.resources.core_v1 import Service
 from single_kernel_postgresql.config.literals import PEER_RELATION, SYSTEM_USERS_PASSWORD_CONFIG
 from tenacity import (
     RetryError,
@@ -238,6 +240,101 @@ def run_command_on_unit(
     if substrate == Substrate.vm:
         return juju.exec(command, unit=unit_name).stdout
     return juju.ssh(unit_name, command, container="postgresql")
+
+
+def get_alias_from_relation_data(
+    juju: jubilant.Juju, unit_name: str, related_unit_name: str
+) -> str | None:
+    """Return the alias that unit_name assigned to the application of related_unit_name."""
+    relation_data = {}
+    for relation in juju.show_unit(related_unit_name).relation_info:
+        for name, unit in relation.related_units.items():
+            if name == unit_name:
+                relation_data = unit.data
+                break
+
+    if "alias" not in relation_data:
+        raise ValueError(f"no alias could be grabbed for {related_unit_name} application/cluster")
+    return relation_data["alias"]
+
+
+def get_application_relation_data(
+    juju: jubilant.Juju,
+    application_name: str,
+    relation_name: str,
+    key: str,
+    relation_id: int | None = None,
+    relation_alias: str | None = None,
+) -> str | None:
+    """Return a key of the application data that the first unit of an app sees in a relation."""
+    unit_name = f"{application_name}/0"
+    relation_data = [
+        relation
+        for relation in juju.show_unit(unit_name).relation_info
+        if relation.endpoint == relation_name
+    ]
+    if relation_id:
+        relation_data = [
+            relation for relation in relation_data if relation.relation_id == relation_id
+        ]
+    if relation_alias:
+        relation_data = [
+            relation
+            for relation in relation_data
+            if get_alias_from_relation_data(juju, unit_name, next(iter(relation.related_units)))
+            == relation_alias
+        ]
+    if len(relation_data) == 0:
+        raise ValueError(
+            f"no relation data could be grabbed on relation with endpoint {relation_name} and alias {relation_alias}"
+        )
+    return relation_data[0].app_data.get(key)
+
+
+def build_connection_string(
+    juju: jubilant.Juju,
+    application_name: str,
+    relation_name: str,
+    substrate: Substrate,
+    *,
+    relation_id: int | None = None,
+    relation_alias: str | None = None,
+    read_only_endpoint: bool = False,
+    database: str | None = None,
+) -> str:
+    """Build a PostgreSQL connection string from the data an app gets in a relation."""
+    if database is None:
+        database = f"{application_name.replace('-', '_')}_{relation_name.replace('-', '_')}"
+
+    if secret_uri := get_application_relation_data(
+        juju, application_name, relation_name, "secret-user", relation_id, relation_alias
+    ):
+        secret_data = juju.show_secret(secret_uri, reveal=True).content
+        username = secret_data["username"]
+        password = secret_data["password"]
+    else:
+        username = get_application_relation_data(
+            juju, application_name, relation_name, "username", relation_id, relation_alias
+        )
+        password = get_application_relation_data(
+            juju, application_name, relation_name, "password", relation_id, relation_alias
+        )
+
+    endpoints = get_application_relation_data(
+        juju,
+        application_name,
+        relation_name,
+        "read-only-endpoints" if read_only_endpoint else "endpoints",
+        relation_id,
+        relation_alias,
+    )
+    host = endpoints.split(",")[0].split(":")[0]
+    if substrate == Substrate.k8s:
+        # The endpoint is the service hostname: use its cluster IP.
+        client = Client(namespace=(juju.model or "").split(":")[-1])
+        host = client.get(Service, name=host.split(".")[0]).spec.clusterIP
+
+    return f"dbname='{database}' user='{username}' host='{host}' password='{password}' connect_timeout=10"
 
 
 def primary_changed(juju: jubilant.Juju, old_primary: str) -> bool:
