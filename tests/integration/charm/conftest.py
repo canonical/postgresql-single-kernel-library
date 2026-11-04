@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.integration.charm.backup_helpers import GCP, cleanup_cloud, get_cloud_config
+from tests.integration.charm.backup_helpers import AWS, GCP, cleanup_cloud, get_cloud_config
 from tests.integration.charm.helpers import RoleAttributeValue
 from tests.integration.types import Substrate
 
@@ -48,6 +48,21 @@ def charm_resources(substrate: Substrate) -> dict[str, str] | None:
         return None
     resources = _metadata(substrate)["resources"]
     return {name: resource["upstream-source"] for name, resource in resources.items()}
+
+
+@pytest.fixture(scope="module")
+def aws_cloud_configs() -> Generator[tuple[dict[str, str], dict[str, str]]]:
+    """AWS S3 integrator config and credentials; the test objects are deleted afterwards."""
+    if (
+        not os.environ.get("AWS_ACCESS_KEY", "").strip()
+        or not os.environ.get("AWS_SECRET_KEY", "").strip()
+    ):
+        pytest.skip("AWS configs not set")
+
+    config, credentials = get_cloud_config(AWS)
+    yield config, credentials
+
+    cleanup_cloud(config, credentials)
 
 
 @pytest.fixture(scope="module")
