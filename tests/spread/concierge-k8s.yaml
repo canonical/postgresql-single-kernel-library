@@ -1,0 +1,15 @@
+juju:
+  model-defaults:
+    logging-config: <root>=INFO; unit=DEBUG
+providers:
+  k8s:
+    enable: true
+    bootstrap: true
+    bootstrap-constraints:
+      root-disk: 5G
+host:
+  snaps:
+    jhack:
+      channel: latest/edge
+      connections:
+        - jhack:dot-local-share-juju snapd
