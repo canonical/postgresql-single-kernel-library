@@ -63,3 +63,70 @@ jobs:
         run: tox run -e unit
     permissions: {}
     cache-mode: none
+
+  build:
+    # The test charms can't use data-platform-workflows build_charm.yaml: scripts/build_charm.sh
+    # has to copy the library into them before packing
+    strategy:
+      matrix:
+        substrate:
+          - vm
+          - k8s
+    name: Build ${{ matrix.substrate }} test charm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Same set up as data-platform-workflows build_charm.yaml (v54.0.0)
+      - name: Set up environment
+        run: |
+          sudo snap install lxd
+          sudo adduser "$USER" lxd
+          # `newgrp` does not work in GitHub Actions; use `sudo --user` instead
+          sudo --user "$USER" --preserve-env --preserve-env=PATH -- env -- lxd waitready
+          sudo --user "$USER" --preserve-env --preserve-env=PATH -- env -- lxd init --auto
+          # Workaround for Docker & LXD on same machine
+          sudo iptables -F FORWARD
+          sudo iptables -P FORWARD ACCEPT
+
+          sudo snap install charmcraft --classic
+          pipx install poetry
+      - run: snap list
+      - name: Build test charm
+        id: pack
+        run: |
+          sudo --user "$USER" --preserve-env --preserve-env=PATH -- env -- \
+            scripts/build_charm.sh \
+            -p ubuntu@24.04:amd64 \
+            -c "tests/charms/postgresql_${VAR_SUBSTRATE}_test_charm"
+        env:
+          VAR_SUBSTRATE: ${{ matrix.substrate }}
+      - name: Charmcraft logs
+        if: ${{ success() || (failure() && steps.pack.outcome == 'failure') }}
+        run: cat ~/.local/state/charmcraft/log/*
+      - name: Upload test charm
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-charm-${{ matrix.substrate }}
+          path: tests/charms/postgresql_${{ matrix.substrate }}_test_charm/*.charm
+          if-no-files-found: error
+    outputs:
+      artifact-prefix: test-charm
+    permissions: {}
+    cache-mode: none
+
+  integration-test:
+    name: Integration test charm
+    needs:
+      - lint-workflows
+      - lint
+      - unit-test
+      - build
+    uses: $/.github/workflows/integration_test.yaml
+    with:
+      artifact-prefix: ${{ needs.build.outputs.artifact-prefix }}
+    permissions: {}
+    cache-mode: none

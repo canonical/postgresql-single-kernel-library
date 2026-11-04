@@ -1,0 +1,5 @@
+summary: test_upgrade_skip_pre_upgrade_check.py
+environment:
+  TEST_MODULE: charm/high_availability/test_upgrade_skip_pre_upgrade_check.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing
