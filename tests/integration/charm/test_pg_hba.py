@@ -3,20 +3,24 @@
 # See LICENSE file for licensing details.
 import logging
 import re
-from pathlib import Path
 from time import sleep
 
+import jubilant
 import psycopg2
 import pytest
-import tomli
+from jubilant import Juju
 
-from .adapters import JujuFixture
-from .jubilant_helpers import (
-    DATABASE_APP_NAME,
-    db_connect,
-    get_primary,
+from tests.integration.charm.helpers import get_primary, get_refresh_versions
+from tests.integration.helpers.juju import (
+    fast_forward,
+    get_app_units,
+    get_credentials,
     get_unit_address,
+    relations,
+    wait_for_apps_status,
 )
+from tests.integration.helpers.postgresql import db_connect
+from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -29,48 +33,47 @@ PASSWORD = "test-password"
 
 
 @pytest.mark.abort_on_fail
-def test_pg_hba(juju: JujuFixture, charm):
-    with juju.ext.fast_forward():
+def test_pg_hba(
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+) -> None:
+    with fast_forward(juju):
         logger.info("Deploying charms")
-        if DATABASE_APP_NAME not in juju.ext.model.applications:
-            juju.ext.model.deploy(
+        if app_name not in juju.status().apps:
+            juju.deploy(
                 charm,
-                num_units=2,
+                app=app_name,
+                base="ubuntu@24.04",
                 config={"profile": "testing"},
+                num_units=2,
+                resources=charm_resources,
+                trust=substrate == Substrate.k8s,
             )
-        if DATA_INTEGRATOR_APP_NAME not in juju.ext.model.applications:
-            juju.ext.model.deploy(
+        if DATA_INTEGRATOR_APP_NAME not in juju.status().apps:
+            juju.deploy(
                 DATA_INTEGRATOR_APP_NAME,
                 config={"database-name": FIRST_DATABASE, "extra-user-roles": "SUPERUSER"},
             )
 
         logger.info("Adding relation between charms")
-        relations = [
-            relation
-            for relation in juju.ext.model.applications[DATABASE_APP_NAME].relations
-            if not relation.is_peer
-            and f"{relation.requires.application_name}:{relation.requires.name}"
-            == f"{DATA_INTEGRATOR_APP_NAME}:postgresql"
-        ]
-        if not relations:
-            juju.ext.model.add_relation(DATA_INTEGRATOR_APP_NAME, DATABASE_APP_NAME)
+        if not relations(juju, app_name, DATA_INTEGRATOR_APP_NAME):
+            juju.integrate(DATA_INTEGRATOR_APP_NAME, app_name)
 
-        juju.ext.model.wait_for_idle(
-            apps=[DATA_INTEGRATOR_APP_NAME, DATABASE_APP_NAME], status="active", timeout=1000
+        juju.wait(
+            wait_for_apps_status(jubilant.all_active, DATA_INTEGRATOR_APP_NAME, app_name),
+            error=jubilant.any_error,
+            timeout=1000,
         )
 
-        primary = get_primary(juju, f"{DATABASE_APP_NAME}/0")
+        primary = get_primary(juju, f"{app_name}/0")
         address = get_unit_address(juju, primary)
-        data_integrator_unit = juju.ext.model.applications[DATA_INTEGRATOR_APP_NAME].units[0]
-        action = data_integrator_unit.run_action(action_name="get-credentials")
-        result = action.wait()
-        credentials = result.results
+        data_integrator_unit = next(iter(get_app_units(juju, DATA_INTEGRATOR_APP_NAME)))
+        credentials = get_credentials(juju, data_integrator_unit)
         connection = None
         try:
             connection = db_connect(
                 host=address,
                 password=credentials["postgresql"]["password"],
-                username=credentials["postgresql"]["username"],
+                user=credentials["postgresql"]["username"],
                 database=FIRST_DATABASE,
             )
             connection.autocommit = True
@@ -107,18 +110,18 @@ def test_pg_hba(juju: JujuFixture, charm):
 
         sleep(90)
 
-        for unit in juju.ext.model.applications[DATABASE_APP_NAME].units:
+        for unit_name in get_app_units(juju, app_name):
             try:
-                address = get_unit_address(juju, unit.name)
+                address = get_unit_address(juju, unit_name)
 
                 logger.info(
-                    f"Checking that the user {FIRST_RELATION_USER} can connect to the database {FIRST_DATABASE} on {unit.name}"
+                    f"Checking that the user {FIRST_RELATION_USER} can connect to the database {FIRST_DATABASE} on {unit_name}"
                 )
                 with (
                     db_connect(
                         host=address,
                         password=PASSWORD,
-                        username=FIRST_RELATION_USER,
+                        user=FIRST_RELATION_USER,
                         database=FIRST_DATABASE,
                     ) as connection,
                     connection.cursor() as cursor,
@@ -134,13 +137,13 @@ def test_pg_hba(juju: JujuFixture, charm):
                 connection.close()
 
                 logger.info(
-                    f"Checking that the user {SECOND_RELATION_USER} can connect to the database {SECOND_DATABASE} on {unit.name}"
+                    f"Checking that the user {SECOND_RELATION_USER} can connect to the database {SECOND_DATABASE} on {unit_name}"
                 )
                 with (
                     db_connect(
                         host=address,
                         password=PASSWORD,
-                        username=SECOND_RELATION_USER,
+                        user=SECOND_RELATION_USER,
                         database=SECOND_DATABASE,
                     ) as connection,
                     connection.cursor() as cursor,
@@ -153,17 +156,15 @@ def test_pg_hba(juju: JujuFixture, charm):
                     # was retrieved directly from the database.
                     assert credentials["postgresql"]["version"] == data
 
-                    with Path("refresh_versions.toml").open("rb") as file:
-                        versions = tomli.load(file)
-                    assert versions["workload"] == data
+                    assert get_refresh_versions(charm)["workload"] == data
 
                 logger.info(
-                    f"Checking that the user {SECOND_RELATION_USER} cannot connect to the database {FIRST_DATABASE} on {unit.name}"
+                    f"Checking that the user {SECOND_RELATION_USER} cannot connect to the database {FIRST_DATABASE} on {unit_name}"
                 )
                 with db_connect(
                     host=address,
                     password=PASSWORD,
-                    username=SECOND_RELATION_USER,
+                    user=SECOND_RELATION_USER,
                     database=FIRST_DATABASE,
                 ) as connection:
                     assert False, (
