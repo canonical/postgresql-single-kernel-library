@@ -1,4 +1,5 @@
 charm_major = 1
+charm = "test/0.0.0+dirty"
 workload = "16.14"
 
 [snap]

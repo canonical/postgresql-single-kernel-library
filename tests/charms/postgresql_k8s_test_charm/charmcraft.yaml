@@ -101,8 +101,6 @@ parts:
     stage:
       - LICENSE
       - refresh_versions.toml
-      - scripts
-      - templates
   libpq:
     build-packages:
       - libpq-dev
