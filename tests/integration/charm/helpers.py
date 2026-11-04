@@ -288,13 +288,12 @@ def refresh_completed(juju: jubilant.Juju, app_name: str, previous_revision: int
     """Whether the refresh actually rolled the app since ``previous_revision``.
 
     Evidence is required beyond merely seeing every unit active: the app charm revision must
-    have advanced past ``previous_revision``, and every unit must report the same non-empty
-    workload version. A roll where the last unit's charm hooks are still pending must not
-    count as completed.
+    have advanced past ``previous_revision`` and the app must report a workload version
+    (``application-version-set`` only sets it on the app, not on each unit). A roll where the
+    last unit's charm hooks are still pending must not count as completed.
     """
     app_status = juju.status().apps[app_name]
-    workload_versions = {unit.workload_status.version for unit in app_status.units.values()}
-    if not workload_versions or "" in workload_versions or len(workload_versions) != 1:
+    if not app_status.version:
         return False
     if any(unit.workload_status.current != "active" for unit in app_status.units.values()):
         return False

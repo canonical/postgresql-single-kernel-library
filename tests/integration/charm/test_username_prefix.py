@@ -171,7 +171,7 @@ def test_readd_db_from_prefix(juju: jubilant.Juju, app_name: str, substrate: Sub
     assert "postgres" not in pg_data["prefix-databases"]
     assert pg_data["prefix-databases"] == "postgre1,postgre2"
     host = uris_host(juju, app_name, substrate)
-    assert pg_data["uris"] == f"postgresql://tester:password@{host}:5432/postgre2"
+    assert pg_data["uris"] == f"postgresql://tester:password@{host}:5432/postgre1"
 
     # Connect to database
     psycopg2.connect(f"postgresql://tester:password@{db_ip}:5432/postgre1")
