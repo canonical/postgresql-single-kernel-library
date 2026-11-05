@@ -80,7 +80,7 @@ jobs:
     needs:
       - collect-integration-tests
     runs-on: ${{ matrix.job.runner }}
-    timeout-minutes: 222  # Sum of steps `timeout-minutes` + 5
+    timeout-minutes: 232  # Sum of steps `timeout-minutes` + 5
     steps:
       - name: Checkout
         timeout-minutes: 3
@@ -119,7 +119,7 @@ jobs:
       # TODO: remove when https://github.com/canonical/charmcraft/issues/2105 and
       # https://github.com/canonical/charmcraft/issues/2130 fixed
       - name: Set up environment
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: |
           sudo snap install go --classic
           go install github.com/canonical/spread/cmd/spread@latest
