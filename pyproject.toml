@@ -75,10 +75,13 @@ lint = [
 ]
 unit = [
     "coverage[toml]==7.16.2",
-    "pytest==9.1.1"
+    "pytest==9.1.1",
+    "pytest-asyncio==0.21.2",
 ]
 integration = [
     "pytest==9.1.1",
+    "pytest-operator==0.43.2",
+    "juju==3.6.1.3",
     "jubilant==1.14.0",
     "allure-pytest==2.16.2",
     "allure-pytest-default-results==0.1.4",
@@ -102,6 +105,7 @@ show_missing = true
 [tool.pytest.ini_options]
 minversion = "6.0"
 log_cli_level = "INFO"
+asyncio_mode = "auto"
 
 # Linting tools configuration
 [tool.ruff]
