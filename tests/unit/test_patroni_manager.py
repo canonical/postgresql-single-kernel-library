@@ -352,41 +352,50 @@ def test_start_patroni(substrate, patroni):
         pytest.skip("VM only")
         return
 
-    with patch("single_kernel_postgresql.managers.patroni.snap.SnapCache") as _snap_cache:
-        _cache = _snap_cache.return_value
-        _selected_snap = _cache.__getitem__.return_value
-        _selected_snap.start.side_effect = [None, snap.SnapError]
-
-        # Test a success scenario.
+    with (
+        patch(
+            "single_kernel_postgresql.workload.vm.snap.start",
+            side_effect=[None, snap.Error("failed")],
+        ) as start,
+        patch(
+            "single_kernel_postgresql.workload.vm.service_states", return_value={"patroni": True}
+        ),
+    ):
         assert patroni.start_patroni()
-        _cache.__getitem__.assert_called_once_with("charmed-postgresql")
-        _selected_snap.start.assert_called_once_with(services=[PATRONI_SERVICE])
-
-        # Test a fail scenario.
+        start.assert_called_once_with("charmed-postgresql", services=[PATRONI_SERVICE])
         assert not patroni.start_patroni()
 
 
-def test_stop_patroni(substrate, patroni):
+@pytest.mark.parametrize(
+    "states,expected", [({"patroni": False}, True), ({"patroni": True}, False), ({}, False)]
+)
+def test_stop_patroni(substrate, patroni, states, expected):
     if substrate == Substrates.K8S:
         pytest.skip("VM only")
-        return
+    with (
+        patch("single_kernel_postgresql.managers.patroni.snap.stop") as stop,
+        patch("single_kernel_postgresql.managers.patroni.service_states", return_value=states),
+    ):
+        assert patroni.stop_patroni() is expected
+        stop.assert_called_once_with("charmed-postgresql", services=[PATRONI_SERVICE])
 
-    with patch("single_kernel_postgresql.managers.patroni.snap.SnapCache") as _snap_cache:
-        _cache = _snap_cache.return_value
-        _selected_snap = _cache.__getitem__.return_value
-        _selected_snap.stop.side_effect = [None, snap.SnapError]
-        _selected_snap.services.__getitem__.return_value.__getitem__.return_value = False
 
-        # Test a success scenario.
-        assert patroni.stop_patroni()
-        _cache.__getitem__.assert_called_once_with("charmed-postgresql")
-        _selected_snap.stop.assert_called_once_with(services=[PATRONI_SERVICE])
-        _selected_snap.services.__getitem__.return_value.__getitem__.assert_called_once_with(
-            "active"
-        )
-
-        # Test a fail scenario.
+def test_stop_patroni_handles_errors(substrate, patroni):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+    with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.snap.stop",
+            side_effect=snap.Error("failed"),
+        ) as stop,
+        patch("single_kernel_postgresql.managers.patroni.service_states") as query,
+    ):
         assert not patroni.stop_patroni()
+        query.assert_not_called()
+        stop.side_effect = None
+        query.side_effect = snap.ConnectionError("failed query")
+        assert not patroni.stop_patroni()
+        query.assert_called_once_with("charmed-postgresql")
 
 
 def test_switchover(patroni):
@@ -843,14 +852,18 @@ def test_patroni_logs(substrate, patroni):
         pytest.skip("VM only")
         return
 
-    with patch("single_kernel_postgresql.managers.patroni.snap.SnapCache") as _snap_cache:
-        # Test when the logs are returned successfully.
-        logs = _snap_cache.return_value.__getitem__.return_value.logs
-        logs.return_value = "fake-logs"
+    with patch(
+        "single_kernel_postgresql.managers.patroni.logs_by_identifier", return_value="fake-logs"
+    ) as logs:
         assert patroni.patroni_logs() == "fake-logs"
-
-        # Test the charm fails to get the logs.
-        logs.side_effect = snap.SnapError
+        assert patroni.patroni_logs("all") == "fake-logs"
+        assert patroni.patroni_logs(2) == "fake-logs"
+        assert logs.call_args_list == [
+            call("charmed-postgresql", "charmed-postgresql.patroni", limit=10),
+            call("charmed-postgresql", "charmed-postgresql.patroni", limit=None),
+            call("charmed-postgresql", "charmed-postgresql.patroni", limit=2),
+        ]
+        logs.side_effect = snap.Error("failed")
         assert patroni.patroni_logs() == ""
 
 
@@ -1426,11 +1439,13 @@ def test_cluster_status_mutations_invalidate_the_cache(patroni):
         assert patroni.get_primary() == "postgresql-0"
         assert _parallel.call_count == 1
 
-        with patch("single_kernel_postgresql.managers.patroni.snap.SnapCache") as _snap_cache:
-            _snap_cache.return_value.__getitem__.return_value.restart.return_value = None
-            _snap_cache.return_value.__getitem__.return_value.services = {
-                "patroni": {"active": True}
-            }
+        with (
+            patch("single_kernel_postgresql.managers.patroni.snap.restart"),
+            patch(
+                "single_kernel_postgresql.managers.patroni.service_states",
+                return_value={"patroni": True},
+            ),
+        ):
             assert patroni.restart_patroni() is True
 
         assert patroni.get_primary() == "postgresql-0"
