@@ -1,0 +1,5 @@
+summary: test_new_relations_1.py
+environment:
+  TEST_MODULE: charm/new_relations/test_new_relations_1.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing
