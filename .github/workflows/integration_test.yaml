@@ -5,8 +5,8 @@ on:
         description: |
           Prefix for the test charm package GitHub artifacts
 
-          Built in ci.yaml with scripts/build_charm.sh: one artifact per substrate
-          (`<prefix>-vm`, `<prefix>-k8s`)
+          Built in ci.yaml with scripts/build_charm.sh: one artifact per substrate and
+          architecture (`<prefix>-vm-amd64`, `<prefix>-vm-arm64`, `<prefix>-k8s-amd64`, ...)
         required: true
         type: string
 
@@ -51,10 +51,14 @@ jobs:
               substrate = backend.removeprefix("github-ci-")
               # Example: "test_upgrade.py"
               task = task.removeprefix("tests/spread/")
-              # Example: "test_upgrade.py:juju36 | vm"
-              name = f"{task}:{variant} | {substrate}"
+              if runner.endswith("-arm"):
+                  architecture = "arm64"
+              else:
+                  architecture = "amd64"
+              # Example: "test_upgrade.py:juju36 | vm | amd64"
+              name = f"{task}:{variant} | {substrate} | {architecture}"
               # ":" character not valid in GitHub Actions artifact
-              name_in_artifact = f"{task}-{variant}-{substrate}"
+              name_in_artifact = f"{task}-{variant}-{substrate}-{architecture}"
               jobs.append({
                   "spread_job": job,
                   "name": name,
@@ -127,7 +131,9 @@ jobs:
         timeout-minutes: 5
         uses: actions/download-artifact@v8
         with:
-          name: ${{ inputs.artifact-prefix }}-${{ matrix.job.substrate }}
+          # All architectures: test_wrong_arch.py deploys the charm of the other architecture
+          pattern: ${{ inputs.artifact-prefix }}-${{ matrix.job.substrate }}-*
+          merge-multiple: true
           # Where the `charm` fixture (tests/integration/charm/conftest.py) looks for it
           path: tests/charms/postgresql_${{ matrix.job.substrate }}_test_charm/
       - name: Run spread job

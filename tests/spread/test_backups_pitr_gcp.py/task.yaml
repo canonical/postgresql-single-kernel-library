@@ -1,0 +1,5 @@
+summary: test_backups_pitr_gcp.py
+environment:
+  TEST_MODULE: charm/test_backups_pitr_gcp.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing
