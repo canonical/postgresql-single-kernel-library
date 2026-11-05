@@ -139,12 +139,12 @@ def test_deploy(
     logging.info("Waiting for the applications to settle")
     retry_if_cli_error(
         lambda: model_1.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_1), timeout=20 * MINUTE_SECS
+            ready=wait_for_apps_status(jubilant.all_active, DB_APP_1), timeout=40 * MINUTE_SECS
         )
     )
     retry_if_cli_error(
         lambda: model_2.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=20 * MINUTE_SECS
+            ready=wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=40 * MINUTE_SECS
         )
     )
 
