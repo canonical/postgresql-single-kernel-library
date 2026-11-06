@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.8, <4.0"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -12,6 +12,45 @@ resolution-markers = [
 [options]
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P1D"
+
+[[package]]
+name = "allure-pytest"
+version = "2.16.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "allure-python-commons" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/12/e1/bf366fd5e97ac0d94584bbb5fdc0476741de8262ca401ac12b720451d7cf/allure_pytest-2.16.2.tar.gz", hash = "sha256:19912ee41c298e080ea4dbffaa3a2cbbc9ca93da14a664056192fc4609ec8eed", size = 17768, upload-time = "2026-09-29T14:06:31.457Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/57/29f41ee6f00e4d860f260b10d4672ffa781e97effe7d5c6c47fc1664c47b/allure_pytest-2.16.2-py3-none-any.whl", hash = "sha256:b16790e2f3749ffb2d3737ba443ba2eede8efba5226978847358fe2fd3e31303", size = 12496, upload-time = "2026-09-29T14:06:30.613Z" },
+]
+
+[[package]]
+name = "allure-pytest-default-results"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "allure-pytest" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d0/86/7efea63ea5a162329288cbe76c4618d35b3a6e3dc1877822f78e44da0f5a/allure_pytest_default_results-0.1.4.tar.gz", hash = "sha256:2eeaacf7836105724df549042e13b740b91013b2a53258ac456ea5fd82f3faa0", size = 2810, upload-time = "2026-04-06T14:23:11.483Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bd/fb/71234d046b1efebc40f103431ffddda0f8e8ea01adcd2219fc4f7c0b8130/allure_pytest_default_results-0.1.4-py3-none-any.whl", hash = "sha256:b9cfc442e6108552c2cc0c3d818f61f8d718bca219ec60041273aa4ae57f0c04", size = 3686, upload-time = "2026-04-06T14:23:10.184Z" },
+]
+
+[[package]]
+name = "allure-python-commons"
+version = "2.16.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "pluggy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/84/91/2da69e393261aa9486d5c41543df4013a199d27911e27ec8de9da95e62d6/allure_python_commons-2.16.2.tar.gz", hash = "sha256:2df87131ae5cbd941e656a56261000189862ebcb71e4c4435879ee2a7c07daa1", size = 15780, upload-time = "2026-09-29T14:06:22.96Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/9c/9fdf49dd9652ae7bfade74e811a961b8461797a3325a6ba35652f3206013/allure_python_commons-2.16.2-py3-none-any.whl", hash = "sha256:0445f2745dfa8af70da1d3261cde2c83d44e7278c105f113ed050b61252f79bd", size = 16932, upload-time = "2026-09-29T14:06:21.875Z" },
+]
 
 [[package]]
 name = "annotated-types"
@@ -1192,6 +1231,18 @@ wheels = [
 ]
 
 [[package]]
+name = "jubilant"
+version = "1.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1d/f1/f9d7581e6bea4ca89bb1c9aca3309629047f3bb0c49ddb0cabe33889d9fd/jubilant-1.14.0.tar.gz", hash = "sha256:d7fb046c716640ccd39c072dc1471de84cc54d78e331cc18d422ca7a5b72b378", size = 37181, upload-time = "2026-09-29T23:03:24.598Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/d4/6effc16acb9fff30603c46270ab58f48c812ba1f567025f22ab5eb96c91a/jubilant-1.14.0-py3-none-any.whl", hash = "sha256:2a631fb2363cdd26c0dea52659b5a8946e36f57fec922895521ab59bda6398e8", size = 39483, upload-time = "2026-09-29T23:03:23.102Z" },
+]
+
+[[package]]
 name = "lightkube"
 version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1592,6 +1643,13 @@ vm = [
 format = [
     { name = "ruff", marker = "python_full_version >= '3.12'" },
 ]
+integration = [
+    { name = "allure-pytest", marker = "python_full_version >= '3.12'" },
+    { name = "allure-pytest-default-results", marker = "python_full_version >= '3.12'" },
+    { name = "jubilant", marker = "python_full_version >= '3.12'" },
+    { name = "pytest", marker = "python_full_version >= '3.12'" },
+    { name = "tomli-w", marker = "python_full_version >= '3.12'" },
+]
 lint = [
     { name = "codespell", marker = "python_full_version >= '3.12'" },
     { name = "ty", marker = "python_full_version >= '3.12'" },
@@ -1600,11 +1658,6 @@ unit = [
     { name = "coverage", marker = "python_full_version >= '3.12'" },
     { name = "pytest", marker = "python_full_version >= '3.12'" },
 ]
-
-[package.group-requires-python]
-format = ">=3.12"
-lint = ">=3.12"
-unit = ">=3.12"
 
 [package.metadata]
 requires-dist = [
@@ -1638,6 +1691,13 @@ provides-extras = ["postgresql", "vm", "k8s", "db-driver"]
 
 [package.metadata.requires-dev]
 format = [{ name = "ruff", marker = "python_full_version >= '3.12'", specifier = "==0.17.0" }]
+integration = [
+    { name = "allure-pytest", marker = "python_full_version >= '3.12'", specifier = "==2.16.2" },
+    { name = "allure-pytest-default-results", marker = "python_full_version >= '3.12'", specifier = "==0.1.4" },
+    { name = "jubilant", marker = "python_full_version >= '3.12'", specifier = "==1.14.0" },
+    { name = "pytest", marker = "python_full_version >= '3.12'", specifier = "==9.1.1" },
+    { name = "tomli-w", marker = "python_full_version >= '3.12'", specifier = "==1.2.0" },
+]
 lint = [
     { name = "codespell", marker = "python_full_version >= '3.12'", specifier = "==2.4.3" },
     { name = "ty", marker = "python_full_version >= '3.12'", specifier = "==0.0.86" },
@@ -2323,6 +2383,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/12/64/da524626d3b9cc40c168a13da8335fe1c51be12c0a63685cc6db7308daae/tomli-2.4.1-cp314-cp314t-win_amd64.whl", hash = "sha256:2c1c351919aca02858f740c6d33adea0c5deea37f9ecca1cc1ef9e884a619d26", size = 121196, upload-time = "2026-03-25T20:22:01.169Z" },
     { url = "https://files.pythonhosted.org/packages/5a/cd/e80b62269fc78fc36c9af5a6b89c835baa8af28ff5ad28c7028d60860320/tomli-2.4.1-cp314-cp314t-win_arm64.whl", hash = "sha256:eab21f45c7f66c13f2a9e0e1535309cee140182a9cdae1e041d02e47291e8396", size = 100393, upload-time = "2026-03-25T20:22:02.137Z" },
     { url = "https://files.pythonhosted.org/packages/7b/61/cceae43728b7de99d9b847560c262873a1f6c98202171fd5ed62640b494b/tomli-2.4.1-py3-none-any.whl", hash = "sha256:0d85819802132122da43cb86656f8d1f8c6587d54ae7dcaf30e90533028b49fe", size = 14583, upload-time = "2026-03-25T20:22:03.012Z" },
+]
+
+[[package]]
+name = "tomli-w"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/75/241269d1da26b624c0d5e110e8149093c759b7a286138f4efd61a60e75fe/tomli_w-1.2.0.tar.gz", hash = "sha256:2dd14fac5a47c27be9cd4c976af5a12d87fb1f0b4512f81d69cce3b35ae25021", size = 7184, upload-time = "2025-01-15T12:07:24.262Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c7/18/c86eb8e0202e32dd3df50d43d7ff9854f8e0603945ff398974c1d91ac1ef/tomli_w-1.2.0-py3-none-any.whl", hash = "sha256:188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90", size = 6675, upload-time = "2025-01-15T12:07:22.074Z" },
 ]
 
 [[package]]

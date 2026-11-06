@@ -1,0 +1,111 @@
+project: postgresql-single-kernel-library
+
+# Integration tests of the VM and K8s test charms (tests/charms/), run on GitHub Actions.
+# Each task runs on both backends: github-ci-vm (lxd) and github-ci-k8s (Canonical K8s).
+# The test charms are built beforehand (scripts/build_charm.sh) and downloaded into
+# tests/charms/<charm>/ by .github/workflows/integration_test.yaml.
+backends:
+  github-ci-vm:
+    type: adhoc
+    # Only run on CI
+    manual: true
+    # HACK: spread requires runners to be accessible via SSH
+    # Configure local sshd & instruct spread to connect to the same machine spread is running on
+    # (spread cannot provision GitHub Actions runners, so we provision a GitHub Actions runner for
+    # each spread job & select a single job when running spread)
+    # Derived from https://github.com/jnsgruk/zinc-k8s-operator/blob/a21eae8399eb3b9df4ddb934b837af25ef831976/spread.yaml#L47
+    allocate: |
+      sudo tee /etc/ssh/sshd_config.d/10-spread-github-ci.conf << 'EOF'
+      PasswordAuthentication yes
+      EOF
+
+      echo "runner:$SPREAD_PASSWORD" | sudo chpasswd
+
+      # Remove the preinstalled lxd
+      sudo snap remove --purge --terminate lxd
+
+      ADDRESS localhost
+    # HACK: spread does not pass environment variables set on runner
+    # Manually pass specific environment variables
+    environment:
+      CI: '$(HOST: echo $CI)'
+      SUBSTRATE: vm
+    systems:
+      - ubuntu-24.04:
+          username: runner
+
+  github-ci-k8s:
+    type: adhoc
+    # Only run on CI
+    manual: true
+    # HACK: see github-ci-vm
+    allocate: |
+      sudo tee /etc/ssh/sshd_config.d/10-spread-github-ci.conf << 'EOF'
+      PasswordAuthentication yes
+      PermitEmptyPasswords yes
+      EOF
+
+      sudo passwd -d runner
+
+      ADDRESS localhost
+
+      # Store PVs on /mnt, which has more free space than the root disk on GitHub runners
+      # (path checked against Canonical K8s local-storage config in prepare-each)
+      sudo mkdir -p /var/snap/k8s/common/rawfile-storage
+      sudo mount --bind /mnt /var/snap/k8s/common/rawfile-storage
+    environment:
+      CI: '$(HOST: echo $CI)'
+      SUBSTRATE: k8s
+    systems:
+      - ubuntu-24.04:
+          username: runner
+
+suites:
+  tests/spread/:
+    summary: Spread tests
+
+path: /root/spread_project
+
+kill-timeout: 3h
+environment:
+  PATH: $PATH:$(pipx environment --value PIPX_BIN_DIR)
+  CONCIERGE_JUJU_CHANNEL/juju36: 3.6/stable
+prepare: |
+  snap refresh --hold
+  chown -R root:root "$SPREAD_PATH"
+  cd "$SPREAD_PATH"
+  snap install --classic concierge
+
+  concierge prepare -c "tests/spread/concierge-$SUBSTRATE.yaml" --trace
+
+  pipx install tox
+  snap install --classic astral-uv
+prepare-each: |
+  cd "$SPREAD_PATH"
+  # `concierge prepare` needs to be run for each spread job in case Juju version changed
+  concierge prepare -c "tests/spread/concierge-$SUBSTRATE.yaml" --trace
+
+  if [ "$SUBSTRATE" = k8s ]; then
+      # k8s status --wait-ready returns as soon as 1 node is ready
+      # (see https://github.com/canonical/k8s-snap/issues/1789)
+      # but Cilium, CoreDNS, and storage may still be initialising
+      for res in deployment/cilium-operator deployment/coredns deployment/metrics-server daemonset/cilium daemonset/ck-storage-rawfile-csi-node statefulset/ck-storage-rawfile-csi-controller; do
+          if k8s kubectl -n kube-system get "$res" >/dev/null 2>&1; then
+              k8s kubectl -n kube-system rollout status "$res" --timeout=5m
+          else
+              echo "Skipping rollout status for missing $res"
+          fi
+      done
+
+      # github-ci-k8s backend bind-mounts /mnt to this path; fail loudly if Canonical K8s stores
+      # PVs elsewhere
+      if [ "$(k8s get local-storage.local-path)" != "/var/snap/k8s/common/rawfile-storage" ]; then
+          echo "Unexpected local-storage path, update /mnt bind mount in spread.yaml"
+          exit 1
+      fi
+  fi
+
+  # Unable to set constraint on all models because of Juju bug:
+  # https://bugs.launchpad.net/juju/+bug/2065050
+  juju set-model-constraints arch="$(dpkg --print-architecture)"
+# Only restore on lxd backend—no need to restore on CI
