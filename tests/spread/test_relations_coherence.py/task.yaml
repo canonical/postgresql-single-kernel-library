@@ -1,0 +1,5 @@
+summary: test_relations_coherence.py
+environment:
+  TEST_MODULE: charm/new_relations/test_relations_coherence.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing

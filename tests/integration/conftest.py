@@ -19,27 +19,12 @@ ABORTED_BY = pytest.StashKey[str]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
+    # --controller, --model and --keep-models come from pytest-operator.
     parser.addoption(
         "--substrate",
         choices=[substrate.value for substrate in Substrate],
         required=True,
         help="Substrate to run the integration tests on.",
-    )
-    parser.addoption(
-        "--controller",
-        default=None,
-        help="Juju controller to use (defaults to the current one).",
-    )
-    parser.addoption(
-        "--model",
-        default=None,
-        help="Use this existing Juju model instead of creating a temporary one.",
-    )
-    parser.addoption(
-        "--keep-models",
-        action="store_true",
-        default=False,
-        help="Keep the temporary models after the tests finish.",
     )
 
 
