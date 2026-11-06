@@ -12,7 +12,7 @@ from jubilant import Juju
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import get_password, get_primary
-from tests.integration.helpers.juju import get_unit_address, wait_for_apps_status
+from tests.integration.helpers.juju import get_unit_address
 from tests.integration.helpers.postgresql import db_connect
 from tests.integration.types import Substrate
 
@@ -95,10 +95,15 @@ PG_CRON_EXTENSION_STATEMENT = "SELECT * FROM cron.job;"
 
 
 def _wait_for_active(juju: Juju, app_name: str, timeout: float = 10 * 60) -> None:
+    # Mirror pytest-operator's wait_for_idle (15 s idle period): right after
+    # `juju config` the units are still active/idle before config-changed starts.
     juju.wait(
-        wait_for_apps_status(jubilant.all_active, app_name),
+        lambda status: (
+            jubilant.all_active(status, app_name) and jubilant.all_agents_idle(status, app_name)
+        ),
         error=jubilant.any_error,
         timeout=timeout,
+        successes=15,
     )
 
 
