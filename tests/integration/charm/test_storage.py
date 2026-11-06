@@ -75,6 +75,7 @@ def test_filling_and_emptying_pgdata_storage(
                 for unit in status.get_units(app_name).values()
             ),
             timeout=500,
+            successes=1,
         )
 
     # Delete big file to release storage space
