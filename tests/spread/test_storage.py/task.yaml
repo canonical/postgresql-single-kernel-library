@@ -1,0 +1,5 @@
+summary: test_storage.py
+environment:
+  TEST_MODULE: charm/test_storage.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing

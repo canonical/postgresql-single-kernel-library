@@ -33,6 +33,8 @@ backends:
     systems:
       - ubuntu-24.04:
           username: runner
+      - ubuntu-24.04-arm:
+          username: runner
 
   github-ci-k8s:
     type: adhoc
@@ -58,6 +60,8 @@ backends:
       SUBSTRATE: k8s
     systems:
       - ubuntu-24.04:
+          username: runner
+      - ubuntu-24.04-arm:
           username: runner
 
 suites:

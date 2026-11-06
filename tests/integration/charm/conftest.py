@@ -10,7 +10,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.integration.charm.backup_helpers import AWS, GCP, cleanup_cloud, get_cloud_config
+from tests.integration.charm.backup_helpers import (
+    AWS,
+    GCP,
+    cleanup_cloud,
+    get_cloud_config,
+    setup_microceph,
+)
 from tests.integration.charm.helpers import RoleAttributeValue
 from tests.integration.types import Substrate
 
@@ -78,6 +84,28 @@ def gcp_cloud_configs() -> Generator[tuple[dict[str, str], dict[str, str]]]:
     yield config, credentials
 
     cleanup_cloud(config, credentials)
+
+
+@pytest.fixture(scope="session")
+def ceph_cloud_configs() -> tuple[dict[str, str], dict[str, str]]:
+    """S3 integrator config and credentials of a microceph installed on the host (CI only)."""
+    if os.environ.get("CI") != "true":
+        pytest.skip("Not running on CI. Skipping microceph installation")
+
+    microceph = setup_microceph()
+    config = {
+        "endpoint": f"https://{microceph.host}",
+        "bucket": microceph.bucket,
+        "path": "/pg",
+        "region": "",
+        "s3-uri-style": "path",
+        "tls-ca-chain": microceph.cert,
+    }
+    credentials = {
+        "access-key": microceph.access_key_id,
+        "secret-key": microceph.secret_access_key,
+    }
+    return config, credentials
 
 
 @pytest.fixture(scope="module")
