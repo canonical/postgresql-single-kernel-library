@@ -8,7 +8,7 @@ import jubilant
 import pytest
 from jubilant import Juju
 from single_kernel_postgresql.config import literals
-from tenacity import Retrying, stop_after_delay, wait_exponential, wait_fixed
+from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_exponential, wait_fixed
 
 from tests.integration.charm.helpers import (
     change_patroni_setting,
@@ -201,7 +201,13 @@ def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrate) -> None:
             run_command_on_unit(juju, primary, "/charm/bin/pebble stop postgresql", substrate)
 
         # Check that the primary changed.
-        assert primary_changed(juju, primary), "primary not changed"
+        for attempt in Retrying(
+            stop=stop_after_attempt(10),
+            wait=wait_exponential(multiplier=1, min=2, max=30),
+            reraise=True,
+        ):
+            with attempt:
+                assert primary_changed(juju, primary), "primary not changed"
         if substrate == Substrate.vm:
             change_primary_start_timeout(juju, primary, 300, patroni_password)
 
