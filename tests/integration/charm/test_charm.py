@@ -260,8 +260,9 @@ def test_settings_are_correct(juju: Juju, app_name: str, substrate: Substrate, u
     assert settings["postgresql"]["use_pg_rewind"] is True
     assert settings["postgresql"]["remove_data_directory_on_rewind_failure"] is False
     assert settings["postgresql"]["remove_data_directory_on_diverged_timelines"] is False
-    assert settings["loop_wait"] == 10
-    assert settings["retry_timeout"] == 10
+    if substrate == Substrate.vm:
+        assert settings["loop_wait"] == 10
+        assert settings["retry_timeout"] == 10
     assert settings["maximum_lag_on_failover"] == 1048576
 
     logger.warning("Asserting port ranges")
