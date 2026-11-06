@@ -55,10 +55,10 @@ class RoleAttributeValue(Enum):
     ALL_DATABASES = 3
 
 
-def get_password(juju: jubilant.Juju, app_name: str, user: str = "operator") -> str:
+def get_password(juju: jubilant.Juju, app_name: str, user: str = "operator") -> str | None:
     """Return the password of a PostgreSQL system user from the charm's app secret."""
     secret = get_secret_by_label(juju, f"{PEER_RELATION}.{app_name}.app")
-    return secret[f"{user}-password"]
+    return secret.get(f"{user}-password")
 
 
 def set_password(
