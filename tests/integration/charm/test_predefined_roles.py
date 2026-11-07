@@ -8,6 +8,7 @@ import jubilant
 import psycopg2
 import pytest
 from psycopg2.sql import SQL, Identifier
+from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
     DATA_INTEGRATOR_APP_NAME,
@@ -299,7 +300,18 @@ def test_operations(  # noqa: C901
                     with connection.cursor() as cursor:
                         cursor.execute("SELECT current_user;")
                         previous_current_user = cursor.fetchone()[0]
+                        # RESET ROLE goes back to the connection-time role, which is the
+                        # database owner in the database the relation user administers.
                         cursor.execute("RESET ROLE;")
+                        check_connected_user(
+                            cursor,
+                            user,
+                            database_owner_user
+                            if auto_escalate_to_database_owner != RoleAttributeValue.NO
+                            and database_to_test == database
+                            else user,
+                        )
+                        cursor.execute("SET ROLE NONE;")
                         check_connected_user(cursor, user, user)
                     if (
                         escalate_to_database_owner_permission == RoleAttributeValue.ALL_DATABASES
@@ -676,7 +688,7 @@ def test_operations(  # noqa: C901
                     ):
                         logger.info(f"{message_prefix} can call the set_user function")
                         with connection.cursor() as cursor:
-                            cursor.execute("RESET ROLE;")
+                            cursor.execute("SET ROLE NONE;")
                             cursor.execute("SELECT set_user('rewind'::TEXT);")
                             check_connected_user(cursor, user, "rewind")
                             cursor.execute("SELECT reset_user();")
@@ -691,13 +703,13 @@ def test_operations(  # noqa: C901
                             pytest.raises(psycopg2.errors.InsufficientPrivilege),
                             connection.cursor() as cursor,
                         ):
-                            cursor.execute("RESET ROLE;")
+                            cursor.execute("SET ROLE NONE;")
                             cursor.execute("SELECT set_user('rewind'::TEXT);")
                         with (
                             pytest.raises(psycopg2.errors.InsufficientPrivilege),
                             connection.cursor() as cursor,
                         ):
-                            cursor.execute("RESET ROLE;")
+                            cursor.execute("SET ROLE NONE;")
                             cursor.execute("SELECT set_user_u('operator'::TEXT);")
 
                     # Do the following operations only once.
@@ -792,3 +804,61 @@ def test_operations(  # noqa: C901
                     operator_cursor.close()
                 if operator_connection is not None:
                     operator_connection.close()
+
+
+def test_database_owner_role_in_replica(juju: jubilant.Juju, app_name: str) -> None:
+    """Check that the relation user is the database owner in a replica, also once it's promoted.
+
+    The login_hook extension doesn't call the login hook while recovery is in progress, so in
+    a replica the role comes from the default role of the relation user in its database.
+    """
+    if len(juju.status().get_units(app_name)) < 2:
+        logger.info("Adding a replica")
+        juju.add_unit(app_name)
+    juju.wait(
+        lambda status: jubilant.all_active(status) and jubilant.all_agents_idle(status),
+        timeout=TIMEOUT,
+    )
+
+    primary = get_primary(juju, f"{app_name}/0")
+    replica = next(unit for unit in juju.status().get_units(app_name) if unit != primary)
+    credentials = get_credentials(juju, f"{DATA_INTEGRATOR_APP_NAME}/0")[RELATION_ENDPOINT]
+    user = credentials["username"]
+    database = credentials["database"]
+    database_owner_user = f"charmed_{database}_owner"
+    table = Identifier(f"test_table_{user}_replica")
+
+    connection = None
+    try:
+        for attempt in Retrying(stop=stop_after_delay(3 * 60), wait=wait_fixed(10), reraise=True):
+            with attempt:
+                connection = db_connect(
+                    get_unit_address(juju, replica),
+                    credentials["password"],
+                    user=user,
+                    database=database,
+                )
+        connection.autocommit = True
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_is_in_recovery();")
+            assert cursor.fetchone()[0], f"{replica} should be a replica"
+            logger.info(f"Checking that {user} user is {database_owner_user} in the replica")
+            check_connected_user(cursor, user, database_owner_user, primary=False)
+
+        logger.info(f"Promoting {replica} while {user} user is connected to it")
+        juju.run(replica, "promote-to-primary", {"scope": "unit"})
+        for attempt in Retrying(stop=stop_after_delay(3 * 60), wait=wait_fixed(5), reraise=True):
+            with attempt, connection.cursor() as cursor:
+                cursor.execute("SELECT pg_is_in_recovery();")
+                assert not cursor.fetchone()[0], f"{replica} should be the primary"
+
+        logger.info(f"Checking that {user} user can create objects in the same connection")
+        with connection.cursor() as cursor:
+            check_connected_user(cursor, user, database_owner_user)
+            cursor.execute(SQL("CREATE TABLE public.{}(value TEXT);").format(table))
+            cursor.execute(SQL("DROP TABLE public.{};").format(table))
+    finally:
+        if connection is not None:
+            connection.close()
+
+    juju.wait(lambda status: jubilant.all_active(status), timeout=TIMEOUT)
