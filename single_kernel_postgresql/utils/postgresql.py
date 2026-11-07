@@ -885,7 +885,13 @@ class PostgreSQL(PostgreSQLBase):
                 connection.close()
 
     def set_up_login_hook_function(self) -> None:
-        """Create a login hook function to set the user for the current session."""
+        """Create a login hook function to set the user for the current session.
+
+        The login_hook extension does not call this function while recovery is in
+        progress, so on replicas it never runs; the per-database owner default set in
+        ``_adjust_user_roles`` (``ALTER ROLE ... IN DATABASE ... SET role``) covers the
+        relation users there.
+        """
         function_creation_statement = f"""CREATE OR REPLACE FUNCTION login_hook.login() RETURNS VOID AS $$
 DECLARE
 	ex_state TEXT;
@@ -1702,6 +1708,11 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
         try:
             for database in databases:
                 with self._connect_to_database() as connection, connection.cursor() as cursor:
+                    cursor.execute(
+                        SQL("ALTER ROLE {} IN DATABASE {} RESET role;").format(
+                            Identifier(user), Identifier(database)
+                        )
+                    )
                     cursor.execute(
                         SQL("REVOKE CONNECT ON DATABASE {} FROM {};").format(
                             Identifier(database), Identifier(user)
