@@ -226,6 +226,7 @@ def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrate) -> None:
             wait_for_apps_status(jubilant.all_active, app_name),
             error=jubilant.any_error,
             timeout=10 * 60,
+            successes=15,
         )
 
 
