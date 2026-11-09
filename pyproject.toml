@@ -17,13 +17,13 @@ classifiers = [
 ]
 requires-python = ">=3.8,<4.0"
 dependencies = [
-    "cryptography>=42.0.0",
     "ops>=2.0.0",
     "tenacity>=9.0.0",
 ]
 
 [project.optional-dependencies]
 postgresql = [
+    "cryptography>=42.0.0; python_version >= '3.12'",
     "httpx; python_version >= '3.12'",
     "data-platform-helpers>=0.1.7; python_version >= '3.12'",
     "charmlibs-pathops>=1.0.1; python_version >= '3.12'",
