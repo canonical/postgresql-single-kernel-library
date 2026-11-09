@@ -120,6 +120,7 @@ def _base_context() -> dict:
         "user_databases_map": {},
         "is_creating_backup": False,
         "is_no_sync_member": False,
+        "max_connections": 100,
     }
 
 
