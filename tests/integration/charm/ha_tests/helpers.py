@@ -1232,7 +1232,7 @@ def change_pvc_pv_name(
     """Change PersistentVolume name config value for PersistentVolumeClaim."""
     pvc_config.spec.volumeName = pv_name_new
     del pvc_config.metadata.annotations["pv.kubernetes.io/bind-completed"]
-    del pvc_config.metadata.uid
+    pvc_config.metadata.uid = None
     return pvc_config
 
 
