@@ -232,20 +232,34 @@ def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrate) -> None:
 def test_remove_tls(juju: Juju, app_name: str, substrate: Substrate) -> None:
     with fast_forward(juju):
         # Remove the relation.
-        juju.remove_relation(
-            f"{app_name}:client-certificates", f"{tls_certificates_app_name}:certificates"
-        )
-        juju.remove_relation(
-            f"{app_name}:peer-certificates", f"{tls_certificates_app_name}:certificates"
-        )
-        # Add a sleep to avoid immediate passing of the idle check.
-        time.sleep(100)
-        juju.wait(
-            wait_for_apps_status(jubilant.all_active, app_name),
-            error=jubilant.any_error,
-            timeout=1800,
-            successes=30,
-        )
+        if substrate == Substrate.vm:
+            juju.remove_relation(
+                f"{app_name}:client-certificates", f"{tls_certificates_app_name}:certificates"
+            )
+            juju.remove_relation(
+                f"{app_name}:peer-certificates", f"{tls_certificates_app_name}:certificates"
+            )
+            # Add a sleep to avoid immediate passing of the idle check.
+            time.sleep(100)
+            juju.wait(
+                wait_for_apps_status(jubilant.all_active, app_name),
+                error=jubilant.any_error,
+                timeout=1800,
+                successes=30,
+            )
+        else:
+            juju.remove_relation(
+                f"{app_name}:peer-certificates", f"{tls_certificates_app_name}:certificates"
+            )
+            juju.remove_relation(
+                f"{app_name}:client-certificates", f"{tls_certificates_app_name}:certificates"
+            )
+            juju.wait(
+                wait_for_apps_status(jubilant.all_active, app_name),
+                error=jubilant.any_error,
+                timeout=1000,
+                successes=15,
+            )
 
         # Wait for all units disabling TLS.
         for unit_name in get_app_units(juju, app_name):

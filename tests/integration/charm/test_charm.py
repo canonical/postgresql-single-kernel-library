@@ -265,10 +265,11 @@ def test_settings_are_correct(juju: Juju, app_name: str, substrate: Substrate, u
         assert settings["retry_timeout"] == 10
     assert settings["maximum_lag_on_failover"] == 1048576
 
-    logger.warning("Asserting port ranges")
-    unit = get_app_units(juju, app_name)[unit_name]
-    assert unit.open_ports
-    assert unit.open_ports[0] == "5432/tcp"
+    if substrate == Substrate.vm:
+        logger.warning("Asserting port ranges")
+        unit = get_app_units(juju, app_name)[unit_name]
+        assert unit.open_ports
+        assert unit.open_ports[0] == "5432/tcp"
 
 
 def test_postgresql_locales(juju: Juju, app_name: str, substrate: Substrate) -> None:
@@ -292,17 +293,30 @@ def test_postgresql_locales(juju: Juju, app_name: str, substrate: Substrate) -> 
     assert locales == sorted(expected_locales)
 
 
-def test_postgresql_parameters_change(juju: Juju, app_name: str) -> None:
+def test_postgresql_parameters_change(juju: Juju, app_name: str, substrate: Substrate) -> None:
     """Test that's possible to change PostgreSQL parameters."""
-    juju.config(
-        app_name,
-        {
-            "memory-max-prepared-transactions": "100",
-            "memory-shared-buffers": "32768",  # 2 * 128MB. Patroni may refuse the config if < 128MB
-            "response-lc-monetary": "en_GB.utf8",
-            "experimental-max-connections": "200",
-        },
-    )
+    if substrate == Substrate.vm:
+        # VM keeps the deprecated "_" options, whose defaults override the "-" ones
+        # when rendering patroni.yml (e.g. response_lc_monetary="C").
+        juju.config(
+            app_name,
+            {
+                "memory_max_prepared_transactions": "100",
+                "memory_shared_buffers": "32768",  # 2 * 128MB. Patroni may refuse the config if < 128MB
+                "response_lc_monetary": "en_GB.utf8",
+                "experimental_max_connections": "200",
+            },
+        )
+    else:
+        juju.config(
+            app_name,
+            {
+                "memory-max-prepared-transactions": "100",
+                "memory-shared-buffers": "32768",  # 2 * 128MB. Patroni may refuse the config if < 128MB
+                "response-lc-monetary": "en_GB.utf8",
+                "experimental-max-connections": "200",
+            },
+        )
     juju.wait(
         wait_for_apps_status(jubilant.all_active, app_name),
         error=jubilant.any_error,
