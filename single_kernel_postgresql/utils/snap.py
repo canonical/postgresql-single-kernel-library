@@ -51,6 +51,8 @@ def service_states(snap_name: str) -> dict[str, bool]:  # noqa: C901
         body = response.json()
         if body["type"] == "error":
             result = body["result"]
+            if not isinstance(result, dict):
+                raise ValueError("Expected an error object")
             error = (
                 snap.NotInstalledError if result.get("kind") == "snap-not-found" else snap.APIError
             )
@@ -74,7 +76,7 @@ def service_states(snap_name: str) -> dict[str, bool]:  # noqa: C901
                 raise ValueError("Invalid service name or active state")
             states[name] = active
         return states
-    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+    except (ValueError, KeyError, TypeError) as exc:
         raise snap.BadResponseError(
             "Invalid snapd service response", response=response.text
         ) from exc

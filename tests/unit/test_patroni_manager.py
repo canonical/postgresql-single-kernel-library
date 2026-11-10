@@ -373,11 +373,19 @@ def test_stop_patroni(substrate, patroni, states, expected):
     if substrate == Substrates.K8S:
         pytest.skip("VM only")
     with (
+        patch(
+            "single_kernel_postgresql.managers.patroni.charm_refresh.snap_name",
+            return_value="custom-postgresql",
+        ) as snap_name,
         patch("single_kernel_postgresql.managers.patroni.snap.stop") as stop,
-        patch("single_kernel_postgresql.managers.patroni.service_states", return_value=states),
+        patch(
+            "single_kernel_postgresql.managers.patroni.service_states", return_value=states
+        ) as query,
     ):
         assert patroni.stop_patroni() is expected
-        stop.assert_called_once_with("charmed-postgresql", services=[PATRONI_SERVICE])
+        stop.assert_called_once_with("custom-postgresql", services=[PATRONI_SERVICE])
+        query.assert_called_once_with("custom-postgresql")
+        snap_name.assert_called_once_with()
 
 
 def test_stop_patroni_handles_errors(substrate, patroni):

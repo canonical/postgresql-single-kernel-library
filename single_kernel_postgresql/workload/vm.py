@@ -184,9 +184,10 @@ class VMWorkload(BaseWorkload):
             ensure_snap_oom_protection(charm_refresh.snap_name())
             try:
                 snap.list_one(charm_refresh.snap_name())
-                present = True
             except snap.NotInstalledError:
                 present = False
+            else:
+                present = True
             if not present or refresh is not None:
                 snap.ensure_installed(charm_refresh.snap_name(), revision=revision)
                 if refresh is not None:

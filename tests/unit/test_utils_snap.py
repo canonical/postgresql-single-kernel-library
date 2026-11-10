@@ -79,12 +79,18 @@ def test_service_states_api_errors(snapd, kind, status, error):
         snap_utils.service_states("charmed-postgresql")
 
 
-@pytest.mark.parametrize("result", [None, [None], [{}], [{"name": "patroni", "active": "false"}]])
-def test_service_states_malformed_response_is_not_absence(snapd, result):
-    with (
-        snapd({"type": "sync", "status-code": 200, "result": result}),
-        pytest.raises(snap.BadResponseError),
-    ):
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"type": "sync", "result": None},
+        {"type": "sync", "result": [None]},
+        {"type": "sync", "result": [{}]},
+        {"type": "sync", "result": [{"name": "patroni", "active": "false"}]},
+        {"type": "error", "result": []},
+    ],
+)
+def test_service_states_malformed_response_is_not_absence(snapd, body):
+    with snapd(body), pytest.raises(snap.BadResponseError):
         snap_utils.service_states("charmed-postgresql")
 
 

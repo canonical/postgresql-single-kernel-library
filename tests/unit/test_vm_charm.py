@@ -625,7 +625,7 @@ def test_metrics_password_uses_scalar_read(charm):
         patch.object(charm.state, "get_secret", return_value="current"),
         patch.object(charm, "_setup_exporter") as setup,
     ):
-        charm._restart_metrics_service()
+        charm._restart_metrics_service(snap_name="charmed-postgresql")
     get_one.assert_called_once_with("charmed-postgresql", "exporter.password")
     setup.assert_not_called()
 

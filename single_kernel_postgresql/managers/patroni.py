@@ -24,6 +24,7 @@ with suppress(ImportError):
     from charmlibs.systemd import daemon_reload
 
     from single_kernel_postgresql.utils.snap import logs_by_identifier, service_states
+import charm_refresh
 import psycopg2
 import psycopg2.extras
 import requests
@@ -636,9 +637,10 @@ class PatroniManager(BaseManager):
         """
         try:
             logger.debug("Stopping Patroni...")
-            snap.stop("charmed-postgresql", services=["patroni"])
+            snap_name = charm_refresh.snap_name()
+            snap.stop(snap_name, services=["patroni"])
             self._invalidate_cluster_status_cache()
-            return service_states("charmed-postgresql").get("patroni") is False
+            return service_states(snap_name).get("patroni") is False
         except snap.Error as e:
             error_message = "Failed to stop patroni snap service"
             logger.exception(error_message, exc_info=e)
