@@ -241,69 +241,78 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
 
     def restart_services(self) -> None:
         """Restart the monitoring and LDAP sync snap services if needed (port)."""
-        self._restart_metrics_service()
-        self._restart_ldap_sync_service()
+        snap_name = charm_refresh.snap_name()
+        self._restart_metrics_service(snap_name=snap_name)
+        self._restart_ldap_sync_service(snap_name=snap_name)
 
-    def _restart_metrics_service(self) -> None:
+    def _restart_metrics_service(self, snap_name: str | None = None) -> None:
         """Restart the monitoring service if the password was rotated (port)."""
         try:
-            snap_password = snap.get_one(charm_refresh.snap_name(), "exporter.password")
+            if snap_name is None:
+                snap_name = charm_refresh.snap_name()
+            snap_password = snap.get_one(snap_name, "exporter.password")
         except snap.Error:
             logger.warning("Early exit: Trying to reset metrics service with no configuration set")
             return None
 
         if snap_password != self.state.get_secret(APP_SCOPE, MONITORING_PASSWORD_KEY):
-            self._setup_exporter()
+            self._setup_exporter(snap_name=snap_name)
 
-    def _restart_ldap_sync_service(self) -> None:
+    def _restart_ldap_sync_service(self, snap_name: str | None = None) -> None:
         """Restart the LDAP sync service in case any configuration changed (port)."""
         if not self.patroni_manager.member_started:
             logger.debug("Restart LDAP sync early exit: Patroni has not started yet")
             return
 
-        sync_service = service_states(charm_refresh.snap_name())["ldap-sync"]
+        if snap_name is None:
+            snap_name = charm_refresh.snap_name()
+        sync_service = service_states(snap_name)["ldap-sync"]
 
         if not self.is_primary and sync_service:
             logger.debug("Stopping LDAP sync service. It must only run in the primary")
-            snap.stop(charm_refresh.snap_name(), services=["ldap-sync"])
+            snap.stop(snap_name, services=["ldap-sync"])
 
         if self.is_primary and not self.is_ldap_enabled:
             logger.debug("Stopping LDAP sync service")
-            snap.stop(charm_refresh.snap_name(), services=["ldap-sync"])
+            snap.stop(snap_name, services=["ldap-sync"])
             return
 
         if self.is_primary and self.is_ldap_enabled:
-            self._setup_ldap_sync()
+            self._setup_ldap_sync(snap_name=snap_name)
 
-    def _setup_exporter(self) -> None:
+    def _setup_exporter(self, snap_name: str | None = None) -> None:
         """Set up postgresql_exporter options (port)."""
         config = {
             "exporter.user": "monitoring",
             "exporter.password": self.state.get_secret(APP_SCOPE, MONITORING_PASSWORD_KEY),
         }
-        snap.set(charm_refresh.snap_name(), {key: str(value) for key, value in config.items()})
+        if snap_name is None:
+            snap_name = charm_refresh.snap_name()
+        snap.set(snap_name, {key: str(value) for key, value in config.items()})
 
-        if service_states(charm_refresh.snap_name())[VM_METRICS_SERVICE_NAME] is False:
-            snap.start(charm_refresh.snap_name(), services=[VM_METRICS_SERVICE_NAME], enable=True)
+        if service_states(snap_name)[VM_METRICS_SERVICE_NAME] is False:
+            snap.start(snap_name, services=[VM_METRICS_SERVICE_NAME], enable=True)
         else:
-            snap.restart(charm_refresh.snap_name(), services=[VM_METRICS_SERVICE_NAME])
+            snap.restart(snap_name, services=[VM_METRICS_SERVICE_NAME])
 
         self.state.peer.data.update({"exporter-started": "True"})
 
-    def _setup_pgbackrest_exporter(self) -> None:
+    def _setup_pgbackrest_exporter(self, snap_name: str | None = None) -> None:
         """Set up pgbackrest_exporter (port)."""
-        if service_states(charm_refresh.snap_name())[VM_PGBACKREST_METRICS_SERVICE_NAME] is False:
+        if snap_name is None:
+            snap_name = charm_refresh.snap_name()
+        if service_states(snap_name)[VM_PGBACKREST_METRICS_SERVICE_NAME] is False:
             snap.start(
-                charm_refresh.snap_name(),
+                snap_name,
                 services=[VM_PGBACKREST_METRICS_SERVICE_NAME],
                 enable=True,
             )
         else:
-            snap.restart(charm_refresh.snap_name(), services=[VM_PGBACKREST_METRICS_SERVICE_NAME])
+            snap.restart(snap_name, services=[VM_PGBACKREST_METRICS_SERVICE_NAME])
 
         self.state.peer.data.update({"pgbackrest-exporter-started": "True"})
 
-    def _setup_ldap_sync(self) -> None:
+    def _setup_ldap_sync(self, snap_name: str | None = None) -> None:
         """Set up postgresql_ldap_sync options (port)."""
         ldap_params = self.ldap.get_ldap_parameters()
         ldap_url = urlparse(ldap_params["ldapurl"])
@@ -325,10 +334,12 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
             "ldap-sync.postgres_username": USER,
             "ldap-sync.postgres_password": self._get_password,
         }
-        snap.set(charm_refresh.snap_name(), {key: str(value) for key, value in config.items()})
+        if snap_name is None:
+            snap_name = charm_refresh.snap_name()
+        snap.set(snap_name, {key: str(value) for key, value in config.items()})
 
         logger.debug("Starting LDAP sync service")
-        snap.restart(charm_refresh.snap_name(), services=["ldap-sync"])
+        snap.restart(snap_name, services=["ldap-sync"])
 
     def set_unit_status(
         self,
@@ -448,9 +459,10 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
 
     def post_refresh_side_effects(self) -> None:
         """Post-refresh workload side effects (port): exporters, pgbackrest, watcher."""
-        self._setup_exporter()
+        snap_name = charm_refresh.snap_name()
+        self._setup_exporter(snap_name=snap_name)
         self.backup_manager.start_stop_pgbackrest_service()
-        self._setup_pgbackrest_exporter()
+        self._setup_pgbackrest_exporter(snap_name=snap_name)
         self.watcher_handler.update_unit_address()
 
     def has_async_replication_relation(self) -> bool:
