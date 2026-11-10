@@ -29,6 +29,10 @@ backends:
     # Manually pass specific environment variables
     environment:
       CI: '$(HOST: echo $CI)'
+      AWS_ACCESS_KEY: '$(HOST: echo $AWS_ACCESS_KEY)'
+      AWS_SECRET_KEY: '$(HOST: echo $AWS_SECRET_KEY)'
+      GCP_ACCESS_KEY: '$(HOST: echo $GCP_ACCESS_KEY)'
+      GCP_SECRET_KEY: '$(HOST: echo $GCP_SECRET_KEY)'
       SUBSTRATE: vm
     systems:
       - ubuntu-24.04:
@@ -55,6 +59,10 @@ backends:
       sudo mount --bind /mnt /var/snap/k8s/common/rawfile-storage
     environment:
       CI: '$(HOST: echo $CI)'
+      AWS_ACCESS_KEY: '$(HOST: echo $AWS_ACCESS_KEY)'
+      AWS_SECRET_KEY: '$(HOST: echo $AWS_SECRET_KEY)'
+      GCP_ACCESS_KEY: '$(HOST: echo $GCP_ACCESS_KEY)'
+      GCP_SECRET_KEY: '$(HOST: echo $GCP_SECRET_KEY)'
       SUBSTRATE: k8s
     systems:
       - ubuntu-24.04:
