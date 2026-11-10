@@ -1,0 +1,5 @@
+summary: test_upgrade_from_stable.py
+environment:
+  TEST_MODULE: charm/high_availability/test_upgrade_from_stable.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing
