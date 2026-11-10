@@ -331,6 +331,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             self.raft_manager,
             self.backup_manager,
             self.restore_manager,
+            self.observer_manager,
         )
 
         # Rolling-restart manager (the rolling_ops charm lib is vendored in the
