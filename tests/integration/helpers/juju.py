@@ -7,6 +7,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 import jubilant
+from single_kernel_postgresql.config.literals import PEER_RELATION
 from tenacity import (
     Retrying,
     retry_if_exception_type,
@@ -14,9 +15,6 @@ from tenacity import (
     stop_after_delay,
     wait_fixed,
 )
-
-from single_kernel_postgresql.config.literals import PEER_RELATION
-
 
 type StatusFn = Callable[[jubilant.Status], bool]
 
@@ -52,6 +50,7 @@ def get_app_leader(juju: jubilant.Juju, app_name: str) -> str:
         if unit.leader:
             return name
     raise AssertionError(f"No leader unit found for {app_name}")
+
 
 def get_user_password(juju: jubilant.Juju, app_name: str, user: str) -> str | None:
     """Get a system user's password."""
