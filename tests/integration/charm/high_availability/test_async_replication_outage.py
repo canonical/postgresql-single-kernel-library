@@ -31,6 +31,8 @@ DB_APP_2 = "db2"
 
 MINUTE_SECS = 60
 
+pytestmark = pytest.mark.vm_only
+
 logging.getLogger("jubilant.wait").setLevel(logging.WARNING)
 
 

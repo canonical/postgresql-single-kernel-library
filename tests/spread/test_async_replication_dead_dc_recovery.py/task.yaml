@@ -1,0 +1,7 @@
+summary: test_async_replication_dead_dc_recovery.py
+backends:
+  - github-ci-vm
+environment:
+  TEST_MODULE: charm/high_availability/test_async_replication_dead_dc_recovery.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing
