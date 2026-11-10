@@ -6,7 +6,6 @@
 import itertools
 
 import psycopg2
-
 from tenacity import (
     Retrying,
     retry_if_exception,
@@ -16,11 +15,13 @@ from tenacity import (
 
 SWEEP_CONNECT_RETRY_BUDGET = 600
 
+
 def _is_connection_refused(error: BaseException) -> bool:
     """Whether the error is a transient connection refusal (e.g. unit still starting)."""
     return (
         isinstance(error, psycopg2.OperationalError) and "connection refused" in str(error).lower()
     )
+
 
 def db_connect(
     host: str,
@@ -55,6 +56,7 @@ def execute_query(
             return list(itertools.chain(*cursor.fetchall()))
     finally:
         connection.close()
+
 
 def execute_queries_on_unit(
     unit_address: str, username: str, password: str, queries: list[str], database: str
