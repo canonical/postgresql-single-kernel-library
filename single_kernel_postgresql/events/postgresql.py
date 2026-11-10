@@ -1202,7 +1202,7 @@ class PostgreSQLEventsHandler(Object):
             # Disable too, so a mid-teardown restart of the unit can't re-enable
             # the services and re-grab the storage mounts before Juju finishes
             # unmounting.
-            snap.SnapCache()[charm_refresh.snap_name()].stop(disable=True)
+            snap.stop(charm_refresh.snap_name(), disable=True)
         except Exception:
             logger.exception("Failed to stop charmed-postgresql snap services")
 
@@ -1234,8 +1234,8 @@ class PostgreSQLEventsHandler(Object):
                 )
                 return
         try:
-            snap.SnapCache()[charm_refresh.snap_name()].ensure(snap.SnapState.Absent)
-        except (snap.SnapError, snap.SnapNotFoundError):
+            snap.remove(charm_refresh.snap_name())
+        except snap.Error:
             # Don't fail the hook: an error here would block the removal of the unit.
             logger.exception("Failed to remove charmed-postgresql snap")
 

@@ -4,6 +4,7 @@
 
 import logging
 import signal
+from contextlib import contextmanager
 from subprocess import TimeoutExpired
 from unittest.mock import Mock, patch
 
@@ -182,13 +183,19 @@ def test_k8s_run_cmd_passes_stdin(substrate, workload):
 # --- service control: VM
 
 
+@contextmanager
 def _mock_vm_snap(**services):
-    """Patch SnapCache in the VM workload module with a snap exposing the given services."""
-    selected_snap = Mock()
-    selected_snap.services = services
-    cache = Mock()
-    cache.__getitem__ = Mock(return_value=selected_snap)
-    return patch("single_kernel_postgresql.workload.vm.snap.SnapCache", return_value=cache)
+    """Supply service state and stub external snap mutations."""
+    with (
+        patch(
+            "single_kernel_postgresql.workload.vm.service_states",
+            return_value={name: info["active"] for name, info in services.items()},
+        ),
+        patch("single_kernel_postgresql.workload.vm.snap.start") as start,
+        patch("single_kernel_postgresql.workload.vm.snap.stop") as stop,
+        patch("single_kernel_postgresql.workload.vm.snap.restart") as restart,
+    ):
+        yield Mock(start=start, stop=stop, restart=restart)
 
 
 def test_vm_service_control_uses_snap_by_name(substrate, workload):
@@ -199,10 +206,14 @@ def test_vm_service_control_uses_snap_by_name(substrate, workload):
         workload.start_service(PGBACKREST_SERVICE)
         workload.stop_service(PGBACKREST_SERVICE)
         workload.restart_service(PGBACKREST_SERVICE)
-    selected_snap = mock_cache.return_value.__getitem__.return_value
-    selected_snap.start.assert_called_once_with(services=[PGBACKREST_SERVICE])
-    selected_snap.stop.assert_called_once_with(services=[PGBACKREST_SERVICE])
-    selected_snap.restart.assert_called_once_with(services=[PGBACKREST_SERVICE])
+    selected_snap = mock_cache
+    selected_snap.start.assert_called_once_with(
+        "charmed-postgresql", services=[PGBACKREST_SERVICE]
+    )
+    selected_snap.stop.assert_called_once_with("charmed-postgresql", services=[PGBACKREST_SERVICE])
+    selected_snap.restart.assert_called_once_with(
+        "charmed-postgresql", services=[PGBACKREST_SERVICE]
+    )
 
 
 def _patroni_cmdline():
@@ -245,7 +256,7 @@ def test_vm_reload_pgbackrest_sends_sighup_to_daemon(mock_iter, mock_kill, subst
     mock_iter.return_value = [vanished, process]
     with _mock_vm_snap(**{PGBACKREST_SERVICE: {"active": True}}) as mock_cache:
         workload.reload_service(PGBACKREST_SERVICE)
-    selected_snap = mock_cache.return_value.__getitem__.return_value
+    selected_snap = mock_cache
     selected_snap.restart.assert_not_called()
     mock_kill.assert_called_once_with(4242, signal.SIGHUP)
 
@@ -265,7 +276,7 @@ def test_vm_reload_running_service_without_daemon_skips(
         caplog.at_level(logging.WARNING),
     ):
         workload.reload_service(PGBACKREST_SERVICE)
-    selected_snap = mock_cache.return_value.__getitem__.return_value
+    selected_snap = mock_cache
     selected_snap.restart.assert_not_called()
     mock_kill.assert_not_called()
     assert "Unable to find pgbackrest-service pid. Skipping reload" in caplog.text
@@ -277,8 +288,10 @@ def test_vm_reload_stopped_service_restarts(substrate, workload):
         return
     with _mock_vm_snap(**{PGBACKREST_SERVICE: {"active": False}}) as mock_cache:
         workload.reload_service(PGBACKREST_SERVICE)
-    selected_snap = mock_cache.return_value.__getitem__.return_value
-    selected_snap.restart.assert_called_once_with(services=[PGBACKREST_SERVICE])
+    selected_snap = mock_cache
+    selected_snap.restart.assert_called_once_with(
+        "charmed-postgresql", services=[PGBACKREST_SERVICE]
+    )
 
 
 @pytest.mark.parametrize(
@@ -297,15 +310,50 @@ def test_vm_service_is_running(substrate, workload, services, expected):
         assert workload.service_is_running(PGBACKREST_SERVICE) is expected
 
 
-def test_vm_service_is_running_snap_error_reads_as_not_running(substrate, workload):
+def test_vm_is_patroni_running_selects_patroni(substrate, workload):
     if substrate == Substrates.K8S:
         pytest.skip("VM only")
-        return
     with patch(
-        "single_kernel_postgresql.workload.vm.snap.SnapCache",
-        side_effect=snap.SnapNotFoundError("no snap"),
+        "single_kernel_postgresql.workload.vm.service_states",
+        return_value={PGBACKREST_SERVICE: False, "patroni": True},
     ):
-        assert workload.service_is_running(PGBACKREST_SERVICE) is False
+        assert workload.is_patroni_running() is True
+
+
+@pytest.mark.parametrize(
+    "services,expected",
+    [
+        pytest.param({"patroni": False}, True, id="stopped"),
+        pytest.param({}, False, id="missing"),
+    ],
+)
+def test_vm_service_exists(substrate, workload, services, expected):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+    with patch("single_kernel_postgresql.workload.vm.service_states", return_value=services):
+        assert workload.service_exists("patroni") is expected
+
+
+@pytest.mark.parametrize("probe", ["is_patroni_running", "service_exists", "service_is_running"])
+@pytest.mark.parametrize(
+    "error",
+    [
+        snap.NotInstalledError("missing", kind="snap-not-found", value="charmed-postgresql"),
+        snap.ConnectionError("unavailable"),
+        snap.APIError("query failed", kind="failure", value=None),
+    ],
+)
+def test_vm_service_probe_error_policy(substrate, workload, probe, error):
+    if substrate == Substrates.K8S:
+        pytest.skip("VM only")
+    args = () if probe == "is_patroni_running" else ("patroni",)
+    with patch("single_kernel_postgresql.workload.vm.service_states", side_effect=error):
+        if isinstance(error, snap.NotInstalledError):
+            assert getattr(workload, probe)(*args) is False
+        else:
+            with pytest.raises(type(error)) as caught:
+                getattr(workload, probe)(*args)
+            assert caught.value is error
 
 
 # --- service control: K8s
