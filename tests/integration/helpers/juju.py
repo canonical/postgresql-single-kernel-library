@@ -15,6 +15,9 @@ from tenacity import (
     wait_fixed,
 )
 
+from single_kernel_postgresql.config.literals import PEER_RELATION
+
+
 type StatusFn = Callable[[jubilant.Status], bool]
 
 MINUTE_SECS = 60
@@ -49,6 +52,13 @@ def get_app_leader(juju: jubilant.Juju, app_name: str) -> str:
         if unit.leader:
             return name
     raise AssertionError(f"No leader unit found for {app_name}")
+
+def get_user_password(juju: jubilant.Juju, app_name: str, user: str) -> str | None:
+    """Get a system user's password."""
+    for secret in juju.secrets():
+        if secret.label == f"{PEER_RELATION}.{app_name}.app":
+            revealed_secret = juju.show_secret(secret.uri, reveal=True)
+            return revealed_secret.content.get(f"{user}-password")
 
 
 def get_app_units(

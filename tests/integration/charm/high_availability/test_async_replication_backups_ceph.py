@@ -23,6 +23,8 @@ DB_APP_2 = "db2"
 PRIMARY_S3_APP = "s3-primary"
 STANDBY_S3_APP = "s3-standby"
 MINUTE_SECS = 60
+
+pytestmark = pytest.mark.vm_only
 EXPECTED_STANDBY_BACKUP_MESSAGE = (
     "Backups are not supported on a standby cluster. "
     "Run create-backup on the primary cluster instead."

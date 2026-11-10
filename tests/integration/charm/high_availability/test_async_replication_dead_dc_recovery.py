@@ -75,6 +75,8 @@ FORBIDDEN_LABEL = "async-replication-secret"
 
 MINUTE_SECS = 60
 
+pytestmark = pytest.mark.vm_only
+
 logging.getLogger("jubilant.wait").setLevel(logging.WARNING)
 
 
