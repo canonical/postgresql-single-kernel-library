@@ -57,6 +57,40 @@ class RoleAttributeValue(Enum):
     ALL_DATABASES = 3
 
 
+def consumer_alias_exists(juju: jubilant.Juju, app_name: str, label: str) -> bool:
+    """Whether *app*'s leader holds a consumer-side alias for *label*.
+
+    A consumed-secret alias is not listed by ``secret-ids`` (which returns only
+    owned secrets), so ``get_async_secret_labels`` can't see it. Probe it directly:
+    ``secret-get --label`` returns content when the alias exists and errors with
+    ``consumer label "<label>" not found`` when it was never registered.
+    """
+    leader = get_app_leader(juju, app_name)
+    try:
+        juju.cli("exec", "--unit", leader, "--", "secret-get", f"--label={label}")
+        return True
+    except jubilant.CLIError as error:
+        haystack = f"{error} {getattr(error, 'stderr', '')} {getattr(error, 'stdout', '')}".lower()
+        if "not found" in haystack:
+            return False
+        raise
+
+
+def get_async_secret_labels(juju: jubilant.Juju, app_name: str) -> set[str]:
+    """Return the async-replication secret labels owned by *app*'s leader unit."""
+    leader = get_app_leader(juju, app_name)
+    labels: set[str] = set()
+    for secret_id in juju.cli("exec", "--unit", leader, "--", "secret-ids").split():
+        info = juju.cli("exec", "--unit", leader, "--", "secret-info-get", secret_id)
+        for line in info.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("label:"):
+                label = stripped.split(":", 1)[1].strip()
+                if "async-replication" in label:
+                    labels.add(label)
+    return labels
+
+
 def get_password(juju: jubilant.Juju, app_name: str, user: str = "operator") -> str | None:
     """Return the password of a PostgreSQL system user from the charm's app secret."""
     secret = get_secret_by_label(juju, f"{PEER_RELATION}.{app_name}.app")
@@ -536,6 +570,15 @@ def get_db_max_written_value(
             return cursor.fetchone()[0]
     finally:
         connection.close()
+
+
+def start_continuous_writes(model: jubilant.Juju, test_app: str) -> None:
+    """Start continuous writes through the test application (retry through transient errors)."""
+    for attempt in Retrying(stop=stop_after_attempt(10), reraise=True):
+        with attempt:
+            model.run(
+                unit=get_app_leader(model, test_app), action="start-continuous-writes"
+            ).raise_on_failure()
 
 
 def check_db_units_writes_increment(
