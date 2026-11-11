@@ -333,3 +333,17 @@ async def stop_machine(ops_test: OpsTest, machine_name: str) -> None:
     """
     stop_machine_command = f"lxc stop {machine_name}"
     subprocess.check_call(stop_machine_command.split())
+
+
+async def reused_full_cluster_recovery_storage(ops_test: OpsTest, unit_name) -> bool:
+    """Returns True if storage provided to Postgresql has been reused.
+
+    Checks Patroni logs for when the database was in archive mode or shut down.
+    """
+    await run_command_on_unit(
+        ops_test,
+        unit_name,
+        "grep -E 'Database cluster state: in archive recovery|Database cluster state: shut down' "
+        "/var/snap/charmed-postgresql/common/var/log/patroni/patroni.log*",
+    )
+    return True
