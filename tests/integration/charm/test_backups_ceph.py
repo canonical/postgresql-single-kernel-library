@@ -1,51 +1,35 @@
 #!/usr/bin/env python3
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
-import logging
+from jubilant import Juju
 
-import pytest
-
-from .adapters import JujuFixture
-from .backup_helpers import backup_operations
-from .conftest import ConnectionInformation
-
-logger = logging.getLogger(__name__)
+from tests.integration.charm.backup_helpers import CEPH, backup_operations
+from tests.integration.types import Substrate
 
 S3_INTEGRATOR_APP_NAME = "s3-integrator"
 
-backup_id, value_before_backup, value_after_backup = "", None, None
 
-
-@pytest.fixture(scope="session")
-def cloud_credentials(microceph: ConnectionInformation) -> dict[str, str]:
-    """Read cloud credentials."""
-    return {
-        "access-key": microceph.access_key_id,
-        "secret-key": microceph.secret_access_key,
-    }
-
-
-@pytest.fixture(scope="session")
-def cloud_configs(microceph: ConnectionInformation):
-    return {
-        "endpoint": f"https://{microceph.host}",
-        "bucket": microceph.bucket,
-        "path": "/pg",
-        "region": "",
-        "s3-uri-style": "path",
-        "tls-ca-chain": microceph.cert,
-    }
-
-
-def test_backup_ceph(juju: JujuFixture, cloud_configs, cloud_credentials, charm) -> None:
+def test_backup_ceph(
+    juju: Juju,
+    charm: str,
+    app_name: str,
+    charm_resources,
+    substrate: Substrate,
+    ceph_cloud_configs: tuple[dict, dict],
+) -> None:
     """Build and deploy two units of PostgreSQL in microceph, test backup and restore actions."""
+    config, credentials = ceph_cloud_configs
+
     backup_operations(
         juju,
+        charm,
+        app_name,
+        charm_resources,
+        substrate,
         S3_INTEGRATOR_APP_NAME,
         None,
         None,
-        cloud_credentials,
-        "ceph",
-        cloud_configs,
-        charm,
+        credentials,
+        CEPH,
+        config,
     )

@@ -82,8 +82,14 @@ jobs:
         substrate:
           - vm
           - k8s
-    name: Build ${{ matrix.substrate }} test charm
-    runs-on: ubuntu-24.04
+        # Same runners as data-platform-workflows build_charm.yaml (v54.0.0)
+        platform:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    name: Build ${{ matrix.substrate }} test charm | ${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -110,17 +116,18 @@ jobs:
         run: |
           sudo --user "$USER" --preserve-env --preserve-env=PATH -- env -- \
             scripts/build_charm.sh \
-            -p ubuntu@24.04:amd64 \
+            -p "ubuntu@24.04:${VAR_ARCH}" \
             -c "tests/charms/postgresql_${VAR_SUBSTRATE}_test_charm"
         env:
           VAR_SUBSTRATE: ${{ matrix.substrate }}
+          VAR_ARCH: ${{ matrix.platform.arch }}
       - name: Charmcraft logs
         if: ${{ success() || (failure() && steps.pack.outcome == 'failure') }}
         run: cat ~/.local/state/charmcraft/log/*
       - name: Upload test charm
         uses: actions/upload-artifact@v7
         with:
-          name: test-charm-${{ matrix.substrate }}
+          name: test-charm-${{ matrix.substrate }}-${{ matrix.platform.arch }}
           path: tests/charms/postgresql_${{ matrix.substrate }}_test_charm/*.charm
           if-no-files-found: error
     outputs:
