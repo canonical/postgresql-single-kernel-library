@@ -285,7 +285,9 @@ def test_plugin_objects(juju: Juju, app_name: str) -> None:
 
     logger.info("Disabling the plugin on charm config, waiting for blocked status")
     juju.config(app_name, {"plugin-pg-trgm-enable": "False"})
-    juju.wait(lambda status: status.apps[app_name].units[primary].is_blocked, timeout=100, successes=1)
+    juju.wait(
+        lambda status: status.apps[app_name].units[primary].is_blocked, timeout=100, successes=1
+    )
 
     logger.info("Enabling the plugin back on charm config, status should resolve")
     juju.config(app_name, {"plugin-pg-trgm-enable": "True"})
@@ -293,7 +295,9 @@ def test_plugin_objects(juju: Juju, app_name: str) -> None:
 
     logger.info("Re-disabling plugin, waiting for blocked status to come back")
     juju.config(app_name, {"plugin-pg-trgm-enable": "False"})
-    juju.wait(lambda status: status.apps[app_name].units[primary].is_blocked, timeout=100, successes=1)
+    juju.wait(
+        lambda status: status.apps[app_name].units[primary].is_blocked, timeout=100, successes=1
+    )
 
     logger.info("Delete the object which depends on the plugin")
     with db_connect(host=address, password=password) as connection:
