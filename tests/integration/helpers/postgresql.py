@@ -3,16 +3,44 @@
 
 """PostgreSQL connection helpers that don't depend on the charm under test."""
 
+import itertools
+
 import psycopg2
 
 
 def db_connect(
-    host: str, password: str, user: str = "operator", database: str = "postgres"
+    host: str,
+    password: str,
+    user: str = "operator",
+    database: str = "postgres",
+    sslmode: str | None = None,
 ) -> psycopg2.extensions.connection:
     """Return a connection to a PostgreSQL database (as the operator user by default)."""
     return psycopg2.connect(
-        host=host, user=user, password=password, dbname=database, connect_timeout=10
+        host=host,
+        user=user,
+        password=password,
+        dbname=database,
+        connect_timeout=10,
+        sslmode=sslmode,
     )
+
+
+def execute_query(
+    host: str,
+    password: str,
+    query: str,
+    database: str = "postgres",
+    sslmode: str | None = None,
+) -> list:
+    """Run a query as the operator user and return all the values of the rows, flattened."""
+    connection = db_connect(host, password, database=database, sslmode=sslmode)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(query)
+            return list(itertools.chain(*cursor.fetchall()))
+    finally:
+        connection.close()
 
 
 def check_connected_user(
