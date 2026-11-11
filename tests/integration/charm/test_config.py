@@ -37,9 +37,13 @@ def test_config_parameters(
             trust=substrate == Substrate.k8s,
         )
         juju.wait(
-            wait_for_apps_status(jubilant.all_active, app_name),
+            lambda status: (
+                jubilant.all_active(status, app_name)
+                and jubilant.all_agents_idle(status, app_name)
+            ),
             error=jubilant.any_error,
             timeout=1500,
+            successes=15,
         )
 
     leader_unit = get_app_leader(juju, app_name)
