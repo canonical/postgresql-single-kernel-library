@@ -27,6 +27,7 @@ from jubilant import Juju
 
 from tests.integration.charm.helpers import get_primary, run_command_on_unit
 from tests.integration.helpers.juju import wait_for_apps_status
+from tests.integration.types import Substrate
 
 IP_FAMILY = os.environ.get("PG_IP_FAMILY", "ipv6")
 V6_SUBNET = os.environ.get("PG_IPV6_SUBNET", "fd42:1928:642::/64")
@@ -64,9 +65,11 @@ def test_deploy(juju: Juju, charm: str, app_name: str):
 
 
 @pytest.mark.abort_on_fail
-def test_peer_binding_address_family(juju: Juju, app_name: str):
+def test_peer_binding_address_family(juju: Juju, app_name: str, substrate: Substrate):
     """The peer relation binding must resolve to the selected family."""
-    output = run_command_on_unit(juju, f"{app_name}/0", "network-get database-peers --format json")
+    output = run_command_on_unit(
+        juju, f"{app_name}/0", "network-get database-peers --format json", substrate
+    )
     binding = json.loads(output)
     addresses = [
         address["value"]
