@@ -1603,5 +1603,5 @@ async def remove_charm_code(ops_test: OpsTest, unit_name: str) -> None:
         ops_test,
         unit_name,
         f"rm /var/lib/juju/agents/unit-{unit_name.replace('/', '-')}/charm/src/charm.py",
-        "charm",
+        container="charm",
     )
