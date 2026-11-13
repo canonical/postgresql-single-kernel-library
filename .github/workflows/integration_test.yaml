@@ -137,6 +137,8 @@ jobs:
       - name: Set up environment
         timeout-minutes: 15
         run: |
+          # pytest-operator's ops_test fixture requires charmcraft on PATH
+          sudo snap install charmcraft --classic
           sudo snap install go --classic
           go install github.com/canonical/spread/cmd/spread@latest
       - name: Download packed test charm

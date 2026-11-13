@@ -1,0 +1,5 @@
+summary: test_synchronous_policy.py
+environment:
+  TEST_MODULE: charm/ha_tests/test_synchronous_policy.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing
