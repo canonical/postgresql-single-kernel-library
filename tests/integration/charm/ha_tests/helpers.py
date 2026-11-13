@@ -1595,3 +1595,13 @@ def remove_instance_isolation(ops_test: OpsTest) -> None:
         shell=True,
         env=env,
     )
+
+
+async def remove_charm_code(ops_test: OpsTest, unit_name: str) -> None:
+    """Remove src/charm.py from the PostgreSQL unit."""
+    await run_command_on_unit(
+        ops_test,
+        unit_name,
+        f"rm /var/lib/juju/agents/unit-{unit_name.replace('/', '-')}/charm/src/charm.py",
+        container="charm",
+    )

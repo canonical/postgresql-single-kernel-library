@@ -1,0 +1,7 @@
+summary: test_filesystem_layout.py
+backends:
+  - github-ci-k8s
+environment:
+  TEST_MODULE: charm/test_filesystem_layout.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing
