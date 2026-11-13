@@ -181,13 +181,16 @@ async def get_unit_address(ops_test: OpsTest, unit_name: str) -> str:
     return status["applications"][unit_name.split("/")[0]].units[unit_name]["address"]
 
 
-async def run_command_on_unit(ops_test: OpsTest, unit_name: str, command: str) -> str:
-    """Run a command on a specific unit (in the postgresql container on K8s).
+async def run_command_on_unit(
+    ops_test: OpsTest, unit_name: str, command: str, container: str = "postgresql"
+) -> str:
+    """Run a command on a specific unit (in the selected container on K8s).
 
     Args:
         ops_test: The ops test framework instance
         unit_name: The name of the unit to run the command on
         command: The command to run
+        container: The K8s container to run the command in (ignored on VM).
 
     Returns:
         the command output if it succeeds, otherwise raises an exception.
@@ -202,7 +205,7 @@ async def run_command_on_unit(ops_test: OpsTest, unit_name: str, command: str) -
             )
         return stdout
 
-    complete_command = f"ssh --container postgresql {unit_name} {command}"
+    complete_command = f"ssh --container {container} {unit_name} {command}"
     return_code, stdout, stderr = await ops_test.juju(*complete_command.split())
     if return_code != 0:
         raise Exception(
