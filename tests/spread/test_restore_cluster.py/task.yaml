@@ -1,0 +1,7 @@
+summary: test_restore_cluster.py
+backends:
+  - github-ci-vm
+environment:
+  TEST_MODULE: charm/ha_tests/test_restore_cluster.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing
