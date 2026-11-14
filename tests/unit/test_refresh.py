@@ -936,7 +936,7 @@ def test_migrate_temp_tablespace_skips_when_tablespace_missing(vm_manager, charm
     temp_root = MagicMock()
     temp_root.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp"
     charm.workload.paths.temp = temp_data_dir
-    charm.workload.paths.temp.parent = temp_root
+    charm.workload.paths.temp_storage = temp_root
     charm.primary_endpoint = "10.1.0.1"
     charm.has_async_replication_relation.return_value = False
     with patch.object(vm_manager, "_resolve_primary_host", return_value="10.1.0.1"):
@@ -965,7 +965,7 @@ def test_execute_temp_tablespace_migration_noop_when_already_migrated(vm_manager
     temp_root = MagicMock()
     temp_root.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp"
     charm.workload.paths.temp = temp_data_dir
-    charm.workload.paths.temp.parent = temp_root
+    charm.workload.paths.temp_storage = temp_root
     cursor = charm.postgresql._connect_to_database.return_value.cursor.return_value
     cursor.fetchone.return_value = ("/var/snap/charmed-postgresql/common/data/temp/16/main",)
 
@@ -981,7 +981,7 @@ def test_execute_temp_tablespace_migration_performs_the_ddl(vm_manager, charm):
     temp_root = MagicMock()
     temp_root.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp"
     charm.workload.paths.temp = temp_data_dir
-    charm.workload.paths.temp.parent = temp_root
+    charm.workload.paths.temp_storage = temp_root
     cursor = charm.postgresql._connect_to_database.return_value.cursor.return_value
     cursor.fetchone.return_value = ("/var/snap/charmed-postgresql/common/data/temp",)
 
@@ -1000,7 +1000,7 @@ def test_execute_temp_tablespace_migration_skips_unexpected_location(vm_manager,
     temp_root = MagicMock()
     temp_root.__str__.return_value = "/var/snap/charmed-postgresql/common/data/temp"
     charm.workload.paths.temp = temp_data_dir
-    charm.workload.paths.temp.parent = temp_root
+    charm.workload.paths.temp_storage = temp_root
     cursor = charm.postgresql._connect_to_database.return_value.cursor.return_value
     cursor.fetchone.return_value = ("/somewhere/else",)
 
