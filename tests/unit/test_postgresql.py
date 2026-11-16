@@ -389,7 +389,6 @@ def test_set_up_database_with_temp_tablespace_and_missing_owner_role(harness, su
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
         ) as _connect_to_database,
-        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
         ),
@@ -465,7 +464,6 @@ def test_set_up_database_owner_mismatch_triggers_rename_and_fix(harness, substra
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
         ) as _connect_to_database,
-        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
         ),
@@ -515,7 +513,6 @@ def test_set_up_database_permissions_mismatch_triggers_rename_and_fix(harness, s
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
         ) as _connect_to_database,
-        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
         ),
@@ -564,7 +561,6 @@ def test_set_up_database_persistent_storage_no_rename(harness, substrate):
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
         ) as _connect_to_database,
-        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
         ),
@@ -616,7 +612,6 @@ def test_set_up_database_no_temp_and_existing_owner_role(harness):
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
         ) as _connect_to_database,
-        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
         ),
@@ -901,7 +896,6 @@ def test_set_up_database_owner_and_permissions_match_no_rename_or_fix(harness):
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
         ) as _connect_to_database,
-        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
         ),
@@ -951,7 +945,6 @@ def test_set_up_database_k8s_skips_change_owner_and_chmod(harness, substrate):
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL._connect_to_database"
         ) as _connect_to_database,
-        patch("single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_login_hook_function"),
         patch(
             "single_kernel_postgresql.utils.postgresql.PostgreSQL.set_up_predefined_catalog_roles_function"
         ),

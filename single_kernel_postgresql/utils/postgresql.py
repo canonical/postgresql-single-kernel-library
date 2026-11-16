@@ -860,7 +860,6 @@ class PostgreSQL(PostgreSQLBase):
                         extra_user_roles=[ROLE_DML],
                     )
 
-                self.set_up_login_hook_function()
                 self.set_up_predefined_catalog_roles_function()
 
             connection.close()
@@ -882,70 +881,6 @@ class PostgreSQL(PostgreSQLBase):
             if cursor is not None:
                 cursor.close()
             if connection is not None:
-                connection.close()
-
-    def set_up_login_hook_function(self) -> None:
-        """Create a login hook function to set the user for the current session."""
-        function_creation_statement = f"""CREATE OR REPLACE FUNCTION login_hook.login() RETURNS VOID AS $$
-DECLARE
-	ex_state TEXT;
-	ex_message TEXT;
-	ex_detail TEXT;
-	ex_hint TEXT;
-	ex_context TEXT;
-	cur_user TEXT;
-	db_admin_role TEXT;
-	db_name TEXT;
-	db_owner_role TEXT;
-	is_user_admin BOOLEAN;
-    user_has_createdb BOOLEAN;
-BEGIN
-	IF NOT login_hook.is_executing_login_hook()
-	THEN
-		RAISE EXCEPTION 'The login_hook.login() function should only be invoked by the login_hook code';
-	END IF;
-
-	cur_user := (SELECT current_user);
-
-	EXECUTE 'SELECT current_database()' INTO db_name;
-	db_admin_role = 'charmed_' || db_name || '_admin';
-
-	EXECUTE format('SELECT EXISTS(SELECT * FROM pg_auth_members a, pg_roles b, pg_roles c WHERE a.roleid = b.oid AND a.member = c.oid AND (b.rolname = %L OR b.rolname = %L) and c.rolname = %L)', db_admin_role, '{ROLE_ADMIN}', cur_user) INTO is_user_admin;
-
-    EXECUTE format('SELECT EXISTS(SELECT * FROM pg_auth_members a, pg_roles b, pg_roles c WHERE a.roleid = b.oid AND a.member = c.oid AND b.rolname = %L and c.rolname = %L)', '{ROLE_DATABASES_OWNER}', cur_user) INTO user_has_createdb;
-
-	BEGIN
-        IF is_user_admin = true THEN
-			db_owner_role = 'charmed_' || db_name || '_owner';
-			EXECUTE format('SET ROLE %L', db_owner_role);
-		ELSE
-            IF user_has_createdb = true THEN
-                EXECUTE format('SET ROLE %L', '{ROLE_DATABASES_OWNER}');
-            END IF;
-		END IF;
-	EXCEPTION
-		WHEN OTHERS THEN
-			GET STACKED DIAGNOSTICS ex_state = RETURNED_SQLSTATE, ex_message = MESSAGE_TEXT, ex_detail = PG_EXCEPTION_DETAIL, ex_hint = PG_EXCEPTION_HINT, ex_context = PG_EXCEPTION_CONTEXT;
-			RAISE LOG e'Error in login_hook.login()\nsqlstate %\nmessage: %\ndetail: %\nhint: %\ncontext: %', ex_state, ex_message, ex_detail, ex_hint, ex_context;
-	END;
-END;
-$$ LANGUAGE plpgsql;"""  # noqa: S608
-        connection = None
-        try:
-            for database in self._get_existing_databases():
-                with (
-                    self._connect_to_database(database=database) as connection,
-                    connection.cursor() as cursor,
-                ):
-                    cursor.execute(SQL("CREATE EXTENSION IF NOT EXISTS login_hook;"))
-                    cursor.execute(SQL("CREATE SCHEMA IF NOT EXISTS login_hook;"))
-                    cursor.execute(SQL(function_creation_statement))
-                    cursor.execute(SQL("GRANT EXECUTE ON FUNCTION login_hook.login() TO PUBLIC;"))
-        except psycopg2.Error as e:
-            logger.error(f"Failed to create login hook function: {e}")
-            raise e
-        finally:
-            if connection:
                 connection.close()
 
     def set_up_predefined_catalog_roles_function(self) -> None:
