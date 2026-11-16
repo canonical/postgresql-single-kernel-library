@@ -10,17 +10,15 @@ from tests.integration.charm.ha_tests.helpers import (
     add_unit_with_storage,
     get_storage_ids,
 )
-from tests.integration.charm.helpers import (
-    db_connect,
-    get_password,
-    get_primary,
-    get_unit_address,
-    set_password,
-)
+from tests.integration.charm.helpers import db_connect
 from tests.integration.charm.pytest_operator_helpers import (
     CHARM_BASE,
+    get_password,
     get_patroni_cluster,
+    get_primary,
+    get_unit_address,
     reused_full_cluster_recovery_storage,
+    set_password,
 )
 
 FIRST_APPLICATION = "first-cluster"
@@ -84,11 +82,9 @@ async def test_build_and_deploy(ops_test: OpsTest, charm) -> None:
 async def test_cluster_restore(ops_test):
     """Recreates the cluster from storage volumes."""
     # Write some data.
-    primary = await get_primary(
-        ops_test, ops_test.model.applications[FIRST_APPLICATION].units[0].name
-    )
+    primary = await get_primary(ops_test, FIRST_APPLICATION)
     password = await get_password(ops_test, database_app_name=FIRST_APPLICATION)
-    address = get_unit_address(ops_test, primary)
+    address = await get_unit_address(ops_test, primary)
     logger.info("creating a table in the database")
     with db_connect(host=address, password=password) as connection:
         connection.autocommit = True
@@ -100,7 +96,7 @@ async def test_cluster_restore(ops_test):
     logger.info("Downscaling the existing cluster")
     storages = []
     for unit in ops_test.model.applications[FIRST_APPLICATION].units:
-        storages.append(get_storage_ids(ops_test, unit.name))
+        storages.append(await get_storage_ids(ops_test, unit.name))
         await ops_test.model.destroy_unit(unit.name)
 
     await ops_test.model.remove_application(FIRST_APPLICATION, block_until_done=True)
@@ -113,10 +109,8 @@ async def test_cluster_restore(ops_test):
             "attached storage not properly reused by Postgresql."
         )
 
-    primary = await get_primary(
-        ops_test, ops_test.model.applications[SECOND_APPLICATION].units[0].name
-    )
-    address = get_unit_address(ops_test, primary)
+    primary = await get_primary(ops_test, SECOND_APPLICATION)
+    address = await get_unit_address(ops_test, primary)
     logger.info("checking that data was persisted")
     with db_connect(host=address, password=password) as connection, connection.cursor() as cursor:
         cursor.execute(

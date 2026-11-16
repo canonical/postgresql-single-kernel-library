@@ -16,7 +16,7 @@ import requests
 from juju.model import Model
 from juju.unit import Unit
 from pytest_operator.plugin import OpsTest
-from single_kernel_postgresql.config.literals import PEER_RELATION
+from single_kernel_postgresql.config.literals import PEER_RELATION, SYSTEM_USERS_PASSWORD_CONFIG
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.helpers.postgresql import execute_query
@@ -347,3 +347,36 @@ async def reused_full_cluster_recovery_storage(ops_test: OpsTest, unit_name) -> 
         "/var/snap/charmed-postgresql/common/var/log/patroni/patroni.log*",
     )
     return True
+
+
+async def set_password(
+    ops_test: OpsTest,
+    database_app_name: str,
+    username: str = "operator",
+    password: str | None = None,
+):
+    """Set a user password via secret.
+
+    Args:
+        ops_test: ops_test instance.
+        username: the user to set the password.
+        password: optional password to use
+            instead of auto-generating
+        database_app_name: name of the app for the secret
+    """
+    secret_name = "system_users_secret"
+
+    try:
+        secret_id = await ops_test.model.add_secret(
+            name=secret_name, data_args=[f"{username}={password}"]
+        )
+        await ops_test.model.grant_secret(secret_name=secret_name, application=database_app_name)
+
+        # update the application config to include the secret
+        await ops_test.model.applications[database_app_name].set_config({
+            SYSTEM_USERS_PASSWORD_CONFIG: secret_id
+        })
+    except Exception:
+        await ops_test.model.update_secret(
+            name=secret_name, data_args=[f"{username}={password}"], new_name=secret_name
+        )
