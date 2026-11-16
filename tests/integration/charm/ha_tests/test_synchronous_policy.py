@@ -1,83 +1,68 @@
 #!/usr/bin/env python3
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
-from tests.integration.charm.ha_tests.helpers import get_cluster_roles
-from tests.integration.charm.pytest_operator_helpers import CHARM_BASE
+from tests.integration.charm.helpers import CHARM_BASE, get_cluster_roles
+from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
 from tests.integration.types import Substrate
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(
-    ops_test: OpsTest, charm: str, app_name: str, charm_resources, substrate: Substrate
+def test_build_and_deploy(
+    juju: jubilant.Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
 ) -> None:
     """Build and deploy three units of PostgreSQL."""
-    async with ops_test.fast_forward():
-        await ops_test.model.deploy(
+    with fast_forward(juju):
+        juju.deploy(
             charm,
-            application_name=app_name,
+            app=app_name,
             num_units=3,
             base=CHARM_BASE,
             config={"profile": "testing"},
             resources=charm_resources,
             trust=substrate == Substrate.k8s,
         )
-        await ops_test.model.wait_for_idle(status="active", timeout=1500)
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=1500)
 
 
-async def test_default_all(ops_test: OpsTest, app_name: str) -> None:
-    app = app_name
-
-    async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(apps=[app], status="active", timeout=300)
+def test_default_all(juju: jubilant.Juju, app_name: str) -> None:
+    with fast_forward(juju):
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=300)
 
     for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True):
         with attempt:
-            roles = await get_cluster_roles(
-                ops_test, ops_test.model.applications[app].units[0].name
-            )
-
+            roles = get_cluster_roles(juju, next(iter(juju.status().get_units(app_name))))
             assert len(roles["primaries"]) == 1
             assert len(roles["sync_standbys"]) == 2
             assert len(roles["replicas"]) == 0
 
 
-async def test_majority(ops_test: OpsTest, app_name: str) -> None:
-    app = app_name
+def test_majority(juju: jubilant.Juju, app_name: str) -> None:
+    juju.config(app_name, {"synchronous-node-count": "majority"})
 
-    await ops_test.model.applications[app].set_config({"synchronous-node-count": "majority"})
-
-    async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(apps=[app], status="active")
+    with fast_forward(juju):
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=600)
 
     for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True):
         with attempt:
-            roles = await get_cluster_roles(
-                ops_test, ops_test.model.applications[app].units[0].name
-            )
-
+            roles = get_cluster_roles(juju, next(iter(juju.status().get_units(app_name))))
             assert len(roles["primaries"]) == 1
             assert len(roles["sync_standbys"]) == 1
             assert len(roles["replicas"]) == 1
 
 
-async def test_constant(ops_test: OpsTest, app_name: str) -> None:
-    app = app_name
+def test_constant(juju: jubilant.Juju, app_name: str) -> None:
+    juju.config(app_name, {"synchronous-node-count": "2"})
 
-    await ops_test.model.applications[app].set_config({"synchronous-node-count": "2"})
-
-    async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(apps=[app], status="active", timeout=300)
+    with fast_forward(juju):
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=300)
 
     for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True):
         with attempt:
-            roles = await get_cluster_roles(
-                ops_test, ops_test.model.applications[app].units[0].name
-            )
-
+            roles = get_cluster_roles(juju, next(iter(juju.status().get_units(app_name))))
             assert len(roles["primaries"]) == 1
             assert len(roles["sync_standbys"]) == 2
             assert len(roles["replicas"]) == 0

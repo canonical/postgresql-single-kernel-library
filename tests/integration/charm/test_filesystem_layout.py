@@ -9,7 +9,7 @@ import logging
 import jubilant
 import pytest
 
-from tests.integration.charm.pytest_operator_helpers import CHARM_BASE
+from tests.integration.charm.helpers import CHARM_BASE
 from tests.integration.helpers.juju import retry_if_cli_error
 
 logger = logging.getLogger(__name__)

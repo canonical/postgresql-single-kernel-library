@@ -49,6 +49,8 @@ RELATION_ENDPOINT = "postgresql"
 
 MINUTE_SECS = 60
 
+CHARM_BASE = "ubuntu@24.04"
+
 # The resume-refresh action is a one-shot charm_refresh state-machine probe: it fails while
 # the charm-side pause has not opened the allow-gate yet ("Unit N is unhealthy. Refresh will
 # not resume.") and once the pod-level StatefulSet roll has already completed ("No refresh

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
-import asyncio
 import logging
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 
-from tests.integration.charm.pytest_operator_helpers import CHARM_BASE
+from tests.integration.charm.helpers import CHARM_BASE
+from tests.integration.helpers.juju import wait_for_apps_status
 
 logger = logging.getLogger(__name__)
 
@@ -20,15 +20,15 @@ pytestmark = pytest.mark.k8s_only
 
 
 @pytest.mark.abort_on_fail
-async def test_deploy_without_trust(ops_test: OpsTest, charm, charm_resources):
+def test_deploy_without_trust(juju: jubilant.Juju, charm, charm_resources):
     """Build and deploy the charm with trust set to false.
 
     Assert on the unit status being blocked due to lack of trust.
     """
-    await ops_test.model.deploy(
+    juju.deploy(
         charm,
         resources=charm_resources,
-        application_name=APP_NAME,
+        app=APP_NAME,
         num_units=3,
         trust=False,
         base=CHARM_BASE,
@@ -36,22 +36,20 @@ async def test_deploy_without_trust(ops_test: OpsTest, charm, charm_resources):
     )
 
     logger.info("Waiting for charm to become blocked due to missing --trust")
-    await asyncio.gather(
-        ops_test.model.block_until(
-            lambda: ops_test.model.applications[APP_NAME].status == "blocked", timeout=1000
+    juju.wait(
+        lambda status: (
+            APP_NAME in status.apps
+            and status.apps[APP_NAME].app_status.current == "blocked"
+            and status.apps[APP_NAME].app_status.message == UNTRUST_ERROR_MESSAGE
         ),
-        ops_test.model.block_until(
-            lambda: ops_test.model.applications[APP_NAME].status_message == UNTRUST_ERROR_MESSAGE,
-            timeout=1000,
-        ),
+        timeout=1000,
     )
 
 
-async def test_trust_blocked_deployment(ops_test: OpsTest):
+def test_trust_blocked_deployment(juju: jubilant.Juju):
     """Trust existing blocked deployment.
 
     Assert on the application status recovering to active.
     """
-    await ops_test.juju("trust", APP_NAME, "--scope=cluster")
-
-    await ops_test.model.wait_for_idle(apps=[APP_NAME], status="active", timeout=3000)
+    juju.cli("trust", APP_NAME, "--scope=cluster")
+    juju.wait(wait_for_apps_status(jubilant.all_active, APP_NAME), timeout=3000)
