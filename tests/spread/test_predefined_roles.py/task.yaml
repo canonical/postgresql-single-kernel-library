@@ -1,0 +1,5 @@
+summary: test_predefined_roles.py
+environment:
+  TEST_MODULE: charm/test_predefined_roles.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing

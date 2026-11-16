@@ -1,0 +1,5 @@
+summary: test_async_replication_upgrade_edge.py
+environment:
+  TEST_MODULE: charm/high_availability/test_async_replication_upgrade_edge.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing

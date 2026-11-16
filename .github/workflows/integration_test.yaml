@@ -1,0 +1,191 @@
+on:
+  workflow_call:
+    inputs:
+      artifact-prefix:
+        description: |
+          Prefix for the test charm package GitHub artifacts
+
+          Built in ci.yaml with scripts/build_charm.sh: one artifact per substrate
+          (`<prefix>-vm`, `<prefix>-k8s`)
+        required: true
+        type: string
+
+jobs:
+  collect-integration-tests:
+    name: Collect integration test spread jobs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up environment
+        run: |
+          sudo snap install go --classic
+          go install github.com/canonical/spread/cmd/spread@latest
+      - name: Collect spread jobs
+        id: collect-jobs
+        shell: python
+        run: |
+          import json
+          import pathlib
+          import os
+          import subprocess
+
+          spread_jobs = (
+              subprocess.run(
+                  [pathlib.Path.home() / "go/bin/spread", "-list", "github-ci-vm", "github-ci-k8s"],
+                  capture_output=True,
+                  check=True,
+                  text=True,
+              )
+              .stdout.strip()
+              .split("\n")
+          )
+          jobs = []
+          for job in spread_jobs:
+              # Example `job`: "github-ci-vm:ubuntu-24.04:tests/spread/test_upgrade.py:juju36"
+              backend, runner, task, variant = job.split(":")
+              # Example: "vm"
+              substrate = backend.removeprefix("github-ci-")
+              # Example: "test_upgrade.py"
+              task = task.removeprefix("tests/spread/")
+              # Example: "test_upgrade.py:juju36 | vm"
+              name = f"{task}:{variant} | {substrate}"
+              # ":" character not valid in GitHub Actions artifact
+              name_in_artifact = f"{task}-{variant}-{substrate}"
+              jobs.append({
+                  "spread_job": job,
+                  "name": name,
+                  "name_in_artifact": name_in_artifact,
+                  "runner": runner,
+                  "substrate": substrate,
+              })
+          output = f"jobs={json.dumps(jobs)}"
+          print(output)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as file:
+              file.write(output)
+    outputs:
+      jobs: ${{ steps.collect-jobs.outputs.jobs }}
+    permissions: {}
+    cache-mode: none
+
+  integration-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJSON(needs.collect-integration-tests.outputs.jobs) }}
+    name: ${{ matrix.job.name }}
+    needs:
+      - collect-integration-tests
+    runs-on: ${{ matrix.job.runner }}
+    timeout-minutes: 232  # Sum of steps `timeout-minutes` + 5
+    steps:
+      - name: Checkout
+        timeout-minutes: 3
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Purge Docker
+        # GitHub-hosted Azure runners ship Docker pre-installed and active.
+        # Canonical K8s requires "A system with no previous installations
+        # of containerd/docker as this may cause conflicts"
+        # (see https://documentation.ubuntu.com/canonical-kubernetes
+        # /release-1.32/snap/tutorial/getting-started/).
+        # Completely purging Docker requires also
+        # deleting the Docker-specific `iptables-nft` rulesets
+        # created on installation.
+        if: ${{ matrix.job.substrate == 'k8s' }}
+        timeout-minutes: 5
+        run: |
+          sudo apt-get remove --purge -y docker-ce docker-ce-cli containerd.io docker.io containerd 2>/dev/null || true
+          sudo nft flush ruleset
+          sudo ip link delete docker0 2>/dev/null || true
+      - name: Remove podman CNI bridge config
+        # Ubuntu 24.04 runners ship podman with a CNI bridge config
+        # (/etc/cni/net.d/87-podman-bridge.conflist) that sorts
+        # lexicographically before Cilium's config (05-cilium.conflist).
+        # When that file is present, containerd picks the podman bridge
+        # as the active CNI before Cilium is ready, bypassing the
+        # node.kubernetes.io/network-unavailable taint and scheduling
+        # pods onto the 10.88.0.0/16 bridge instead of the Cilium pod
+        # CIDR. Removing the file ensures Cilium is the only CNI plugin
+        # from the start.
+        if: ${{ matrix.job.substrate == 'k8s' }}
+        timeout-minutes: 1
+        run: |
+          sudo rm -f /etc/cni/net.d/87-podman-bridge.conflist
+      # TODO: remove when https://github.com/canonical/charmcraft/issues/2105 and
+      # https://github.com/canonical/charmcraft/issues/2130 fixed
+      - name: Set up environment
+        timeout-minutes: 15
+        run: |
+          sudo snap install go --classic
+          go install github.com/canonical/spread/cmd/spread@latest
+      - name: Download packed test charm
+        timeout-minutes: 5
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact-prefix }}-${{ matrix.job.substrate }}
+          # Where the `charm` fixture (tests/integration/charm/conftest.py) looks for it
+          path: tests/charms/postgresql_${{ matrix.job.substrate }}_test_charm/
+      - name: Run spread job
+        timeout-minutes: 180
+        id: spread
+        # TODO: replace with `charmcraft test` when
+        # https://github.com/canonical/charmcraft/issues/2105 and
+        # https://github.com/canonical/charmcraft/issues/2130 fixed
+        run: ~/go/bin/spread -vv -artifacts=artifacts "${VAR_SPREAD_JOB}"
+        env:
+          VAR_SPREAD_JOB: ${{ matrix.job.spread_job }}
+      - timeout-minutes: 1
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: snap list
+      - name: lxc image list
+        timeout-minutes: 1
+        if: ${{ matrix.job.substrate == 'vm' && (success() || (failure() && steps.spread.outcome == 'failure')) }}
+        # sudo needed since spread runs scripts as root
+        run: sudo lxc image list
+      - name: Select model
+        timeout-minutes: 1
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        id: juju-switch
+        run: |
+          # sudo needed since spread runs scripts as root
+          # "testing" is default model created by concierge
+          sudo juju switch testing
+          mkdir ~/logs/
+      - name: juju status
+        timeout-minutes: 1
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: |
+          if [ "${VAR_SUBSTRATE}" = vm ]; then
+            sudo juju status --color --relations --storage | tee ~/logs/juju-status.txt
+          else
+            sudo juju status --color --relations | tee ~/logs/juju-status.txt
+          fi
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: juju debug-log
+        timeout-minutes: 3
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo juju debug-log --color --replay --no-tail | tee ~/logs/juju-debug-log.txt
+      - name: jhack tail
+        timeout-minutes: 3
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo jhack tail --printer raw --replay --no-watch | tee ~/logs/jhack-tail.txt
+      - name: Upload logs
+        timeout-minutes: 5
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs-integration-test-${{ matrix.job.name_in_artifact }}
+          path: ~/logs/
+          if-no-files-found: error
+      - name: Disk usage
+        timeout-minutes: 1
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: df --human-readable
+    permissions: {}
+    cache-mode: none
