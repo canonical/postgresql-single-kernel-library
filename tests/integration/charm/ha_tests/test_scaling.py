@@ -2,23 +2,21 @@
 # Copyright 2024 Canonical Ltd.
 # See LICENSE file for licensing details.
 import logging
-from asyncio import gather
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 from tenacity import RetryError, Retrying, stop_after_delay, wait_fixed
 
-from tests.integration.charm.ha_tests.helpers import (
-    are_writes_increasing,
-    check_writes,
-    get_cluster_roles,
-    get_primary,
-    start_continuous_writes,
-)
-from tests.integration.charm.pytest_operator_helpers import (
+from tests.integration.charm.helpers import (
     APPLICATION_NAME,
     CHARM_BASE,
+    are_writes_increasing,
+    check_writes,
+    get_ha_cluster_roles,
+    get_primary_from_app,
+    start_ha_continuous_writes,
 )
+from tests.integration.helpers.juju import fast_forward, wait_for_idle
 
 logger = logging.getLogger(__name__)
 
@@ -32,34 +30,32 @@ class ClusterNotReadyError(Exception):
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(ops_test: OpsTest, charm, app_name: str) -> None:
+def test_build_and_deploy(juju: jubilant.Juju, charm, app_name: str) -> None:
     """Build and deploy two PostgreSQL clusters."""
     # This is a potentially destructive test, so it shouldn't be run against existing clusters
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Deploy the first cluster with reusable storage
-        await gather(
-            ops_test.model.deploy(
-                charm,
-                application_name=app_name,
-                num_units=2,
-                base=CHARM_BASE,
-                config={"profile": "testing"},
-            ),
-            ops_test.model.deploy(
-                APPLICATION_NAME,
-                application_name=APPLICATION_NAME,
-                base="ubuntu@24.04",
-                channel="latest/edge",
-            ),
+        juju.deploy(
+            charm,
+            app=app_name,
+            num_units=2,
+            base=CHARM_BASE,
+            config={"profile": "testing"},
+        )
+        juju.deploy(
+            APPLICATION_NAME,
+            app=APPLICATION_NAME,
+            base="ubuntu@24.04",
+            channel="latest/edge",
         )
 
-        await ops_test.model.relate(app_name, f"{APPLICATION_NAME}:database")
-        await ops_test.model.wait_for_idle(status="active", timeout=1800)
+        juju.integrate(app_name, f"{APPLICATION_NAME}:database")
+        wait_for_idle(juju, status="active", timeout=1800)
 
 
 @pytest.mark.abort_on_fail
-async def test_removing_stereo_primary(
-    ops_test: OpsTest, continuous_writes, app_name: str
+def test_removing_stereo_primary(
+    juju: jubilant.Juju, juju_continuous_writes, app_name: str
 ) -> None:
     # Start an application that continuously writes data to the database.
     app = app_name
@@ -68,136 +64,127 @@ async def test_removing_stereo_primary(
     try:
         for attempt in Retrying(stop=stop_after_delay(60 * 10), wait=wait_fixed(10)):
             with attempt:
-                original_roles = await get_cluster_roles(
-                    ops_test, ops_test.model.applications[app_name].units[0].name
+                original_roles = get_ha_cluster_roles(
+                    juju, next(iter(juju.status().apps[app_name].units))
                 )
                 if not original_roles["sync_standbys"]:
                     raise ClusterNotReadyError()
     except RetryError:
         pytest.fail("no sync_standby member appeared within 10 minutes of deployment")
-    await start_continuous_writes(ops_test, app)
+    start_ha_continuous_writes(juju, app)
     logger.info("Deleting primary")
-    primary = await get_primary(ops_test, app)
-    await ops_test.model.destroy_unit(primary, force=True, destroy_storage=False, max_wait=1500)
+    primary = get_primary_from_app(juju, app)
+    juju.remove_unit(primary, force=True, destroy_storage=False)
 
-    left_unit = ops_test.model.units[original_roles["sync_standbys"][0]]
-    for left_unit in ops_test.model.applications[app_name].units:
-        if left_unit.name not in original_roles["primaries"]:
+    left_unit = original_roles["sync_standbys"][0]
+    for left_unit in juju.status().apps[app_name].units:
+        if left_unit not in original_roles["primaries"]:
             break
 
-    await ops_test.model.block_until(
-        lambda: (
-            left_unit.workload_status == "blocked"
-            and left_unit.workload_status_message == "Raft majority loss, run: promote-to-primary"
+    juju.wait(
+        lambda status: (
+            status.apps[app_name].units[left_unit].workload_status.current == "blocked"
+            and status.apps[app_name].units[left_unit].workload_status.message
+            == "Raft majority loss, run: promote-to-primary"
         ),
         timeout=600,
+        delay=0.5,
+        successes=1,
     )
 
-    run_action = (
-        await ops_test.model
-        .applications[app_name]
-        .units[0]
-        .run_action("promote-to-primary", scope="unit", force=True)
+    juju.run(
+        next(iter(juju.status().apps[app_name].units)),
+        "promote-to-primary",
+        {"scope": "unit", "force": True},
     )
-    await run_action.wait()
 
-    await ops_test.model.wait_for_idle(status="active", timeout=600, idle_period=45)
+    wait_for_idle(juju, status="active", timeout=600, idle_period=45)
 
     logger.info("Scaling back up")
-    await ops_test.model.applications[app_name].add_unit(count=1)
-    await ops_test.model.wait_for_idle(status="active", timeout=1500)
+    juju.add_unit(app_name, num_units=1)
+    wait_for_idle(juju, status="active", timeout=1500)
 
-    await are_writes_increasing(ops_test, primary)
+    are_writes_increasing(juju, primary)
 
-    new_roles = await get_cluster_roles(
-        ops_test, ops_test.model.applications[app_name].units[0].name
-    )
+    new_roles = get_ha_cluster_roles(juju, next(iter(juju.status().apps[app_name].units)))
     assert len(new_roles["primaries"]) == 1
     assert len(new_roles["sync_standbys"]) == 1
     assert new_roles["primaries"][0] == original_roles["sync_standbys"][0]
 
-    await check_writes(ops_test)
+    check_writes(juju)
 
 
 @pytest.mark.abort_on_fail
-async def test_removing_stereo_sync_standby(
-    ops_test: OpsTest, continuous_writes, app_name: str
+def test_removing_stereo_sync_standby(
+    juju: jubilant.Juju, juju_continuous_writes, app_name: str
 ) -> None:
     # Start an application that continuously writes data to the database.
     app = app_name
-    original_roles = await get_cluster_roles(
-        ops_test, ops_test.model.applications[app_name].units[0].name
-    )
-    await start_continuous_writes(ops_test, app)
+    original_roles = get_ha_cluster_roles(juju, next(iter(juju.status().apps[app_name].units)))
+    start_ha_continuous_writes(juju, app)
     logger.info("Deleting sync replica")
-    primary = await get_primary(ops_test, app)
-    secondary = next(
-        filter(lambda x: x.name != primary, ops_test.model.applications[app_name].units)
-    ).name
-    await ops_test.model.destroy_unit(secondary, force=True, destroy_storage=False, max_wait=1500)
+    primary = get_primary_from_app(juju, app)
+    secondary = next(filter(lambda name: name != primary, juju.status().apps[app_name].units))
+    juju.remove_unit(secondary, force=True, destroy_storage=False)
 
-    await ops_test.model.wait_for_idle(status="active", timeout=600, idle_period=45)
+    wait_for_idle(juju, status="active", timeout=600, idle_period=45)
 
     logger.info("Scaling back up")
-    await ops_test.model.applications[app_name].add_unit(count=1)
-    await ops_test.model.wait_for_idle(status="active", timeout=1500)
+    juju.add_unit(app_name, num_units=1)
+    wait_for_idle(juju, status="active", timeout=1500)
 
-    await are_writes_increasing(ops_test, primary)
+    are_writes_increasing(juju, primary)
 
-    new_roles = await get_cluster_roles(
-        ops_test, ops_test.model.applications[app_name].units[0].name
-    )
+    new_roles = get_ha_cluster_roles(juju, next(iter(juju.status().apps[app_name].units)))
     assert len(new_roles["primaries"]) == 1
     assert len(new_roles["sync_standbys"]) == 1
     assert new_roles["primaries"][0] == original_roles["primaries"][0]
 
-    await check_writes(ops_test)
+    check_writes(juju)
 
 
 @pytest.mark.abort_on_fail
-async def test_scale_to_five_units(ops_test: OpsTest, app_name: str) -> None:
-    await ops_test.model.applications[app_name].add_unit(count=3)
-    await ops_test.model.wait_for_idle(status="active", timeout=2000)
+def test_scale_to_five_units(juju: jubilant.Juju, app_name: str) -> None:
+    juju.add_unit(app_name, num_units=3)
+    wait_for_idle(juju, status="active", timeout=2000)
 
 
 @pytest.mark.abort_on_fail
-async def test_removing_raft_majority(ops_test: OpsTest, continuous_writes, app_name: str) -> None:
+def test_removing_raft_majority(
+    juju: jubilant.Juju, juju_continuous_writes, app_name: str
+) -> None:
     # Start an application that continuously writes data to the database.
     app = app_name
-    original_roles = await get_cluster_roles(
-        ops_test, ops_test.model.applications[app_name].units[0].name
-    )
+    original_roles = get_ha_cluster_roles(juju, next(iter(juju.status().apps[app_name].units)))
 
-    await start_continuous_writes(ops_test, app)
+    start_ha_continuous_writes(juju, app)
     logger.info("Deleting primary")
-    await gather(
-        ops_test.model.destroy_unit(
-            original_roles["primaries"][0], force=True, destroy_storage=False, max_wait=1500
-        ),
-        ops_test.model.destroy_unit(
-            original_roles["sync_standbys"][0], force=True, destroy_storage=False, max_wait=1500
-        ),
-        ops_test.model.destroy_unit(
-            original_roles["sync_standbys"][1], force=True, destroy_storage=False, max_wait=1500
-        ),
+    juju.remove_unit(
+        original_roles["primaries"][0],
+        original_roles["sync_standbys"][0],
+        original_roles["sync_standbys"][1],
+        force=True,
+        destroy_storage=False,
     )
 
-    left_unit = ops_test.model.units[original_roles["sync_standbys"][2]]
-    await ops_test.model.block_until(
-        lambda: (
-            left_unit.workload_status == "blocked"
-            and left_unit.workload_status_message == "Raft majority loss, run: promote-to-primary"
+    left_unit = original_roles["sync_standbys"][2]
+    juju.wait(
+        lambda status: (
+            status.apps[app_name].units[left_unit].workload_status.current == "blocked"
+            and status.apps[app_name].units[left_unit].workload_status.message
+            == "Raft majority loss, run: promote-to-primary"
         ),
         timeout=600,
+        delay=0.5,
+        successes=1,
     )
 
-    run_action = await left_unit.run_action("promote-to-primary", scope="unit", force=True)
-    await run_action.wait()
+    juju.run(left_unit, "promote-to-primary", {"scope": "unit", "force": True})
 
-    await ops_test.model.wait_for_idle(status="active", timeout=900, idle_period=45)
+    wait_for_idle(juju, status="active", timeout=900, idle_period=45)
 
-    await are_writes_increasing(
-        ops_test,
+    are_writes_increasing(
+        juju,
         [
             original_roles["primaries"][0],
             original_roles["sync_standbys"][0],
@@ -206,13 +193,11 @@ async def test_removing_raft_majority(ops_test: OpsTest, continuous_writes, app_
     )
 
     logger.info("Scaling back up")
-    await ops_test.model.applications[app_name].add_unit(count=3)
-    await ops_test.model.wait_for_idle(status="active", timeout=2000)
+    juju.add_unit(app_name, num_units=3)
+    wait_for_idle(juju, status="active", timeout=2000)
 
-    await check_writes(ops_test)
-    new_roles = await get_cluster_roles(
-        ops_test, ops_test.model.applications[app_name].units[0].name
-    )
+    check_writes(juju)
+    new_roles = get_ha_cluster_roles(juju, next(iter(juju.status().apps[app_name].units)))
     assert len(new_roles["primaries"]) == 1
     assert len(new_roles["sync_standbys"]) == 4
     assert new_roles["primaries"][0] == original_roles["sync_standbys"][2]

@@ -19,7 +19,7 @@ import psycopg2
 import requests
 import yaml
 from lightkube import Client
-from lightkube.resources.core_v1 import Service
+from lightkube.resources.core_v1 import Pod, Service
 from single_kernel_postgresql.config.literals import PEER_RELATION, SYSTEM_USERS_PASSWORD_CONFIG
 from tenacity import (
     RetryError,
@@ -31,12 +31,14 @@ from tenacity import (
 )
 
 from tests.integration.helpers.juju import (
+    fast_forward,
     get_app_leader,
     get_app_units,
     get_credentials,
     get_secret_by_label,
     get_unit_address,
     wait_for_apps_status,
+    wait_for_idle,
 )
 from tests.integration.helpers.postgresql import db_connect, execute_query
 from tests.integration.types import Substrate
@@ -50,6 +52,7 @@ RELATION_ENDPOINT = "postgresql"
 MINUTE_SECS = 60
 
 CHARM_BASE = "ubuntu@24.04"
+APPLICATION_NAME = "postgresql-test-app"
 
 # The resume-refresh action is a one-shot charm_refresh state-machine probe: it fails while
 # the charm-side pause has not opened the allow-gate yet ("Unit N is unhealthy. Refresh will
@@ -1090,3 +1093,560 @@ def check_for_fix_log_message(juju: jubilant.Juju, unit_name: str) -> bool:
         "This may indicate the code path was not triggered or permissions were already correct."
     )
     return False
+
+
+# Faithful synchronous ports of the HA helpers. Keep the existing generic helpers
+# above unchanged where their primary selection, retries or storage policy differ.
+
+
+class MemberNotListedOnClusterError(Exception):
+    """Raised when a member is not listed in the cluster."""
+
+
+class MemberNotUpdatedOnClusterError(Exception):
+    """Raised when a member is not yet updated in the cluster."""
+
+
+def get_postgresql_app_name(
+    juju: jubilant.Juju, application_name: str = "postgresql", model: jubilant.Juju | None = None
+) -> str | None:
+    """Return the first PostgreSQL application, as in the original HA helpers."""
+    status = (model or juju).status()
+    for app, app_status in status.apps.items():
+        if application_name in app_status.charm and APPLICATION_NAME not in app_status.charm:
+            return app
+    return None
+
+
+def get_primary_from_app(
+    juju: jubilant.Juju, app: str, down_unit: str | None = None
+) -> str | None:
+    """Ask each available unit for the primary, without changing the original selection."""
+    for unit_name in juju.status().apps[app].units:
+        if unit_name != down_unit:
+            primary = juju.run(unit_name, "get-primary").results.get("primary", "None")
+            if primary == "None":
+                continue
+            return primary
+    return None
+
+
+def get_patroni_cluster(unit_ip: str) -> dict:
+    """Read the Patroni cluster with the original 30-second retry window."""
+    for attempt in Retrying(stop=stop_after_delay(30), wait=wait_fixed(3)):
+        with attempt:
+            resp = requests.get(f"https://{unit_ip}:8008/cluster", verify=False)
+    return resp.json()
+
+
+def get_ip_from_inside_the_unit(juju: jubilant.Juju, unit_name: str) -> str:
+    """Get the addresses reported by hostname -I inside the unit."""
+    return juju.cli("exec", "--unit", unit_name, "--", "hostname", "-I").splitlines()[0].strip()
+
+
+def instance_ip(juju: jubilant.Juju, instance: str) -> str | None:
+    """Translate a machine hostname to its IP using the original machines output."""
+    output = juju.cli("machines")
+    for line in output.splitlines():
+        if instance in line:
+            return line.split()[2]
+    return None
+
+
+def get_unit_ip(juju: jubilant.Juju, unit_name: str, model: jubilant.Juju | None = None) -> str:
+    """Get the VM machine IP or the K8s pod address, as in the HA helpers."""
+    status = juju.status()
+    if status.model.type == "caas":
+        return get_unit_address(juju, unit_name)
+    if model is None:
+        application = unit_name.split("/")[0]
+        for name, _unit in status.apps[application].units.items():
+            if name == unit_name:
+                break
+        return instance_ip(juju, status.machines[_unit.machine].hostname)
+    return get_unit_address(juju, unit_name)
+
+
+def get_machine_from_unit(juju: jubilant.Juju, unit_name: str) -> str:
+    """Get the machine hostname by running hostname on the unit."""
+    return juju.cli("exec", "--unit", unit_name, "--", "hostname").strip()
+
+
+def stop_machine(machine_name: str) -> None:
+    """Stop the LXD machine where a unit runs."""
+    subprocess.check_call(f"lxc stop {machine_name}".split())
+
+
+def get_patroni_setting(juju: jubilant.Juju, setting: str, tls: bool = False) -> int | None:
+    """Get an integer Patroni setting, retaining the original retries and primary selection."""
+    for attempt in Retrying(stop=stop_after_delay(30 * 2), wait=wait_fixed(3)):
+        with attempt:
+            app = get_postgresql_app_name(juju)
+            primary_name = get_primary_from_app(juju, app)
+            unit_ip = get_unit_address(juju, primary_name)
+            configuration_info = requests.get(f"https://{unit_ip}:8008/config", verify=False)
+            value = configuration_info.json().get(setting)
+            return int(value) if value is not None else None
+
+
+def change_ha_patroni_setting(
+    juju: jubilant.Juju,
+    setting: str,
+    value: int | bool | None,
+    password: str,
+    use_random_unit: bool = False,
+    tls: bool = False,
+) -> None:
+    """Change a Patroni setting with the original HA primary selection and retries."""
+    for attempt in Retrying(stop=stop_after_delay(30 * 2), wait=wait_fixed(3)):
+        with attempt:
+            app = get_postgresql_app_name(juju)
+            if use_random_unit:
+                unit = random.choice(list(juju.status().apps[app].units))
+                unit_ip = get_unit_address(juju, unit)
+            else:
+                primary_name = get_primary_from_app(juju, app)
+                unit_ip = get_unit_address(juju, primary_name)
+            requests.patch(
+                f"https://{unit_ip}:8008/config",
+                json={setting: value},
+                verify=False,
+                auth=requests.auth.HTTPBasicAuth("patroni", password),
+            )
+
+
+def get_ha_cluster_roles(
+    juju: jubilant.Juju, unit_name: str, use_ip_from_inside: bool = False
+) -> dict[str, list[str]]:
+    """Read cluster roles with the original HA address selection and retries."""
+    unit_ip = (
+        get_ip_from_inside_the_unit(juju, unit_name)
+        if use_ip_from_inside
+        else get_unit_ip(juju, unit_name)
+    )
+    members = {"replicas": [], "primaries": [], "sync_standbys": []}
+    member_list = get_patroni_cluster(unit_ip)["members"]
+    logger.info(f"Cluster members are: {member_list}")
+    for member in member_list:
+        role = member["role"]
+        name = "/".join(member["name"].rsplit("-", 1))
+        if role == "leader":
+            members["primaries"].append(name)
+        elif role == "sync_standby":
+            members["sync_standbys"].append(name)
+        else:
+            members["replicas"].append(name)
+    return members
+
+
+def count_writes(  # noqa: C901
+    juju: jubilant.Juju,
+    down_unit: str | None = None,
+    use_ip_from_inside: bool = False,
+    extra_model: jubilant.Juju | None = None,
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Count writes, retaining the HA model selection and member exclusions."""
+    app = get_postgresql_app_name(juju)
+    password = get_password(juju, app)
+    members = []
+    if juju.status().model.type != "caas":
+        for model in [juju, extra_model]:
+            if model is None:
+                continue
+            status = model.status()
+            for unit_name in status.apps[app].units:
+                if unit_name != down_unit:
+                    members_data = get_patroni_cluster(
+                        get_ip_from_inside_the_unit(juju, unit_name)
+                        if use_ip_from_inside
+                        else get_unit_ip(juju, unit_name)
+                    )["members"]
+                    for member_data in members_data:
+                        member_data["model"] = status.model.name
+                    members.extend(members_data)
+                    break
+        down_ips = []
+        if down_unit:
+            for unit_name, unit in juju.status().apps[app].units.items():
+                if unit_name == down_unit:
+                    down_ips.append(unit.public_address)
+                    down_ips.append(get_unit_ip(juju, unit_name))
+        return count_writes_on_members(members, password, down_ips)
+
+    for model in [juju, extra_model]:
+        if model is None:
+            continue
+        status = model.status()
+        for unit_name, unit in status.apps[app].units.items():
+            if unit_name != down_unit:
+                members_data = get_patroni_cluster(unit.address)["members"]
+                for _, member_data in enumerate(members_data):
+                    member_data["model"] = status.model.name
+                members.extend(members_data)
+                break
+
+    count = {}
+    maximum = {}
+    for member in members:
+        if member["role"] != "replica" and member["host"].split(".")[0] != (
+            down_unit or ""
+        ).replace("/", "-"):
+            host = member["host"]
+            client = Client(namespace=member["model"])
+            service = client.get(Pod, name=host.split(".")[0])
+            ip = service.status.podIP
+            connection_string = (
+                f"dbname='{APPLICATION_NAME.replace('-', '_')}_database' user='operator'"
+                f" host='{ip}' password='{password}' connect_timeout=10"
+            )
+            member_name = f"{member['model']}.{member['name']}"
+            connection = None
+            try:
+                with (
+                    psycopg2.connect(connection_string) as connection,
+                    connection.cursor() as cursor,
+                ):
+                    cursor.execute("SELECT COUNT(number), MAX(number) FROM continuous_writes;")
+                    results = cursor.fetchone()
+                    count[member_name] = results[0]
+                    maximum[member_name] = results[1]
+            except psycopg2.Error:
+                count[member_name] = -1
+                maximum[member_name] = -1
+            finally:
+                if connection is not None:
+                    connection.close()
+    return count, maximum
+
+
+def count_writes_on_members(members, password, down_ips) -> tuple[dict[str, int], dict[str, int]]:
+    count = {}
+    maximum = {}
+    for member in members:
+        if member["role"] != "replica" and member["host"] not in down_ips:
+            host = member["host"]
+            connection_string = (
+                f"dbname='{APPLICATION_NAME.replace('-', '_')}_database' user='operator'"
+                f" host='{host}' password='{password}' connect_timeout=10"
+            )
+            member_name = f"{member['model']}.{member['name']}"
+            connection = None
+            try:
+                with (
+                    psycopg2.connect(connection_string) as connection,
+                    connection.cursor() as cursor,
+                ):
+                    cursor.execute("SELECT COUNT(number), MAX(number) FROM continuous_writes;")
+                    results = cursor.fetchone()
+                    count[member_name] = results[0]
+                    maximum[member_name] = results[1]
+            except psycopg2.Error:
+                count[member_name] = -1
+                maximum[member_name] = -1
+            finally:
+                if connection is not None:
+                    connection.close()
+    return count, maximum
+
+
+def are_writes_increasing(
+    juju: jubilant.Juju,
+    down_unit: str | list[str] | None = None,
+    use_ip_from_inside: bool = False,
+    extra_model: jubilant.Juju | None = None,
+) -> None:
+    """Verify writes increase with the original retries and down-unit handling."""
+    if juju.status().model.type != "caas":
+        down_units = [down_unit] if isinstance(down_unit, str) or not down_unit else down_unit
+        writes, _ = count_writes(
+            juju,
+            down_unit=down_units[0],
+            use_ip_from_inside=use_ip_from_inside,
+            extra_model=extra_model,
+        )
+        logger.info(f"Initial writes {writes}")
+        for attempt in Retrying(stop=stop_after_delay(60 * 3), wait=wait_fixed(3), reraise=True):
+            with attempt:
+                more_writes, _ = count_writes(
+                    juju,
+                    down_unit=down_units[0],
+                    use_ip_from_inside=use_ip_from_inside,
+                    extra_model=extra_model,
+                )
+                logger.info(f"Retry writes {more_writes}")
+                for member, count in writes.items():
+                    if "/".join(member.split(".", 1)[-1].rsplit("-", 1)) in down_units:
+                        continue
+                    assert more_writes[member] > count, (
+                        f"{member}: writes not continuing to DB (current writes: {more_writes[member]} - previous writes: {count})"
+                    )
+        return
+
+    for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            writes, _ = count_writes(juju, down_unit=down_unit, extra_model=extra_model)
+            assert len(writes), "No units report count"
+    logger.info(f"Initial writes {writes}")
+    for attempt in Retrying(stop=stop_after_delay(60 * 3), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            more_writes, _ = count_writes(juju, down_unit=down_unit, extra_model=extra_model)
+            logger.info(f"Retry writes {more_writes}")
+            members_checked = []
+            for member, count in writes.items():
+                if member in more_writes:
+                    members_checked.append(member)
+                    assert more_writes[member] > count, (
+                        f"{member}: writes not continuing to DB (current writes: {more_writes[member]} - previous writes: {count})"
+                    )
+            assert len(members_checked), "No member checked from the initial writes"
+
+
+def start_ha_continuous_writes(
+    juju: jubilant.Juju, app: str, model: jubilant.Juju | None = None
+) -> None:
+    """Relate the fixed test-app if needed, then start writes on its first unit."""
+    if model is None:
+        model = juju
+    relations = [
+        relation
+        for relation in model.status().apps[APPLICATION_NAME].relations.get("database", [])
+        if relation.related_app == app
+    ]
+    if not relations:
+        model.integrate(app, f"{APPLICATION_NAME}:database")
+        wait_for_idle(
+            model, apps=[APPLICATION_NAME, app], status="active", timeout=1000, idle_period=30
+        )
+    for attempt in Retrying(stop=stop_after_delay(60 * 5), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            unit = next(iter(model.status().apps[APPLICATION_NAME].units))
+            action = model.run(unit, "start-continuous-writes")
+            assert action.results["result"] == "True", "Unable to create continuous_writes table"
+
+
+def stop_continuous_writes(juju: jubilant.Juju) -> int:
+    """Stop continuous writes and return the last written value."""
+    unit = next(iter(juju.status().apps[APPLICATION_NAME].units))
+    action = juju.run(unit, "stop-continuous-writes")
+    return int(action.results["writes"])
+
+
+def check_writes(
+    juju: jubilant.Juju,
+    use_ip_from_inside: bool = False,
+    extra_model: jubilant.Juju | None = None,
+) -> int:
+    """Compare the test-app's final count with each member, using the original retries."""
+    total_expected_writes = stop_continuous_writes(juju)
+    for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True):
+        with attempt:
+            actual_writes, max_number_written = count_writes(
+                juju, use_ip_from_inside=use_ip_from_inside, extra_model=extra_model
+            )
+            for member, count in actual_writes.items():
+                logger.info(
+                    f"member: {member}, count: {count}, max_number_written: {max_number_written[member]}, total_expected_writes: {total_expected_writes}"
+                )
+                assert count == max_number_written[member], (
+                    f"{member}: writes to the db were missed: count of actual writes ({count}) on {member} different from the max number written ({max_number_written[member]})."
+                )
+                assert total_expected_writes == count, f"{member}: writes to the db were missed."
+    return total_expected_writes
+
+
+def fetch_cluster_members(juju: jubilant.Juju, use_ip_from_inside: bool = False):
+    """Fetch and compare the member IP lists reported by every unit."""
+    app = get_postgresql_app_name(juju)
+    member_ips = {}
+    if juju.status().model.type != "caas":
+        for unit_name in juju.status().apps[app].units:
+            unit_ip = (
+                get_ip_from_inside_the_unit(juju, unit_name)
+                if use_ip_from_inside
+                else get_unit_ip(juju, unit_name)
+            )
+            cluster_info = requests.get(f"https://{unit_ip}:8008/cluster", verify=False)
+            if len(member_ips) > 0:
+                assert member_ips == {
+                    member["host"] for member in cluster_info.json()["members"]
+                }, "members report different lists of cluster members."
+            else:
+                member_ips = {member["host"] for member in cluster_info.json()["members"]}
+        return member_ips
+
+    def get_host_ip(host: str) -> str:
+        client = Client(namespace=juju.status().model.name)
+        pod = client.get(Pod, name=host.split(".")[0])
+        return pod.status.podIP
+
+    for unit_name in juju.status().apps[app].units:
+        unit_address = get_unit_address(juju, unit_name)
+        cluster_info = requests.get(f"https://{unit_address}:8008/cluster", verify=False)
+        if len(member_ips) > 0:
+            assert member_ips == {
+                get_host_ip(member["host"]) for member in cluster_info.json()["members"]
+            }, "members report different lists of cluster members."
+        else:
+            member_ips = {get_host_ip(member["host"]) for member in cluster_info.json()["members"]}
+    return member_ips
+
+
+def is_replica(juju: jubilant.Juju, unit_name: str, use_ip_from_inside: bool = False) -> bool:
+    """Wait for a former primary to be listed and no longer be leader."""
+    unit_ip = (
+        get_ip_from_inside_the_unit(juju, unit_name)
+        if use_ip_from_inside
+        else get_unit_ip(juju, unit_name)
+    )
+    member_name = unit_name.replace("/", "-")
+    try:
+        for attempt in Retrying(stop=stop_after_delay(60 * 3), wait=wait_fixed(3)):
+            with attempt:
+                cluster_info = requests.get(f"https://{unit_ip}:8008/cluster", verify=False)
+                if member_name not in {
+                    member["name"] for member in cluster_info.json()["members"]
+                }:
+                    raise MemberNotListedOnClusterError()
+                for member in cluster_info.json()["members"]:
+                    if member["name"] == member_name:
+                        role = member["role"]
+                if role != "leader":
+                    return True
+                else:
+                    raise MemberNotUpdatedOnClusterError()
+    except RetryError:
+        return False
+
+
+def is_secondary_up_to_date(
+    juju: jubilant.Juju,
+    unit_name: str,
+    expected_writes: int,
+    use_ip_from_inside: bool = False,
+) -> bool:
+    """Check a secondary's writes with the original retries and K8s idle wait."""
+    app = get_postgresql_app_name(juju)
+    password = get_password(juju, app)
+    if juju.status().model.type != "caas":
+        host = next(
+            (
+                get_ip_from_inside_the_unit(juju, name)
+                if use_ip_from_inside
+                else get_unit_ip(juju, name)
+            )
+            for name in juju.status().apps[app].units
+            if name == unit_name
+        )
+    else:
+        host = juju.status().apps[app].units[unit_name].address
+    connection_string = (
+        f"dbname='{APPLICATION_NAME.replace('-', '_')}_database' user='operator'"
+        f" host='{host}' password='{password}' connect_timeout=10"
+    )
+    try:
+        for attempt in Retrying(stop=stop_after_delay(60 * 3), wait=wait_fixed(3)):
+            with (
+                attempt,
+                psycopg2.connect(connection_string) as connection,
+                connection.cursor() as cursor,
+            ):
+                cursor.execute("SELECT COUNT(number), MAX(number) FROM continuous_writes;")
+                results = cursor.fetchone()
+                if juju.status().model.type != "caas":
+                    assert results[0] == expected_writes and results[1] == expected_writes
+                elif results[0] != expected_writes or results[1] != expected_writes:
+                    with fast_forward(juju, interval="30s"):
+                        wait_for_idle(
+                            juju, apps=[unit_name.split("/")[0]], idle_period=15, timeout=1000
+                        )
+                        raise Exception
+    except RetryError:
+        return False
+    finally:
+        connection.close()
+    return True
+
+
+def is_cluster_updated(
+    juju: jubilant.Juju, primary_name: str, use_ip_from_inside: bool = False
+) -> None:
+    logger.info("checking that the former primary is now a replica")
+    assert is_replica(juju, primary_name, use_ip_from_inside), (
+        "there are more than one primary in the cluster."
+    )
+    logger.info("checking that all units are part of the same cluster")
+    member_ips = fetch_cluster_members(juju, use_ip_from_inside)
+    app = primary_name.split("/")[0]
+    ip_addresses = [
+        (
+            get_ip_from_inside_the_unit(juju, unit_name)
+            if use_ip_from_inside
+            else get_unit_ip(juju, unit_name)
+        )
+        for unit_name in juju.status().apps[app].units
+    ]
+    assert set(member_ips) == set(ip_addresses), "not all units are part of the same cluster."
+    logger.info("checking that no writes to the database were missed after stopping the writes")
+    for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True):
+        with attempt:
+            total_expected_writes = check_writes(juju, use_ip_from_inside)
+    logger.info("checking that the former primary is up to date with the cluster after restarting")
+    for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True):
+        with attempt:
+            assert is_secondary_up_to_date(
+                juju, primary_name, total_expected_writes, use_ip_from_inside
+            ), f"secondary ({primary_name}) not up to date with the cluster after restarting."
+
+
+def scale_ha_application(
+    juju: jubilant.Juju,
+    application_name: str,
+    count: int,
+    model: jubilant.Juju | None = None,
+) -> None:
+    """Scale using the original HA storage policy and exact-unit idle waits."""
+    if model is None:
+        model = juju
+    if juju.status().model.type != "caas":
+        units = list(model.status().apps[application_name].units)
+        change = count - len(units)
+        if change > 0:
+            model.add_unit(application_name, num_units=change)
+        elif change < 0:
+            model.remove_unit(*units[0:-change])
+        wait_for_idle(
+            model,
+            apps=[application_name],
+            status="active",
+            timeout=2000,
+            idle_period=30,
+            wait_for_exact_units=count,
+        )
+        return
+
+    model.cli("scale-application", application_name, str(count))
+    if count == 0:
+        model.wait(
+            lambda status: len(status.apps[application_name].units) == count,
+            timeout=1200,
+            delay=0.5,
+            successes=1,
+        )
+    else:
+        wait_for_idle(
+            model,
+            apps=[application_name],
+            status="active",
+            timeout=1200,
+            wait_for_exact_units=count,
+            idle_period=2,
+        )
+
+
+def remove_charm_code(juju: jubilant.Juju, unit_name: str) -> None:
+    """Remove src/charm.py from the PostgreSQL unit's charm container."""
+    juju.ssh(
+        unit_name,
+        f"rm /var/lib/juju/agents/unit-{unit_name.replace('/', '-')}/charm/src/charm.py",
+        container="charm",
+    )
