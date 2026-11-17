@@ -14,7 +14,8 @@ from tests.integration.charm.helpers import (
     change_ha_patroni_setting,
     get_postgresql_app_name,
 )
-from tests.integration.helpers.juju import get_app_leader
+from tests.integration.helpers.juju import fast_forward, get_app_leader, wait_for_idle
+from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,32 @@ def juju_primary_start_timeout(juju: jubilant.Juju) -> None:
         patroni_password,
         use_random_unit=True,
     )
+
+
+@pytest.fixture()
+def juju_restart_policy(juju: jubilant.Juju, substrate: Substrate) -> None:
+    """Set the same Pebble restart policy on all units (K8s only)."""
+    if substrate == Substrate.vm:
+        yield
+        return
+
+    app = helpers.get_postgresql_app_name(juju)
+    for unit in juju.status().apps[app].units:
+        helpers.modify_pebble_restart_delay(
+            juju,
+            unit,
+            "tests/integration/charm/ha_tests/manifests/extend_pebble_restart_delay.yml",
+        )
+        with fast_forward(juju):
+            wait_for_idle(
+                juju,
+                apps=[app],
+                status="active",
+                raise_on_blocked=True,
+                timeout=5 * 60,
+                idle_period=30,
+            )
+    yield
 
 
 @pytest.fixture()

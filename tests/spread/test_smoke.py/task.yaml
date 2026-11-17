@@ -1,5 +1,5 @@
 summary: test_smoke.py
 environment:
-  TEST_MODULE: charm/ha_tests/test_smoke.py
+  TEST_MODULE: charm/high_availability/test_smoke.py
 execute: |
   tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing
