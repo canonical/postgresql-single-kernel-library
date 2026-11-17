@@ -4,14 +4,48 @@
 
 import logging
 
+import jubilant
 import pytest
-from tenacity import Retrying, stop_after_attempt
+from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
+from tests.integration.charm import helpers
+from tests.integration.charm.helpers import (
+    APPLICATION_NAME,
+    change_ha_patroni_setting,
+    get_postgresql_app_name,
+)
 from tests.integration.helpers.juju import get_app_leader
 
 logger = logging.getLogger(__name__)
 
 DB_TEST_APP_NAME = "postgresql-test-app"
+
+
+@pytest.fixture()
+def juju_continuous_writes(juju: jubilant.Juju) -> None:
+    """Clear continuous writes at the end, like the async HA fixture."""
+    yield
+    for attempt in Retrying(stop=stop_after_delay(60 * 5), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            unit = next(iter(juju.status().apps[APPLICATION_NAME].units))
+            action = juju.run(unit, "clear-continuous-writes")
+            assert action.results["result"] == "True", "Unable to clear up continuous_writes table"
+
+
+@pytest.fixture(scope="module")
+def juju_primary_start_timeout(juju: jubilant.Juju) -> None:
+    """Set and restore primary_start_timeout exactly like the async HA fixture."""
+    patroni_password = helpers.get_password(juju, get_postgresql_app_name(juju), "patroni")
+    initial_primary_start_timeout = helpers.get_patroni_setting(juju, "primary_start_timeout")
+    change_ha_patroni_setting(juju, "primary_start_timeout", 0, patroni_password)
+    yield
+    change_ha_patroni_setting(
+        juju,
+        "primary_start_timeout",
+        initial_primary_start_timeout,
+        patroni_password,
+        use_random_unit=True,
+    )
 
 
 @pytest.fixture()
