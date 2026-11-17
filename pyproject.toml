@@ -66,18 +66,18 @@ module-root = ""
 
 [dependency-groups]
 format = [
-    "ruff==0.17.0"
+    "ruff==0.17.5"
 ]
 lint = [
     "codespell==2.4.3",
-    "ty==0.0.86"
+    "ty==0.0.104"
 ]
 unit = [
-    "coverage[toml]==7.16.2",
-    "pytest==9.1.1"
+    "coverage[toml]==7.17.3",
+    "pytest==9.2.0"
 ]
 integration = [
-    "pytest==9.1.1",
+    "pytest==9.2.0",
     "jubilant==1.14.0",
     "allure-pytest==2.16.2",
     "allure-pytest-default-results==0.1.4",
