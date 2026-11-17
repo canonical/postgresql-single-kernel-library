@@ -3,23 +3,21 @@
 # See LICENSE file for licensing details.
 import logging
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 
-from tests.integration.charm.ha_tests.helpers import (
-    add_unit_with_storage,
-    get_storage_ids,
-)
-from tests.integration.charm.helpers import db_connect
-from tests.integration.charm.pytest_operator_helpers import (
+from tests.integration.charm.helpers import (
     CHARM_BASE,
+    add_unit_with_storage,
+    db_connect,
     get_password,
     get_patroni_cluster,
-    get_primary,
-    get_unit_address,
+    get_primary_from_app,
+    get_storage_ids,
     reused_full_cluster_recovery_storage,
     set_password,
 )
+from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
 
 FIRST_APPLICATION = "first-cluster"
 SECOND_APPLICATION = "second-cluster"
@@ -32,59 +30,53 @@ pytestmark = pytest.mark.vm_only
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(ops_test: OpsTest, charm) -> None:
+def test_build_and_deploy(juju: jubilant.Juju, charm) -> None:
     """Build and deploy two PostgreSQL clusters."""
     # This is a potentially destructive test, so it shouldn't be run against existing clusters
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Deploy the first cluster with reusable storage
-        await ops_test.model.deploy(
+        juju.deploy(
             charm,
-            application_name=FIRST_APPLICATION,
+            app=FIRST_APPLICATION,
             num_units=3,
             base=CHARM_BASE,
             storage={
-                "archive": {"pool": "lxd-btrfs", "size": 8046},
-                "data": {"pool": "lxd-btrfs", "size": 8046},
-                "logs": {"pool": "lxd-btrfs", "size": 8046},
-                "temp": {"pool": "lxd-btrfs", "size": 8046},
+                "archive": "lxd-btrfs,8046M",
+                "data": "lxd-btrfs,8046M",
+                "logs": "lxd-btrfs,8046M",
+                "temp": "lxd-btrfs,8046M",
             },
             config={"profile": "testing"},
         )
 
         # Deploy the second cluster
-        await ops_test.model.deploy(
+        juju.deploy(
             charm,
-            application_name=SECOND_APPLICATION,
+            app=SECOND_APPLICATION,
             num_units=1,
             base=CHARM_BASE,
             config={"profile": "testing"},
         )
 
-        await ops_test.model.wait_for_idle(status="active", timeout=1500)
+        wait_for_idle(juju, status="active", timeout=1500)
 
         # TODO have a better way to bootstrap clusters with existing storage
         for user in ["monitoring", "operator", "replication", "rewind"]:
-            password = await get_password(
-                ops_test, database_app_name=FIRST_APPLICATION, username=user
-            )
-            await set_password(
-                ops_test, database_app_name=SECOND_APPLICATION, username=user, password=password
-            )
+            password = get_password(juju, FIRST_APPLICATION, user)
+            set_password(juju, SECOND_APPLICATION, username=user, password=password)
             # wait for the password changes to be processed
-            await ops_test.model.wait_for_idle(
-                apps=[SECOND_APPLICATION], status="active", timeout=1500
-            )
+            wait_for_idle(juju, apps=[SECOND_APPLICATION], status="active", timeout=1500)
 
-        second_primary = ops_test.model.applications[SECOND_APPLICATION].units[0].name
-        await ops_test.model.destroy_unit(second_primary)
+        second_primary = next(iter(juju.status().apps[SECOND_APPLICATION].units))
+        juju.remove_unit(second_primary)
 
 
-async def test_cluster_restore(ops_test):
+def test_cluster_restore(juju: jubilant.Juju):
     """Recreates the cluster from storage volumes."""
     # Write some data.
-    primary = await get_primary(ops_test, FIRST_APPLICATION)
-    password = await get_password(ops_test, database_app_name=FIRST_APPLICATION)
-    address = await get_unit_address(ops_test, primary)
+    primary = get_primary_from_app(juju, FIRST_APPLICATION)
+    password = get_password(juju, FIRST_APPLICATION)
+    address = get_unit_address(juju, primary)
     logger.info("creating a table in the database")
     with db_connect(host=address, password=password) as connection:
         connection.autocommit = True
@@ -95,22 +87,28 @@ async def test_cluster_restore(ops_test):
 
     logger.info("Downscaling the existing cluster")
     storages = []
-    for unit in ops_test.model.applications[FIRST_APPLICATION].units:
-        storages.append(await get_storage_ids(ops_test, unit.name))
-        await ops_test.model.destroy_unit(unit.name)
+    for unit in juju.status().apps[FIRST_APPLICATION].units:
+        storages.append(get_storage_ids(juju, unit))
+        juju.remove_unit(unit)
 
-    await ops_test.model.remove_application(FIRST_APPLICATION, block_until_done=True)
+    juju.remove_application(FIRST_APPLICATION)
+    juju.wait(
+        lambda status: FIRST_APPLICATION not in status.apps,
+        timeout=float("inf"),
+        delay=0.5,
+        successes=1,
+    )
 
     # Recreate cluster
     logger.info("Upscaling the second cluster with the old data")
     for storage in storages:
-        unit = await add_unit_with_storage(ops_test, SECOND_APPLICATION, storage)
-        assert await reused_full_cluster_recovery_storage(ops_test, unit.name), (
+        unit = add_unit_with_storage(juju, SECOND_APPLICATION, storage)
+        assert reused_full_cluster_recovery_storage(juju, unit), (
             "attached storage not properly reused by Postgresql."
         )
 
-    primary = await get_primary(ops_test, SECOND_APPLICATION)
-    address = await get_unit_address(ops_test, primary)
+    primary = get_primary_from_app(juju, SECOND_APPLICATION)
+    address = get_unit_address(juju, primary)
     logger.info("checking that data was persisted")
     with db_connect(host=address, password=password) as connection, connection.cursor() as cursor:
         cursor.execute(
@@ -124,13 +122,13 @@ async def test_cluster_restore(ops_test):
 
     # check that there is only one primary
     cluster = get_patroni_cluster(
-        ops_test.model.applications[SECOND_APPLICATION].units[0].public_address
+        next(iter(juju.status().apps[SECOND_APPLICATION].units.values())).public_address
     )
     primaries = [member for member in cluster["members"] if member["role"] == "leader"]
     assert len(primaries) == 1, "There isn't just a single primary"
 
     # check that all units are member of the new cluster
     members = [member["name"] for member in cluster["members"]]
-    for unit in ops_test.model.applications[SECOND_APPLICATION].units:
-        assert unit.name.replace("/", "-") in members, "Unit missing from cluster"
+    for unit in juju.status().apps[SECOND_APPLICATION].units:
+        assert unit.replace("/", "-") in members, "Unit missing from cluster"
     assert len(members) == len(storages), "Number of restored units and reused storages diverge"
