@@ -2,6 +2,7 @@
 # See LICENSE file for licensing details.
 """Skeleton for the abstract charm."""
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
@@ -66,6 +67,13 @@ from ..config.literals import (
     TRACING_RELATION_NAME,
 )
 from ..utils.postgresql import PostgreSQL
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpx2").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("asyncio").setLevel(logging.WARNING)
+logging.getLogger("boto3").setLevel(logging.WARNING)
+logging.getLogger("botocore").setLevel(logging.WARNING)
 
 
 class AbstractPostgreSQLCharm(CharmBase, ABC):
