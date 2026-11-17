@@ -7,6 +7,7 @@ import json
 import logging
 import random
 import subprocess
+import tarfile
 import tempfile
 import time
 import tomllib
@@ -15,11 +16,17 @@ from datetime import datetime
 from enum import Enum
 
 import jubilant
+import kubernetes
 import psycopg2
 import requests
 import yaml
+from kubernetes import config
+from kubernetes.client.api import core_v1_api
+from kubernetes.stream import stream
 from lightkube import Client
-from lightkube.resources.core_v1 import Pod, Service
+from lightkube.core.client import GlobalResource
+from lightkube.core.exceptions import ApiError
+from lightkube.resources.core_v1 import PersistentVolume, PersistentVolumeClaim, Pod, Service
 from single_kernel_postgresql.config.literals import PEER_RELATION, SYSTEM_USERS_PASSWORD_CONFIG
 from tenacity import (
     RetryError,
@@ -1650,3 +1657,499 @@ def remove_charm_code(juju: jubilant.Juju, unit_name: str) -> None:
         f"rm /var/lib/juju/agents/unit-{unit_name.replace('/', '-')}/charm/src/charm.py",
         container="charm",
     )
+
+
+def storage_type(juju: jubilant.Juju, app: str) -> str | None:
+    """Retrieve the storage type using the original CLI table parsing."""
+    proc = juju.cli("storage")
+    for line in proc.splitlines():
+        if "Storage" in line:
+            continue
+        if len(line) == 0:
+            continue
+        if "detached" in line:
+            continue
+        unit_name = line.split()[0]
+        app_name = unit_name.split("/")[0]
+        if app_name == app:
+            return line.split()[3]
+
+
+def get_storage_ids(juju: jubilant.Juju, unit_name: str) -> list[str]:
+    """Retrieve storage IDs (only data on K8s), using the original CLI table."""
+    storage_ids = []
+    proc = juju.cli("storage")
+    for line in proc.splitlines():
+        if "Storage" in line:
+            continue
+        if len(line) == 0:
+            continue
+        if "detached" in line:
+            continue
+        if line.split()[0] == unit_name and (
+            juju.status().model.type != "caas" or line.split()[1].startswith("data")
+        ):
+            storage_ids.append(line.split()[1])
+    return storage_ids
+
+
+def add_unit_with_storage(juju: jubilant.Juju, app: str, storages: list[str]) -> str:
+    """Add a unit and verify the attached storage exactly like the async helper."""
+    original_units = set(juju.status().apps[app].units)
+    add_unit_cmd = ["add-unit", app]
+    for storage in storages:
+        add_unit_cmd.append(f"--attach-storage={storage}")
+    juju.cli(*add_unit_cmd)
+    with fast_forward(juju):
+        wait_for_idle(juju, apps=[app], status="active", timeout=2000)
+
+    # When removing all units sometimes the last unit remain in the list
+    current_units = set(juju.status().apps[app].units)
+    original_units.intersection_update(current_units)
+    assert original_units.issubset(current_units), "New unit not added to model"
+
+    new_unit = (current_units - original_units).pop()
+    assert sorted(get_storage_ids(juju, new_unit)) == sorted(storages), (
+        "unit added with incorrect storage"
+    )
+    return new_unit
+
+
+def run_ha_command_on_unit(
+    juju: jubilant.Juju, unit_name: str, command: str, container: str = "postgresql"
+) -> str:
+    """Run the original HA CLI command, preserving exec/ssh and argument splitting."""
+    if juju.status().model.type != "caas":
+        return juju.cli("exec", "--unit", unit_name, "--", *command.split())
+    complete_command = f"ssh --container {container} {unit_name} {command}"
+    return juju.cli(*complete_command.split())
+
+
+def reused_replica_storage(juju: jubilant.Juju, unit_name: str) -> bool:
+    """Check the original Patroni log marker for reused replica storage."""
+    command = (
+        "grep 'Database cluster state: in archive recovery' "
+        "/var/snap/charmed-postgresql/common/var/log/patroni/patroni.log*"
+    )
+    run_ha_command_on_unit(juju, unit_name, command)
+    return True
+
+
+def reused_full_cluster_recovery_storage(juju: jubilant.Juju, unit_name: str) -> bool:
+    """Check the original Patroni log markers for full cluster recovery."""
+    command = (
+        "grep -E 'Database cluster state: in archive recovery|Database cluster state: shut down' "
+        "/var/snap/charmed-postgresql/common/var/log/patroni/patroni.log*"
+    )
+    run_ha_command_on_unit(juju, unit_name, command)
+    return True
+
+
+def is_storage_exists(juju: jubilant.Juju, storage_id: str) -> bool:
+    """Check storage existence, retaining the original return-code-1 handling."""
+    try:
+        stdout = juju.cli("show-storage", storage_id, "--format=json")
+    except jubilant.CLIError as error:
+        if error.returncode == 1:
+            return storage_id in error.stdout
+        raise
+    return storage_id in str(stdout)
+
+
+def create_db(juju: jubilant.Juju, app: str, db: str) -> None:
+    """Create the database using the first unit, like the async HA helper."""
+    unit = next(iter(juju.status().apps[app].units))
+    unit_address = get_unit_address(juju, unit)
+    password = get_password(juju, app)
+    conn = db_connect(unit_address, password)
+    conn.autocommit = True
+    cursor = conn.cursor()
+    cursor.execute(f"CREATE DATABASE {db};")
+    cursor.close()
+    conn.close()
+
+
+def check_db(juju: jubilant.Juju, app: str, db: str) -> bool:
+    """Check database existence using the original query and first unit."""
+    unit = next(iter(juju.status().apps[app].units))
+    unit_address = get_unit_address(juju, unit)
+    password = get_password(juju, app)
+    assert password is not None
+    query = execute_query(
+        unit_address,
+        password,
+        f"select datname from pg_catalog.pg_database where datname = '{db}';",
+    )
+    if "ERROR" in query:
+        raise Exception(f"Database check is failed with postgresql err: {query}")
+    return db in query
+
+
+def get_detached_storages(juju: jubilant.Juju) -> list[str]:
+    """Get detached storage (only data on K8s), retaining the original life expression."""
+    parsed_storages_list = json.loads(juju.cli("storage", "--format=json"))
+    detached_storages = []
+    for storage_name, storage in parsed_storages_list["storage"].items():
+        if (
+            (juju.status().model.type != "caas" or storage_name.startswith("data"))
+            and (str(storage["status"]["current"]) == "detached")
+            and (str(storage["life"] == "alive"))
+        ):
+            detached_storages.append(storage_name)
+    if len(detached_storages) > 0:
+        return detached_storages
+    raise Exception("failed to get deatached storage")
+
+
+def check_password_auth(juju: jubilant.Juju, unit_name: str) -> bool:
+    """Check the same operator authentication failure marker in PostgreSQL logs."""
+    stdout = juju.cli(
+        "exec",
+        "--unit",
+        unit_name,
+        "--",
+        "grep",
+        "-E",
+        "'password'",
+        "/var/snap/charmed-postgresql/common/var/log/postgresql/postgresql*",
+    )
+    return 'password authentication failed for user "operator"' not in stdout
+
+
+def check_system_id_mismatch(juju: jubilant.Juju, unit_name: str) -> bool:
+    """Check the original system ID mismatch marker in Patroni logs."""
+    log_str = f"CRITICAL: system ID mismatch, node {unit_name.replace('/', '-')} belongs to a different cluster"
+    stdout = run_ha_command_on_unit(
+        juju, unit_name, "cat /var/lib/pg/logs/16/main/patroni_logs/patroni.log*"
+    )
+    return log_str in str(stdout)
+
+
+def delete_pvc(juju: jubilant.Juju, pvc: GlobalResource):
+    """Delete a PVC, retaining the original warning-only ApiError handling."""
+    namespace = juju.status().model.name
+    client = Client(namespace=namespace)
+    try:
+        client.delete(PersistentVolumeClaim, namespace=namespace, name=pvc.metadata.name)
+    except ApiError as e:
+        logger.warning(f"failed to delete pvc {pvc.metadata.name}: {e}")
+        pass
+
+
+def get_pvcs(juju: jubilant.Juju, unit_name: str):
+    """Get the unit's PVCs with the original name matching and storage-name parsing."""
+    pvcs = {}
+    namespace = juju.status().model.name
+    client = Client(namespace=namespace)
+    pvc_list = client.list(PersistentVolumeClaim, namespace=namespace)
+    unit_label = unit_name.replace("/", "-")
+    for pvc in pvc_list:
+        if unit_label in pvc.metadata.name:
+            pvc_storage_name = pvc.metadata.name.replace(unit_name.split("/")[0], "").split("-")[1]
+            logger.info(f"got pvc for {pvc_storage_name} storage: {pvc.metadata.name}")
+            pvcs[pvc_storage_name] = pvc
+    return pvcs
+
+
+def get_pvs(juju: jubilant.Juju, unit_name: str):
+    """Get the unit's PVs with the original claimRef matching and name parsing."""
+    pvs = {}
+    namespace = juju.status().model.name
+    client = Client(namespace=namespace)
+    pv_list = client.list(PersistentVolume, namespace=namespace)
+    unit_label = unit_name.replace("/", "-")
+    for pv in pv_list:
+        if pv.spec.claimRef and pv.spec.claimRef.name.endswith(unit_label):
+            pvc_storage_name = pv.spec.claimRef.name.replace(unit_name.split("/")[0], "").split(
+                "-"
+            )[1]
+            logger.info(f"got pv for {pvc_storage_name} storage: {pv.metadata.name}")
+            pvs[pvc_storage_name] = pv
+    return pvs
+
+
+def change_pvs_reclaim_policy(
+    juju: jubilant.Juju, pvs_configs: dict[str, PersistentVolume], policy: str
+):
+    """Patch the original PV reclaim policy and return the patched resources."""
+    namespace = juju.status().model.name
+    client = Client(namespace=namespace)
+    results = {}
+    for pvc_storage_name, pv_config in pvs_configs.items():
+        results[pvc_storage_name] = client.patch(
+            PersistentVolume,
+            pv_config.metadata.name,
+            {"spec": {"persistentVolumeReclaimPolicy": f"{policy}"}},
+            namespace=namespace,
+        )
+    return results
+
+
+def remove_pv_claimref(juju: jubilant.Juju, pv_config: PersistentVolume):
+    """Remove the PV's claimRef with the original patch."""
+    namespace = juju.status().model.name
+    client = Client(namespace=namespace)
+    client.patch(
+        PersistentVolume,
+        pv_config.metadata.name,
+        {"spec": {"claimRef": None}},
+        namespace=namespace,
+    )
+
+
+def change_pvc_pv_name(
+    pvc_config: PersistentVolumeClaim, pv_name_new: str
+) -> PersistentVolumeClaim:
+    """Change the PVC's PV name and clear the same binding metadata as the original."""
+    pvc_config.spec.volumeName = pv_name_new
+    del pvc_config.metadata.annotations["pv.kubernetes.io/bind-completed"]
+    pvc_config.metadata.uid = None
+    return pvc_config
+
+
+def apply_pvc_config(juju: jubilant.Juju, pvc_config: PersistentVolumeClaim):
+    """Apply the PVC with the original field manager and metadata mutation."""
+    namespace = juju.status().model.name
+    client = Client(namespace=namespace)
+    pvc_config.metadata.managedFields = None
+    client.apply(pvc_config, namespace=namespace, field_manager="lightkube")
+
+
+def remove_unit_force(juju: jubilant.Juju, num_units: int):
+    """Remove K8s units with the original force flags and scale-dependent wait."""
+    app_name_str = get_postgresql_app_name(juju)
+    scale = len(juju.status().apps[app_name_str].units) - num_units
+    juju.cli(
+        "remove-unit",
+        app_name_str,
+        "--force",
+        "--no-wait",
+        "--no-prompt",
+        "--num-units",
+        str(num_units),
+    )
+    if scale == 0:
+        juju.wait(
+            lambda status: len(status.apps[app_name_str].units) == scale,
+            timeout=1000,
+            delay=0.5,
+            successes=1,
+        )
+    else:
+        wait_for_idle(
+            juju,
+            apps=[app_name_str],
+            status="active",
+            timeout=1000,
+            wait_for_exact_units=scale,
+        )
+
+
+def is_postgresql_ready(
+    juju: jubilant.Juju, unit_name: str, use_ip_from_inside: bool = False
+) -> bool:
+    """Check Patroni health with the original ten-minute retry policy."""
+    unit_ip = (
+        get_ip_from_inside_the_unit(juju, unit_name)
+        if use_ip_from_inside
+        else get_unit_address(juju, unit_name)
+    )
+    try:
+        for attempt in Retrying(stop=stop_after_delay(60 * 10), wait=wait_fixed(3)):
+            with attempt:
+                instance_health_info = requests.get(f"https://{unit_ip}:8008/health", verify=False)
+                assert instance_health_info.status_code == 200
+    except RetryError:
+        return False
+    return True
+
+
+class ProcessError(Exception):
+    """Raised when a process fails."""
+
+
+class ProcessRunningError(Exception):
+    """Raised when a process is running when it is not expected to be."""
+
+
+def send_signal_to_process(  # noqa: C901
+    juju: jubilant.Juju, unit_name: str, process: str, signal: str, use_ssh: bool = False
+) -> None:
+    """Port the original process signal helper, including PID checks and retries."""
+    app = get_postgresql_app_name(juju)
+    if len(juju.status().apps[app].units) < 2:
+        juju.add_unit(app, num_units=1)
+        wait_for_idle(juju, apps=[app], status="active", timeout=1000)
+
+    opt = "-f" if "/" in process else "-x"
+    if juju.status().model.type != "caas":
+        command = f"exec --unit {unit_name} -- pkill --signal {signal} {opt} {process}"
+        try:
+            juju.cli(*command.split())
+        except jubilant.CLIError as error:
+            if signal != "SIGCONT":
+                raise ProcessError(
+                    "Expected command %s to succeed instead it failed: %s",
+                    command,
+                    error.returncode,
+                ) from error
+        return
+
+    pod_name = unit_name.replace("/", "-")
+    if signal not in ["SIGSTOP", "SIGCONT"]:
+        try:
+            old_pid = juju.cli(
+                "ssh", "--container", "postgresql", unit_name, "pgrep", opt, process
+            )
+        except jubilant.CLIError as error:
+            old_pid = error.stdout
+
+    command = f"pkill --signal {signal} {opt} {process}"
+    if use_ssh:
+        # Juju.cli has no timeout argument; retain the original ten-second limit.
+        response = subprocess.run(
+            [juju.cli_binary, "ssh", "--model", juju.model, unit_name, *command.split()],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if response.returncode != 0:
+            raise ProcessError(
+                "Expected command %s to succeed instead it failed: %s",
+                command,
+                response.returncode,
+            )
+        return
+
+    config.load_kube_config()
+    for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
+        with attempt:
+            response = stream(
+                core_v1_api.CoreV1Api().connect_get_namespaced_pod_exec,
+                pod_name,
+                juju.status().model.name,
+                container="postgresql",
+                command=command.split(),
+                stderr=True,
+                stdin=False,
+                stdout=True,
+                tty=False,
+                _preload_content=False,
+            )
+            response.run_forever(timeout=10)
+            if signal not in ["SIGSTOP", "SIGCONT"]:
+                try:
+                    raw_pid = juju.cli(
+                        "ssh", "--container", "postgresql", unit_name, "pgrep", opt, process
+                    )
+                except jubilant.CLIError as error:
+                    raw_pid = error.stdout
+                if raw_pid == old_pid:
+                    raise ProcessRunningError
+            elif response.returncode != 0:
+                raise ProcessError(
+                    "Expected command %s to succeed instead it failed: %s",
+                    command,
+                    response.returncode,
+                )
+
+
+def copy_file_into_pod(
+    client: kubernetes.client.api.core_v1_api.CoreV1Api,
+    namespace: str,
+    pod_name: str,
+    container_name: str,
+    destination_path: str,
+    source_path: str,
+) -> None:
+    """Copy file contents into a pod with the original tar/stream implementation."""
+    try:
+        exec_command = ["tar", "xvf", "-", "-C", "/"]
+        api_response = kubernetes.stream.stream(
+            client.connect_get_namespaced_pod_exec,
+            pod_name,
+            namespace,
+            container=container_name,
+            command=exec_command,
+            stdin=True,
+            stdout=True,
+            stderr=True,
+            tty=False,
+            _preload_content=False,
+        )
+        with tempfile.TemporaryFile() as tar_buffer:
+            with tarfile.open(fileobj=tar_buffer, mode="w") as tar:
+                tar.add(source_path, destination_path)
+            tar_buffer.seek(0)
+            commands = []
+            commands.append(tar_buffer.read())
+            while api_response.is_open():
+                api_response.update(timeout=1)
+                if commands:
+                    command = commands.pop(0)
+                    api_response.write_stdin(command.decode())
+                else:
+                    break
+            api_response.close()
+    except kubernetes.client.rest.ApiException:
+        assert False
+
+
+def modify_pebble_restart_delay(
+    juju: jubilant.Juju, unit_name: str, pebble_plan_path: str, ensure_replan: bool = False
+) -> None:
+    """Add/replan the original Pebble layer, preserving optional validation and retries."""
+    kubernetes.config.load_kube_config()
+    client = kubernetes.client.api.core_v1_api.CoreV1Api()
+    pod_name = unit_name.replace("/", "-")
+    container_name = "postgresql"
+    service_name = "postgresql"
+    now = datetime.now().isoformat()
+    namespace = juju.status().model.name
+    copy_file_into_pod(
+        client,
+        namespace,
+        pod_name,
+        container_name,
+        f"/tmp/pebble_plan_{now}.yml",
+        pebble_plan_path,
+    )
+    add_to_pebble_layer_commands = (
+        f"/charm/bin/pebble add --combine {service_name} /tmp/pebble_plan_{now}.yml"
+    )
+    response = kubernetes.stream.stream(
+        client.connect_get_namespaced_pod_exec,
+        pod_name,
+        namespace,
+        container=container_name,
+        command=add_to_pebble_layer_commands.split(),
+        stdin=False,
+        stdout=True,
+        stderr=True,
+        tty=False,
+        _preload_content=False,
+    )
+    response.run_forever(timeout=5)
+    assert response.returncode == 0, (
+        f"Failed to add to pebble layer, unit={unit_name}, container={container_name}, service={service_name}"
+    )
+    for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            replan_pebble_layer_commands = "/charm/bin/pebble replan"
+            response = kubernetes.stream.stream(
+                client.connect_get_namespaced_pod_exec,
+                pod_name,
+                namespace,
+                container=container_name,
+                command=replan_pebble_layer_commands.split(),
+                stdin=False,
+                stdout=True,
+                stderr=True,
+                tty=False,
+                _preload_content=False,
+            )
+            response.run_forever(timeout=60)
+            if ensure_replan and response.returncode != 0:
+                assert response.returncode == 0, (
+                    f"Failed to replan pebble layer, unit={unit_name}, container={container_name}, service={service_name}"
+                )
