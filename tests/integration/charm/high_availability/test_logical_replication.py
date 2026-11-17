@@ -172,16 +172,12 @@ def test_switchover(juju: jubilant.Juju, substrate: Substrate):
     publisher_leader = get_app_leader(juju, DATABASE_APP_NAME)
     publisher_roles = get_cluster_roles(juju, publisher_leader)
     publisher_candidate = publisher_roles["sync_standbys"][0]
-    juju.run(
-        publisher_candidate, "promote-to-primary", {"scope": "unit", "force": True}
-    ).raise_on_failure()
+    juju.run(publisher_candidate, "promote-to-primary", {"scope": "unit"}).raise_on_failure()
 
     subscriber_leader = get_app_leader(juju, SECOND_DATABASE_APP_NAME)
     subscriber_roles = get_cluster_roles(juju, subscriber_leader)
     subscriber_candidate = subscriber_roles["sync_standbys"][0]
-    juju.run(
-        subscriber_candidate, "promote-to-primary", {"scope": "unit", "force": True}
-    ).raise_on_failure()
+    juju.run(subscriber_candidate, "promote-to-primary", {"scope": "unit"}).raise_on_failure()
     _wait_for_active(juju, substrate)
 
 
