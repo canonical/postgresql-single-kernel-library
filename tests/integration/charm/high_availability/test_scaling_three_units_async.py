@@ -101,6 +101,8 @@ def test_removing_unit(
                 next(iter(juju.status().apps[app_name].units)),
                 "promote-to-primary",
                 {"scope": "unit", "force": True},
+                # Raft reinitialisation can exceed juju run's default 60s wait.
+                wait=600,
             )
         except TimeoutError:
             # Check if Patroni self healed

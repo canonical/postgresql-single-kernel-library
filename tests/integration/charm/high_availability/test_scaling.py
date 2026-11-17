@@ -75,6 +75,8 @@ def test_removing_stereo_primary(
     logger.info("Deleting primary")
     primary = get_primary_from_app(juju, app)
     juju.remove_unit(primary, force=True, destroy_storage=False)
+    # libjuju's destroy_unit(max_wait=1500) blocked until the unit was gone; jubilant doesn't.
+    juju.wait(lambda status: primary not in status.apps[app_name].units, timeout=1500)
 
     left_unit = original_roles["sync_standbys"][0]
     for left_unit in juju.status().apps[app_name].units:
@@ -92,11 +94,10 @@ def test_removing_stereo_primary(
         successes=1,
     )
 
-    juju.run(
-        next(iter(juju.status().apps[app_name].units)),
-        "promote-to-primary",
-        {"scope": "unit", "force": True},
-    )
+    # Run on the surviving unit: the first unit in status may still be the removed primary,
+    # leaving the action pending forever on a dead machine.
+    # Raft reinitialisation can exceed juju run's default 60s wait; libjuju waited indefinitely.
+    juju.run(left_unit, "promote-to-primary", {"scope": "unit", "force": True}, wait=600)
 
     wait_for_idle(juju, status="active", timeout=600, idle_period=45)
 
@@ -126,6 +127,8 @@ def test_removing_stereo_sync_standby(
     primary = get_primary_from_app(juju, app)
     secondary = next(filter(lambda name: name != primary, juju.status().apps[app_name].units))
     juju.remove_unit(secondary, force=True, destroy_storage=False)
+    # Wait for the unit to disappear, as libjuju's destroy_unit(max_wait=1500) did.
+    juju.wait(lambda status: secondary not in status.apps[app_name].units, timeout=1500)
 
     wait_for_idle(juju, status="active", timeout=600, idle_period=45)
 
@@ -179,7 +182,8 @@ def test_removing_raft_majority(
         successes=1,
     )
 
-    juju.run(left_unit, "promote-to-primary", {"scope": "unit", "force": True})
+    # Raft reinitialisation can exceed juju run's default 60s wait; libjuju waited indefinitely.
+    juju.run(left_unit, "promote-to-primary", {"scope": "unit", "force": True}, wait=600)
 
     wait_for_idle(juju, status="active", timeout=900, idle_period=45)
 
