@@ -600,7 +600,7 @@ class PatroniManager(BaseManager):
         """
         try:
             logger.debug("Getting Patroni logs...")
-            limit = None if num_lines == "all" else num_lines or 10
+            limit = None if num_lines == "all" else num_lines
             return logs_by_identifier(
                 "charmed-postgresql", "charmed-postgresql.patroni", limit=limit
             )
