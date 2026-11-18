@@ -2,11 +2,14 @@
 # Copyright 2022 Canonical Ltd.
 # See LICENSE file for licensing details.
 from asyncio import gather
+from concurrent.futures import ThreadPoolExecutor
 
+import jubilant
 import pytest
 from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
+from tests.integration.charm import helpers
 from tests.integration.charm.ha_tests.helpers import (
     ORIGINAL_RESTART_CONDITION,
     RESTART_CONDITION,
@@ -20,6 +23,11 @@ from tests.integration.charm.ha_tests.helpers import (
     remove_instance_isolation,
     update_restart_condition,
 )
+from tests.integration.charm.high_availability.conftest import (
+    juju_continuous_writes,
+    juju_primary_start_timeout,
+    juju_restart_policy,
+)
 from tests.integration.charm.pytest_operator_helpers import (
     APPLICATION_NAME,
     app_name,
@@ -27,6 +35,52 @@ from tests.integration.charm.pytest_operator_helpers import (
     run_command_on_unit,
 )
 from tests.integration.types import Substrate
+
+__all__ = ["juju_continuous_writes", "juju_primary_start_timeout", "juju_restart_policy"]
+
+
+@pytest.fixture()
+def juju_loop_wait(juju: jubilant.Juju) -> None:
+    """Restore the original loop_wait configuration after the test."""
+    initial_loop_wait = helpers.get_patroni_setting(juju, "loop_wait")
+    yield
+    patroni_password = helpers.get_password(juju, helpers.get_postgresql_app_name(juju), "patroni")
+    helpers.change_ha_patroni_setting(
+        juju, "loop_wait", initial_loop_wait, patroni_password, use_random_unit=True
+    )
+
+
+@pytest.fixture()
+def juju_reset_restart_condition(juju: jubilant.Juju, substrate: Substrate):
+    """Set and restore the systemd restart condition concurrently on all VM units."""
+    if substrate == Substrate.k8s:
+        yield
+        return
+
+    app = helpers.get_postgresql_app_name(juju)
+    units = list(juju.status().apps[app].units)
+    with ThreadPoolExecutor(max_workers=len(units)) as executor:
+        futures = [
+            executor.submit(
+                helpers.update_restart_condition, juju, unit, helpers.RESTART_CONDITION
+            )
+            for unit in units
+        ]
+        for future in futures:
+            future.result()
+
+    yield
+
+    units = list(juju.status().apps[app].units)
+    with ThreadPoolExecutor(max_workers=len(units)) as executor:
+        futures = [
+            executor.submit(
+                helpers.update_restart_condition, juju, unit, helpers.ORIGINAL_RESTART_CONDITION
+            )
+            for unit in units
+        ]
+        for future in futures:
+            future.result()
 
 
 @pytest.fixture()

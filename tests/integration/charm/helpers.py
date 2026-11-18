@@ -5,6 +5,7 @@
 
 import json
 import logging
+import os
 import random
 import subprocess
 import tarfile
@@ -60,6 +61,10 @@ MINUTE_SECS = 60
 
 CHARM_BASE = "ubuntu@24.04"
 APPLICATION_NAME = "postgresql-test-app"
+SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
+PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{SERVICE_NAME}"
+RESTART_CONDITION = "no"
+ORIGINAL_RESTART_CONDITION = "always"
 
 # The resume-refresh action is a one-shot charm_refresh state-machine probe: it fails while
 # the charm-side pause has not opened the allow-gate yet ("Unit N is unhealthy. Refresh will
@@ -1959,6 +1964,100 @@ def is_postgresql_ready(
             with attempt:
                 instance_health_info = requests.get(f"https://{unit_ip}:8008/health", verify=False)
                 assert instance_health_info.status_code == 200
+    except RetryError:
+        return False
+    return True
+
+
+def update_restart_condition(juju: jubilant.Juju, unit_name: str, condition: str):
+    """Update the systemd restart condition with the original SCP/reload/start sequence."""
+    _, temp_path = tempfile.mkstemp()
+    for attempt in range(10):
+        try:
+            juju.scp(
+                f"ubuntu@{unit_name}:{PATRONI_SERVICE_DEFAULT_PATH}",
+                temp_path,
+                host_key_checks=False,
+                scp_options=["-q", "-B"],
+            )
+            break
+        except jubilant.CLIError:
+            time.sleep(2)
+            if attempt == 9:
+                raise
+    with open(temp_path) as patroni_service_file:
+        patroni_service = patroni_service_file.readlines()
+
+    for index, line in enumerate(patroni_service):
+        if "Restart=" in line:
+            patroni_service[index] = f"Restart={condition}\n"
+
+    with open(temp_path, "w") as service_file:
+        service_file.writelines(patroni_service)
+
+    # The service directory has strict permissions: upload elsewhere, then move it.
+    for attempt in range(10):
+        try:
+            juju.scp(
+                temp_path,
+                f"ubuntu@{unit_name}:patroni.service",
+                host_key_checks=False,
+                scp_options=["-q", "-B"],
+            )
+            break
+        except jubilant.CLIError:
+            time.sleep(2)
+            if attempt == 9:
+                raise
+    mv_cmd = f"mv /home/ubuntu/patroni.service {PATRONI_SERVICE_DEFAULT_PATH}"
+    run_ha_command_on_unit(juju, unit_name, mv_cmd)
+    os.remove(temp_path)
+
+    run_ha_command_on_unit(juju, unit_name, "systemctl daemon-reload")
+    run_ha_command_on_unit(juju, unit_name, f"systemctl start {SERVICE_NAME}")
+    is_postgresql_ready(juju, unit_name)
+
+
+def are_all_db_processes_down(juju: jubilant.Juju, process: str, signal: str) -> bool:
+    """Check all units and re-send the signal with the original 400-second retry policy."""
+    app = get_postgresql_app_name(juju)
+    pgrep_cmd = ("pgrep", "-f", process) if "/" in process else ("pgrep", "-x", process)
+    is_vm = juju.status().model.type != "caas"
+    if not is_vm:
+        try:
+            subprocess.check_call(["kubectl", "version", "--client=true"])
+            kubectl = "kubectl"
+        except FileNotFoundError:
+            kubectl = "sudo k8s kubectl"
+        namespace = juju.status().model.name
+
+    try:
+        for attempt in Retrying(stop=stop_after_delay(400), wait=wait_fixed(3)):
+            with attempt:
+                running_process = False
+                for unit in juju.status().apps[app].units:
+                    if is_vm:
+                        try:
+                            processes = juju.cli("ssh", unit, *pgrep_cmd)
+                        except jubilant.CLIError as error:
+                            # The original ignores the exit code and examines stdout only.
+                            processes = error.stdout
+                        processes = [proc for proc in processes.split("\n") if len(proc) > 0]
+                        is_running = len(processes) > 0
+                    else:
+                        pod_name = unit.replace("/", "-")
+                        call = subprocess.run(
+                            f"{kubectl} -n {namespace} exec {pod_name} -c postgresql -- {' '.join(pgrep_cmd)}",
+                            shell=True,
+                        )
+                        is_running = call.returncode != 1
+
+                    if is_running:
+                        logger.info(f"Unit {unit} not yet down")
+                        send_signal_to_process(juju, unit, process, signal)
+                        running_process = True
+                if running_process:
+                    raise ProcessRunningError
     except RetryError:
         return False
     return True
