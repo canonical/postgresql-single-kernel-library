@@ -15,6 +15,7 @@ from tests.integration.charm.helpers import (
     get_db_max_written_value,
     get_db_primary_unit,
     get_db_standby_leader_unit,
+    standby_cluster_ready,
 )
 from tests.integration.helpers.juju import (
     get_app_leader,
@@ -214,7 +215,7 @@ def test_create_replication(first_model: str, second_model: str) -> None:
     )
     retry_if_cli_error(
         lambda: model_2.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=20 * MINUTE_SECS
+            ready=lambda status: standby_cluster_ready(status, DB_APP_2), timeout=20 * MINUTE_SECS
         )
     )
 
@@ -260,7 +261,7 @@ def test_standby_promotion(first_model: str, second_model: str) -> None:
     model_1 = Juju(model=first_model)
     retry_if_cli_error(
         lambda: model_1.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_1), timeout=20 * MINUTE_SECS
+            ready=lambda status: standby_cluster_ready(status, DB_APP_1), timeout=20 * MINUTE_SECS
         )
     )
     retry_if_cli_error(
@@ -332,7 +333,7 @@ def test_unrelate_and_relate(first_model: str, second_model: str) -> None:
     )
     retry_if_cli_error(
         lambda: model_2.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=20 * MINUTE_SECS
+            ready=lambda status: standby_cluster_ready(status, DB_APP_2), timeout=20 * MINUTE_SECS
         )
     )
 
@@ -497,8 +498,17 @@ def rerelate_test_app(juju: Juju, db_name: str, test_app_name: str) -> None:
     retry_if_cli_error(lambda: juju.remove_relation(db_name, f"{test_app_name}:database"))
     retry_if_cli_error(
         lambda: juju.wait(
-            ready=wait_for_apps_status(jubilant.all_blocked, test_app_name)
-            and wait_for_apps_status(jubilant.all_active, db_name),
+            # Also wait for the relation to be gone: a dying relation makes the
+            # following integrate fail with "is dying, but not yet removed".
+            ready=lambda status: (
+                wait_for_apps_status(jubilant.all_blocked, test_app_name)(status)
+                and wait_for_apps_status(jubilant.all_active, db_name)(status)
+                and db_name
+                not in [
+                    relation.related_app
+                    for relation in status.apps[test_app_name].relations.get("database", [])
+                ]
+            ),
             timeout=10 * MINUTE_SECS,
         )
     )

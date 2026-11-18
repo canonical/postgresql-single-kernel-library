@@ -516,6 +516,19 @@ def get_db_standby_leader_unit(juju: jubilant.Juju, app_name: str) -> str:
     raise AssertionError(f"No standby leader found for {app_name}")
 
 
+def standby_cluster_ready(status: jubilant.Status, app_name: str) -> bool:
+    """Whether app_name has finished setting up as a standby cluster.
+
+    Agents idle, all units active and one of them reporting "Standby" (the standby
+    leader). The app status alone is not enough: it changes to "Standby" as soon as
+    the standby setup starts, while the units are still stopped or waiting.
+    """
+    return wait_for_apps_status(jubilant.all_active, app_name)(status) and any(
+        unit.workload_status.message.startswith("Standby")
+        for unit in status.apps[app_name].units.values()
+    )
+
+
 def get_member_state(juju: jubilant.Juju, app_name: str, member_name: str) -> str | None:
     """Return a cluster member's reported state from the leader's /cluster endpoint."""
     unit_address = get_unit_address(juju, get_app_leader(juju, app_name))

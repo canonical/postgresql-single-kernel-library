@@ -15,6 +15,7 @@ from tests.integration.charm.helpers import (
     get_db_max_written_value,
     get_published_secret_id,
     run_upgrade,
+    standby_cluster_ready,
 )
 from tests.integration.helpers.juju import (
     get_app_leader,
@@ -202,7 +203,7 @@ def test_create_replication(first_model: str, second_model: str) -> None:
     )
     retry_if_cli_error(
         lambda: model_2.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=20 * MINUTE_SECS
+            ready=lambda status: standby_cluster_ready(status, DB_APP_2), timeout=20 * MINUTE_SECS
         )
     )
 
