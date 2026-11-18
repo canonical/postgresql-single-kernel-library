@@ -863,7 +863,10 @@ class AsyncReplicationManager(BaseManager):
 
             if self.state.model.unit.is_leader():
                 # Remove the "cluster_initialised" flag to avoid self-healing in the update status hook.
-                self.state.application.data.update({"cluster_initialised": ""})
+                self.state.application.data.update({
+                    "cluster_initialised": "",
+                    "members_ips": "[]",
+                })
                 if not self._configure_standby_cluster(event):
                     return False
 
