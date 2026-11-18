@@ -1522,6 +1522,7 @@ class PostgreSQLEventsHandler(Object):
         if self.state.model.unit.is_leader():
             self.charm.watcher_handler.update_endpoints()
             self.charm.async_replication.update_async_replication_data()
+            self._update_leader_cluster_members(event)
 
         self._vm_update_new_unit_status()
 
