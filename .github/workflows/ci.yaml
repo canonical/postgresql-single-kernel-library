@@ -94,6 +94,7 @@ jobs:
 
           sudo snap install charmcraft --classic
           pipx install poetry
+          pipx install charmcraftcache
       - run: snap list
       - name: Build test charm
         id: pack
@@ -103,6 +104,9 @@ jobs:
             -p ubuntu@24.04:amd64 \
             -c "tests/charms/postgresql_'"${VAR_SUBSTRATE}"'_test_charm"'
         env:
+          # Used by charmcraftcache (to avoid GitHub API rate limit)
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
           VAR_SUBSTRATE: ${{ matrix.substrate }}
           CI_CACHE: true
       - name: Charmcraft logs
