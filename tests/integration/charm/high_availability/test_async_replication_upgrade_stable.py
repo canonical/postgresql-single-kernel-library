@@ -105,7 +105,8 @@ def test_deploy(
         charm=app_name,
         app=DB_APP_1,
         base="ubuntu@24.04",
-        channel="16/stable",
+        # TODO revert to stable when https://github.com/canonical/postgresql-single-kernel-library/pull/331 gets released
+        channel="16/stable" if substrate == Substrate.k8s else "16/edge",
         config=configuration,
         constraints=constraints,
         num_units=3,
@@ -116,7 +117,8 @@ def test_deploy(
         charm=app_name,
         app=DB_APP_2,
         base="ubuntu@24.04",
-        channel="16/stable",
+        # TODO revert to stable when https://github.com/canonical/postgresql-single-kernel-library/pull/331 gets released
+        channel="16/stable" if substrate == Substrate.k8s else "16/edge",
         config=configuration,
         constraints=constraints,
         num_units=3,
