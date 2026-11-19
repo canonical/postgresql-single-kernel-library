@@ -3,10 +3,12 @@
 # See LICENSE file for licensing details.
 from asyncio import gather
 
+import jubilant
 import pytest
 from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
+from tests.integration.charm import helpers
 from tests.integration.charm.ha_tests.helpers import (
     ORIGINAL_RESTART_CONDITION,
     RESTART_CONDITION,
@@ -20,6 +22,10 @@ from tests.integration.charm.ha_tests.helpers import (
     remove_instance_isolation,
     update_restart_condition,
 )
+from tests.integration.charm.high_availability.conftest import (
+    juju_continuous_writes,
+    juju_primary_start_timeout,
+)
 from tests.integration.charm.pytest_operator_helpers import (
     APPLICATION_NAME,
     app_name,
@@ -27,6 +33,9 @@ from tests.integration.charm.pytest_operator_helpers import (
     run_command_on_unit,
 )
 from tests.integration.types import Substrate
+
+# Temporary fixture re-exports while self_healing_3 is migrated in ha_tests/.
+__all__ = ["juju_continuous_writes", "juju_primary_start_timeout"]
 
 
 @pytest.fixture()
@@ -161,6 +170,43 @@ async def wal_settings(ops_test: OpsTest, substrate: Substrate) -> None:
         await change_wal_settings(
             ops_test,
             unit.name,
+            initial_max_wal_size,
+            initial_min_wal_size,
+            initial_wal_keep_segments,
+            patroni_password,
+        )
+
+
+@pytest.fixture()
+def juju_chaos_mesh(juju: jubilant.Juju, substrate: Substrate) -> None:
+    """Deploy and remove Chaos Mesh exactly like the async fixture (K8s only)."""
+    if substrate == Substrate.vm:
+        yield
+        return
+
+    helpers.deploy_chaos_mesh(juju.status().model.name)
+    yield
+    helpers.remove_instance_isolation(juju)
+    helpers.destroy_chaos_mesh(juju.status().model.name)
+
+
+@pytest.fixture()
+def juju_wal_settings(juju: jubilant.Juju, substrate: Substrate) -> None:
+    """Restore the same WAL settings on each unit as the async fixture."""
+    initial_max_wal_size = helpers.get_postgresql_parameter(juju, "max_wal_size")
+    initial_min_wal_size = helpers.get_postgresql_parameter(juju, "min_wal_size")
+    initial_wal_keep_segments = helpers.get_postgresql_parameter(juju, "wal_keep_segments")
+    yield
+    app = helpers.get_postgresql_app_name(juju)
+    for unit in juju.status().apps[app].units:
+        if substrate == Substrate.vm:
+            helpers.run_ha_command_on_unit(juju, unit, "snap start charmed-postgresql.patroni")
+        patroni_password = helpers.get_password(
+            juju, helpers.get_postgresql_app_name(juju), "patroni"
+        )
+        helpers.change_wal_settings(
+            juju,
+            unit,
             initial_max_wal_size,
             initial_min_wal_size,
             initial_wal_keep_segments,

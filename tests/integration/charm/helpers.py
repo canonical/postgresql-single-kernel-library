@@ -3,10 +3,12 @@
 
 """Helpers specific to the PostgreSQL charm."""
 
+import contextlib
 import json
 import logging
 import os
 import random
+import string
 import subprocess
 import tarfile
 import tempfile
@@ -65,6 +67,7 @@ SERVICE_NAME = "snap.charmed-postgresql.patroni.service"
 PATRONI_SERVICE_DEFAULT_PATH = f"/etc/systemd/system/{SERVICE_NAME}"
 RESTART_CONDITION = "no"
 ORIGINAL_RESTART_CONDITION = "always"
+PGDATA_PATH = "/var/lib/postgresql/16/main"
 
 # The resume-refresh action is a one-shot charm_refresh state-machine probe: it fails while
 # the charm-side pause has not opened the allow-gate yet ("Unit N is unhealthy. Refresh will
@@ -2252,3 +2255,267 @@ def modify_pebble_restart_delay(
                 assert response.returncode == 0, (
                     f"Failed to replan pebble layer, unit={unit_name}, container={container_name}, service={service_name}"
                 )
+
+
+def change_wal_settings(
+    juju: jubilant.Juju,
+    unit_name: str,
+    max_wal_size: int,
+    min_wal_size,
+    wal_keep_segments,
+    password: str,
+) -> None:
+    """Change WAL settings with the original parameters and 60-second retry policy."""
+    for attempt in Retrying(stop=stop_after_delay(30 * 2), wait=wait_fixed(3)):
+        with attempt:
+            unit_ip = get_unit_address(juju, unit_name)
+            requests.patch(
+                f"https://{unit_ip}:8008/config",
+                json={
+                    "postgresql": {
+                        "parameters": {
+                            "max_wal_size": max_wal_size,
+                            "min_wal_size": min_wal_size,
+                            "wal_keep_segments": wal_keep_segments,
+                        }
+                    }
+                },
+                verify=False,
+                auth=requests.auth.HTTPBasicAuth("patroni", password),
+            )
+
+
+def get_postgresql_parameter(juju: jubilant.Juju, parameter_name: str) -> int | None:
+    """Read a PostgreSQL parameter from Patroni, including the original None cases."""
+    for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
+        with attempt:
+            app = get_postgresql_app_name(juju)
+            primary_name = get_primary_from_app(juju, app)
+            unit_ip = get_unit_address(juju, primary_name)
+            configuration_info = requests.get(f"https://{unit_ip}:8008/config", verify=False)
+            postgresql_dict = configuration_info.json().get("postgresql")
+            if postgresql_dict is None:
+                return None
+            parameters = postgresql_dict.get("parameters")
+            if parameters is None:
+                return None
+            parameter_value = parameters.get(parameter_name)
+            return parameter_value
+
+
+def list_wal_files(juju: jubilant.Juju, app: str) -> dict[str, set[str]]:
+    """List WAL files per unit with the original VM/K8s commands and exclusions."""
+    units = list(juju.status().apps[app].units)
+    files = {}
+    if juju.status().model.type != "caas":
+        command = "ls -1 /var/snap/charmed-postgresql/common/var/lib/postgresql/16/main/pg_wal/"
+        for unit in units:
+            stdout = run_ha_command_on_unit(juju, unit, command)
+            files[unit] = stdout.splitlines()
+            files[unit] = {
+                i for i in files[unit] if ".history" not in i and i != "" and i != "archive_status"
+            }
+        return files
+
+    command = f"ls -1 {PGDATA_PATH}/pg_wal/"
+    for unit in units:
+        complete_command = f"run --unit {unit} -- {command}"
+        try:
+            stdout = juju.cli(*complete_command.split())
+        except jubilant.CLIError as error:
+            # The original ignores the exit code and examines stdout only.
+            stdout = error.stdout
+        files[unit] = stdout.splitlines()
+        files[unit] = {
+            i for i in files[unit] if ".history" not in i and i != "" and i != "archive_status"
+        }
+    return files
+
+
+def is_connection_possible(
+    juju: jubilant.Juju, unit_name: str, use_ip_from_inside: bool = False
+) -> bool:
+    """Test a PostgreSQL connection with the original 120-second retry policy.
+
+    Jubilant's public synchronous API has no equivalent to the original two
+    asyncio.wait_for(..., 15) calls for password and address lookup. Those lookups
+    are not individually bounded; the retry window cannot interrupt a blocked CLI.
+    """
+    try:
+        app = unit_name.split("/")[0]
+        for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3)):
+            with attempt:
+                password = get_password(juju, app)
+                address = (
+                    get_ip_from_inside_the_unit(juju, unit_name)
+                    if use_ip_from_inside
+                    else get_unit_ip(juju, unit_name)
+                )
+
+                with (
+                    db_connect(host=address, password=password) as connection,
+                    connection.cursor() as cursor,
+                ):
+                    cursor.execute("SELECT 1;")
+                    success = cursor.fetchone()[0] == 1
+                connection.close()
+
+                if not success:
+                    raise Exception
+                return True
+    except RetryError:
+        return False
+
+
+def cut_network_from_unit(machine_name: str) -> None:
+    """Cut network from a LXC container by masking eth0."""
+    cut_network_command = f"lxc config device add {machine_name} eth0 none"
+    subprocess.check_call(cut_network_command.split())
+
+
+def cut_network_from_unit_without_ip_change(machine_name: str) -> None:
+    """Cut network with the original LXC limits, preserving the unit IP address."""
+    override_command = f"lxc config device override {machine_name} eth0"
+    with contextlib.suppress(subprocess.CalledProcessError):
+        subprocess.check_call(override_command.split())
+    limit_set_command = f"lxc config device set {machine_name} eth0 limits.egress=0kbit"
+    subprocess.check_call(limit_set_command.split())
+    limit_set_command = f"lxc config device set {machine_name} eth0 limits.ingress=1kbit"
+    subprocess.check_call(limit_set_command.split())
+    limit_set_command = f"lxc config device set {machine_name} eth0 limits.priority=10"
+    subprocess.check_call(limit_set_command.split())
+
+
+def get_controller_machine(juju: jubilant.Juju) -> str:
+    """Return the first controller machine's instance ID from show-controller."""
+    controller_name = juju.status().model.controller
+    raw_controller = juju.cli("show-controller", controller_name, include_model=False)
+    controller = yaml.safe_load(raw_controller.strip())
+    return next(
+        machine.get("instance-id")
+        for machine in controller[controller_name]["controller-machines"].values()
+    )
+
+
+def is_machine_reachable_from(origin_machine: str, target_machine: str) -> bool:
+    """Test reachability with the original three pings from a LXC container."""
+    try:
+        subprocess.check_call(f"lxc exec {origin_machine} -- ping -c 3 {target_machine}".split())
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def restore_network_for_unit(machine_name: str) -> None:
+    """Restore network by removing the eth0 mask from a LXC container."""
+    restore_network_command = f"lxc config device remove {machine_name} eth0"
+    subprocess.check_call(restore_network_command.split())
+
+
+def restore_network_for_unit_without_ip_change(machine_name: str) -> None:
+    """Restore network by clearing the same LXC limits as the original helper."""
+    limit_set_command = f"lxc config device set {machine_name} eth0 limits.egress="
+    subprocess.check_call(limit_set_command.split())
+    limit_set_command = f"lxc config device set {machine_name} eth0 limits.ingress="
+    subprocess.check_call(limit_set_command.split())
+    limit_set_command = f"lxc config device set {machine_name} eth0 limits.priority="
+    subprocess.check_call(limit_set_command.split())
+
+
+def wait_network_restore(juju: jubilant.Juju, unit_name: str, old_ip: str) -> None:
+    """Check the IP inside the unit once, exactly like the original helper."""
+    if get_ip_from_inside_the_unit(juju, unit_name) == old_ip:
+        raise Exception
+
+
+def get_member_lag(cluster: dict, member_name: str) -> int:
+    """Return the lag of a specific member."""
+    for member in cluster["members"]:
+        if member["name"] == member_name.replace("/", "-"):
+            return member.get("lag", 0)
+    return 0
+
+
+def is_member_isolated(
+    juju: jubilant.Juju, not_isolated_member: str, isolated_member: str
+) -> bool:
+    """Check for lag above 1000 with the original 60-second retry policy."""
+    unit_ip = get_unit_address(juju, not_isolated_member)
+    try:
+        for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
+            with attempt:
+                cluster_info = get_patroni_cluster(unit_ip)
+                lag = get_member_lag(cluster_info, isolated_member)
+                assert lag > 1000
+    except RetryError:
+        return False
+    return True
+
+
+def deploy_chaos_mesh(namespace: str) -> None:
+    """Run the original Chaos Mesh deployment script in the provided namespace."""
+    env = os.environ
+    env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
+    subprocess.check_output(
+        " ".join([
+            "tests/integration/charm/ha_tests/scripts/deploy_chaos_mesh.sh",
+            namespace,
+        ]),
+        shell=True,
+        env=env,
+    )
+
+
+def destroy_chaos_mesh(namespace: str) -> None:
+    """Run the original Chaos Mesh removal script in the provided namespace."""
+    env = os.environ
+    env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
+    subprocess.check_output(
+        f"tests/integration/charm/ha_tests/scripts/destroy_chaos_mesh.sh {namespace}",
+        shell=True,
+        env=env,
+    )
+
+
+def isolate_instance_from_cluster(juju: jubilant.Juju, unit_name: str) -> None:
+    """Apply the original NetworkChaos manifest to isolate a pod."""
+    try:
+        subprocess.check_call(["kubectl", "version", "--client=true"])
+        kubectl = "kubectl"
+    except FileNotFoundError:
+        kubectl = "sudo k8s kubectl"
+
+    with tempfile.NamedTemporaryFile() as temp_file:
+        with open(
+            "tests/integration/charm/ha_tests/manifests/chaos_network_loss.yml"
+        ) as chaos_network_loss_file:
+            template = string.Template(chaos_network_loss_file.read())
+            chaos_network_loss = template.substitute(
+                namespace=juju.status().model.name,
+                pod=unit_name.replace("/", "-"),
+            )
+            temp_file.write(str.encode(chaos_network_loss))
+            temp_file.flush()
+
+        env = os.environ
+        env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
+        subprocess.check_output(
+            " ".join([*kubectl.split(), "apply", "-f", temp_file.name]), shell=True, env=env
+        )
+
+
+def remove_instance_isolation(juju: jubilant.Juju) -> None:
+    """Delete the original NetworkChaos policy, ignoring a missing policy."""
+    try:
+        subprocess.check_call(["kubectl", "version", "--client=true"])
+        kubectl = "kubectl"
+    except FileNotFoundError:
+        kubectl = "sudo k8s kubectl"
+
+    env = os.environ
+    env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
+    subprocess.check_output(
+        f"{kubectl} -n {juju.status().model.name} delete --ignore-not-found=true networkchaos network-loss-primary",
+        shell=True,
+        env=env,
+    )
