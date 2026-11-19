@@ -760,19 +760,21 @@ class AsyncReplicationManager(BaseManager):
 
     def _start_standby_database(self, event: RelationChangedEvent) -> bool:
         """Update the configuration and start the database; True when the event is deferred."""
-        if self.state.substrate == Substrates.K8S:
-            if not cast("K8sWorkload", self.workload).postgresql_service_registered():
-                logger.debug("Early exit on_async_relation_changed: container hasn't started yet.")
-                event.defer()
-                return True
-            # Update the asynchronous replication configuration and start the database.
-            self.update_config()
-            self.workload.start_service(K8S_POSTGRESQL_SERVICE_NAME)
-        else:
-            # Update the asynchronous replication configuration and start the database.
-            self.update_config()
-            if not self.patroni_manager.start_patroni():
-                raise AsyncReplicationError("Failed to start patroni service.")
+        if (
+            self.state.substrate == Substrates.K8S
+            and not cast("K8sWorkload", self.workload).postgresql_service_registered()
+        ):
+            logger.debug("Early exit on_async_relation_changed: container hasn't started yet.")
+            event.defer()
+            return True
+        # Update the asynchronous replication configuration and start the database.
+        self.update_config()
+        if self.state.model.unit.is_leader():
+            if self.state.substrate == Substrates.K8S:
+                self.workload.start_service(K8S_POSTGRESQL_SERVICE_NAME)
+            else:
+                if not self.patroni_manager.start_patroni():
+                    raise AsyncReplicationError("Failed to start patroni service.")
         return False
 
     def _configure_primary_cluster(
