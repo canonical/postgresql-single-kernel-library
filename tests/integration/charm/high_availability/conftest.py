@@ -141,3 +141,40 @@ def continuous_writes(juju):
 
     logger.info("Clearing continuous writes")
     juju.run(unit=application_unit, action="clear-continuous-writes", wait=120).raise_on_failure()
+
+
+@pytest.fixture()
+def juju_chaos_mesh(juju: jubilant.Juju, substrate: Substrate) -> None:
+    """Deploy and remove Chaos Mesh exactly like the async fixture (K8s only)."""
+    if substrate == Substrate.vm:
+        yield
+        return
+
+    helpers.deploy_chaos_mesh(juju.status().model.name)
+    yield
+    helpers.remove_instance_isolation(juju)
+    helpers.destroy_chaos_mesh(juju.status().model.name)
+
+
+@pytest.fixture()
+def juju_wal_settings(juju: jubilant.Juju, substrate: Substrate) -> None:
+    """Restore the same WAL settings on each unit as the async fixture."""
+    initial_max_wal_size = helpers.get_postgresql_parameter(juju, "max_wal_size")
+    initial_min_wal_size = helpers.get_postgresql_parameter(juju, "min_wal_size")
+    initial_wal_keep_segments = helpers.get_postgresql_parameter(juju, "wal_keep_segments")
+    yield
+    app = helpers.get_postgresql_app_name(juju)
+    for unit in juju.status().apps[app].units:
+        if substrate == Substrate.vm:
+            helpers.run_ha_command_on_unit(juju, unit, "snap start charmed-postgresql.patroni")
+        patroni_password = helpers.get_password(
+            juju, helpers.get_postgresql_app_name(juju), "patroni"
+        )
+        helpers.change_wal_settings(
+            juju,
+            unit,
+            initial_max_wal_size,
+            initial_min_wal_size,
+            initial_wal_keep_segments,
+            patroni_password,
+        )
