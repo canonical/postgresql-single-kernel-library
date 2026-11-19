@@ -5,6 +5,7 @@
 from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
+from data_platform_helpers.advanced_statuses.models import StatusObject
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, Object
 from single_kernel_postgresql.compat.postgresql import PostgreSQLCreateDatabaseError
 from single_kernel_postgresql.config.enums import Substrates
@@ -43,6 +44,32 @@ def test_set_unit_status_skips_lower_priority_refresh(charm):
     with patch.object(type(charm), "unit", new_callable=PropertyMock, return_value=unit):
         charm.set_unit_status(MaintenanceStatus("reconfiguring cluster"))
     unit.status.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "refresh",
+    [
+        None,
+        Mock(unit_status_higher_priority=None, unit_status_lower_priority=Mock(return_value=None)),
+    ],
+    ids=["no-refresh-object", "refresh-idle"],
+)
+def test_set_unit_status_refreshes_the_persisted_role_record(charm, refresh):
+    """A mid-hook role write must update the record the collect handler replays.
+
+    The status handler only recomputes on update-status; on every other hook it
+    replays the stored refresh_manager record, so a record left at its
+    construction-time value reverts the role label written during the hook (the
+    'Primary' label staying on the old primary after promote-to-primary).
+    """
+    charm.refresh_manager.refresh = refresh
+    charm.set_unit_status(ActiveStatus("Primary"))
+    assert charm.refresh_manager.get_statuses("unit") == [
+        StatusObject(status="active", message="Primary")
+    ]
+
+    charm.set_unit_status(ActiveStatus())
+    assert charm.refresh_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
 
 
 def test_update_config_clears_stale_standby_cluster(charm):
