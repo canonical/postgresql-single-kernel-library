@@ -866,7 +866,9 @@ class AsyncReplicationManager(BaseManager):
                 # Remove the "cluster_initialised" flag to avoid self-healing in the update status hook.
                 self.state.application.data.update({
                     "cluster_initialised": "",
-                    "endpoints" if k8s else "members_ips": f'["{self.state.endpoint}"]',
+                    "endpoints"
+                    if k8s
+                    else "members_ips": f'["{self.state.endpoint if k8s else self.state.unit_ip}"]',
                 })
                 if not self._configure_standby_cluster(event):
                     return False
