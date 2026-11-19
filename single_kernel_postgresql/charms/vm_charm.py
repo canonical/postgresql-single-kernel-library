@@ -17,7 +17,6 @@ from urllib.parse import urlparse
 import charm_refresh
 from charmlibs import snap
 from ops import ActiveStatus, BlockedStatus, StatusBase
-from ops.log import JujuLogHandler
 from tenacity import RetryError
 
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
@@ -78,12 +77,6 @@ class PostgreSQLVMCharm(AbstractPostgreSQLCharm):
         """
         super().__init__(*args)
         self._charm_dir = pathlib.Path(os.environ.get("CHARM_DIR", "."))
-
-        # Show the logger name (module name) in logs.
-        root_logger = logging.getLogger()
-        for handler in root_logger.handlers:
-            if isinstance(handler, JujuLogHandler):
-                handler.setFormatter(logging.Formatter("{name}:{message}", style="{"))
 
         # The lib TLS handler emits tls_files_pushed after a successful push;
         # the VM charm reloads (update_config) on it (port of _reload_tls_after_push).
