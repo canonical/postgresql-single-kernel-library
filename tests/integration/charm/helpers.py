@@ -5,14 +5,25 @@
 
 import json
 import logging
+import random
+import tempfile
 import tomllib
 import zipfile
+from datetime import datetime
 from enum import Enum
 
 import jubilant
 import requests
-from single_kernel_postgresql.config.literals import PEER_RELATION
-from tenacity import Retrying, stop_after_delay, wait_fixed
+import yaml
+from single_kernel_postgresql.config.literals import PEER_RELATION, SYSTEM_USERS_PASSWORD_CONFIG
+from tenacity import (
+    RetryError,
+    Retrying,
+    stop_after_attempt,
+    stop_after_delay,
+    wait_exponential,
+    wait_fixed,
+)
 
 from tests.integration.helpers.juju import (
     get_app_leader,
@@ -21,7 +32,7 @@ from tests.integration.helpers.juju import (
     get_unit_address,
     wait_for_apps_status,
 )
-from tests.integration.helpers.postgresql import db_connect
+from tests.integration.helpers.postgresql import db_connect, execute_query
 from tests.integration.types import Substrate
 
 DATA_INTEGRATOR_APP_NAME = "data-integrator"
@@ -44,10 +55,44 @@ class RoleAttributeValue(Enum):
     ALL_DATABASES = 3
 
 
-def get_password(juju: jubilant.Juju, app_name: str, user: str = "operator") -> str:
+def get_password(juju: jubilant.Juju, app_name: str, user: str = "operator") -> str | None:
     """Return the password of a PostgreSQL system user from the charm's app secret."""
     secret = get_secret_by_label(juju, f"{PEER_RELATION}.{app_name}.app")
-    return secret[f"{user}-password"]
+    return secret.get(f"{user}-password")
+
+
+def set_password(
+    juju: jubilant.Juju, app_name: str, username: str = "operator", password: str | None = None
+) -> None:
+    """Set the password of a system user through the system users secret."""
+    secret_name = "system_users_secret"
+    try:
+        secret_id = juju.add_secret(secret_name, {username: password})
+        juju.grant_secret(secret_id, app_name)
+        # Update the application config to include the secret.
+        juju.config(app_name, {SYSTEM_USERS_PASSWORD_CONFIG: str(secret_id)})
+    except Exception:
+        juju.update_secret(secret_name, {username: password})
+
+
+def restart_patroni(juju: jubilant.Juju, unit_name: str, password: str) -> None:
+    """Restart PostgreSQL on a unit through the Patroni REST API."""
+    requests.post(
+        f"https://{get_unit_address(juju, unit_name)}:8008/restart",
+        auth=requests.auth.HTTPBasicAuth("patroni", password),
+        verify=False,
+    )
+
+
+def check_patroni(juju: jubilant.Juju, unit_name: str, restart_time: float) -> bool:
+    """Return whether PostgreSQL is running on a unit and was started after restart_time."""
+    health_info = requests.get(
+        f"https://{get_unit_address(juju, unit_name)}:8008/health", verify=False
+    ).json()
+    postmaster_start_time = datetime.strptime(
+        health_info["postmaster_start_time"], "%Y-%m-%d %H:%M:%S.%f%z"
+    ).timestamp()
+    return postmaster_start_time > restart_time and health_info["state"] == "running"
 
 
 def get_primary(juju: jubilant.Juju, unit_name: str) -> str:
@@ -62,6 +107,293 @@ def get_primary(juju: jubilant.Juju, unit_name: str) -> str:
 def get_db_primary_unit(juju: jubilant.Juju, app_name: str) -> str:
     """Return the primary unit of a cluster."""
     return get_primary(juju, get_app_leader(juju, app_name))
+
+
+def wait_for_idle_on_blocked(
+    juju: jubilant.Juju,
+    database_app_name: str,
+    unit_number: int,
+    other_app_name: str,
+    status_message: str,
+    timeout: float = 10 * MINUTE_SECS,
+) -> None:
+    """Wait for other_app_name to be active and a database unit to be blocked with a message."""
+    unit = f"{database_app_name}/{unit_number}"
+    juju.wait(
+        wait_for_apps_status(jubilant.all_active, other_app_name),
+        error=lambda status: jubilant.any_error(status, other_app_name),
+        timeout=timeout,
+    )
+    juju.wait(
+        lambda status: (
+            status.apps[database_app_name].units[unit].is_blocked
+            and status.apps[database_app_name].units[unit].workload_status.message
+            == status_message
+        ),
+        timeout=timeout,
+    )
+
+
+def get_cluster_roles(juju: jubilant.Juju, unit_name: str) -> dict[str, list[str]]:
+    """Return the unit names of the cluster members by role, asking the Patroni API."""
+    unit_address = get_unit_address(juju, unit_name)
+    members = {"replicas": [], "primaries": [], "sync_standbys": []}
+    member_list = requests.get(f"https://{unit_address}:8008/cluster", verify=False).json()[
+        "members"
+    ]
+    logging.info(f"Cluster members are: {member_list}")
+    for member in member_list:
+        role = member["role"]
+        name = "/".join(member["name"].rsplit("-", 1))
+        if role == "leader":
+            members["primaries"].append(name)
+        elif role == "sync_standby":
+            members["sync_standbys"].append(name)
+        else:
+            members["replicas"].append(name)
+    return members
+
+
+def check_cluster_members(juju: jubilant.Juju, app_name: str, substrate: Substrate) -> None:
+    """Check that the Patroni cluster members are the application units.
+
+    On VM the member hosts are also checked against the unit addresses.
+    """
+    for attempt in Retrying(
+        stop=stop_after_attempt(10), wait=wait_exponential(multiplier=1, min=2, max=30)
+    ):
+        with attempt:
+            units = get_app_units(juju, app_name)
+            primary = get_primary(juju, next(iter(units)))
+            address = get_unit_address(juju, primary)
+
+            members = requests.get(f"https://{address}:8008/cluster", verify=False).json()[
+                "members"
+            ]
+            assert [member["name"] for member in members] == [
+                name.replace("/", "-") for name in units
+            ]
+            if substrate == Substrate.vm:
+                assert [member["host"] for member in members] == [
+                    unit.public_address for unit in units.values()
+                ]
+
+
+def scale_application(
+    juju: jubilant.Juju, app_name: str, count: int, substrate: Substrate
+) -> None:
+    """Scale an application to a number of units and wait for it to be active.
+
+    On VM the first units are removed; on K8s only the last pods can be removed.
+    """
+    units = list(get_app_units(juju, app_name))
+    change = count - len(units)
+    if change > 0:
+        juju.add_unit(app_name, num_units=change)
+    elif change < 0:
+        if substrate == Substrate.vm:
+            juju.remove_unit(*units[:-change], destroy_storage=True)
+        else:
+            juju.remove_unit(app_name, num_units=-change)
+    juju.wait(
+        lambda status: (
+            wait_for_apps_status(jubilant.all_active, app_name)(status)
+            and len(status.get_units(app_name)) == count
+        ),
+        error=jubilant.any_error,
+        timeout=2000,
+    )
+
+
+def switchover(
+    juju: jubilant.Juju, current_primary: str, password: str, candidate: str | None = None
+) -> None:
+    """Trigger a switchover with the Patroni API and wait for the sync standbys to be back."""
+    primary_address = get_unit_address(juju, current_primary)
+    response = requests.post(
+        f"https://{primary_address}:8008/switchover",
+        json={
+            "leader": current_primary.replace("/", "-"),
+            "candidate": candidate.replace("/", "-") if candidate else None,
+        },
+        auth=requests.auth.HTTPBasicAuth("patroni", password),
+        verify=False,
+    )
+    assert response.status_code == 200
+    app_name = current_primary.split("/")[0]
+    for attempt in Retrying(stop=stop_after_attempt(30), wait=wait_fixed(2), reraise=True):
+        with attempt:
+            response = requests.get(f"https://{primary_address}:8008/cluster", verify=False)
+            assert response.status_code == 200
+            standbys = [
+                member for member in response.json()["members"] if member["role"] == "sync_standby"
+            ]
+            assert len(standbys) == len(get_app_units(juju, app_name)) - 1
+
+
+def run_command_on_unit(
+    juju: jubilant.Juju, unit_name: str, command: str, substrate: Substrate
+) -> str:
+    """Run a shell command on the workload of a unit (the postgresql container on K8s)."""
+    if substrate == Substrate.vm:
+        return juju.exec(command, unit=unit_name).stdout
+    return juju.ssh(unit_name, command, container="postgresql")
+
+
+def primary_changed(juju: jubilant.Juju, old_primary: str) -> bool:
+    """Return whether the primary is no longer old_primary, asking another unit."""
+    other_unit = next(
+        unit for unit in get_app_units(juju, old_primary.split("/")[0]) if unit != old_primary
+    )
+    return get_primary(juju, other_unit) != old_primary
+
+
+def change_patroni_setting(
+    juju: jubilant.Juju,
+    app_name: str,
+    setting: str,
+    value: int | bool,
+    password: str,
+    use_random_unit: bool = False,
+) -> None:
+    """Change a Patroni setting through the REST API of the primary (or a random unit)."""
+    for attempt in Retrying(stop=stop_after_delay(30 * 2), wait=wait_fixed(3)):
+        with attempt:
+            if use_random_unit:
+                unit_name = random.choice(list(get_app_units(juju, app_name)))
+            else:
+                unit_name = get_db_primary_unit(juju, app_name)
+            requests.patch(
+                f"https://{get_unit_address(juju, unit_name)}:8008/config",
+                json={setting: value},
+                verify=False,
+                auth=requests.auth.HTTPBasicAuth("patroni", password),
+            )
+
+
+def change_primary_start_timeout(
+    juju: jubilant.Juju, unit_name: str, seconds: int | None, password: str
+) -> None:
+    """Change the Patroni primary_start_timeout setting through the REST API of a unit."""
+    for attempt in Retrying(stop=stop_after_delay(30 * 2), wait=wait_fixed(3)):
+        with attempt:
+            requests.patch(
+                f"https://{get_unit_address(juju, unit_name)}:8008/config",
+                json={"primary_start_timeout": seconds},
+                verify=False,
+                auth=requests.auth.HTTPBasicAuth("patroni", password),
+            )
+
+
+def get_tls_ca(juju: jubilant.Juju, unit_name: str, relation: str = "client") -> str:
+    """Return the TLS CA of a certificates relation of the unit, or "" if there is none."""
+    raw_data = juju.cli("show-unit", unit_name)
+    if not raw_data:
+        raise ValueError(f"no unit info could be grabbed for {unit_name}")
+    data = yaml.safe_load(raw_data)
+    endpoint = f"{relation}-certificates"
+    relation_data = [v for v in data[unit_name]["relation-info"] if v["endpoint"] == endpoint]
+    if not relation_data:
+        return ""
+    return json.loads(relation_data[0]["application-data"]["certificates"])[0].get("ca")
+
+
+def check_tls(juju: jubilant.Juju, unit_name: str, enabled: bool) -> bool:
+    """Return whether TLS is enabled/disabled on the PostgreSQL instance of a unit.
+
+    Besides "SHOW ssl", checks that the connections from the other units are (or aren't)
+    encrypted.
+    """
+    app_name = unit_name.split("/")[0]
+    unit_address = get_unit_address(juju, unit_name)
+    password = get_password(juju, app_name)
+    other_addresses = [
+        f"'{get_unit_address(juju, other_unit)}'"
+        for other_unit in get_app_units(juju, app_name)
+        if other_unit != unit_name
+    ]
+    try:
+        for attempt in Retrying(
+            stop=stop_after_attempt(10), wait=wait_exponential(multiplier=1, min=2, max=30)
+        ):
+            with attempt:
+                output = execute_query(
+                    unit_address,
+                    password,
+                    "SHOW ssl;",
+                    sslmode="require" if enabled else "disable",
+                )
+                tls_enabled = "on" in output
+
+                # Number of bits of the encryption algorithm of each connection
+                # (None if the connection isn't encrypted).
+                connections_encryption_info = execute_query(
+                    unit_address,
+                    password,
+                    "SELECT bits FROM pg_stat_ssl INNER JOIN pg_stat_activity"
+                    " ON pg_stat_ssl.pid = pg_stat_activity.pid"
+                    " WHERE pg_stat_ssl.pid = pg_backend_pid()"
+                    f" OR client_addr IN ({','.join(other_addresses)});",
+                )
+                connections_encrypted = (
+                    all(connections_encryption_info)
+                    if enabled
+                    else any(connections_encryption_info)
+                )
+
+                if enabled != tls_enabled or tls_enabled != connections_encrypted:
+                    raise ValueError(
+                        f"TLS is{' not' if not tls_enabled else ''} enabled on {unit_name}"
+                    )
+                return True
+    except RetryError:
+        return False
+    return False
+
+
+def check_tls_replication(juju: jubilant.Juju, unit_name: str, enabled: bool) -> bool:
+    """Return whether the replication connections to a unit are (or aren't) encrypted."""
+    unit_address = get_unit_address(juju, unit_name)
+    password = get_password(juju, unit_name.split("/")[0])
+    output = execute_query(
+        unit_address,
+        password,
+        "SELECT pg_ssl.ssl, pg_sa.client_addr FROM pg_stat_ssl pg_ssl"
+        " JOIN pg_stat_activity pg_sa ON pg_ssl.pid = pg_sa.pid"
+        " AND pg_sa.usename = 'replication';",
+    )
+    return all(output[i] == enabled for i in range(0, len(output), 2))
+
+
+def check_tls_patroni_api(
+    juju: jubilant.Juju, unit_name: str, enabled: bool, substrate: Substrate
+) -> bool:
+    """Return whether the Patroni REST API of a unit answers through TLS.
+
+    On VM the server certificate is validated with the peer CA when TLS is enabled. On K8s
+    it isn't, since the unit IP doesn't match the certificate hostname (a k8s hostname).
+    """
+    unit_address = get_unit_address(juju, unit_name)
+    tls_ca = get_tls_ca(juju, unit_name, "peer") if substrate == Substrate.vm else ""
+
+    # If there is no TLS CA in the relation, something is wrong in
+    # the relation between the TLS Certificates Operator and PostgreSQL.
+    if substrate == Substrate.vm and enabled and not tls_ca:
+        return False
+
+    try:
+        for attempt in Retrying(
+            stop=stop_after_attempt(10), wait=wait_exponential(multiplier=1, min=2, max=30)
+        ):
+            with attempt, tempfile.NamedTemporaryFile() as temp_ca_file:
+                temp_ca_file.write(tls_ca.encode("utf-8"))
+                temp_ca_file.seek(0)
+                verify = temp_ca_file.name if substrate == Substrate.vm and enabled else False
+                health_info = requests.get(f"https://{unit_address}:8008/health", verify=verify)
+                return health_info.status_code == 200
+    except RetryError:
+        return False
+    return False
 
 
 def count_switchovers(juju: jubilant.Juju, app_name: str) -> int:
