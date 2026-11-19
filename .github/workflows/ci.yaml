@@ -82,8 +82,13 @@ jobs:
         substrate:
           - vm
           - k8s
-    name: Build ${{ matrix.substrate }} test charm
-    runs-on: ubuntu-latest
+        platform:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    name: Build ${{ matrix.substrate }} test charm | ${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -110,13 +115,14 @@ jobs:
         run: |
           newgrp lxd --command \
            'scripts/build_charm.sh \
-            -p ubuntu@24.04:amd64 \
+            -p "ubuntu@24.04:'"${VAR_ARCH}"'" \
             -c "tests/charms/postgresql_'"${VAR_SUBSTRATE}"'_test_charm"'
         env:
           # Used by charmcraftcache (to avoid GitHub API rate limit)
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
           VAR_SUBSTRATE: ${{ matrix.substrate }}
+          VAR_ARCH: ${{ matrix.platform.arch }}
           CI_CACHE: true
       - name: Charmcraft logs
         if: ${{ success() || (failure() && steps.pack.outcome == 'failure') }}
@@ -124,7 +130,7 @@ jobs:
       - name: Upload test charm
         uses: actions/upload-artifact@v7
         with:
-          name: test-charm-${{ matrix.substrate }}
+          name: test-charm-${{ matrix.substrate }}-${{ matrix.platform.arch }}
           path: tests/charms/postgresql_${{ matrix.substrate }}_test_charm/*.charm
           if-no-files-found: error
     outputs:
