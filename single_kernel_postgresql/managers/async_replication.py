@@ -968,7 +968,7 @@ class AsyncReplicationManager(BaseManager):
 
     def _wait_for_standby_leader(self, event: RelationChangedEvent) -> bool:
         """Wait for the standby leader to be up and running."""
-        if not self.state.model.unit.is_leader():
+        if self.state.model.unit.is_leader():
             return False
 
         k8s = self.state.substrate == Substrates.K8S
