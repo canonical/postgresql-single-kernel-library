@@ -17,7 +17,6 @@ from lightkube import Client
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.core_v1 import Endpoints
 from ops import ActiveStatus, BlockedStatus, ModelError, StatusBase
-from ops.log import JujuLogHandler
 from ops.pebble import ChangeError, Layer, LayerDict, ServiceDict, ServiceStatus
 
 from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
@@ -92,12 +91,6 @@ class PostgreSQLK8sCharm(AbstractPostgreSQLCharm):
         assert isinstance(self.workload, K8sWorkload), (  # noqa: S101
             "Workload must be an instance of K8sWorkload"
         )
-
-        # Show the logger name (module name) in logs (port).
-        root_logger = logging.getLogger()
-        for handler in root_logger.handlers:
-            if isinstance(handler, JujuLogHandler):
-                handler.setFormatter(logging.Formatter("{name}:{message}", style="{"))
 
         # Open the API and database ports when Juju supports it on K8s (port).
         if self.model.juju_version.supports_open_port_on_k8s:

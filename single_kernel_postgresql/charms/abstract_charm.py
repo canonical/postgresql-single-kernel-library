@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
 from ops.charm import CharmBase, UpdateStatusEvent
+from ops.log import JujuLogHandler
 from ops_tracing import Tracing
 
 if TYPE_CHECKING:
@@ -91,6 +92,12 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
     tls_transfer: "TLSTransfer"
 
     def __init__(self, *args):
+        # Show logger name (module name) in logs
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            if isinstance(handler, JujuLogHandler):
+                handler.setFormatter(logging.Formatter("{name}:{message}", style="{"))
+
         super().__init__(*args)
 
         # State
