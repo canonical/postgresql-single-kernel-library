@@ -298,9 +298,6 @@ class RefreshManager(BaseManager):
         self._charm = charm
         self.set_default_status = set_default_status
         self.can_set_app_status = True
-        # The default (role) status as last computed by reconcile_refresh_status;
-        # None until the first no-refresh reconciliation runs.
-        self._default_status: StatusBase | None = None
         # charm_refresh resume callbacks (e.g. refresh_snap) run DURING the
         # charm_refresh.Machines()/Kubernetes() construction below and dispatch back
         # through this manager (refresh_snap ends with
@@ -351,7 +348,6 @@ class RefreshManager(BaseManager):
                 )
                 self.refresh = None
         self.reconcile_refresh_status()
-        self._persist_machinery_status()
 
     def _construct_refresh_object(
         self,
@@ -384,81 +380,57 @@ class RefreshManager(BaseManager):
     ) -> list[StatusObject]:
         """Compute the manager's statuses.
 
-        The refresh statuses are maintained statefully (see reconcile_refresh_status),
-        so recompute replays the reconciliation and surfaces the resulting unit status
-        as this manager's status record; the machinery record stays available to the
-        status handler's collect evaluation between recomputes.
+        The refresh statuses are maintained statefully on the unit status itself (see
+        reconcile_refresh_status), so recompute replays the reconciliation. The unit
+        status record is never stored: it is derived from the live unit status on
+        every evaluation, so the status handler's collect always sees what the hook
+        last wrote (a stored snapshot replayed the pre-hook role and kept the
+        'Primary' label on the old primary after a switchover).
         """
-        if not recompute:
+        if recompute:
+            self.reconcile_refresh_status()
+        if scope == "app":
+            if recompute:
+                # App statuses stay charm-owned (the async-replication phase migrates
+                # them); the leader set-app-status call ran in the reconciliation.
+                return [GeneralStatuses.ACTIVE_IDLE.value]
             return self.state.statuses.get(scope, self.name).root or [
                 GeneralStatuses.ACTIVE_IDLE.value
             ]
-        self.reconcile_refresh_status()
-        if scope == "app":
-            # App statuses stay charm-owned (the async-replication phase migrates
-            # them); the leader set-app-status call ran in the reconciliation.
-            return [GeneralStatuses.ACTIVE_IDLE.value]
-        return [self._persist_machinery_status()]
+        return [self._machinery_status()]
 
-    def _persist_machinery_status(self) -> StatusObject:
-        """Persist the reconciled unit status as this manager's status record.
+    def _machinery_status(self) -> StatusObject:
+        """Derive this manager's unit status record from the live unit status.
 
-        Only snapshot the unit status when the refresh itself set it: the
-        reconciliation records the refresh status message in
-        LAST_REFRESH_UNIT_STATUS_FILE, and a snapshot of an unrelated status
-        would be re-fed through the collect handler forever (waiting outranks
-        active there), self-perpetuating a stale status.
+        The status handler sets the unit status from the components' records alone,
+        so whatever this returns replaces the unit status at the end of the hook
+        unless another component reports a higher-priority status.
 
-        One relaxation keeps the role surface visible: the charm's update-status
-        handler writes the role message (Primary/Standby, with its degraded or
-        read-only suffixes) as its last statement, so an ActiveStatus carrying a
-        message is snapshotted even when the refresh did not set it. Active
-        ranks self-clear — the next bare active() write fails the branch and
-        resets the record. Blocked/maintenance/waiting statuses the refresh did
-        not set keep the plain ACTIVE_IDLE fallback. A bare active() (no role
-        information) is also not snapshotted: replaying it is indistinguishable
-        from ACTIVE_IDLE.
+        A status the refresh itself set (its message is recorded in
+        LAST_REFRESH_UNIT_STATUS_FILE) is passed through as is. Of the statuses the
+        refresh did not set, only an ActiveStatus carrying a message passes through:
+        that is the role surface (Primary/Standby, with its degraded or read-only
+        suffixes) written by set_primary_status_message. Blocked, maintenance and
+        waiting statuses the refresh did not set are owned by the components that
+        raise them and fall back to ACTIVE_IDLE here, as does a bare active().
         """
-        if self.refresh is None:
-            # Persist the freshly computed default (role) status so every hook's
-            # collect replays it and the mid-hook role writes become idempotent
-            # instead of being wiped to bare active().
-            if isinstance(self._default_status, ActiveStatus):
-                record = StatusObject(status="active", message=self._default_status.message)
-            else:
-                # Blocked/error defaults stay owned by the components that raise
-                # them; snapshotting them here could self-perpetuate stale states.
-                record = GeneralStatuses.ACTIVE_IDLE.value
-        else:
+        status = self._charm.unit.status
+        if (
+            self.refresh is not None
+            and status.name in ("active", "blocked", "maintenance", "waiting")
+            and isinstance(status, (ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus))
+        ):
             try:
                 refresh_status_message = json.loads(
                     pathlib.Path(LAST_REFRESH_UNIT_STATUS_FILE).read_text()
                 )
             except FileNotFoundError:
                 refresh_status_message = None
-            status = self._charm.unit.status
-            if (
-                status.name not in ("active", "blocked", "maintenance", "waiting")
-                or not isinstance(
-                    status, (ActiveStatus, BlockedStatus, MaintenanceStatus, WaitingStatus)
-                )
-                or refresh_status_message != status.message
-            ):
-                if isinstance(status, ActiveStatus) and status.message:
-                    # The role message the charm just wrote must survive the
-                    # collect-phase recompute (roles-family '' != 'Primary'
-                    # after a fast self-heal, CI 2026-10-17).
-                    record = StatusObject(status="active", message=status.message)
-                else:
-                    # Unknown/error statuses carry no refresh information, and
-                    # statuses the refresh did not set must not be snapshotted:
-                    # the record would never clear once the underlying condition
-                    # resolved.
-                    record = GeneralStatuses.ACTIVE_IDLE.value
-            else:
-                record = StatusObject(status=status.name, message=status.message)
-        self.state.statuses.set(record, "unit", self.name)
-        return record
+            if refresh_status_message == status.message:
+                return StatusObject(status=status.name, message=status.message)
+        if isinstance(status, ActiveStatus) and status.message:
+            return StatusObject(status="active", message=status.message)
+        return GeneralStatuses.ACTIVE_IDLE.value
 
     def set_unit_status(
         self,
@@ -511,7 +483,6 @@ class RefreshManager(BaseManager):
             # handler replays it instead of wiping the unit to bare active()
             # (primary-flap regression).
             self.set_default_status()
-            self._default_status = self._charm.unit.status
         elif self._charm.unit.status.message == last_refresh_unit_status:
             if self.refresh is not None and (
                 refresh_status := self.refresh.unit_status_lower_priority(

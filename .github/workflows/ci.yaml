@@ -19,6 +19,15 @@ on:
     - cron: '53 0 * * *'  # Daily at 00:53 UTC
   # Triggered on push to branch "main" by .github/workflows/release.yaml
   workflow_call:
+    secrets:
+      AWS_ACCESS_KEY:
+        required: true
+      AWS_SECRET_KEY:
+        required: true
+      GCP_ACCESS_KEY:
+        required: true
+      GCP_SECRET_KEY:
+        required: true
 
 jobs:
   lint-workflows:
@@ -73,8 +82,13 @@ jobs:
         substrate:
           - vm
           - k8s
-    name: Build ${{ matrix.substrate }} test charm
-    runs-on: ubuntu-26.04
+        platform:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-26.04-arm
+    name: Build ${{ matrix.substrate }} test charm | ${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.runner }}
     timeout-minutes: 60
     steps:
       - name: Checkout
@@ -86,32 +100,37 @@ jobs:
         run: |
           sudo snap install lxd
           sudo adduser "$USER" lxd
-          # `newgrp` does not work in GitHub Actions; use `sudo --user` instead
-          sudo --user "$USER" --preserve-env --preserve-env=PATH -- env -- lxd waitready
-          sudo --user "$USER" --preserve-env --preserve-env=PATH -- env -- lxd init --auto
+          newgrp lxd --command 'lxd waitready'
+          newgrp lxd --command 'lxd init --auto'
           # Workaround for Docker & LXD on same machine
           sudo iptables -F FORWARD
           sudo iptables -P FORWARD ACCEPT
 
           sudo snap install charmcraft --classic
           pipx install poetry
+          pipx install charmcraftcache
       - run: snap list
       - name: Build test charm
         id: pack
         run: |
-          sudo --user "$USER" --preserve-env --preserve-env=PATH -- env -- \
-            scripts/build_charm.sh \
-            -p ubuntu@24.04:amd64 \
-            -c "tests/charms/postgresql_${VAR_SUBSTRATE}_test_charm"
+          newgrp lxd --command \
+           'scripts/build_charm.sh \
+            -p "ubuntu@24.04:'"${VAR_ARCH}"'" \
+            -c "tests/charms/postgresql_'"${VAR_SUBSTRATE}"'_test_charm"'
         env:
+          # Used by charmcraftcache (to avoid GitHub API rate limit)
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
           VAR_SUBSTRATE: ${{ matrix.substrate }}
+          VAR_ARCH: ${{ matrix.platform.arch }}
+          CI_CACHE: true
       - name: Charmcraft logs
         if: ${{ success() || (failure() && steps.pack.outcome == 'failure') }}
         run: cat ~/.local/state/charmcraft/log/*
       - name: Upload test charm
         uses: actions/upload-artifact@v7
         with:
-          name: test-charm-${{ matrix.substrate }}
+          name: test-charm-${{ matrix.substrate }}-${{ matrix.platform.arch }}
           path: tests/charms/postgresql_${{ matrix.substrate }}_test_charm/*.charm
           if-no-files-found: error
     outputs:
@@ -129,5 +148,10 @@ jobs:
     uses: $/.github/workflows/integration_test.yaml
     with:
       artifact-prefix: ${{ needs.build.outputs.artifact-prefix }}
+    secrets:
+      AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+      AWS_SECRET_KEY: ${{ secrets.AWS_SECRET_KEY }}
+      GCP_ACCESS_KEY: ${{ secrets.GCP_ACCESS_KEY }}
+      GCP_SECRET_KEY: ${{ secrets.GCP_SECRET_KEY }}
     permissions: {}
     cache-mode: none

@@ -3,11 +3,20 @@
 
 """Fixtures for the integration tests of the PostgreSQL charm."""
 
+import os
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 import yaml
 
+from tests.integration.charm.backup_helpers import (
+    AWS,
+    GCP,
+    cleanup_cloud,
+    get_cloud_config,
+    setup_microceph,
+)
 from tests.integration.charm.helpers import RoleAttributeValue
 from tests.integration.types import Substrate
 
@@ -45,6 +54,58 @@ def charm_resources(substrate: Substrate) -> dict[str, str] | None:
         return None
     resources = _metadata(substrate)["resources"]
     return {name: resource["upstream-source"] for name, resource in resources.items()}
+
+
+@pytest.fixture(scope="module")
+def aws_cloud_configs() -> Generator[tuple[dict[str, str], dict[str, str]]]:
+    """AWS S3 integrator config and credentials; the test objects are deleted afterwards."""
+    if (
+        not os.environ.get("AWS_ACCESS_KEY", "").strip()
+        or not os.environ.get("AWS_SECRET_KEY", "").strip()
+    ):
+        pytest.skip("AWS configs not set")
+
+    config, credentials = get_cloud_config(AWS)
+    yield config, credentials
+
+    cleanup_cloud(config, credentials)
+
+
+@pytest.fixture(scope="module")
+def gcp_cloud_configs() -> Generator[tuple[dict[str, str], dict[str, str]]]:
+    """GCP S3 integrator config and credentials; the test objects are deleted afterwards."""
+    if (
+        not os.environ.get("GCP_ACCESS_KEY", "").strip()
+        or not os.environ.get("GCP_SECRET_KEY", "").strip()
+    ):
+        pytest.skip("GCP configs not set")
+
+    config, credentials = get_cloud_config(GCP)
+    yield config, credentials
+
+    cleanup_cloud(config, credentials)
+
+
+@pytest.fixture(scope="session")
+def ceph_cloud_configs() -> tuple[dict[str, str], dict[str, str]]:
+    """S3 integrator config and credentials of a microceph installed on the host (CI only)."""
+    if os.environ.get("CI") != "true":
+        pytest.skip("Not running on CI. Skipping microceph installation")
+
+    microceph = setup_microceph()
+    config = {
+        "endpoint": f"https://{microceph.host}",
+        "bucket": microceph.bucket,
+        "path": "/pg",
+        "region": "",
+        "s3-uri-style": "path",
+        "tls-ca-chain": microceph.cert,
+    }
+    credentials = {
+        "access-key": microceph.access_key_id,
+        "secret-key": microceph.secret_access_key,
+    }
+    return config, credentials
 
 
 @pytest.fixture(scope="module")

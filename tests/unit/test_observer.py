@@ -646,3 +646,37 @@ def test_authorisation_rules_main(substrate):
         _get.assert_any_call("http://server1:8008/cluster")
         _get.assert_any_call("http://server2:8008/cluster")
         assert _check_for_database_changes.called
+
+
+@pytest.mark.parametrize(
+    "states,check", [({"patroni": True}, True), ({"patroni": False}, False), ({}, False)]
+)
+def test_raft_observer_gates_on_patroni_state(states, check):
+    from single_kernel_postgresql.scripts import raft_observer
+
+    with (
+        patch.object(raft_observer, "service_states", return_value=states),
+        patch.object(raft_observer, "get_raft_password", return_value="secret") as password,
+        patch.object(raft_observer, "check_raft_connection") as connection,
+    ):
+        raft_observer.main()
+    assert password.called is check
+    if check:
+        connection.assert_called_once_with("secret")
+    else:
+        connection.assert_not_called()
+
+
+def test_raft_observer_query_failure_does_not_check_connection():
+    from charmlibs import snap
+    from single_kernel_postgresql.scripts import raft_observer
+
+    with (
+        patch.object(
+            raft_observer, "service_states", side_effect=snap.ConnectionError("unavailable")
+        ),
+        patch.object(raft_observer, "check_raft_connection") as connection,
+        pytest.raises(snap.ConnectionError),
+    ):
+        raft_observer.main()
+    connection.assert_not_called()

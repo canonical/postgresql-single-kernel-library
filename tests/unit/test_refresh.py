@@ -434,7 +434,6 @@ def test_refresh_manager_constructor_retries_transient_transport_error(
         # The mock refresh object would leak Mocks into the machinery-status
         # JSON file; the reconciliation is out of scope for this test.
         patch.object(RefreshManager, "reconcile_refresh_status"),
-        patch.object(RefreshManager, "_persist_machinery_status"),
     ):
         manager = RefreshManager(
             state=state,
@@ -598,40 +597,33 @@ def test_get_statuses_replays_the_reconciliation_on_recompute(refresh_manager, c
     higher = MaintenanceStatus("refresh in progress")
     refresh_manager.refresh.unit_status_higher_priority = higher
     record = StatusObject(status="maintenance", message="refresh in progress")
-    refresh_manager.state.statuses.set.reset_mock()
 
     statuses = refresh_manager.get_statuses("unit", recompute=True)
 
     assert charm.unit.status == higher
     assert statuses == [record]
-    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+    refresh_manager.state.statuses.set.assert_not_called()
 
 
-def test_get_statuses_persists_the_reconciled_active_status(refresh_manager, charm):
+def test_get_statuses_reports_the_reconciled_active_status(refresh_manager, charm):
     refresh_manager.refresh = None
-    refresh_manager.state.statuses.set.reset_mock()
 
     statuses = refresh_manager.get_statuses("unit", recompute=True)
 
     assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
-    refresh_manager.state.statuses.set.assert_called_once_with(
-        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
-    )
+    refresh_manager.state.statuses.set.assert_not_called()
 
 
-def test_get_statuses_persists_active_idle_for_unsettled_unit_status(refresh_manager, charm):
+def test_get_statuses_reports_active_idle_for_unsettled_unit_status(refresh_manager, charm):
     charm.unit.status = UnknownStatus()
-    refresh_manager.state.statuses.set.reset_mock()
 
     statuses = refresh_manager.get_statuses("unit", recompute=True)
 
     assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
-    refresh_manager.state.statuses.set.assert_called_once_with(
-        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
-    )
+    refresh_manager.state.statuses.set.assert_not_called()
 
 
-def test_get_statuses_snapshots_an_active_role_status(refresh_manager, charm):
+def test_get_statuses_passes_through_an_active_role_status(refresh_manager, charm):
     """An ActiveStatus carrying a role message survives the machinery record.
 
     The charm's update-status handler writes ActiveStatus('Primary') as its
@@ -645,92 +637,66 @@ def test_get_statuses_snapshots_an_active_role_status(refresh_manager, charm):
     """
     refresh_manager.refresh.unit_status_higher_priority = None
     charm.unit.status = ActiveStatus("Primary")
-    refresh_manager.state.statuses.set.reset_mock()
 
     statuses = refresh_manager.get_statuses("unit", recompute=True)
 
     record = StatusObject(status="active", message="Primary")
     assert statuses == [record]
-    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+    refresh_manager.state.statuses.set.assert_not_called()
 
 
-def test_get_statuses_does_not_snapshot_a_bare_active_status(refresh_manager, charm):
+def test_get_statuses_reports_active_idle_for_a_bare_active_status(refresh_manager, charm):
     """A bare active() the refresh did not set keeps the ACTIVE_IDLE record.
 
     The empty message is the no-role-information surface: replaying it is
-    indistinguishable from ACTIVE_IDLE, and snapshotting every bare active()
+    indistinguishable from ACTIVE_IDLE, and passing through every bare active()
     would only churn the record between equivalent values.
     """
     refresh_manager.refresh.unit_status_higher_priority = None
     charm.unit.status = ActiveStatus()
-    refresh_manager.state.statuses.set.reset_mock()
 
     statuses = refresh_manager.get_statuses("unit", recompute=True)
 
     assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
-    refresh_manager.state.statuses.set.assert_called_once_with(
-        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
-    )
+    refresh_manager.state.statuses.set.assert_not_called()
 
 
-def test_get_statuses_does_not_snapshot_a_non_refresh_unit_status(refresh_manager, charm):
-    """The machinery record must not snapshot statuses the refresh did not set.
+def test_get_statuses_does_not_pass_through_a_non_refresh_unit_status(refresh_manager, charm):
+    """The machinery record must not pass through statuses the refresh did not set.
 
-    A snapshot of an unrelated status (e.g. the cluster manager's "awaiting
+    A replay of an unrelated status (e.g. the cluster manager's "awaiting
     passwords generation") would be re-fed through the collect handler forever:
     waiting outranks active there, so the record would never clear even after
     the underlying condition resolved.
     """
     refresh_manager.refresh.unit_status_higher_priority = None
     charm.unit.status = WaitingStatus("awaiting passwords generation")
-    refresh_manager.state.statuses.set.reset_mock()
 
     statuses = refresh_manager.get_statuses("unit", recompute=True)
 
     assert statuses == [GeneralStatuses.ACTIVE_IDLE.value]
-    refresh_manager.state.statuses.set.assert_called_once_with(
-        GeneralStatuses.ACTIVE_IDLE.value, "unit", "refresh_manager"
-    )
+    refresh_manager.state.statuses.set.assert_not_called()
 
 
-def test_get_statuses_snapshots_a_refresh_set_status(refresh_manager, charm):
-    """A status the refresh itself set keeps being snapshotted."""
+def test_get_statuses_passes_through_a_refresh_set_status(refresh_manager, charm):
+    """A status the refresh itself set is passed through."""
     higher = WaitingStatus("refresh queued")
     refresh_manager.refresh.unit_status_higher_priority = higher
-    refresh_manager.state.statuses.set.reset_mock()
 
     statuses = refresh_manager.get_statuses("unit", recompute=True)
 
     record = StatusObject(status="waiting", message="refresh queued")
     assert statuses == [record]
-    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
-
-
-@pytest.fixture
-def persisted_statuses(refresh_manager):
-    """A fake status store so the replay of the persisted record is observable."""
-    store: dict = {}
-
-    def fake_set(record, scope, name):
-        store[(scope, name)] = [record]
-
-    def fake_get(scope, name):
-        entry = MagicMock(name="statuses entry")
-        entry.root = store.get((scope, name), [])
-        return entry
-
-    refresh_manager.state.statuses.set.side_effect = fake_set
-    refresh_manager.state.statuses.get.side_effect = fake_get
-    return store
+    refresh_manager.state.statuses.set.assert_not_called()
 
 
 @pytest.mark.parametrize(
     "role_message", ["Primary", "Primary (degraded)", "Primary (read-only)", "Standby"]
 )
-def test_get_statuses_recompute_persists_the_default_role_status(
+def test_get_statuses_recompute_reports_the_default_role_status(
     refresh_manager, charm, set_default_status, role_message
 ):
-    """Recompute with no refresh must surface AND persist the freshly computed role status.
+    """Recompute with no refresh must surface the freshly computed role status.
 
     Otherwise every hook's collect wipes the mid-hook write to a bare active()
     and juju flaps between the two (primary-flap regression).
@@ -742,32 +708,37 @@ def test_get_statuses_recompute_persists_the_default_role_status(
     set_default_status.side_effect = compute_default
     refresh_manager.refresh = None
     charm.unit.status = ActiveStatus()
-    refresh_manager.state.statuses.set.reset_mock()
 
     statuses = refresh_manager.get_statuses("unit", recompute=True)
 
     set_default_status.assert_called_once()
     record = StatusObject(status="active", message=role_message)
     assert statuses == [record]
-    refresh_manager.state.statuses.set.assert_called_once_with(record, "unit", "refresh_manager")
+    refresh_manager.state.statuses.set.assert_not_called()
 
 
-def test_get_statuses_replays_the_persisted_role_status_without_recompute(
-    refresh_manager, charm, set_default_status, persisted_statuses
+@pytest.mark.parametrize("with_refresh", [True, False])
+def test_get_statuses_follows_mid_hook_role_writes_without_recompute(
+    refresh_manager, charm, with_refresh
 ):
-    """A later hook's collect replays the stored role record.
+    """The collect evaluation reflects the role the hook last wrote, never a snapshot.
 
-    Keeps the unit status message stable between update-status recomputes.
+    After a switchover the topology-change hook writes the new role; a stored
+    record replayed the pre-hook role and kept 'Primary' on the old primary
+    until the next update-status.
     """
-    set_default_status.side_effect = lambda: setattr(charm.unit, "status", ActiveStatus("Primary"))
-    refresh_manager.refresh = None
-    charm.unit.status = ActiveStatus()
-
-    refresh_manager.get_statuses("unit", recompute=True)
-
+    if with_refresh:
+        refresh_manager.refresh.unit_status_higher_priority = None
+    else:
+        refresh_manager.refresh = None
+    charm.unit.status = ActiveStatus("Primary")
     assert refresh_manager.get_statuses("unit") == [
         StatusObject(status="active", message="Primary")
     ]
+
+    charm.unit.status = ActiveStatus()
+    assert refresh_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
+    refresh_manager.state.statuses.set.assert_not_called()
 
 
 def test_get_statuses_returns_cached_active_idle_for_app_scope_without_recompute(
@@ -776,13 +747,6 @@ def test_get_statuses_returns_cached_active_idle_for_app_scope_without_recompute
     refresh_manager.state.statuses.get.return_value.root = []
 
     assert refresh_manager.get_statuses("app") == [GeneralStatuses.ACTIVE_IDLE.value]
-
-
-def test_get_statuses_returns_the_cached_records_without_recompute(refresh_manager):
-    record = StatusObject(status="blocked", message="upgrade failed")
-    refresh_manager.state.statuses.get.return_value.root = [record]
-
-    assert refresh_manager.get_statuses("unit") == [record]
 
 
 def test_get_statuses_defaults_to_active_idle_without_cached_records(refresh_manager):

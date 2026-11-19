@@ -5,6 +5,7 @@
 from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
+from data_platform_helpers.advanced_statuses.models import StatusObject
 from ops import ActiveStatus, BlockedStatus, MaintenanceStatus, Object
 from single_kernel_postgresql.compat.postgresql import PostgreSQLCreateDatabaseError
 from single_kernel_postgresql.config.enums import Substrates
@@ -43,6 +44,32 @@ def test_set_unit_status_skips_lower_priority_refresh(charm):
     with patch.object(type(charm), "unit", new_callable=PropertyMock, return_value=unit):
         charm.set_unit_status(MaintenanceStatus("reconfiguring cluster"))
     unit.status.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "refresh",
+    [
+        None,
+        Mock(unit_status_higher_priority=None, unit_status_lower_priority=Mock(return_value=None)),
+    ],
+    ids=["no-refresh-object", "refresh-idle"],
+)
+def test_set_unit_status_refreshes_the_persisted_role_record(charm, refresh):
+    """A mid-hook role write must update the record the collect handler replays.
+
+    The status handler only recomputes on update-status; on every other hook it
+    replays the stored refresh_manager record, so a record left at its
+    construction-time value reverts the role label written during the hook (the
+    'Primary' label staying on the old primary after promote-to-primary).
+    """
+    charm.refresh_manager.refresh = refresh
+    charm.set_unit_status(ActiveStatus("Primary"))
+    assert charm.refresh_manager.get_statuses("unit") == [
+        StatusObject(status="active", message="Primary")
+    ]
+
+    charm.set_unit_status(ActiveStatus())
+    assert charm.refresh_manager.get_statuses("unit") == [GeneralStatuses.ACTIVE_IDLE.value]
 
 
 def test_update_config_clears_stale_standby_cluster(charm):
@@ -583,3 +610,77 @@ def test_pitr_failure_persists_blocked_through_collect(charm, harness):
     ):
         harness.evaluate_status()
         assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
+
+
+@pytest.mark.parametrize("active", [True, False])
+@pytest.mark.parametrize(
+    "service,method",
+    [
+        ("prometheus-postgres-exporter", "_setup_exporter"),
+        ("pgbackrest-exporter", "_setup_pgbackrest_exporter"),
+    ],
+)
+def test_exporters_start_enabled_or_restart(charm, active, service, method):
+    with (
+        patch(
+            "single_kernel_postgresql.charms.vm_charm.service_states",
+            return_value={service: active},
+        ),
+        patch("single_kernel_postgresql.charms.vm_charm.snap.set") as set_config,
+        patch("single_kernel_postgresql.charms.vm_charm.snap.start") as start,
+        patch("single_kernel_postgresql.charms.vm_charm.snap.restart") as restart,
+        patch.object(charm.state, "get_secret", return_value=None),
+    ):
+        getattr(charm, method)()
+    if active:
+        restart.assert_called_once_with("charmed-postgresql", services=[service])
+        start.assert_not_called()
+    else:
+        start.assert_called_once_with("charmed-postgresql", services=[service], enable=True)
+        restart.assert_not_called()
+    if method == "_setup_exporter":
+        set_config.assert_called_once_with(
+            "charmed-postgresql", {"exporter.user": "monitoring", "exporter.password": "None"}
+        )
+
+
+def test_metrics_password_uses_scalar_read(charm):
+    with (
+        patch(
+            "single_kernel_postgresql.charms.vm_charm.snap.get_one", return_value="current"
+        ) as get_one,
+        patch.object(charm.state, "get_secret", return_value="current"),
+        patch.object(charm, "_setup_exporter") as setup,
+    ):
+        charm._restart_metrics_service(snap_name="charmed-postgresql")
+    get_one.assert_called_once_with("charmed-postgresql", "exporter.password")
+    setup.assert_not_called()
+
+
+def test_ldap_config_preserves_string_values(charm):
+    charm.ldap = Mock()
+    charm.ldap.get_ldap_parameters.return_value = {
+        "ldapurl": "ldap://ldap.example:389",
+        "ldapbasedn": "dc=example",
+        "ldapbinddn": "cn=reader",
+        "ldapbindpasswd": "secret",
+    }
+    with (
+        patch.object(
+            type(charm),
+            "postgresql",
+            new_callable=PropertyMock,
+            return_value=Mock(build_postgresql_group_map=Mock(return_value={})),
+        ),
+        patch.object(type(charm), "_get_password", new_callable=PropertyMock, return_value=None),
+        patch("single_kernel_postgresql.charms.vm_charm.snap.set") as set_config,
+        patch("single_kernel_postgresql.charms.vm_charm.snap.restart") as restart,
+    ):
+        charm._setup_ldap_sync()
+    name, config = set_config.call_args.args
+    assert name == "charmed-postgresql"
+    assert config["ldap-sync.ldap_port"] == "389"
+    assert config["ldap-sync.postgres_port"] == "5432"
+    assert config["ldap-sync.postgres_password"] == "None"
+    assert all(isinstance(value, str) for value in config.values())
+    restart.assert_called_once_with("charmed-postgresql", services=["ldap-sync"])
