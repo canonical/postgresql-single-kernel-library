@@ -6,6 +6,7 @@ from time import sleep
 
 import jubilant
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -37,15 +38,14 @@ from tests.integration.charm.helpers import (
 )
 from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
 MEDIAN_ELECTION_TIME = 10
 
 CLEAN_DATA_DIR_SCRIPT = {
-    Substrate.vm: "tests/integration/charm/ha_tests/clean-data-dir-vm.sh",
-    Substrate.k8s: "tests/integration/charm/ha_tests/clean-data-dir-k8s.sh",
+    Substrates.VM: "tests/integration/charm/ha_tests/clean-data-dir-vm.sh",
+    Substrates.K8S: "tests/integration/charm/ha_tests/clean-data-dir-k8s.sh",
 }
 
 VM_STORAGE = {
@@ -58,7 +58,7 @@ VM_STORAGE = {
 
 @pytest.mark.abort_on_fail
 def test_build_and_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy three unit of PostgreSQL."""
     wait_for_apps = False
@@ -72,10 +72,10 @@ def test_build_and_deploy(
                 app=app_name,
                 num_units=3,
                 base=CHARM_BASE,
-                storage=VM_STORAGE if substrate == Substrate.vm else None,
+                storage=VM_STORAGE if substrate == Substrates.VM else None,
                 config={"profile": "testing"},
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
     # Deploy the continuous writes application charm if it wasn't already deployed.
     if APPLICATION_NAME not in juju.status().apps:
@@ -104,13 +104,13 @@ def test_build_and_deploy(
 def test_forceful_restart_without_data_and_transaction_logs(
     juju: jubilant.Juju,
     app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     juju_continuous_writes,
     juju_primary_start_timeout,
     juju_wal_settings,
 ) -> None:
     """A forceful restart with deleted data and without transaction logs (forced clone)."""
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         pytest.skip("Unstable")
 
     # Locate primary unit.
@@ -126,10 +126,10 @@ def test_forceful_restart_without_data_and_transaction_logs(
 
     # Halts the execution of `update-status` hook so the pebble service doesn't get restarted
     # (on K8s).
-    with fast_forward(juju, "24h" if substrate == Substrate.k8s else "10s"):
+    with fast_forward(juju, "24h" if substrate == Substrates.K8S else "10s"):
         # Stop the systemd service on the primary unit.
         logger.info(f"stopping database from {primary_name}")
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             run_ha_command_on_unit(juju, primary_name, "snap stop charmed-postgresql.patroni")
         else:
             run_ha_command_on_unit(juju, primary_name, "/charm/bin/pebble stop postgresql")
@@ -138,7 +138,7 @@ def test_forceful_restart_without_data_and_transaction_logs(
         logger.info(f"removing data from {primary_name}")
         juju.ssh(
             primary_name,
-            "sudo" if substrate == Substrate.vm else "bash",
+            "sudo" if substrate == Substrates.VM else "bash",
             "/tmp/clean-data-dir.sh",
         )
 
@@ -186,7 +186,7 @@ def test_forceful_restart_without_data_and_transaction_logs(
 
     # Database service in old primary should recover (after update-status run on K8s).
     with fast_forward(juju, "10s"):
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             # Start the systemd service in the old primary.
             run_ha_command_on_unit(juju, primary_name, "snap start charmed-postgresql.patroni")
 
@@ -200,14 +200,14 @@ def test_forceful_restart_without_data_and_transaction_logs(
 def test_network_cut(
     juju: jubilant.Juju,
     app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     architecture: str,
     juju_continuous_writes,
     juju_primary_start_timeout,
     juju_chaos_mesh,
 ):
     """Completely cut and restore network."""
-    if substrate == Substrate.k8s and architecture != "amd64":
+    if substrate == Substrates.K8S and architecture != "amd64":
         pytest.skip("Chaos Mesh is only deployed on amd64")
 
     # Locate primary unit.
@@ -217,7 +217,7 @@ def test_network_cut(
     # Start an application that continuously writes data to the database.
     start_ha_continuous_writes(juju, app)
 
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         # Get unit hostname and IP.
         primary_hostname = get_machine_from_unit(juju, primary_name)
         primary_ip = get_unit_ip(juju, primary_name)
@@ -226,7 +226,7 @@ def test_network_cut(
     logger.info("checking whether the connectivity to the database is working")
     assert is_connection_possible(juju, primary_name), f"Connection {primary_name} is not possible"
 
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         logger.info(f"Cutting network for {primary_name}")
         cut_network_from_unit(primary_hostname)
 
@@ -271,7 +271,7 @@ def test_network_cut(
                 new_primary_name = get_primary_from_app(juju, app, down_unit=primary_name)
                 assert new_primary_name != primary_name
 
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         logger.info(f"Restoring network for {primary_name}")
         restore_network_for_unit(primary_hostname)
 
@@ -301,7 +301,7 @@ def test_network_cut(
         remove_instance_isolation(juju)
 
     # The unit IP changes on VM, so it's retrieved from inside the unit.
-    use_ip_from_inside = substrate == Substrate.vm
+    use_ip_from_inside = substrate == Substrates.VM
 
     # Verify that the database service got restarted and is ready in the old primary.
     logger.info(f"waiting for the database service to be ready on {primary_name}")

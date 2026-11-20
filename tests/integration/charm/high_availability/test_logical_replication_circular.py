@@ -12,11 +12,11 @@ import json
 import jubilant
 import psycopg2
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import CHARM_BASE, build_connection_string
 from tests.integration.helpers.juju import fast_forward, get_app_leader, wait_for_apps_status
-from tests.integration.types import Substrate
 
 APP_NAME_A = "postgresql-a"
 APP_NAME_B = "postgresql-b"
@@ -32,7 +32,7 @@ TESTING_DATABASE = "testdb"
 
 
 @pytest.mark.abort_on_fail
-def test_deploy_clusters(juju: jubilant.Juju, charm, charm_resources, substrate: Substrate):
+def test_deploy_clusters(juju: jubilant.Juju, charm, charm_resources, substrate: Substrates):
     """Deploy three PostgreSQL clusters for testing circular replication."""
     juju.deploy(
         charm,
@@ -41,7 +41,7 @@ def test_deploy_clusters(juju: jubilant.Juju, charm, charm_resources, substrate:
         base=CHARM_BASE,
         config=APP_CONFIG.copy(),
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(
         charm,
@@ -50,7 +50,7 @@ def test_deploy_clusters(juju: jubilant.Juju, charm, charm_resources, substrate:
         base=CHARM_BASE,
         config=APP_CONFIG.copy(),
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(
         charm,
@@ -59,7 +59,7 @@ def test_deploy_clusters(juju: jubilant.Juju, charm, charm_resources, substrate:
         base=CHARM_BASE,
         config=APP_CONFIG.copy(),
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(
         "data-integrator",
@@ -96,7 +96,7 @@ def test_deploy_clusters(juju: jubilant.Juju, charm, charm_resources, substrate:
 
 
 @pytest.mark.abort_on_fail
-def test_setup_tables(juju: jubilant.Juju, substrate: Substrate):
+def test_setup_tables(juju: jubilant.Juju, substrate: Substrates):
     """Create test tables in all clusters."""
     _create_test_table(juju, DATA_INTEGRATOR_A, substrate, "users")
     _create_test_table(juju, DATA_INTEGRATOR_A, substrate, "orders")
@@ -107,7 +107,7 @@ def test_setup_tables(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_bidirectional_same_table_blocked(juju: jubilant.Juju, substrate: Substrate):
+def test_bidirectional_same_table_blocked(juju: jubilant.Juju, substrate: Substrates):
     """Test that bidirectional replication of the same table is blocked.
 
     Scenario: Cluster A <-> Cluster B (both trying to replicate public.users)
@@ -162,7 +162,7 @@ def test_bidirectional_same_table_blocked(juju: jubilant.Juju, substrate: Substr
 
 
 @pytest.mark.abort_on_fail
-def test_bidirectional_different_tables_allowed(juju: jubilant.Juju, substrate: Substrate):
+def test_bidirectional_different_tables_allowed(juju: jubilant.Juju, substrate: Substrates):
     """Test that bidirectional replication of different tables is allowed.
 
     Scenario: Cluster A -> B (public.users), Cluster B -> A (public.orders)
@@ -188,7 +188,7 @@ def test_bidirectional_different_tables_allowed(juju: jubilant.Juju, substrate: 
 
 
 @pytest.mark.abort_on_fail
-def test_cleanup_ab_relations(juju: jubilant.Juju, substrate: Substrate):
+def test_cleanup_ab_relations(juju: jubilant.Juju, substrate: Substrates):
     """Clean up A-B relations before testing multi-hop scenario."""
     juju.remove_relation(
         f"{APP_NAME_A}:logical-replication-offer", f"{APP_NAME_B}:logical-replication"
@@ -215,7 +215,7 @@ def test_cleanup_ab_relations(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_multihop_circular_blocked(juju: jubilant.Juju, substrate: Substrate):
+def test_multihop_circular_blocked(juju: jubilant.Juju, substrate: Substrates):
     """Test that multi-hop circular replication is blocked.
 
     Scenario: Cluster A -> B -> C -> A (all for public.users)
@@ -288,7 +288,7 @@ def test_multihop_circular_blocked(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_multihop_different_table_allowed(juju: jubilant.Juju, substrate: Substrate):
+def test_multihop_different_table_allowed(juju: jubilant.Juju, substrate: Substrates):
     """Test that multi-hop replication of different table works.
 
     Scenario: A -> B -> C (public.users), C -> A (public.orders)
@@ -316,7 +316,7 @@ def test_multihop_different_table_allowed(juju: jubilant.Juju, substrate: Substr
 
 
 def _create_test_table(
-    juju: jubilant.Juju, data_integrator_app_name: str, substrate: Substrate, table_name: str
+    juju: jubilant.Juju, data_integrator_app_name: str, substrate: Substrates, table_name: str
 ) -> None:
     """Create a test table in the specified database."""
     connection_string = build_connection_string(
@@ -340,7 +340,7 @@ def _create_test_table(
 
 
 def _truncate_table(
-    juju: jubilant.Juju, data_integrator_app_name: str, substrate: Substrate, table_name: str
+    juju: jubilant.Juju, data_integrator_app_name: str, substrate: Substrates, table_name: str
 ) -> None:
     """Truncate a table in the specified database."""
     connection_string = build_connection_string(
@@ -366,7 +366,7 @@ def _truncate_table(
 def _insert_test_data(
     juju: jubilant.Juju,
     data_integrator_app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     data: str,
     table_name: str,
 ) -> None:
@@ -394,7 +394,7 @@ def _insert_test_data(
 def _check_test_data(
     juju: jubilant.Juju,
     data_integrator_app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     data: str,
     table_name: str,
 ) -> bool:

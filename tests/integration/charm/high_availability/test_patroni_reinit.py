@@ -11,6 +11,7 @@ import pytest
 import requests
 from jubilant import Juju
 from single_kernel_postgresql.config import literals
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, retry_if_exception, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -23,7 +24,6 @@ from tests.integration.helpers.juju import (
     get_unit_address,
     wait_for_apps_status,
 )
-from tests.integration.types import Substrate
 
 logging.getLogger("jubilant.wait").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def _grep_patroni_logs(juju: Juju, unit: str, pattern: str) -> str:
 
 
 def test_deploy(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Deploy a 3-unit PostgreSQL cluster and the continuous-writes test application."""
     logger.info("Deploying PostgreSQL cluster (%s, 3 units)", app_name)
@@ -82,7 +82,7 @@ def test_deploy(
         config={"profile": "testing"},
         resources=charm_resources,
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
 
     logger.info("Deploying test application (%s)", DB_TEST_APP_NAME)

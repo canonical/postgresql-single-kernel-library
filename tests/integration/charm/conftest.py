@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.backup_helpers import (
     AWS,
@@ -18,39 +19,38 @@ from tests.integration.charm.backup_helpers import (
     setup_microceph,
 )
 from tests.integration.charm.helpers import RoleAttributeValue
-from tests.integration.types import Substrate
 
 TEST_CHARMS_PATH = Path(__file__).parents[2] / "charms"
 
 
-def _metadata(substrate: Substrate) -> dict:
-    path = TEST_CHARMS_PATH / f"postgresql_{substrate}_test_charm" / "metadata.yaml"
+def _metadata(substrate: Substrates) -> dict:
+    path = TEST_CHARMS_PATH / f"postgresql_{substrate.value}_test_charm" / "metadata.yaml"
     return yaml.safe_load(path.read_text())
 
 
 @pytest.fixture(scope="session")
-def app_name(substrate: Substrate) -> str:
+def app_name(substrate: Substrates) -> str:
     """Application name of the test charm (postgresql or postgresql-k8s)."""
     return _metadata(substrate)["name"]
 
 
 @pytest.fixture(scope="session")
-def charm(substrate: Substrate, app_name: str, architecture: str) -> str:
+def charm(substrate: Substrates, app_name: str, architecture: str) -> str:
     """Path to the test charm built by scripts/build_charm.sh."""
-    charm_dir = TEST_CHARMS_PATH / f"postgresql_{substrate}_test_charm"
+    charm_dir = TEST_CHARMS_PATH / f"postgresql_{substrate.value}_test_charm"
     path = charm_dir / f"{app_name}_ubuntu@24.04-{architecture}.charm"
     if not path.exists():
         pytest.fail(
             f"{path} not found, build it with:"
-            f" scripts/build_charm.sh -c tests/charms/postgresql_{substrate}_test_charm"
+            f" scripts/build_charm.sh -c tests/charms/postgresql_{substrate.value}_test_charm"
         )
     return str(path)
 
 
 @pytest.fixture(scope="session")
-def charm_resources(substrate: Substrate) -> dict[str, str] | None:
+def charm_resources(substrate: Substrates) -> dict[str, str] | None:
     """Resources to deploy the test charm with (the OCI image on K8s, none on VM)."""
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         return None
     resources = _metadata(substrate)["resources"]
     return {name: resource["upstream-source"] for name, resource in resources.items()}

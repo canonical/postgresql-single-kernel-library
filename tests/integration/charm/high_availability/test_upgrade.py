@@ -10,6 +10,7 @@ from pathlib import Path
 import jubilant
 import tomli_w
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, retry_if_exception_type, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -27,7 +28,6 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 DB_TEST_APP_NAME = "postgresql-test-app"
 
@@ -36,7 +36,7 @@ MINUTE_SECS = 60
 logging.getLogger("jubilant.wait").setLevel(logging.WARNING)
 
 
-def test_deploy_latest(juju: Juju, app_name: str, substrate: Substrate) -> None:
+def test_deploy_latest(juju: Juju, app_name: str, substrate: Substrates) -> None:
     """Simple test to ensure that the PostgreSQL and application charms get deployed."""
     logging.info("Deploying PostgreSQL cluster")
     juju.deploy(
@@ -46,7 +46,7 @@ def test_deploy_latest(juju: Juju, app_name: str, substrate: Substrate) -> None:
         channel="16/edge",
         config={"profile": "testing"},
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(
         charm=DB_TEST_APP_NAME,
@@ -92,7 +92,7 @@ def test_upgrade_from_edge(
     app_name: str,
     charm: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     continuous_writes,
 ) -> None:
     """Update the second cluster."""
@@ -135,7 +135,7 @@ def test_fail_and_rollback(
     app_name: str,
     charm: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     tmp_path: Path,
     continuous_writes,
 ) -> None:
@@ -157,7 +157,7 @@ def test_fail_and_rollback(
     logging.info("Refresh the charm")
     juju.refresh(app=app_name, path=fault_charm, resources=charm_resources)
 
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         logging.info("Wait for upgrade to fail on leader")
         juju.wait(
             ready=wait_for_apps_status(jubilant.any_blocked, app_name),
@@ -201,12 +201,12 @@ def test_fail_and_rollback(
     check_db_units_writes_increment(juju, app_name, unit_names)
 
 
-def inject_dependency_fault(substrate: Substrate, charm_file: Path) -> None:
+def inject_dependency_fault(substrate: Substrates, charm_file: Path) -> None:
     """Inject a dependency fault into the PostgreSQL charm."""
     versions = get_refresh_versions(str(charm_file))
 
     versions["charm"] = "16/0.0.0"
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         versions["snap"]["revisions"][platform.machine()] = "1"
     else:
         versions["workload"] = "16.14"

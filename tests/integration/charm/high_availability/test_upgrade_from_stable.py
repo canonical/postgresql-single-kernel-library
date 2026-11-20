@@ -6,6 +6,7 @@ import logging
 import jubilant
 import requests
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import (
     check_db_units_writes_increment,
@@ -17,7 +18,6 @@ from tests.integration.helpers.juju import (
     get_unit_address,
     wait_for_apps_status,
 )
-from tests.integration.types import Substrate
 
 DB_TEST_APP_NAME = "postgresql-test-app"
 
@@ -26,7 +26,7 @@ MINUTE_SECS = 60
 logging.getLogger("jubilant.wait").setLevel(logging.WARNING)
 
 
-def test_deploy_stable(juju: Juju, app_name: str, substrate: Substrate) -> None:
+def test_deploy_stable(juju: Juju, app_name: str, substrate: Substrates) -> None:
     """Simple test to ensure that the PostgreSQL and application charms get deployed."""
     logging.info("Deploying PostgreSQL cluster")
     juju.deploy(
@@ -36,7 +36,7 @@ def test_deploy_stable(juju: Juju, app_name: str, substrate: Substrate) -> None:
         channel="16/stable",
         config={"profile": "testing"},
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(
         charm=DB_TEST_APP_NAME,
@@ -73,7 +73,7 @@ def test_upgrade_from_stable(
     app_name: str,
     charm: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     continuous_writes,
 ) -> None:
     """Update the second cluster."""

@@ -6,11 +6,11 @@ from itertools import combinations
 
 import jubilant
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import DATA_INTEGRATOR_APP_NAME
 from tests.integration.helpers.juju import relations, retry_if_cli_error
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ def all_units_blocked(status: jubilant.Status) -> bool:
 
 @pytest.mark.abort_on_fail
 def test_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Deploy the charms."""
     # Deploy the database charm if not already deployed.
@@ -45,7 +45,7 @@ def test_deploy(
             config={"profile": "testing"},
             num_units=1,
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
 
     # Deploy the data integrator if not already deployed.

@@ -9,6 +9,7 @@ from collections.abc import Generator
 import jubilant
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_attempt
 
 from tests.integration.charm.helpers import (
@@ -23,7 +24,6 @@ from tests.integration.helpers.juju import (
     split_model,
     wait_for_apps_status,
 )
-from tests.integration.types import Substrate
 
 DB_APP_1 = "db1"
 DB_APP_2 = "db2"
@@ -93,7 +93,7 @@ def test_deploy(
     second_model: str,
     app_name: str,
     architecture: str,
-    substrate: Substrate,
+    substrate: Substrates,
 ) -> None:
     """Simple test to ensure that the PostgreSQL application charms get deployed."""
     configuration = {"profile": "testing"}
@@ -106,11 +106,11 @@ def test_deploy(
         app=DB_APP_1,
         base="ubuntu@24.04",
         # TODO revert to stable when https://github.com/canonical/postgresql-single-kernel-library/pull/331 gets released
-        channel="16/stable" if substrate == Substrate.k8s else "16/edge",
+        channel="16/stable" if substrate == Substrates.K8S else "16/edge",
         config=configuration,
         constraints=constraints,
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     model_2 = Juju(model=second_model)
     model_2.deploy(
@@ -118,11 +118,11 @@ def test_deploy(
         app=DB_APP_2,
         base="ubuntu@24.04",
         # TODO revert to stable when https://github.com/canonical/postgresql-single-kernel-library/pull/331 gets released
-        channel="16/stable" if substrate == Substrate.k8s else "16/edge",
+        channel="16/stable" if substrate == Substrates.K8S else "16/edge",
         config=configuration,
         constraints=constraints,
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
 
     logging.info("Deploying the test application")
@@ -214,7 +214,7 @@ def test_upgrade_from_edge(
     second_model: str,
     charm: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     first_model_continuous_writes,
 ) -> None:
     """Upgrade the two PostgreSQL clusters and assert the shared secret id is stable."""
