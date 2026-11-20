@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -396,8 +395,10 @@ class PatroniManager(BaseManager):
             # Check if all members are running and one of them is a leader (primary) or
             # a standby leader, because sometimes there may exist (for some period of time)
             # only replicas after a failed switchover.
-            return all(member["state"] in STARTED_STATES for member in members) and any(
-                member["role"] in ["leader", "standby_leader"] for member in members
+            return (
+                all(member["state"] in RUNNING_STATES for member in members)
+                and any(member["role"] in ["leader", "standby_leader"] for member in members)
+                and len(members) >= len(self.state.application.members_ips)
             )
         else:
             # Request info from cluster endpoint
