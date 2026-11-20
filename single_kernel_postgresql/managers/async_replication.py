@@ -682,6 +682,12 @@ class AsyncReplicationManager(BaseManager):
 
     def promote_to_primary(self, event: ActionEvent) -> None:
         """Promote this cluster to the primary cluster."""
+        # Promotion reads the app status and writes the app databags: leader-only.
+        if not self.state.model.unit.is_leader():
+            event.fail(
+                "Cluster promotion must be run on the Juju leader unit of the standby cluster."
+            )
+            return
         # Same stale-counter exposure as create-replication: a counter orphaned by a
         # teardown without events would mask the "no primary" condition below.
         self.clear_stale_promotion()
