@@ -9,6 +9,7 @@ import pytest
 from jubilant import Juju
 from lightkube import Client
 from lightkube.resources.core_v1 import Pod
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_attempt, wait_exponential
 
 from tests.integration.charm.backup_helpers import GCP, backup_operations
@@ -20,7 +21,6 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE = "the S3 repository has backups from another cluster"
 FAILED_TO_ACCESS_CREATE_BUCKET_ERROR_MESSAGE = (
@@ -40,7 +40,7 @@ def test_backup_gcp(
     charm: str,
     app_name: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     gcp_cloud_configs: tuple[dict, dict],
 ) -> None:
     """Build and deploy two units of PostgreSQL in GCP, test backup and restore actions."""
@@ -75,13 +75,13 @@ def test_restore_on_new_cluster(
     charm: str,
     app_name: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     gcp_cloud_configs: tuple[dict, dict],
 ) -> None:
     """Test that is possible to restore a backup to another PostgreSQL cluster."""
     # VM reuses the name of the removed app (so its unit numbering continues at 2);
     # K8s uses a new name.
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         previous_database_app_name = f"{app_name}-gcp"
         previous_unit_number = 2
     else:
@@ -95,7 +95,7 @@ def test_restore_on_new_cluster(
             base="ubuntu@24.04",
             config={"profile": "testing"},
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
     juju.integrate(previous_database_app_name, S3_INTEGRATOR_APP_NAME)
     juju.integrate(database_app_name, S3_INTEGRATOR_APP_NAME)

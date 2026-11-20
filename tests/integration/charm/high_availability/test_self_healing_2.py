@@ -7,6 +7,7 @@ from time import sleep
 
 import jubilant
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -30,13 +31,12 @@ from tests.integration.charm.helpers import (
     update_restart_condition,
 )
 from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
 PATRONI_PROCESS = {
-    Substrate.vm: "/snap/charmed-postgresql/[0-9]*/usr/bin/patroni",
-    Substrate.k8s: "/usr/bin/patroni",
+    Substrates.VM: "/snap/charmed-postgresql/[0-9]*/usr/bin/patroni",
+    Substrates.K8S: "/usr/bin/patroni",
 }
 POSTGRESQL_PROCESS = "postgres"
 # The Patroni path depends on the substrate, so the tests are parametrized by name.
@@ -53,7 +53,7 @@ VM_STORAGE = {
 
 @pytest.mark.abort_on_fail
 def test_build_and_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy three unit of PostgreSQL."""
     wait_for_apps = False
@@ -67,10 +67,10 @@ def test_build_and_deploy(
                 app=app_name,
                 num_units=3,
                 base=CHARM_BASE,
-                storage=VM_STORAGE if substrate == Substrate.vm else None,
+                storage=VM_STORAGE if substrate == Substrates.VM else None,
                 config={"profile": "testing"},
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
     # Deploy the continuous writes application charm if it wasn't already deployed.
     if APPLICATION_NAME not in juju.status().apps:
@@ -100,7 +100,7 @@ def test_build_and_deploy(
 def test_freeze_db_process(
     juju: jubilant.Juju,
     app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     process: str,
     juju_continuous_writes,
     juju_primary_start_timeout,
@@ -154,7 +154,7 @@ def test_freeze_db_process(
 def test_full_cluster_restart(
     juju: jubilant.Juju,
     app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     process: str,
     signal: str,
     juju_continuous_writes,
@@ -175,7 +175,7 @@ def test_full_cluster_restart(
 
     # Change the loop wait setting to make Patroni wait more time before restarting PostgreSQL.
     initial_loop_wait = get_patroni_setting(juju, "loop_wait")
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         initial_ttl = get_patroni_setting(juju, "ttl")
         # loop_wait parameter is limited by ttl value, thus we should increase it first
         change_ha_patroni_setting(juju, "ttl", 600, patroni_password, use_random_unit=True)
@@ -202,7 +202,7 @@ def test_full_cluster_restart(
             "Not all units down at the same time."
         )
     finally:
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             if process == PATRONI_PROCESS[substrate]:
                 # Preserve the concurrent systemd restoration of the original asyncio.gather.
                 units = list(juju.status().apps[app].units)
@@ -220,13 +220,13 @@ def test_full_cluster_restart(
                 modify_pebble_restart_delay(
                     juju,
                     unit,
-                    "tests/integration/charm/ha_tests/manifests/restore_pebble_restart_delay.yml",
+                    "tests/integration/charm/high_availability/manifests/restore_pebble_restart_delay.yml",
                     ensure_replan=True,
                 )
         change_ha_patroni_setting(
             juju, "loop_wait", initial_loop_wait, patroni_password, use_random_unit=True
         )
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             change_ha_patroni_setting(
                 juju, "ttl", initial_ttl, patroni_password, use_random_unit=True
             )

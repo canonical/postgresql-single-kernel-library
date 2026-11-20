@@ -9,6 +9,7 @@ from collections.abc import Generator
 import jubilant
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -23,7 +24,6 @@ from tests.integration.helpers.juju import (
     split_model,
     wait_for_apps_status,
 )
-from tests.integration.types import Substrate
 
 DB_APP_1 = "db1"
 DB_APP_2 = "db2"
@@ -94,7 +94,7 @@ def test_deploy(
     charm: str,
     charm_resources,
     architecture: str,
-    substrate: Substrate,
+    substrate: Substrates,
 ) -> None:
     """Simple test to ensure that the database application charms get deployed."""
     configuration = {"profile": "testing"}
@@ -110,7 +110,7 @@ def test_deploy(
         constraints=constraints,
         resources=charm_resources,
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     model_2 = Juju(model=second_model)
     model_2.deploy(
@@ -121,7 +121,7 @@ def test_deploy(
         constraints=constraints,
         resources=charm_resources,
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
 
     logging.info("Deploying test application")
@@ -343,7 +343,7 @@ def test_unrelate_and_relate(first_model: str, second_model: str) -> None:
 
 
 def test_failover_in_main_cluster(
-    first_model: str, second_model: str, substrate: Substrate
+    first_model: str, second_model: str, substrate: Substrates
 ) -> None:
     """Test that async replication fails over correctly."""
     model_1 = Juju(model=first_model)
@@ -353,7 +353,7 @@ def test_failover_in_main_cluster(
 
     # Machine units can be removed by name; K8s always removes the highest numbered pod.
     primary = None
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         primary = get_db_primary_unit(model_1, DB_APP_1)
         retry_if_cli_error(lambda: model_1.remove_unit(primary))
     else:
@@ -385,7 +385,7 @@ def test_failover_in_main_cluster(
 
 
 def test_failover_in_standby_cluster(
-    first_model: str, second_model: str, substrate: Substrate
+    first_model: str, second_model: str, substrate: Substrates
 ) -> None:
     """Test that async replication fails over correctly."""
     model_1 = Juju(model=first_model)
@@ -395,7 +395,7 @@ def test_failover_in_standby_cluster(
 
     # Machine units can be removed by name; K8s always removes the highest numbered pod.
     standby = None
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         standby = get_db_standby_leader_unit(model_2, DB_APP_2)
         retry_if_cli_error(lambda: model_2.remove_unit(standby))
     else:

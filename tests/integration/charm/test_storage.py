@@ -9,10 +9,10 @@ import jubilant
 import pytest
 from jubilant import Juju
 from single_kernel_postgresql.config import literals
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import get_db_primary_unit, run_command_on_unit
 from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ K8S_PGDATA_PATH = f"/{literals.K8S_DEBIAN_DATA_SYMLINK}/main"
 
 
 @pytest.mark.abort_on_fail
-def test_storage(juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate):
+def test_storage(juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates):
     """Build and deploy the charm and check its storage list."""
     with fast_forward(juju):
         juju.deploy(
@@ -31,7 +31,7 @@ def test_storage(juju: Juju, charm: str, app_name: str, charm_resources, substra
             config={"profile": "testing"},
             num_units=1,
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
         juju.wait(
             wait_for_apps_status(jubilant.all_active, app_name),
@@ -51,7 +51,7 @@ def test_storage(juju: Juju, charm: str, app_name: str, charm_resources, substra
 
 @pytest.mark.k8s_only
 def test_filling_and_emptying_pgdata_storage(
-    juju: Juju, app_name: str, architecture: str, substrate: Substrate
+    juju: Juju, app_name: str, architecture: str, substrate: Substrates
 ):
     """Saturate charm's pgdata volume."""
     if architecture != "amd64":

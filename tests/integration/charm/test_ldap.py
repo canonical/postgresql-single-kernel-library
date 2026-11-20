@@ -6,11 +6,11 @@ import logging
 
 import jubilant
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import CHARM_BASE, get_password
 from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_apps_status
 from tests.integration.helpers.postgresql import execute_queries_on_unit
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def require_juju3(juju: jubilant.Juju) -> None:
 
 @pytest.mark.abort_on_fail
 def test_build_and_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy one unit of PostgreSQL."""
     # It is possible for users to provide their own cluster for HA testing. Hence, check if there
@@ -44,7 +44,7 @@ def test_build_and_deploy(
                 base=CHARM_BASE,
                 config={"profile": "testing"},
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
             juju.wait(
                 lambda status: (

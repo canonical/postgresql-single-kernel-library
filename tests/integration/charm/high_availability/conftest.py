@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import jubilant
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
 from tests.integration.charm import helpers
@@ -16,7 +17,6 @@ from tests.integration.charm.helpers import (
     get_postgresql_app_name,
 )
 from tests.integration.helpers.juju import fast_forward, get_app_leader, wait_for_idle
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +51,9 @@ def juju_primary_start_timeout(juju: jubilant.Juju) -> None:
 
 
 @pytest.fixture()
-def juju_restart_policy(juju: jubilant.Juju, substrate: Substrate) -> None:
+def juju_restart_policy(juju: jubilant.Juju, substrate: Substrates) -> None:
     """Set the same Pebble restart policy on all units (K8s only)."""
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         yield
         return
 
@@ -62,7 +62,7 @@ def juju_restart_policy(juju: jubilant.Juju, substrate: Substrate) -> None:
         helpers.modify_pebble_restart_delay(
             juju,
             unit,
-            "tests/integration/charm/ha_tests/manifests/extend_pebble_restart_delay.yml",
+            "tests/integration/charm/high_availability/manifests/extend_pebble_restart_delay.yml",
         )
         with fast_forward(juju):
             wait_for_idle(
@@ -88,9 +88,9 @@ def juju_loop_wait(juju: jubilant.Juju) -> None:
 
 
 @pytest.fixture()
-def juju_reset_restart_condition(juju: jubilant.Juju, substrate: Substrate):
+def juju_reset_restart_condition(juju: jubilant.Juju, substrate: Substrates):
     """Set and restore the systemd restart condition concurrently on all VM units."""
-    if substrate == Substrate.k8s:
+    if substrate == Substrates.K8S:
         yield
         return
 
@@ -144,9 +144,9 @@ def continuous_writes(juju):
 
 
 @pytest.fixture()
-def juju_chaos_mesh(juju: jubilant.Juju, substrate: Substrate) -> None:
+def juju_chaos_mesh(juju: jubilant.Juju, substrate: Substrates) -> None:
     """Deploy and remove Chaos Mesh exactly like the async fixture (K8s only)."""
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         yield
         return
 
@@ -157,7 +157,7 @@ def juju_chaos_mesh(juju: jubilant.Juju, substrate: Substrate) -> None:
 
 
 @pytest.fixture()
-def juju_wal_settings(juju: jubilant.Juju, substrate: Substrate) -> None:
+def juju_wal_settings(juju: jubilant.Juju, substrate: Substrates) -> None:
     """Restore the same WAL settings on each unit as the async fixture."""
     initial_max_wal_size = helpers.get_postgresql_parameter(juju, "max_wal_size")
     initial_min_wal_size = helpers.get_postgresql_parameter(juju, "min_wal_size")
@@ -165,7 +165,7 @@ def juju_wal_settings(juju: jubilant.Juju, substrate: Substrate) -> None:
     yield
     app = helpers.get_postgresql_app_name(juju)
     for unit in juju.status().apps[app].units:
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             helpers.run_ha_command_on_unit(juju, unit, "snap start charmed-postgresql.patroni")
         patroni_password = helpers.get_password(
             juju, helpers.get_postgresql_app_name(juju), "patroni"

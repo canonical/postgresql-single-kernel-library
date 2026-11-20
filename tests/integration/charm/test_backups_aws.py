@@ -6,6 +6,7 @@ import logging
 import jubilant
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_attempt, wait_exponential
 
 from tests.integration.charm.backup_helpers import AWS, backup_operations
@@ -23,7 +24,6 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 S3_INTEGRATOR_APP_NAME = "s3-integrator"
 tls_certificates_app_name = "self-signed-certificates"
@@ -38,7 +38,7 @@ def test_backup_aws(
     charm: str,
     app_name: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     aws_cloud_configs: tuple[dict, dict],
 ) -> None:
     """Build and deploy two units of PostgreSQL in AWS, test backup and restore actions."""

@@ -8,11 +8,11 @@ import psycopg2
 import pytest
 from jubilant import Juju
 from single_kernel_postgresql.config import literals
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import build_connection_string, run_command_on_unit
 from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ K8S_POSTGRESQL_LOGS_DIR = f"/{literals.K8S_LOGS_STORAGE_PATH}/{literals.K8S_PG_L
 
 @pytest.mark.abort_on_fail
 def test_audit_plugin(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Test the audit plugin."""
     juju.deploy(
@@ -35,7 +35,7 @@ def test_audit_plugin(
         base="ubuntu@24.04",
         config={"profile": "testing"},
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(APPLICATION_NAME, base="ubuntu@24.04", channel="latest/edge")
     juju.integrate(f"{APPLICATION_NAME}:{RELATION_ENDPOINT}", app_name)
@@ -62,7 +62,7 @@ def test_audit_plugin(
         if connection is not None:
             connection.close()
     unit_name = f"{app_name}/0"
-    logs_dir = VM_POSTGRESQL_LOGS_DIR if substrate == Substrate.vm else K8S_POSTGRESQL_LOGS_DIR
+    logs_dir = VM_POSTGRESQL_LOGS_DIR if substrate == Substrates.VM else K8S_POSTGRESQL_LOGS_DIR
     for attempt in Retrying(stop=stop_after_delay(90), wait=wait_fixed(10), reraise=True):
         with attempt:
             try:

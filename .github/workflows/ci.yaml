@@ -80,68 +80,21 @@ jobs:
     cache-mode: none
 
   build:
-    # The test charms can't use data-platform-workflows build_charm.yaml: scripts/build_charm.sh
-    # has to copy the library into them before packing
+    # The test charms install the library from the repository root (pyproject.toml path
+    # dependency); build_charm.yaml packs with charmcraft monorepo support to make it available
     strategy:
       fail-fast: false
       matrix:
         substrate:
           - vm
           - k8s
-        platform:
-          - arch: amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            runner: ubuntu-26.04-arm
-    name: Build ${{ matrix.substrate }} test charm | ${{ matrix.platform.arch }}
-    runs-on: ${{ matrix.platform.runner }}
-    timeout-minutes: 60
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      # Same set up as data-platform-workflows build_charm.yaml (v54.0.0)
-      - name: Set up environment
-        run: |
-          sudo snap install lxd
-          sudo adduser "$USER" lxd
-          newgrp lxd --command 'lxd waitready'
-          newgrp lxd --command 'lxd init --auto'
-          # Workaround for Docker & LXD on same machine
-          sudo iptables -F FORWARD
-          sudo iptables -P FORWARD ACCEPT
-
-          sudo snap install charmcraft --classic
-          pipx install poetry
-          pipx install charmcraftcache
-      - run: snap list
-      - name: Build test charm
-        id: pack
-        run: |
-          newgrp lxd --command \
-           'scripts/build_charm.sh \
-            -p "ubuntu@24.04:'"${VAR_ARCH}"'" \
-            -c "tests/charms/postgresql_'"${VAR_SUBSTRATE}"'_test_charm"'
-        env:
-          # Used by charmcraftcache (to avoid GitHub API rate limit)
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-          VAR_SUBSTRATE: ${{ matrix.substrate }}
-          VAR_ARCH: ${{ matrix.platform.arch }}
-          CI_CACHE: true
-      - name: Charmcraft logs
-        if: ${{ success() || (failure() && steps.pack.outcome == 'failure') }}
-        run: cat ~/.local/state/charmcraft/log/*
-      - name: Upload test charm
-        uses: actions/upload-artifact@v7
-        with:
-          name: test-charm-${{ matrix.substrate }}-${{ matrix.platform.arch }}
-          path: tests/charms/postgresql_${{ matrix.substrate }}_test_charm/*.charm
-          if-no-files-found: error
-    outputs:
+    name: Build ${{ matrix.substrate }} test charm
+    uses: canonical/data-platform-workflows/.github/workflows/build_charm.yaml@v56.0.0
+    with:
       artifact-prefix: test-charm
-    permissions: {}
+      path-to-charm-directory: tests/charms/postgresql_${{ matrix.substrate }}_test_charm
+    permissions:
+      contents: read
     cache-mode: none
 
   integration-test:
