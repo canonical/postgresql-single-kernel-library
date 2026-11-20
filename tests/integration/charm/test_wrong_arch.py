@@ -19,8 +19,8 @@ def fetch_charm(substrate: Substrates, architecture: str) -> str:
     if not packed_charms:
         pytest.fail(
             f"No {architecture} charm found in {charm_dir}, build it with:"
-            f" scripts/build_charm.sh -p ubuntu@24.04:{architecture}"
-            f" -c tests/charms/postgresql_{substrate.value}_test_charm"
+            f" cd tests/charms/postgresql_{substrate.value}_test_charm"
+            f" && CHARMCRAFT_EXPERIMENTAL_MONOREPO=1 charmcraft pack -p ubuntu@24.04:{architecture}"
         )
     return str(packed_charms[0].resolve(strict=True))
 

@@ -5,8 +5,8 @@ on:
         description: |
           Prefix for the test charm package GitHub artifacts
 
-          Built in ci.yaml with scripts/build_charm.sh: one artifact per substrate and
-          architecture (`<prefix>-vm-amd64`, `<prefix>-vm-arm64`, `<prefix>-k8s-amd64`, ...)
+          Built in ci.yaml with data-platform-workflows build_charm.yaml: one artifact per test
+          charm and platform (`<prefix>-tests-charms-postgresql_vm_test_charm--platform-ubuntu@24.04-amd64`, ...)
         required: true
         type: string
     secrets:
@@ -152,10 +152,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           # All architectures: test_wrong_arch.py deploys the charm of the other architecture
-          pattern: ${{ inputs.artifact-prefix }}-${{ matrix.job.substrate }}-*
+          pattern: ${{ inputs.artifact-prefix }}-tests-charms-postgresql_${{ matrix.job.substrate }}_test_charm--platform-*
           merge-multiple: true
-          # Where the `charm` fixture (tests/integration/charm/conftest.py) looks for it
-          path: tests/charms/postgresql_${{ matrix.job.substrate }}_test_charm/
+          # The artifacts keep the path from the repository root, so the charms land in
+          # tests/charms/postgresql_<substrate>_test_charm/, where the `charm` fixture
+          # (tests/integration/charm/conftest.py) looks for them
+          path: .
       - name: Run spread job
         timeout-minutes: 180
         id: spread
