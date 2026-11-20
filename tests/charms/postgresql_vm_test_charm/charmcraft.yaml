@@ -48,7 +48,11 @@ parts:
     #   (https://github.com/canonical/charmcraft/blob/9ff19c328e23b50cc06f04e8a5ad4835740badf4/charmcraft/parts/plugins/_poetry.py#L95
     #   https://github.com/canonical/craft-parts/blob/afb0d652eb330b6aaad4f40fbd6e5357d358de47/craft_parts/plugins/base.py#L270)
     plugin: poetry
-    source: .
+    # Repository root, so the library (path dependency in pyproject.toml) is available.
+    # Needs CHARMCRAFT_EXPERIMENTAL_MONOREPO=1
+    # (https://canonical.com/juju/docs/charmcraft/latest/howto/pack-a-charm-in-a-monorepo/)
+    source: ../../..
+    source-subdir: tests/charms/postgresql_vm_test_charm
     after:
       - poetry-deps
     poetry-export-extra-args: ['--only', 'main,charm-libs', "--without-hashes"]  # For the library build locally
