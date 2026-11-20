@@ -2509,7 +2509,7 @@ def deploy_chaos_mesh(namespace: str) -> None:
     env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
     subprocess.check_output(
         " ".join([
-            "tests/integration/charm/ha_tests/scripts/deploy_chaos_mesh.sh",
+            "tests/integration/charm/high_availability/scripts/deploy_chaos_mesh.sh",
             namespace,
         ]),
         shell=True,
@@ -2522,7 +2522,7 @@ def destroy_chaos_mesh(namespace: str) -> None:
     env = os.environ
     env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
     subprocess.check_output(
-        f"tests/integration/charm/ha_tests/scripts/destroy_chaos_mesh.sh {namespace}",
+        f"tests/integration/charm/high_availability/scripts/destroy_chaos_mesh.sh {namespace}",
         shell=True,
         env=env,
     )
@@ -2538,7 +2538,7 @@ def isolate_instance_from_cluster(juju: jubilant.Juju, unit_name: str) -> None:
 
     with tempfile.NamedTemporaryFile() as temp_file:
         with open(
-            "tests/integration/charm/ha_tests/manifests/chaos_network_loss.yml"
+            "tests/integration/charm/high_availability/manifests/chaos_network_loss.yml"
         ) as chaos_network_loss_file:
             template = string.Template(chaos_network_loss_file.read())
             chaos_network_loss = template.substitute(

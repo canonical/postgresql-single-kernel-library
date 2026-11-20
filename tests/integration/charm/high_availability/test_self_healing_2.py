@@ -220,7 +220,7 @@ def test_full_cluster_restart(
                 modify_pebble_restart_delay(
                     juju,
                     unit,
-                    "tests/integration/charm/ha_tests/manifests/restore_pebble_restart_delay.yml",
+                    "tests/integration/charm/high_availability/manifests/restore_pebble_restart_delay.yml",
                     ensure_replan=True,
                 )
         change_ha_patroni_setting(
