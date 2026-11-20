@@ -62,7 +62,7 @@ def juju_restart_policy(juju: jubilant.Juju, substrate: Substrates) -> None:
         helpers.modify_pebble_restart_delay(
             juju,
             unit,
-            "tests/integration/charm/ha_tests/manifests/extend_pebble_restart_delay.yml",
+            "tests/integration/charm/high_availability/manifests/extend_pebble_restart_delay.yml",
         )
         with fast_forward(juju):
             wait_for_idle(

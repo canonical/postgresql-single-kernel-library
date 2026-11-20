@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 MEDIAN_ELECTION_TIME = 10
 
 CLEAN_DATA_DIR_SCRIPT = {
-    Substrates.VM: "tests/integration/charm/ha_tests/clean-data-dir-vm.sh",
-    Substrates.K8S: "tests/integration/charm/ha_tests/clean-data-dir-k8s.sh",
+    Substrates.VM: "tests/integration/charm/high_availability/clean-data-dir-vm.sh",
+    Substrates.K8S: "tests/integration/charm/high_availability/clean-data-dir-k8s.sh",
 }
 
 VM_STORAGE = {
