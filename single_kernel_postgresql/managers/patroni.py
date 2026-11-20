@@ -396,7 +396,7 @@ class PatroniManager(BaseManager):
             # a standby leader, because sometimes there may exist (for some period of time)
             # only replicas after a failed switchover.
             return (
-                all(member["state"] in STARTED_STATES for member in members)
+                all(member["state"] in RUNNING_STATES for member in members)
                 and any(member["role"] in ["leader", "standby_leader"] for member in members)
                 and len(members) >= len(self.state.peer_members_ips)
             )

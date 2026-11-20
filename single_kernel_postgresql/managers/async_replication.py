@@ -970,6 +970,15 @@ class AsyncReplicationManager(BaseManager):
         if self.watcher is not None:
             self.watcher.enable_watcher()
 
+    def are_peers_started(self) -> bool:
+        """Check that all peer units have started for the current counter."""
+        peers = self.state.peer_relation.units if self.state.peer_relation else []
+        return all(
+            self.state.peer_relation.data[unit].get("unit-promoted-cluster-counter")  # type: ignore
+            == self.get_highest_promoted_cluster_counter_value()
+            for unit in {*peers, self.state.model.unit}
+        )
+
     def _wait_for_standby_leader(self, event: RelationChangedEvent) -> bool:
         """Wait for the standby leader to be up and running."""
         if self.state.model.unit.is_leader():
