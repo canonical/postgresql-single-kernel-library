@@ -205,6 +205,10 @@ class PostgreSQLAsyncReplication(Object):
 
     def _on_create_replication(self, event: ActionEvent) -> None:
         """Set up asynchronous replication between two clusters."""
+        # Creating the replication writes the app databags: leader-only.
+        if not self.state.model.unit.is_leader():
+            event.fail("create-replication must be run on the Juju leader unit.")
+            return
         # A dead-DC teardown whose relation-broken never fired leaves the promoted-
         # cluster-counter orphaned in peer data; clear it before the guard reads it,
         # or create-replication reports "There is already a replication set up."
