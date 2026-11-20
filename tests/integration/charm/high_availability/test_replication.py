@@ -1,46 +1,44 @@
 #!/usr/bin/env python3
 # Copyright 2023 Canonical Ltd.
 # See LICENSE file for licensing details.
+import jubilant
 import psycopg2
 import pytest
 from lightkube.core.client import Client
 from lightkube.resources.core_v1 import Pod
-from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, retry_if_exception_type, stop_after_delay, wait_fixed
 
-from tests.integration.charm.ha_tests.helpers import (
+from tests.integration.charm.helpers import (
+    APPLICATION_NAME,
+    CHARM_BASE,
     are_writes_increasing,
     check_writes,
     fetch_cluster_members,
-    is_cluster_updated,
-    start_continuous_writes,
-)
-from tests.integration.charm.pytest_operator_helpers import (
-    APPLICATION_NAME,
-    CHARM_BASE,
     get_password,
-    get_primary,
-    get_unit_address,
-    scale_application,
+    get_primary_from_app,
+    is_cluster_updated,
+    scale_ha_application,
+    start_ha_continuous_writes,
 )
+from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
 from tests.integration.helpers.postgresql import db_connect
 from tests.integration.types import Substrate
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(
-    ops_test: OpsTest, charm, app_name: str, charm_resources, substrate: Substrate
+def test_build_and_deploy(
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
 ) -> None:
     """Build and deploy three unit of PostgreSQL."""
     wait_for_apps = False
     # It is possible for users to provide their own cluster for HA testing. Hence, check if there
     # is a pre-existing cluster.
-    if app_name not in ops_test.model.applications:
+    if app_name not in juju.status().apps:
         wait_for_apps = True
-        async with ops_test.fast_forward():
-            await ops_test.model.deploy(
+        with fast_forward(juju):
+            juju.deploy(
                 charm,
-                application_name=app_name,
+                app=app_name,
                 num_units=3,
                 base=CHARM_BASE,
                 config={"profile": "testing"},
@@ -48,133 +46,131 @@ async def test_build_and_deploy(
                 trust=substrate == Substrate.k8s,
             )
     # Deploy the continuous writes application charm if it wasn't already deployed.
-    if APPLICATION_NAME not in ops_test.model.applications:
+    if APPLICATION_NAME not in juju.status().apps:
         wait_for_apps = True
-        async with ops_test.fast_forward():
-            await ops_test.model.deploy(
+        with fast_forward(juju):
+            juju.deploy(
                 APPLICATION_NAME,
-                application_name=APPLICATION_NAME,
+                app=APPLICATION_NAME,
                 base=CHARM_BASE,
                 channel="latest/edge",
             )
 
     if wait_for_apps:
-        async with ops_test.fast_forward():
-            await ops_test.model.relate(app_name, f"{APPLICATION_NAME}:database")
-            await ops_test.model.wait_for_idle(status="active", timeout=1500)
+        with fast_forward(juju):
+            juju.integrate(app_name, f"{APPLICATION_NAME}:database")
+            wait_for_idle(juju, status="active", timeout=1500)
 
 
-async def test_reelection(
-    ops_test: OpsTest,
+def test_reelection(
+    juju: jubilant.Juju,
     app_name: str,
     substrate: Substrate,
-    continuous_writes,
-    primary_start_timeout,
+    juju_continuous_writes,
+    juju_primary_start_timeout,
 ) -> None:
     """Kill primary unit, check reelection."""
     app = app_name
-    if len(ops_test.model.applications[app].units) < 2:
-        await scale_application(ops_test, app, 2)
+    if len(juju.status().apps[app].units) < 2:
+        scale_ha_application(juju, app, 2)
 
     # Start an application that continuously writes data to the database.
-    await start_continuous_writes(ops_test, app)
+    start_ha_continuous_writes(juju, app)
 
-    primary_name = await get_primary(ops_test, app)
+    primary_name = get_primary_from_app(juju, app)
     if substrate == Substrate.vm:
         # Remove the primary unit.
-        await ops_test.model.destroy_units(primary_name)
+        juju.remove_unit(primary_name)
     else:
         # Kill the current primary.
-        client = Client(namespace=ops_test.model.info.name)
+        client = Client(namespace=juju.status().model.name)
         client.delete(Pod, name=primary_name.replace("/", "-"))
 
     # Wait and get the primary again (which can be any unit, including the previous primary).
-    async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(apps=[app], status="active")
+    with fast_forward(juju):
+        wait_for_idle(juju, apps=[app], status="active")
 
     # Check whether writes are increasing.
-    await are_writes_increasing(ops_test, primary_name)
+    are_writes_increasing(juju, primary_name)
 
     # Verify that a new primary gets elected (ie old primary is secondary).
     for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
         with attempt:
-            new_primary_name = await get_primary(ops_test, app, down_unit=primary_name)
+            new_primary_name = get_primary_from_app(juju, app, down_unit=primary_name)
             assert new_primary_name != primary_name, "primary reelection hasn't happened"
 
     if substrate == Substrate.vm:
         # Verify that all units are part of the same cluster.
-        member_ips = await fetch_cluster_members(ops_test)
+        member_ips = fetch_cluster_members(juju)
         app = primary_name.split("/")[0]
-        ip_addresses = [unit.public_address for unit in ops_test.model.applications[app].units]
+        ip_addresses = [unit.public_address for unit in juju.status().apps[app].units.values()]
         assert set(member_ips) == set(ip_addresses), "not all units are part of the same cluster."
 
         # Verify that no writes to the database were missed after stopping the writes.
-        await check_writes(ops_test)
+        check_writes(juju)
     else:
         # Verify that all the units from the first cluster are up-to-date.
-        await is_cluster_updated(ops_test, primary_name)
+        is_cluster_updated(juju, primary_name)
 
 
-async def test_consistency(ops_test: OpsTest, app_name: str, continuous_writes) -> None:
+def test_consistency(juju: jubilant.Juju, app_name: str, juju_continuous_writes) -> None:
     """Write to primary, read data from secondaries (check consistency)."""
     # Locate primary unit.
     app = app_name
-    primary_name = await get_primary(ops_test, app)
+    primary_name = get_primary_from_app(juju, app)
 
     # Start an application that continuously writes data to the database.
-    await start_continuous_writes(ops_test, app)
+    start_ha_continuous_writes(juju, app)
 
     # Check whether writes are increasing.
-    await are_writes_increasing(ops_test, primary_name)
+    are_writes_increasing(juju, primary_name)
 
     # Verify that no writes to the database were missed after stopping the writes
     # (check that all the units have all the writes).
-    await check_writes(ops_test)
+    check_writes(juju)
 
 
-async def test_no_data_replicated_between_clusters(
-    ops_test: OpsTest,
+def test_no_data_replicated_between_clusters(
+    juju: jubilant.Juju,
     charm,
     app_name: str,
     charm_resources,
     substrate: Substrate,
-    continuous_writes,
+    juju_continuous_writes,
 ) -> None:
     """Check that writes in one cluster are not replicated to another cluster."""
     # Locate primary unit.
     app = app_name
-    primary_name = await get_primary(ops_test, app)
+    primary_name = get_primary_from_app(juju, app)
 
     # Deploy another cluster.
     new_cluster_app = f"second-{app}"
-    if new_cluster_app not in ops_test.model.applications:
-        async with ops_test.fast_forward():
-            await ops_test.model.deploy(
+    if new_cluster_app not in juju.status().apps:
+        with fast_forward(juju):
+            juju.deploy(
                 charm,
-                application_name=new_cluster_app,
+                app=new_cluster_app,
                 num_units=2,
                 base=CHARM_BASE,
                 config={"profile": "testing"},
                 resources=charm_resources,
                 trust=substrate == Substrate.k8s,
             )
-            await ops_test.model.wait_for_idle(
-                apps=[new_cluster_app], status="active", timeout=1500
-            )
+            wait_for_idle(juju, apps=[new_cluster_app], status="active", timeout=1500)
 
     # Start an application that continuously writes data to the database.
-    await start_continuous_writes(ops_test, app)
+    start_ha_continuous_writes(juju, app)
 
     # Check whether writes are increasing.
-    await are_writes_increasing(ops_test, primary_name)
+    are_writes_increasing(juju, primary_name)
 
     # Verify that no writes to the first cluster were missed after stopping the writes.
-    await check_writes(ops_test)
+    check_writes(juju)
 
     # Verify that the data from the first cluster wasn't replicated to the second cluster.
-    password = await get_password(ops_test, database_app_name=new_cluster_app)
-    for unit in ops_test.model.applications[new_cluster_app].units:
-        address = await get_unit_address(ops_test, unit.name)
+    password = get_password(juju, new_cluster_app)
+    for unit_name in juju.status().apps[new_cluster_app].units:
+        address = get_unit_address(juju, unit_name)
         for attempt in Retrying(
             stop=stop_after_delay(120),
             wait=wait_fixed(3),

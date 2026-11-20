@@ -3,6 +3,7 @@
 
 """Juju helpers that don't depend on the charm under test."""
 
+import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
@@ -124,6 +125,75 @@ def wait_for_apps_status(status_fn: Callable[..., bool], *apps: str) -> StatusFn
         apps: the applications to check.
     """
     return lambda status: jubilant.all_agents_idle(status, *apps) and status_fn(status, *apps)
+
+
+def wait_for_idle(  # noqa: C901
+    juju: jubilant.Juju,
+    apps: list[str] | None = None,
+    *,
+    status: str | None = None,
+    timeout: float | None = 600,
+    idle_period: float = 15,
+    raise_on_error: bool = True,
+    raise_on_blocked: bool = False,
+    wait_for_exact_units: int | None = None,
+) -> None:
+    """Wait like libjuju's wait_for_idle, using status polling instead of its watcher.
+
+    Keep the idle period per unit, the unit/app workload checks and the default
+    minimum of one unit per app. Only the arguments used by migrated HA tests
+    are supported. Errors use Jubilant's WaitError and timeouts use TimeoutError.
+    """
+    apps = list(apps or juju.status().apps)
+    idle_times: dict[str, float] = {}
+
+    def ready(model_status: jubilant.Status) -> bool:
+        busy = False
+        now = time.monotonic()
+        for app_name in apps:
+            if app_name not in model_status.apps:
+                busy = True
+                continue
+            app = model_status.apps[app_name]
+            if (raise_on_error and app.app_status.current == "error") or (
+                raise_on_blocked and app.app_status.current == "blocked"
+            ):
+                raise jubilant.WaitError(f"App {app_name} in {app.app_status.current}")
+            if (wait_for_exact_units is not None and len(app.units) != wait_for_exact_units) or (
+                wait_for_exact_units is None and len(app.units) < 1
+            ):
+                busy = True
+                continue
+            for unit_name, unit in app.units.items():
+                machine = model_status.machines.get(unit.machine)
+                if raise_on_error and (
+                    (machine is not None and machine.machine_status.current == "error")
+                    or unit.juju_status.current == "error"
+                    or unit.workload_status.current == "error"
+                ):
+                    raise jubilant.WaitError(f"Unit, agent or machine of {unit_name} in error")
+                if raise_on_blocked and unit.workload_status.current == "blocked":
+                    raise jubilant.WaitError(f"Unit {unit_name} in blocked")
+                if unit.juju_status.current == "idle" and (
+                    not status
+                    or (
+                        unit.workload_status.current == status and app.app_status.current == status
+                    )
+                ):
+                    idle_start = idle_times.setdefault(unit_name, now)
+                    if now - idle_start < idle_period:
+                        busy = True
+                else:
+                    idle_times.pop(unit_name, None)
+                    busy = True
+        return not busy
+
+    juju.wait(
+        ready,
+        delay=0.5,
+        successes=1,
+        timeout=float("inf") if timeout is None else timeout,
+    )
 
 
 def wait_resilient(juju: jubilant.Juju, **kwargs) -> None:
