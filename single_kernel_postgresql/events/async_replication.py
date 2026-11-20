@@ -354,7 +354,7 @@ class PostgreSQLAsyncReplication(Object):
 
     def _reconfigure_cluster(self, event: RelationChangedEvent) -> None:
         """Trigger reconfigure if not all followers are joned."""
-        if not self.manager.are_peers_started():
+        if self.state.model.unit.is_leader() and not self.manager.are_peers_started():
             if self.state.substrate == Substrates.VM:
                 self.charm.membership_manager.reconfigure_cluster(event)
             else:

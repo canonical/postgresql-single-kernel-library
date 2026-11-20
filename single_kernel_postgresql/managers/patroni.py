@@ -398,7 +398,7 @@ class PatroniManager(BaseManager):
             return (
                 all(member["state"] in RUNNING_STATES for member in members)
                 and any(member["role"] in ["leader", "standby_leader"] for member in members)
-                and len(members) >= len(self.state.peer_members_ips)
+                and len(members) >= len(self.state.application.members_ips)
             )
         else:
             # Request info from cluster endpoint
