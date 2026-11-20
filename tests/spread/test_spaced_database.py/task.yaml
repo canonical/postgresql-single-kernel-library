@@ -1,0 +1,7 @@
+summary: test_spaced_database.py
+backends:
+  - github-ci-vm
+environment:
+  TEST_MODULE: charm/spaces/test_spaced_database.py
+execute: |
+  tox run -e integration -- "tests/integration/$TEST_MODULE" --substrate "$SUBSTRATE" --model testing

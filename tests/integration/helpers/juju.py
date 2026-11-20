@@ -7,9 +7,18 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 
 import jubilant
-from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_fixed
+from single_kernel_postgresql.config.literals import PEER_RELATION
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    stop_after_delay,
+    wait_fixed,
+)
 
 type StatusFn = Callable[[jubilant.Status], bool]
+
+MINUTE_SECS = 60
 
 
 def retry_if_cli_error[T](fn: Callable[[], T], *, max_attempts: int = 10) -> T:
@@ -41,6 +50,14 @@ def get_app_leader(juju: jubilant.Juju, app_name: str) -> str:
         if unit.leader:
             return name
     raise AssertionError(f"No leader unit found for {app_name}")
+
+
+def get_user_password(juju: jubilant.Juju, app_name: str, user: str) -> str | None:
+    """Get a system user's password."""
+    for secret in juju.secrets():
+        if secret.label == f"{PEER_RELATION}.{app_name}.app":
+            revealed_secret = juju.show_secret(secret.uri, reveal=True)
+            return revealed_secret.content.get(f"{user}-password")
 
 
 def get_app_units(
@@ -107,3 +124,21 @@ def wait_for_apps_status(status_fn: Callable[..., bool], *apps: str) -> StatusFn
         apps: the applications to check.
     """
     return lambda status: jubilant.all_agents_idle(status, *apps) and status_fn(status, *apps)
+
+
+def wait_resilient(juju: jubilant.Juju, **kwargs) -> None:
+    """Run ``juju.wait`` but retry through transient controller CLIErrors.
+
+    Force-stopping a whole datacenter's machines can momentarily stress a single
+    LXD-hosted juju controller — ``juju status`` can transiently fail mid-teardown
+    with "no controller API addresses; is bootstrap still in progress?". Retry
+    across those blips; a real readiness timeout (``WaitError``) still propagates.
+    """
+    for attempt in Retrying(
+        stop=stop_after_delay(8 * MINUTE_SECS),
+        wait=wait_fixed(15),
+        retry=retry_if_exception_type(jubilant.CLIError),
+        reraise=True,
+    ):
+        with attempt:
+            juju.wait(**kwargs)
