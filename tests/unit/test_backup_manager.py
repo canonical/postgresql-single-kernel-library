@@ -28,6 +28,7 @@ from single_kernel_postgresql.managers.backup import (
     PGBACKREST_CHECK_TIMEOUT,
     PGBACKREST_STANZA_CREATE_TIMEOUT,
     BackupManager,
+    calculate_backup_process_max,
 )
 from single_kernel_postgresql.utils.backup import (
     ANOTHER_CLUSTER_REPOSITORY_ERROR_MESSAGE,
@@ -626,3 +627,51 @@ def test_vm_check_timeout_reraises_after_single_reconciled_retry(
     # the per-attempt contract of the stanza lifecycle.
     assert backup_manager.workload.run_cmd.call_count == 2
     assert reconcile.call_count == 2
+
+
+# -- backup parallelism -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cpu_cores,on_primary,on_replica",
+    [
+        (0, 1, 1),
+        (1, 1, 1),
+        (3, 1, 1),
+        (4, 1, 2),
+        (7, 1, 3),
+        (8, 2, 4),
+        (16, 4, 8),
+        (32, 8, 8),
+        (64, 8, 8),
+    ],
+)
+def test_calculate_backup_process_max(cpu_cores, on_primary, on_replica):
+    assert calculate_backup_process_max(cpu_cores, is_primary=True) == on_primary
+    assert calculate_backup_process_max(cpu_cores, is_primary=False) == on_replica
+
+
+@pytest.mark.parametrize("planned_units,expected", [(1, 4), (3, 8)])
+def test_render_sets_backup_process_max_from_cluster_size(
+    harness, backup_manager, planned_units, expected
+):
+    harness.set_planned_units(planned_units)
+    backup_manager.resource_provider.get_available_resources.return_value = (16, 1000)
+    s3_rel = harness.add_relation(S3_RELATION_NAME, "s3-integrator")
+    harness.update_relation_data(
+        s3_rel, "s3-integrator", {"bucket": "b", "access-key": "k", "secret-key": "s"}
+    )
+    backup_manager.workload.root = Path("/")
+    backup_manager.workload.write_text = MagicMock()
+    with patch.object(
+        BackupManager, "_tls_ca_chain_filename", new_callable=PropertyMock, return_value=""
+    ):
+        assert backup_manager._render_pgbackrest_conf_file() is True
+    content = next(
+        c.args[0]
+        for c in backup_manager.workload.write_text.call_args_list
+        if str(c.args[1]).endswith("pgbackrest.conf")
+    )
+    assert f"[global:backup]\nprocess-max={expected}\n" in content
+    # Restore keeps its own, unchanged setting.
+    assert "[global:restore]\nprocess-max=14" in content
