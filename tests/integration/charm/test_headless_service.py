@@ -12,7 +12,7 @@ from lightkube.models.core_v1 import ServiceSpec
 from lightkube.models.meta_v1 import ObjectMeta
 from lightkube.resources.core_v1 import Service
 
-from tests.integration.charm.pytest_operator_helpers import CHARM_BASE
+from tests.integration.charm.helpers import CHARM_BASE
 from tests.integration.helpers.juju import split_model
 
 logger = logging.getLogger(__name__)

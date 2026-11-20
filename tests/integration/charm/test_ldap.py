@@ -2,18 +2,13 @@
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-import asyncio
-import importlib.metadata
 import logging
 
+import jubilant
 import pytest
-from pytest_operator.plugin import OpsTest
 
-from tests.integration.charm.pytest_operator_helpers import (
-    CHARM_BASE,
-    get_password,
-    get_unit_address,
-)
+from tests.integration.charm.helpers import CHARM_BASE, get_password
+from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_apps_status
 from tests.integration.helpers.postgresql import execute_queries_on_unit
 from tests.integration.types import Substrate
 
@@ -23,108 +18,102 @@ GLAUTH_PSQL_APP_NAME = "postgresql-k8s"
 GLAUTH_CERT_APP_NAME = "self-signed-certificates"
 GLAUTH_APP_NAME = "glauth-k8s"
 
-pytestmark = [
-    pytest.mark.k8s_only,
-    pytest.mark.skipif(
-        int(importlib.metadata.version("juju").split(".")[0]) != 3,
-        reason="Requires Juju 3",
-    ),
-]
+pytestmark = pytest.mark.k8s_only
+
+
+@pytest.fixture(scope="module", autouse=True)
+def require_juju3(juju: jubilant.Juju) -> None:
+    """Check the actual Juju CLI version rather than the removed libjuju dependency."""
+    if juju.version().major != 3:
+        pytest.skip("Requires Juju 3")
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(
-    ops_test: OpsTest, charm, app_name: str, charm_resources, substrate: Substrate
+def test_build_and_deploy(
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
 ) -> None:
-    """Build and deploy three unit of PostgreSQL."""
+    """Build and deploy one unit of PostgreSQL."""
     # It is possible for users to provide their own cluster for HA testing. Hence, check if there
     # is a pre-existing cluster.
-    if app_name not in ops_test.model.applications:
-        async with ops_test.fast_forward():
-            await ops_test.model.deploy(
+    if app_name not in juju.status().apps:
+        with fast_forward(juju):
+            juju.deploy(
                 charm,
-                application_name=app_name,
+                app=app_name,
                 num_units=1,
                 base=CHARM_BASE,
                 config={"profile": "testing"},
                 resources=charm_resources,
                 trust=substrate == Substrate.k8s,
             )
-            await ops_test.model.wait_for_idle(
-                apps=[app_name],
-                status="active",
-                raise_on_blocked=True,
+            juju.wait(
+                lambda status: (
+                    wait_for_apps_status(jubilant.all_active, app_name)(status)
+                    and len(status.get_units(app_name)) == 1
+                ),
+                error=lambda status: jubilant.any_blocked(status, app_name),
                 timeout=1000,
-                wait_for_exact_units=1,
             )
 
 
 @pytest.mark.abort_on_fail
-async def test_glauth_integration(ops_test: OpsTest, app_name: str):
+def test_glauth_integration(juju: jubilant.Juju, app_name: str):
     glauth_psql_app_name = f"glauth-{GLAUTH_PSQL_APP_NAME}"
     glauth_cert_app_name = f"glauth-{GLAUTH_CERT_APP_NAME}"
 
-    # Deploy GLAuth charm
-    await asyncio.gather(
-        ops_test.model.deploy(
-            GLAUTH_PSQL_APP_NAME,
-            application_name=glauth_psql_app_name,
-            channel="14/stable",
-            trust=True,
-        ),
-        ops_test.model.deploy(
-            GLAUTH_CERT_APP_NAME,
-            application_name=glauth_cert_app_name,
-            channel="1/stable",
-            trust=False,
-        ),
-        ops_test.model.deploy(
-            GLAUTH_APP_NAME,
-            application_name=GLAUTH_APP_NAME,
-            channel="latest/edge",
-            trust=True,
-        ),
+    # Deploy GLAuth charm.
+    juju.deploy(
+        GLAUTH_PSQL_APP_NAME,
+        app=glauth_psql_app_name,
+        channel="14/stable",
+        trust=True,
+    )
+    juju.deploy(
+        GLAUTH_CERT_APP_NAME,
+        app=glauth_cert_app_name,
+        channel="1/stable",
+        trust=False,
+    )
+    juju.deploy(
+        GLAUTH_APP_NAME,
+        app=GLAUTH_APP_NAME,
+        channel="latest/edge",
+        trust=True,
     )
 
-    async with ops_test.fast_forward():
-        await asyncio.gather(
-            ops_test.model.wait_for_idle(apps=[glauth_psql_app_name], status="active"),
-            ops_test.model.wait_for_idle(apps=[glauth_cert_app_name], status="active"),
-            ops_test.model.wait_for_idle(apps=[GLAUTH_APP_NAME], status="blocked"),
-        )
-
-        # Add both relations to GLAuth (PostgreSQL and self-signed-certificates)
-        logger.info("Adding relations to GLAuth")
-        await asyncio.gather(
-            ops_test.model.add_relation(
-                f"{GLAUTH_APP_NAME}:pg-database", f"{glauth_psql_app_name}:database"
+    with fast_forward(juju):
+        juju.wait(
+            lambda status: (
+                wait_for_apps_status(
+                    jubilant.all_active, glauth_psql_app_name, glauth_cert_app_name
+                )(status)
+                and wait_for_apps_status(jubilant.all_blocked, GLAUTH_APP_NAME)(status)
             ),
-            ops_test.model.add_relation(GLAUTH_APP_NAME, glauth_cert_app_name),
-        )
-        await asyncio.gather(
-            ops_test.model.wait_for_idle(apps=[glauth_psql_app_name], status="active"),
-            ops_test.model.wait_for_idle(apps=[glauth_cert_app_name], status="active"),
-            ops_test.model.wait_for_idle(apps=[GLAUTH_APP_NAME], status="active"),
+            timeout=600,
         )
 
-        # Add relation to PostgreSQL
+        # Add both relations to GLAuth (PostgreSQL and self-signed-certificates).
+        logger.info("Adding relations to GLAuth")
+        juju.integrate(f"{GLAUTH_APP_NAME}:pg-database", f"{glauth_psql_app_name}:database")
+        juju.integrate(GLAUTH_APP_NAME, glauth_cert_app_name)
+        juju.wait(
+            wait_for_apps_status(
+                jubilant.all_active, glauth_psql_app_name, glauth_cert_app_name, GLAUTH_APP_NAME
+            ),
+            timeout=600,
+        )
+
+        # Add relation to PostgreSQL.
         logger.info("Adding relation to PostgreSQL")
-        await ops_test.model.add_relation(
-            f"{GLAUTH_APP_NAME}:ldap",
-            f"{app_name}:ldap",
-        )
-        await ops_test.model.add_relation(
-            f"{GLAUTH_APP_NAME}:send-ca-cert",
-            f"{app_name}:receive-ca-cert",
-        )
+        juju.integrate(f"{GLAUTH_APP_NAME}:ldap", f"{app_name}:ldap")
+        juju.integrate(f"{GLAUTH_APP_NAME}:send-ca-cert", f"{app_name}:receive-ca-cert")
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=600)
 
-        await ops_test.model.wait_for_idle(apps=[app_name], status="active")
+        unit_name = next(iter(juju.status().get_units(app_name)))
+        address = get_unit_address(juju, unit_name)
+        password = get_password(juju, app_name)
 
-        database_units = ops_test.model.applications[app_name].units
-        address = await get_unit_address(ops_test, database_units[0].name)
-        password = await get_password(ops_test, database_app_name=app_name)
-
-        # Validate the 'operator' user can still access the instance
+        # Validate the 'operator' user can still access the instance.
         execute_queries_on_unit(
             unit_address=address,
             username="operator",
