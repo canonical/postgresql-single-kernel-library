@@ -6,6 +6,7 @@ import json
 import jubilant
 import psycopg2
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import CHARM_BASE, build_connection_string, get_cluster_roles
@@ -15,7 +16,6 @@ from tests.integration.helpers.juju import (
     remove_application,
     wait_for_apps_status,
 )
-from tests.integration.types import Substrate
 
 DATABASE_APP_NAME = "postgresql"
 SECOND_DATABASE_APP_NAME = "postgresql2"
@@ -35,7 +35,7 @@ TIMEOUT = 10 * 60
 
 
 @pytest.mark.abort_on_fail
-def test_deploy(juju: jubilant.Juju, charm, charm_resources, substrate: Substrate):
+def test_deploy(juju: jubilant.Juju, charm, charm_resources, substrate: Substrates):
     juju.deploy(
         charm,
         app=DATABASE_APP_NAME,
@@ -43,7 +43,7 @@ def test_deploy(juju: jubilant.Juju, charm, charm_resources, substrate: Substrat
         base=CHARM_BASE,
         config=DATABASE_APP_CONFIG.copy(),
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(
         charm,
@@ -52,7 +52,7 @@ def test_deploy(juju: jubilant.Juju, charm, charm_resources, substrate: Substrat
         base=CHARM_BASE,
         config=DATABASE_APP_CONFIG.copy(),
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(
         charm,
@@ -61,7 +61,7 @@ def test_deploy(juju: jubilant.Juju, charm, charm_resources, substrate: Substrat
         base=CHARM_BASE,
         config=DATABASE_APP_CONFIG.copy(),
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(
         DATA_INTEGRATOR_APP_NAME,
@@ -94,7 +94,7 @@ def test_deploy(juju: jubilant.Juju, charm, charm_resources, substrate: Substrat
         ),
         timeout=2500,
     )
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         with fast_forward(juju, interval=FAST_INTERVAL):
             juju.integrate(DATABASE_APP_NAME, DATA_INTEGRATOR_APP_NAME)
             juju.integrate(SECOND_DATABASE_APP_NAME, SECOND_DATA_INTEGRATOR_APP_NAME)
@@ -118,7 +118,7 @@ def test_deploy(juju: jubilant.Juju, charm, charm_resources, substrate: Substrat
 
 
 @pytest.mark.abort_on_fail
-def test_pg2_publisher_error(juju: jubilant.Juju, substrate: Substrate):
+def test_pg2_publisher_error(juju: jubilant.Juju, substrate: Substrates):
     _create_test_table(juju, SECOND_DATA_INTEGRATOR_APP_NAME, substrate)
 
     pg2_config = DATABASE_APP_CONFIG.copy()
@@ -152,7 +152,7 @@ def test_pg3_local_error(juju: jubilant.Juju):
 
 
 @pytest.mark.abort_on_fail
-def test_resolve_errors(juju: jubilant.Juju, substrate: Substrate):
+def test_resolve_errors(juju: jubilant.Juju, substrate: Substrates):
     _create_test_table(juju, DATA_INTEGRATOR_APP_NAME, substrate)
     _create_test_table(juju, DATA_INTEGRATOR_APP_NAME, substrate, "test_table2")
     _create_test_table(juju, THIRD_DATA_INTEGRATOR_APP_NAME, substrate, "test_table2")
@@ -160,7 +160,7 @@ def test_resolve_errors(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_replication(juju: jubilant.Juju, substrate: Substrate):
+def test_replication(juju: jubilant.Juju, substrate: Substrates):
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "first")
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "first", "test_table2")
     _check_test_data(juju, SECOND_DATA_INTEGRATOR_APP_NAME, substrate, "first")
@@ -168,7 +168,7 @@ def test_replication(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_switchover(juju: jubilant.Juju, substrate: Substrate):
+def test_switchover(juju: jubilant.Juju, substrate: Substrates):
     publisher_leader = get_app_leader(juju, DATABASE_APP_NAME)
     publisher_roles = get_cluster_roles(juju, publisher_leader)
     publisher_candidate = publisher_roles["sync_standbys"][0]
@@ -182,7 +182,7 @@ def test_switchover(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_replication_after_switchover(juju: jubilant.Juju, substrate: Substrate):
+def test_replication_after_switchover(juju: jubilant.Juju, substrate: Substrates):
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "second")
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "second", "test_table2")
     _check_test_data(juju, SECOND_DATA_INTEGRATOR_APP_NAME, substrate, "second")
@@ -190,7 +190,7 @@ def test_replication_after_switchover(juju: jubilant.Juju, substrate: Substrate)
 
 
 @pytest.mark.abort_on_fail
-def test_pg3_extend_subscription(juju: jubilant.Juju, substrate: Substrate):
+def test_pg3_extend_subscription(juju: jubilant.Juju, substrate: Substrates):
     _create_test_table(juju, THIRD_DATA_INTEGRATOR_APP_NAME, substrate)
     pg3_config = DATABASE_APP_CONFIG.copy()
     pg3_config["logical-replication-subscription-request"] = json.dumps({
@@ -203,7 +203,7 @@ def test_pg3_extend_subscription(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_pg2_change_subscription(juju: jubilant.Juju, substrate: Substrate):
+def test_pg2_change_subscription(juju: jubilant.Juju, substrate: Substrates):
     _create_test_table(juju, SECOND_DATA_INTEGRATOR_APP_NAME, substrate, "test_table2")
     pg2_config = DATABASE_APP_CONFIG.copy()
     pg2_config["logical-replication-subscription-request"] = json.dumps({
@@ -217,7 +217,7 @@ def test_pg2_change_subscription(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_replication_after_subscriptions_changes(juju: jubilant.Juju, substrate: Substrate):
+def test_replication_after_subscriptions_changes(juju: jubilant.Juju, substrate: Substrates):
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "third")
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "third", "test_table2")
     _check_test_data(juju, SECOND_DATA_INTEGRATOR_APP_NAME, substrate, "second")
@@ -237,7 +237,7 @@ def test_pg2_dynamic_error(juju: jubilant.Juju):
 
 
 @pytest.mark.abort_on_fail
-def test_replication_during_dynamic_error(juju: jubilant.Juju, substrate: Substrate):
+def test_replication_during_dynamic_error(juju: jubilant.Juju, substrate: Substrates):
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "fourth")
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "fourth", "test_table2")
     _check_test_data(juju, SECOND_DATA_INTEGRATOR_APP_NAME, substrate, "second")
@@ -247,7 +247,7 @@ def test_replication_during_dynamic_error(juju: jubilant.Juju, substrate: Substr
 
 
 @pytest.mark.abort_on_fail
-def test_pg2_resolve_dynamic_error(juju: jubilant.Juju, substrate: Substrate):
+def test_pg2_resolve_dynamic_error(juju: jubilant.Juju, substrate: Substrates):
     connection_string = build_connection_string(
         juju,
         SECOND_DATA_INTEGRATOR_APP_NAME,
@@ -263,7 +263,7 @@ def test_pg2_resolve_dynamic_error(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_pg2_remove(juju: jubilant.Juju, substrate: Substrate):
+def test_pg2_remove(juju: jubilant.Juju, substrate: Substrates):
     remove_application(juju, SECOND_DATA_INTEGRATOR_APP_NAME)
     remove_application(juju, SECOND_DATABASE_APP_NAME)
     _wait_for_active(juju, substrate, vm_timeout=1000)
@@ -282,7 +282,7 @@ def test_pg2_remove(juju: jubilant.Juju, substrate: Substrate):
 
 
 @pytest.mark.abort_on_fail
-def test_replication_after_pg2_removal(juju: jubilant.Juju, substrate: Substrate):
+def test_replication_after_pg2_removal(juju: jubilant.Juju, substrate: Substrates):
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "fifth")
     _insert_test_data(juju, DATA_INTEGRATOR_APP_NAME, substrate, "fifth", "test_table2")
     _check_test_data(juju, THIRD_DATA_INTEGRATOR_APP_NAME, substrate, "fifth")
@@ -290,7 +290,7 @@ def test_replication_after_pg2_removal(juju: jubilant.Juju, substrate: Substrate
 
 
 @pytest.mark.abort_on_fail
-def test_pg3_remove_relation(juju: jubilant.Juju, substrate: Substrate):
+def test_pg3_remove_relation(juju: jubilant.Juju, substrate: Substrates):
     juju.remove_relation(
         f"{DATABASE_APP_NAME}:logical-replication-offer",
         f"{THIRD_DATABASE_APP_NAME}:logical-replication",
@@ -310,8 +310,10 @@ def test_pg3_remove_relation(juju: jubilant.Juju, substrate: Substrate):
         )
 
 
-def _wait_for_active(juju: jubilant.Juju, substrate: Substrate, vm_timeout: int = TIMEOUT) -> None:
-    if substrate == Substrate.vm:
+def _wait_for_active(
+    juju: jubilant.Juju, substrate: Substrates, vm_timeout: int = TIMEOUT
+) -> None:
+    if substrate == Substrates.VM:
         with fast_forward(juju, interval=FAST_INTERVAL):
             juju.wait(wait_for_apps_status(jubilant.all_active), timeout=vm_timeout)
     else:
@@ -329,7 +331,7 @@ def _wait_for_leader_on_blocked(juju: jubilant.Juju, app_name: str) -> None:
 def _create_test_table(
     juju: jubilant.Juju,
     data_integrator_app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     table_name: str = "test_table",
 ) -> None:
     connection_string = build_connection_string(
@@ -355,7 +357,7 @@ def _create_test_table(
 def _insert_test_data(
     juju: jubilant.Juju,
     data_integrator_app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     data: str,
     table_name: str = "test_table",
 ) -> None:
@@ -382,7 +384,7 @@ def _insert_test_data(
 def _check_test_data(
     juju: jubilant.Juju,
     data_integrator_app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     data: str,
     table_name: str = "test_table",
 ) -> bool:

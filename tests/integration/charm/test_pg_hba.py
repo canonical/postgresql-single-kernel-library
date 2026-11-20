@@ -9,6 +9,7 @@ import jubilant
 import psycopg2
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import get_primary, get_refresh_versions
 from tests.integration.helpers.juju import (
@@ -20,7 +21,6 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ PASSWORD = "test-password"
 
 @pytest.mark.abort_on_fail
 def test_pg_hba(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     with fast_forward(juju):
         logger.info("Deploying charms")
@@ -46,7 +46,7 @@ def test_pg_hba(
                 config={"profile": "testing"},
                 num_units=2,
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
         if DATA_INTEGRATOR_APP_NAME not in juju.status().apps:
             juju.deploy(

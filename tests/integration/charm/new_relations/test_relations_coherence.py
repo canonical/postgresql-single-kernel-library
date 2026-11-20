@@ -8,6 +8,7 @@ import string
 import jubilant
 import psycopg2
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import DATABASE_DEFAULT_NAME
 
 from tests.integration.charm.helpers import (
@@ -16,7 +17,6 @@ from tests.integration.charm.helpers import (
     build_connection_string,
 )
 from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ FIRST_DATABASE_RELATION_NAME = "database"
 
 @pytest.mark.abort_on_fail
 def test_relations(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ):
     """Test that check relation data."""
     app_names = [app_name, DATA_INTEGRATOR_APP_NAME]
@@ -38,7 +38,7 @@ def test_relations(
             base=CHARM_BASE,
             config={"profile": "testing"},
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
         # Creating first time relation with user role. Base is ignored on K8s.
         juju.deploy(DATA_INTEGRATOR_APP_NAME, base=CHARM_BASE)

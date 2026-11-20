@@ -6,6 +6,7 @@ import time
 import jubilant
 import psycopg2
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import DATABASE_DEFAULT_NAME
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
@@ -28,7 +29,6 @@ from tests.integration.helpers.juju import (
     split_model,
     wait_for_idle,
 )
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ def test_deploy_charms(juju: jubilant.Juju, charm):
 @pytest.mark.k8s_only
 @pytest.mark.abort_on_fail
 def test_database_relation_with_charm_libraries_k8s(
-    juju: jubilant.Juju, charm, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, charm_resources, substrate: Substrates
 ):
     """Test basic functionality of database relation interface."""
     # Deploy both charms (multiple units for each application to test that later they correctly
@@ -253,7 +253,7 @@ def test_read_only_endpoint_in_scaled_up_cluster_vm(juju: jubilant.Juju):
 
 
 @pytest.mark.vm_only
-def test_database_relation_with_charm_libraries_vm(juju: jubilant.Juju, substrate: Substrate):
+def test_database_relation_with_charm_libraries_vm(juju: jubilant.Juju, substrate: Substrates):
     """Test basic functionality of database relation interface."""
     # Get the connection string to connect to the database using the read/write endpoint.
     connection_string = build_connection_string(
@@ -331,7 +331,7 @@ def test_filter_out_degraded_replicas(juju: jubilant.Juju):
 
 
 def test_two_applications_doesnt_share_the_same_relation_data(
-    juju: jubilant.Juju, substrate: Substrate
+    juju: jubilant.Juju, substrate: Substrates
 ):
     """Test that two different application connect to the database with different credentials."""
     # Set some variables to use in this test.
@@ -390,7 +390,7 @@ def test_two_applications_doesnt_share_the_same_relation_data(
 
 
 def test_an_application_can_connect_to_multiple_database_clusters(
-    juju: jubilant.Juju, substrate: Substrate
+    juju: jubilant.Juju, substrate: Substrates
 ):
     """Test that an application can connect to different clusters of the same database."""
     # Relate the application with both database clusters
@@ -477,7 +477,7 @@ def test_an_application_can_connect_to_multiple_database_clusters(
 
 
 @pytest.mark.abort_on_fail
-def test_an_application_can_request_multiple_databases(juju: jubilant.Juju, substrate: Substrate):
+def test_an_application_can_request_multiple_databases(juju: jubilant.Juju, substrate: Substrates):
     """Test that an application can request additional databases using the same interface."""
     # Relate the charms using another relation and wait for them exchanging some connection data.
     juju.integrate(f"{APPLICATION_APP_NAME}:{SECOND_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
@@ -561,7 +561,7 @@ def test_relation_broken(juju: jubilant.Juju):
 
 
 @pytest.mark.k8s_only
-def test_restablish_relation(juju: jubilant.Juju, substrate: Substrate):
+def test_restablish_relation(juju: jubilant.Juju, substrate: Substrates):
     """Test that a previously broken relation would be functional if restored."""
     # Relate the charms and wait for them exchanging some connection data.
     with fast_forward(juju):
@@ -603,7 +603,7 @@ def test_restablish_relation(juju: jubilant.Juju, substrate: Substrate):
 @pytest.mark.vm_only
 @pytest.mark.abort_on_fail
 def test_relation_data_is_updated_correctly_when_scaling(
-    juju: jubilant.Juju, substrate: Substrate
+    juju: jubilant.Juju, substrate: Substrates
 ):
     """Test that relation data, like connection data, is updated correctly when scaling."""
     # Retrieve the list of current database unit names.

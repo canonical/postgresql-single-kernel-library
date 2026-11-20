@@ -6,6 +6,7 @@ import logging
 import jubilant
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import (
     check_db_units_writes_increment,
@@ -13,7 +14,6 @@ from tests.integration.charm.helpers import (
     run_upgrade,
 )
 from tests.integration.helpers.juju import get_app_units, wait_for_apps_status
-from tests.integration.types import Substrate
 
 DB_TEST_APP_NAME = "postgresql-test-app"
 
@@ -22,7 +22,7 @@ MINUTE_SECS = 60
 logging.getLogger("jubilant.wait").setLevel(logging.WARNING)
 
 
-def test_deploy_stable(juju: Juju, app_name: str, substrate: Substrate) -> None:
+def test_deploy_stable(juju: Juju, app_name: str, substrate: Substrates) -> None:
     """Simple test to ensure that the PostgreSQL and application charms get deployed."""
     logging.info("Deploying PostgreSQL cluster")
     juju.deploy(
@@ -32,7 +32,7 @@ def test_deploy_stable(juju: Juju, app_name: str, substrate: Substrate) -> None:
         channel="16/stable",
         config={"profile": "testing"},
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     juju.deploy(
         charm=DB_TEST_APP_NAME,
@@ -59,7 +59,7 @@ def test_refresh_without_pre_refresh_check(
     app_name: str,
     charm: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     continuous_writes,
 ) -> None:
     """Test updating from stable channel."""
@@ -78,10 +78,10 @@ def test_refresh_without_pre_refresh_check(
 
 
 def test_rollback_without_pre_refresh_check(
-    juju: Juju, app_name: str, substrate: Substrate, continuous_writes
+    juju: Juju, app_name: str, substrate: Substrates, continuous_writes
 ) -> None:
     """Test refresh back to stable channel."""
-    if substrate == Substrate.k8s:
+    if substrate == Substrates.K8S:
         pytest.skip("Unstable on K8s")
 
     # Early Jubilant 1.X.Y versions do not support the `switch` option

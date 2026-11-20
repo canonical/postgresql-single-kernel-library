@@ -9,6 +9,7 @@ import psycopg2
 import pytest
 from jubilant import Juju
 from single_kernel_postgresql.config import literals
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_attempt, wait_exponential
 
 from tests.integration.charm.helpers import (
@@ -26,7 +27,6 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 # Directory of the PostgreSQL logs on each substrate.
 VM_POSTGRESQL_LOGS_DIR = f"{literals.BASE_SNAP_DIR}/{literals.SNAP_COMMON}/{literals.VM_LOGS_PATH}"
@@ -43,7 +43,7 @@ def _wait_for_active(juju: Juju, app_name: str, timeout: float = 1000) -> None:
 
 @pytest.mark.abort_on_fail
 def test_deploy(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Deploy three units of PostgreSQL."""
     with fast_forward(juju):
@@ -54,7 +54,7 @@ def test_deploy(
             config={"profile": "testing"},
             num_units=3,
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
         _wait_for_active(juju, app_name, timeout=1500)
 
@@ -118,9 +118,9 @@ def test_no_password_change_on_invalid_password(juju: Juju, app_name: str) -> No
     assert password1 == password2
 
 
-def test_no_password_exposed_on_logs(juju: Juju, app_name: str, substrate: Substrate) -> None:
+def test_no_password_exposed_on_logs(juju: Juju, app_name: str, substrate: Substrates) -> None:
     """Test that passwords don't get exposed on postgresql logs."""
-    logs_dir = VM_POSTGRESQL_LOGS_DIR if substrate == Substrate.vm else K8S_POSTGRESQL_LOGS_DIR
+    logs_dir = VM_POSTGRESQL_LOGS_DIR if substrate == Substrates.VM else K8S_POSTGRESQL_LOGS_DIR
     for unit_name in get_app_units(juju, app_name):
         try:
             logs = run_command_on_unit(

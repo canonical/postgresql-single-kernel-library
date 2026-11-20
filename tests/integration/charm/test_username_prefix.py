@@ -6,6 +6,7 @@ import logging
 import jubilant
 import psycopg2
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import DATA_INTEGRATOR_APP_NAME
 from tests.integration.helpers.juju import (
@@ -13,17 +14,16 @@ from tests.integration.helpers.juju import (
     get_unit_address,
     wait_for_apps_status,
 )
-from tests.integration.types import Substrate
 
 MINUTE_SECS = 60
 
 
-def uris_host(juju: jubilant.Juju, app_name: str, substrate: Substrate) -> str:
+def uris_host(juju: jubilant.Juju, app_name: str, substrate: Substrates) -> str:
     """Host the charm publishes in the relation URIs.
 
     The leader unit IP on VM, the primary service on K8s.
     """
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         return get_unit_address(juju, get_app_leader(juju, app_name))
     # The K8s namespace is the model name, without the "controller:" prefix.
     namespace = juju.model.split(":")[-1]
@@ -32,7 +32,7 @@ def uris_host(juju: jubilant.Juju, app_name: str, substrate: Substrate) -> str:
 
 @pytest.mark.abort_on_fail
 def test_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Deploy the charms."""
     logging.info("Deploying database charm")
@@ -42,7 +42,7 @@ def test_deploy(
         config={"profile": "testing"},
         num_units=1,
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
 
     # Deploy the data integrator if not already deployed.
@@ -102,7 +102,7 @@ def test_prefix_too_short(juju: jubilant.Juju, app_name: str) -> None:
     juju.wait(jubilant.all_agents_idle, timeout=5 * MINUTE_SECS)
 
 
-def test_get_prefix(juju: jubilant.Juju, app_name: str, substrate: Substrate) -> None:
+def test_get_prefix(juju: jubilant.Juju, app_name: str, substrate: Substrates) -> None:
     db_ip = get_unit_address(juju, get_app_leader(juju, app_name))
 
     logging.info("Setting prefix")
@@ -135,7 +135,7 @@ def test_get_prefix(juju: jubilant.Juju, app_name: str, substrate: Substrate) ->
     psycopg2.connect(f"postgresql://tester:password@{db_ip}:5432/postgre2")
 
 
-def test_remove_db_from_prefix(juju: jubilant.Juju, app_name: str, substrate: Substrate) -> None:
+def test_remove_db_from_prefix(juju: jubilant.Juju, app_name: str, substrate: Substrates) -> None:
     db_ip = get_unit_address(juju, get_app_leader(juju, app_name))
 
     juju.remove_relation(app_name, "di1")
@@ -157,7 +157,7 @@ def test_remove_db_from_prefix(juju: jubilant.Juju, app_name: str, substrate: Su
     psycopg2.connect(f"postgresql://tester:password@{db_ip}:5432/postgre2")
 
 
-def test_readd_db_from_prefix(juju: jubilant.Juju, app_name: str, substrate: Substrate) -> None:
+def test_readd_db_from_prefix(juju: jubilant.Juju, app_name: str, substrate: Substrates) -> None:
     db_ip = get_unit_address(juju, get_app_leader(juju, app_name))
 
     juju.integrate(app_name, "di1")
