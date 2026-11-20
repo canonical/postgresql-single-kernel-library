@@ -162,12 +162,15 @@ def test_removing_raft_majority(
 
     start_ha_continuous_writes(juju, app)
     logger.info("Deleting primary")
-    juju.remove_unit(
+    # Remove immediately so departing hooks cannot shrink Raft membership gracefully.
+    juju.cli(
+        "remove-unit",
+        "--no-prompt",
         original_roles["primaries"][0],
         original_roles["sync_standbys"][0],
         original_roles["sync_standbys"][1],
-        force=True,
-        destroy_storage=False,
+        "--force",
+        "--no-wait",
     )
 
     left_unit = original_roles["sync_standbys"][2]
