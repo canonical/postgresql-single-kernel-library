@@ -1,29 +1,34 @@
 # Copyright 2022 Canonical Ltd.
 # See LICENSE file for licensing details.
-import asyncio
 import logging
+import time
 
+import jubilant
 import psycopg2
 import pytest
-from pytest_operator.plugin import OpsTest
 from single_kernel_postgresql.config.literals import DATABASE_DEFAULT_NAME
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
-from tests.integration.charm.new_relations.helpers import (
-    build_connection_string,
-    get_application_relation_data,
-)
-from tests.integration.charm.pytest_operator_helpers import (
+from tests.integration.charm.helpers import (
     CHARM_BASE,
     assert_sync_standbys,
+    build_connection_string,
     check_database_users_existence,
-    get_leader_unit,
+    get_application_relation_data,
     get_machine_from_unit,
-    get_primary,
-    scale_application,
+    get_primary_from_app,
+    scale_ha_application,
     start_machine,
     stop_machine,
 )
+from tests.integration.helpers.juju import (
+    fast_forward,
+    get_app_leader,
+    get_unit_address,
+    split_model,
+    wait_for_idle,
+)
+from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -42,81 +47,79 @@ INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE = "invalid role(s) for extra user roles
 
 @pytest.mark.vm_only
 @pytest.mark.abort_on_fail
-async def test_deploy_charms(ops_test: OpsTest, charm):
+def test_deploy_charms(juju: jubilant.Juju, charm):
     """Deploy both charms (application and database) to use in the tests."""
     # Deploy both charms (multiple units for each application to test that later they correctly
     # set data in the relation application databag using only the leader unit).
-    async with ops_test.fast_forward():
-        await asyncio.gather(
-            ops_test.model.deploy(
-                APPLICATION_APP_NAME,
-                application_name=APPLICATION_APP_NAME,
-                num_units=2,
-                channel="latest/edge",
-                series="noble",
-            ),
-            ops_test.model.deploy(
-                charm,
-                application_name=DATABASE_APP_NAME,
-                num_units=1,
-                base=CHARM_BASE,
-                config={"profile": "testing"},
-            ),
-            ops_test.model.deploy(
-                charm,
-                application_name=ANOTHER_DATABASE_APP_NAME,
-                num_units=2,
-                base=CHARM_BASE,
-                config={"profile": "testing"},
-            ),
+    with fast_forward(juju):
+        juju.deploy(
+            APPLICATION_APP_NAME,
+            app=APPLICATION_APP_NAME,
+            num_units=2,
+            channel="latest/edge",
+            base=CHARM_BASE,
+        )
+        juju.deploy(
+            charm,
+            app=DATABASE_APP_NAME,
+            num_units=1,
+            base=CHARM_BASE,
+            config={"profile": "testing"},
+        )
+        juju.deploy(
+            charm,
+            app=ANOTHER_DATABASE_APP_NAME,
+            num_units=2,
+            base=CHARM_BASE,
+            config={"profile": "testing"},
         )
 
-        await ops_test.model.wait_for_idle(
-            apps=[DATABASE_APP_NAME, ANOTHER_DATABASE_APP_NAME], status="active", timeout=3000
+        wait_for_idle(
+            juju,
+            apps=[DATABASE_APP_NAME, ANOTHER_DATABASE_APP_NAME],
+            status="active",
+            timeout=3000,
         )
 
 
 @pytest.mark.k8s_only
 @pytest.mark.abort_on_fail
-async def test_database_relation_with_charm_libraries_k8s(
-    ops_test: OpsTest, charm, charm_resources
+def test_database_relation_with_charm_libraries_k8s(
+    juju: jubilant.Juju, charm, charm_resources, substrate: Substrate
 ):
     """Test basic functionality of database relation interface."""
     # Deploy both charms (multiple units for each application to test that later they correctly
     # set data in the relation application databag using only the leader unit).
-    async with ops_test.fast_forward():
-        await asyncio.gather(
-            ops_test.model.deploy(
-                APPLICATION_APP_NAME,
-                application_name=APPLICATION_APP_NAME,
-                num_units=2,
-                base=CHARM_BASE,
-                channel="latest/edge",
-            ),
-            ops_test.model.deploy(
-                charm,
-                resources=charm_resources,
-                application_name=DATABASE_APP_NAME,
-                num_units=3,
-                base=CHARM_BASE,
-                trust=True,
-                config={"profile": "testing"},
-            ),
-            ops_test.model.deploy(
-                charm,
-                resources=charm_resources,
-                application_name=ANOTHER_DATABASE_APP_NAME,
-                num_units=3,
-                base=CHARM_BASE,
-                trust=True,
-                config={"profile": "testing"},
-            ),
+    with fast_forward(juju):
+        juju.deploy(
+            APPLICATION_APP_NAME,
+            app=APPLICATION_APP_NAME,
+            num_units=2,
+            base=CHARM_BASE,
+            channel="latest/edge",
+        )
+        juju.deploy(
+            charm,
+            resources=charm_resources,
+            app=DATABASE_APP_NAME,
+            num_units=3,
+            base=CHARM_BASE,
+            trust=True,
+            config={"profile": "testing"},
+        )
+        juju.deploy(
+            charm,
+            resources=charm_resources,
+            app=ANOTHER_DATABASE_APP_NAME,
+            num_units=3,
+            base=CHARM_BASE,
+            trust=True,
+            config={"profile": "testing"},
         )
         # Relate the charms and wait for them exchanging some connection data.
-        await ops_test.model.add_relation(
-            f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME
-        )
-        await ops_test.model.wait_for_idle(
+        juju.integrate(f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
+        wait_for_idle(
+            juju,
             apps=[DATABASE_APP_NAME],
             status="active",
             raise_on_blocked=True,
@@ -124,29 +127,20 @@ async def test_database_relation_with_charm_libraries_k8s(
             timeout=1000,
         )
 
-        # Check that on juju 3 we have secrets and no username and password in the rel databag
-        if hasattr(ops_test.model, "list_secrets"):
-            logger.info("checking for secrets")
-            secret_uri, password = await asyncio.gather(
-                get_application_relation_data(
-                    ops_test,
-                    APPLICATION_APP_NAME,
-                    FIRST_DATABASE_RELATION_NAME,
-                    "secret-user",
-                ),
-                get_application_relation_data(
-                    ops_test,
-                    APPLICATION_APP_NAME,
-                    FIRST_DATABASE_RELATION_NAME,
-                    "password",
-                ),
-            )
-            assert secret_uri is not None
-            assert password is None
+        # The pinned libjuju has list_secrets, so the original always checks this.
+        logger.info("checking for secrets")
+        secret_uri = get_application_relation_data(
+            juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "secret-user"
+        )
+        password = get_application_relation_data(
+            juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "password"
+        )
+        assert secret_uri is not None
+        assert password is None
 
     # Get the connection string to connect to the database using the read/write endpoint.
-    connection_string = await build_connection_string(
-        ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME
+    connection_string = build_connection_string(
+        juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, substrate
     )
 
     # Connect to the database using the read/write endpoint.
@@ -167,14 +161,18 @@ async def test_database_relation_with_charm_libraries_k8s(
 
         # Get the version of the database and compare with the information that
         # was retrieved directly from the database.
-        version = await get_application_relation_data(
-            ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "version"
+        version = get_application_relation_data(
+            juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "version"
         )
         assert version == data
 
     # Get the connection string to connect to the database using the read-only endpoint.
-    connection_string = await build_connection_string(
-        ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, read_only_endpoint=True
+    connection_string = build_connection_string(
+        juju,
+        APPLICATION_APP_NAME,
+        FIRST_DATABASE_RELATION_NAME,
+        substrate,
+        read_only_endpoint=True,
     )
 
     # Connect to the database using the read-only endpoint.
@@ -190,47 +188,37 @@ async def test_database_relation_with_charm_libraries_k8s(
 
 
 @pytest.mark.vm_only
-async def test_primary_read_only_endpoint_in_standalone_cluster_vm(ops_test: OpsTest):
+def test_primary_read_only_endpoint_in_standalone_cluster_vm(juju: jubilant.Juju):
     """Test that there is no read-only endpoint in a standalone cluster."""
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Ensure the cluster starts with only one member.
         # We can't scale down a running cluster to 1 unit because the way
         # Patroni raft implementation works (to scale from 2 units to 1 Patroni
         # needs at least one mode unit that run only raft to have quorum).
-        assert len(ops_test.model.applications[DATABASE_APP_NAME].units) == 1
+        assert len(juju.status().apps[DATABASE_APP_NAME].units) == 1
 
         # Relate the charms and wait for them exchanging some connection data.
-        await ops_test.model.add_relation(
-            f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME
-        )
-        await ops_test.model.wait_for_idle(apps=APP_NAMES, status="active")
+        juju.integrate(f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
+        wait_for_idle(juju, apps=APP_NAMES, status="active")
 
         # Check that on juju 3 we have secrets and no username and password in the rel databag
         logger.info("checking for secrets")
-        secret_uri, password = await asyncio.gather(
-            get_application_relation_data(
-                ops_test,
-                APPLICATION_APP_NAME,
-                FIRST_DATABASE_RELATION_NAME,
-                "secret-user",
-            ),
-            get_application_relation_data(
-                ops_test,
-                APPLICATION_APP_NAME,
-                FIRST_DATABASE_RELATION_NAME,
-                "password",
-            ),
+        secret_uri = get_application_relation_data(
+            juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "secret-user"
+        )
+        password = get_application_relation_data(
+            juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "password"
         )
         assert secret_uri is not None
         assert password is None
 
         # Try to get the connection string of the database using the read-only endpoint.
         # It should be the primary.
-        primary_unit = ops_test.model.applications[DATABASE_APP_NAME].units[0]
+        primary_unit = next(iter(juju.status().apps[DATABASE_APP_NAME].units.values()))
         for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True):
             with attempt:
-                data = await get_application_relation_data(
-                    ops_test,
+                data = get_application_relation_data(
+                    juju,
                     APPLICATION_APP_NAME,
                     FIRST_DATABASE_RELATION_NAME,
                     "read-only-endpoints",
@@ -239,24 +227,24 @@ async def test_primary_read_only_endpoint_in_standalone_cluster_vm(ops_test: Ops
 
 
 @pytest.mark.vm_only
-async def test_read_only_endpoint_in_scaled_up_cluster_vm(ops_test: OpsTest):
+def test_read_only_endpoint_in_scaled_up_cluster_vm(juju: jubilant.Juju):
     """Test that there is read-only endpoint in a scaled up cluster."""
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Scale up the database.
-        await scale_application(ops_test, DATABASE_APP_NAME, 2)
-        primary = await get_primary(ops_test, DATABASE_APP_NAME)
+        scale_ha_application(juju, DATABASE_APP_NAME, 2)
+        primary = get_primary_from_app(juju, DATABASE_APP_NAME)
         replica = next(
             unit
-            for unit in ops_test.model.applications[DATABASE_APP_NAME].units
-            if unit.name != primary
+            for name, unit in juju.status().apps[DATABASE_APP_NAME].units.items()
+            if name != primary
         )
 
         # Try to get the connection string of the database using the read-only endpoint.
         # It should be the replica unit.
         for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True):
             with attempt:
-                data = await get_application_relation_data(
-                    ops_test,
+                data = get_application_relation_data(
+                    juju,
                     APPLICATION_APP_NAME,
                     FIRST_DATABASE_RELATION_NAME,
                     "read-only-endpoints",
@@ -265,11 +253,11 @@ async def test_read_only_endpoint_in_scaled_up_cluster_vm(ops_test: OpsTest):
 
 
 @pytest.mark.vm_only
-async def test_database_relation_with_charm_libraries_vm(ops_test: OpsTest):
+def test_database_relation_with_charm_libraries_vm(juju: jubilant.Juju, substrate: Substrate):
     """Test basic functionality of database relation interface."""
     # Get the connection string to connect to the database using the read/write endpoint.
-    connection_string = await build_connection_string(
-        ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME
+    connection_string = build_connection_string(
+        juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, substrate
     )
 
     # Connect to the database using the read/write endpoint.
@@ -290,14 +278,18 @@ async def test_database_relation_with_charm_libraries_vm(ops_test: OpsTest):
 
         # Get the version of the database and compare with the information that
         # was retrieved directly from the database.
-        version = await get_application_relation_data(
-            ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "version"
+        version = get_application_relation_data(
+            juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "version"
         )
         assert version == data
 
     # Get the connection string to connect to the database using the read-only endpoint.
-    connection_string = await build_connection_string(
-        ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, read_only_endpoint=True
+    connection_string = build_connection_string(
+        juju,
+        APPLICATION_APP_NAME,
+        FIRST_DATABASE_RELATION_NAME,
+        substrate,
+        read_only_endpoint=True,
     )
 
     # Connect to the database using the read-only endpoint.
@@ -314,35 +306,33 @@ async def test_database_relation_with_charm_libraries_vm(ops_test: OpsTest):
 
 @pytest.mark.vm_only
 @pytest.mark.abort_on_fail
-async def test_filter_out_degraded_replicas(ops_test: OpsTest):
-    primary = await get_primary(ops_test, DATABASE_APP_NAME)
-    replica = next(
-        unit.name
-        for unit in ops_test.model.applications[DATABASE_APP_NAME].units
-        if unit.name != primary
-    )
-    machine = await get_machine_from_unit(ops_test, replica)
-    await stop_machine(ops_test, machine)
+def test_filter_out_degraded_replicas(juju: jubilant.Juju):
+    primary = get_primary_from_app(juju, DATABASE_APP_NAME)
+    replica = next(name for name in juju.status().apps[DATABASE_APP_NAME].units if name != primary)
+    machine = get_machine_from_unit(juju, replica)
+    stop_machine(machine)
 
     for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True):
         # Topology observer runs every half a minute
-        await asyncio.sleep(60)
+        time.sleep(60)
         with attempt:
-            data = await get_application_relation_data(
-                ops_test,
+            data = get_application_relation_data(
+                juju,
                 APPLICATION_APP_NAME,
                 FIRST_DATABASE_RELATION_NAME,
                 "read-only-endpoints",
             )
-            assert data == f"{ops_test.model.units[primary].public_address}:5432"
+            assert data == f"{get_unit_address(juju, primary)}:5432"
 
-    await start_machine(ops_test, machine)
-    await ops_test.model.wait_for_idle(
-        apps=[DATABASE_APP_NAME], status="active", timeout=200, raise_on_error=False
+    start_machine(machine)
+    wait_for_idle(
+        juju, apps=[DATABASE_APP_NAME], status="active", timeout=200, raise_on_error=False
     )
 
 
-async def test_two_applications_doesnt_share_the_same_relation_data(ops_test: OpsTest):
+def test_two_applications_doesnt_share_the_same_relation_data(
+    juju: jubilant.Juju, substrate: Substrate
+):
     """Test that two different application connect to the database with different credentials."""
     # Set some variables to use in this test.
     another_application_app_name = "another-application"
@@ -350,26 +340,26 @@ async def test_two_applications_doesnt_share_the_same_relation_data(ops_test: Op
     all_app_names.extend(APP_NAMES)
 
     # Deploy another application.
-    await ops_test.model.deploy(
+    juju.deploy(
         APPLICATION_APP_NAME,
-        application_name=another_application_app_name,
+        app=another_application_app_name,
         base=CHARM_BASE,
         channel="latest/edge",
     )
 
     # Relate the new application with the database
     # and wait for them exchanging some connection data.
-    await ops_test.model.add_relation(
+    juju.integrate(
         f"{another_application_app_name}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME
     )
-    await ops_test.model.wait_for_idle(apps=all_app_names, status="active", idle_period=30)
+    wait_for_idle(juju, apps=all_app_names, status="active", idle_period=30)
 
     # Assert the two application have different relation (connection) data.
-    application_connection_string = await build_connection_string(
-        ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME
+    application_connection_string = build_connection_string(
+        juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, substrate
     )
-    another_application_connection_string = await build_connection_string(
-        ops_test, another_application_app_name, FIRST_DATABASE_RELATION_NAME
+    another_application_connection_string = build_connection_string(
+        juju, another_application_app_name, FIRST_DATABASE_RELATION_NAME, substrate
     )
 
     assert application_connection_string != another_application_connection_string
@@ -379,50 +369,71 @@ async def test_two_applications_doesnt_share_the_same_relation_data(ops_test: Op
         (APPLICATION_APP_NAME, "another_application_database"),
         (another_application_app_name, f"{APPLICATION_APP_NAME.replace('-', '_')}_database"),
     ]:
-        connection_string = await build_connection_string(
-            ops_test,
+        connection_string = build_connection_string(
+            juju,
             application,
             FIRST_DATABASE_RELATION_NAME,
+            substrate,
             database=DATABASE_DEFAULT_NAME,
         )
         with pytest.raises(psycopg2.Error):
             psycopg2.connect(connection_string)
-        connection_string = await build_connection_string(
-            ops_test,
+        connection_string = build_connection_string(
+            juju,
             application,
             FIRST_DATABASE_RELATION_NAME,
+            substrate,
             database=other_application_database,
         )
         with pytest.raises(psycopg2.Error):
             psycopg2.connect(connection_string)
 
 
-async def test_an_application_can_connect_to_multiple_database_clusters(ops_test: OpsTest):
+def test_an_application_can_connect_to_multiple_database_clusters(
+    juju: jubilant.Juju, substrate: Substrate
+):
     """Test that an application can connect to different clusters of the same database."""
     # Relate the application with both database clusters
     # and wait for them exchanging some connection data.
-    first_cluster_relation = await ops_test.model.add_relation(
+    juju.integrate(
         f"{APPLICATION_APP_NAME}:{MULTIPLE_DATABASE_CLUSTERS_RELATION_NAME}", DATABASE_APP_NAME
     )
-    second_cluster_relation = await ops_test.model.add_relation(
+    juju.integrate(
         f"{APPLICATION_APP_NAME}:{MULTIPLE_DATABASE_CLUSTERS_RELATION_NAME}",
         ANOTHER_DATABASE_APP_NAME,
     )
-    await ops_test.model.wait_for_idle(apps=APP_NAMES, status="active", idle_period=30)
+    wait_for_idle(juju, apps=APP_NAMES, status="active", idle_period=30)
+
+    # integrate returns no relation object: recover each ID by endpoint and related app.
+    relation_data = juju.show_unit(f"{APPLICATION_APP_NAME}/0").relation_info
+    first_cluster_relation = next(
+        relation.relation_id
+        for relation in relation_data
+        if relation.endpoint == MULTIPLE_DATABASE_CLUSTERS_RELATION_NAME
+        and any(unit.split("/")[0] == DATABASE_APP_NAME for unit in relation.related_units)
+    )
+    second_cluster_relation = next(
+        relation.relation_id
+        for relation in relation_data
+        if relation.endpoint == MULTIPLE_DATABASE_CLUSTERS_RELATION_NAME
+        and any(unit.split("/")[0] == ANOTHER_DATABASE_APP_NAME for unit in relation.related_units)
+    )
 
     # Retrieve the connection string to both database clusters using the relation aliases
     # and assert they are different.
-    application_connection_string = await build_connection_string(
-        ops_test,
+    application_connection_string = build_connection_string(
+        juju,
         APPLICATION_APP_NAME,
         MULTIPLE_DATABASE_CLUSTERS_RELATION_NAME,
-        relation_id=first_cluster_relation.id,
+        substrate,
+        relation_id=first_cluster_relation,
     )
-    another_application_connection_string = await build_connection_string(
-        ops_test,
+    another_application_connection_string = build_connection_string(
+        juju,
         APPLICATION_APP_NAME,
         MULTIPLE_DATABASE_CLUSTERS_RELATION_NAME,
-        relation_id=second_cluster_relation.id,
+        substrate,
+        relation_id=second_cluster_relation,
     )
     assert application_connection_string != another_application_connection_string
 
@@ -466,24 +477,20 @@ async def test_an_application_can_connect_to_multiple_database_clusters(ops_test
 
 
 @pytest.mark.abort_on_fail
-async def test_an_application_can_request_multiple_databases(ops_test: OpsTest):
+def test_an_application_can_request_multiple_databases(juju: jubilant.Juju, substrate: Substrate):
     """Test that an application can request additional databases using the same interface."""
     # Relate the charms using another relation and wait for them exchanging some connection data.
-    await ops_test.model.add_relation(
-        f"{APPLICATION_APP_NAME}:{SECOND_DATABASE_RELATION_NAME}", DATABASE_APP_NAME
-    )
-    await ops_test.model.wait_for_idle(
-        apps=APP_NAMES, status="active", timeout=15 * 60, idle_period=30
-    )
+    juju.integrate(f"{APPLICATION_APP_NAME}:{SECOND_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
+    wait_for_idle(juju, apps=APP_NAMES, status="active", timeout=15 * 60, idle_period=30)
 
     # Get the connection strings to connect to both databases.
     for attempt in Retrying(stop=stop_after_attempt(15), wait=wait_fixed(3), reraise=True):
         with attempt:
-            first_database_connection_string = await build_connection_string(
-                ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME
+            first_database_connection_string = build_connection_string(
+                juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, substrate
             )
-            second_database_connection_string = await build_connection_string(
-                ops_test, APPLICATION_APP_NAME, SECOND_DATABASE_RELATION_NAME
+            second_database_connection_string = build_connection_string(
+                juju, APPLICATION_APP_NAME, SECOND_DATABASE_RELATION_NAME, substrate
             )
 
     # Assert the two application have different relation (connection) data.
@@ -491,87 +498,83 @@ async def test_an_application_can_request_multiple_databases(ops_test: OpsTest):
 
 
 @pytest.mark.k8s_only
-async def test_primary_read_only_endpoint_in_standalone_cluster_k8s(ops_test: OpsTest):
+def test_primary_read_only_endpoint_in_standalone_cluster_k8s(juju: jubilant.Juju):
     """Test that there is no read-only endpoint in a standalone cluster."""
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Scale down the database.
-        await scale_application(ops_test, DATABASE_APP_NAME, 1)
+        scale_ha_application(juju, DATABASE_APP_NAME, 1)
 
         # Try to get the connection string of the database using the read-only endpoint.
         # It should not be available anymore.
         for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True):
             with attempt:
-                data = await get_application_relation_data(
-                    ops_test,
+                data = get_application_relation_data(
+                    juju,
                     APPLICATION_APP_NAME,
                     FIRST_DATABASE_RELATION_NAME,
                     "read-only-endpoints",
                 )
-                assert (
-                    data
-                    == f"{DATABASE_APP_NAME}-primary.{ops_test.model.name}.svc.cluster.local:5432"
-                )
+                model_name = split_model(juju.model)[1]
+                assert data == f"{DATABASE_APP_NAME}-primary.{model_name}.svc.cluster.local:5432"
 
 
 @pytest.mark.k8s_only
-async def test_read_only_endpoint_in_scaled_up_cluster_k8s(ops_test: OpsTest):
+def test_read_only_endpoint_in_scaled_up_cluster_k8s(juju: jubilant.Juju):
     """Test that there is read-only endpoint in a scaled up cluster."""
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Scale up the database.
-        await scale_application(ops_test, DATABASE_APP_NAME, 3)
+        scale_ha_application(juju, DATABASE_APP_NAME, 3)
 
         # Try to get the connection string of the database using the read-only endpoint.
         # It should be available again.
         for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True):
             with attempt:
-                data = await get_application_relation_data(
-                    ops_test,
+                data = get_application_relation_data(
+                    juju,
                     APPLICATION_APP_NAME,
                     FIRST_DATABASE_RELATION_NAME,
                     "read-only-endpoints",
                 )
-                assert (
-                    data
-                    == f"{DATABASE_APP_NAME}-replicas.{ops_test.model.name}.svc.cluster.local:5432"
-                )
+                model_name = split_model(juju.model)[1]
+                assert data == f"{DATABASE_APP_NAME}-replicas.{model_name}.svc.cluster.local:5432"
 
 
 @pytest.mark.k8s_only
-async def test_relation_broken(ops_test: OpsTest):
+def test_relation_broken(juju: jubilant.Juju):
     """Test that the user is removed when the relation is broken."""
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Retrieve the relation user.
-        relation_user = await get_application_relation_data(
-            ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "username"
+        relation_user = get_application_relation_data(
+            juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, "username"
         )
 
         # Break the relation.
-        await ops_test.model.applications[DATABASE_APP_NAME].remove_relation(
+        juju.remove_relation(
             f"{DATABASE_APP_NAME}", f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}"
         )
-        await ops_test.model.wait_for_idle(apps=APP_NAMES, status="active", raise_on_blocked=True)
+        wait_for_idle(juju, apps=APP_NAMES, status="active", raise_on_blocked=True)
 
         # Check that the relation user was removed from the database.
-        await check_database_users_existence(
-            ops_test, [], [relation_user], database_app_name=DATABASE_APP_NAME
+        check_database_users_existence(
+            juju, [], [relation_user], database_app_name=DATABASE_APP_NAME
         )
 
 
 @pytest.mark.k8s_only
-async def test_restablish_relation(ops_test: OpsTest):
+def test_restablish_relation(juju: jubilant.Juju, substrate: Substrate):
     """Test that a previously broken relation would be functional if restored."""
     # Relate the charms and wait for them exchanging some connection data.
-    async with ops_test.fast_forward():
-        await ops_test.model.add_relation(
-            f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME
-        )
-        await ops_test.model.wait_for_idle(
-            apps=APP_NAMES, status="active", idle_period=30, raise_on_blocked=True
-        )
+    with fast_forward(juju):
+        juju.integrate(f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
+        wait_for_idle(juju, apps=APP_NAMES, status="active", idle_period=30, raise_on_blocked=True)
 
     # Get the connection string to connect to the database using the read-only endpoint.
-    connection_string = await build_connection_string(
-        ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, read_only_endpoint=True
+    connection_string = build_connection_string(
+        juju,
+        APPLICATION_APP_NAME,
+        FIRST_DATABASE_RELATION_NAME,
+        substrate,
+        read_only_endpoint=True,
     )
 
     # Connect to the database using the read-only endpoint.
@@ -582,8 +585,8 @@ async def test_restablish_relation(ops_test: OpsTest):
         assert data[0] == "some data"
 
     # Get the connection string to connect to the database using the read/write endpoint.
-    connection_string = await build_connection_string(
-        ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME
+    connection_string = build_connection_string(
+        juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, substrate
     )
 
     # Connect to the database using the read/write endpoint.
@@ -599,42 +602,45 @@ async def test_restablish_relation(ops_test: OpsTest):
 
 @pytest.mark.vm_only
 @pytest.mark.abort_on_fail
-async def test_relation_data_is_updated_correctly_when_scaling(ops_test: OpsTest):
+def test_relation_data_is_updated_correctly_when_scaling(
+    juju: jubilant.Juju, substrate: Substrate
+):
     """Test that relation data, like connection data, is updated correctly when scaling."""
     # Retrieve the list of current database unit names.
-    units_to_remove = [unit.name for unit in ops_test.model.applications[DATABASE_APP_NAME].units]
+    units_to_remove = list(juju.status().apps[DATABASE_APP_NAME].units)
 
-    async with ops_test.fast_forward(fast_interval="60s"):
+    with fast_forward(juju, interval="60s"):
         # Add two more units.
-        await ops_test.model.applications[DATABASE_APP_NAME].add_units(2)
-        await ops_test.model.wait_for_idle(
-            apps=[DATABASE_APP_NAME], status="active", timeout=3000, wait_for_exact_units=4
+        juju.add_unit(DATABASE_APP_NAME, num_units=2)
+        wait_for_idle(
+            juju, apps=[DATABASE_APP_NAME], status="active", timeout=3000, wait_for_exact_units=4
         )
 
-        assert_sync_standbys(
-            ops_test.model.applications[DATABASE_APP_NAME].units[0].public_address, 2
-        )
+        first_unit = next(iter(juju.status().apps[DATABASE_APP_NAME].units.values()))
+        assert_sync_standbys(first_unit.public_address, 2)
 
         # Remove the original units.
-        leader_unit = await get_leader_unit(ops_test, DATABASE_APP_NAME)
-        await ops_test.model.applications[DATABASE_APP_NAME].destroy_units(*[
-            unit for unit in units_to_remove if unit != leader_unit.name
-        ])
-        await ops_test.model.wait_for_idle(
-            apps=[DATABASE_APP_NAME], status="active", timeout=600, wait_for_exact_units=3
+        leader_unit = get_app_leader(juju, DATABASE_APP_NAME)
+        juju.remove_unit(*[unit for unit in units_to_remove if unit != leader_unit])
+        wait_for_idle(
+            juju, apps=[DATABASE_APP_NAME], status="active", timeout=600, wait_for_exact_units=3
         )
-        await ops_test.model.applications[DATABASE_APP_NAME].destroy_units(leader_unit.name)
-        await ops_test.model.wait_for_idle(
-            apps=[DATABASE_APP_NAME], status="active", timeout=600, wait_for_exact_units=2
+        juju.remove_unit(leader_unit)
+        wait_for_idle(
+            juju, apps=[DATABASE_APP_NAME], status="active", timeout=600, wait_for_exact_units=2
         )
 
         # Get the updated connection data and assert it can be used
         # to write and read some data properly.
-        primary_connection_string = await build_connection_string(
-            ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME
+        primary_connection_string = build_connection_string(
+            juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, substrate
         )
-        replica_connection_string = await build_connection_string(
-            ops_test, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, read_only_endpoint=True
+        replica_connection_string = build_connection_string(
+            juju,
+            APPLICATION_APP_NAME,
+            FIRST_DATABASE_RELATION_NAME,
+            substrate,
+            read_only_endpoint=True,
         )
 
         # Connect to the database using the primary connection string.
@@ -666,94 +672,94 @@ async def test_relation_data_is_updated_correctly_when_scaling(ops_test: OpsTest
                 cursor.execute("DROP TABLE test;")
         connection.close()
 
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Remove the relation and test that its user was deleted
         # (by checking that the connection string doesn't work anymore).
-        await ops_test.model.applications[DATABASE_APP_NAME].remove_relation(
+        juju.remove_relation(
             f"{DATABASE_APP_NAME}:database",
             f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}",
         )
-        await ops_test.model.wait_for_idle(
-            apps=[DATABASE_APP_NAME], status="active", timeout=1000, idle_period=30
+        wait_for_idle(
+            juju, apps=[DATABASE_APP_NAME], status="active", timeout=1000, idle_period=30
         )
         with pytest.raises(psycopg2.OperationalError):
             psycopg2.connect(primary_connection_string)
 
 
 @pytest.mark.abort_on_fail
-async def test_relation_with_no_database_name(ops_test: OpsTest):
+def test_relation_with_no_database_name(juju: jubilant.Juju):
     """Test that a relation with no database name doesn't block the charm."""
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Relate the charms using a relation that doesn't provide a database name.
-        await ops_test.model.add_relation(
-            f"{APPLICATION_APP_NAME}:{NO_DATABASE_RELATION_NAME}", DATABASE_APP_NAME
-        )
-        await ops_test.model.wait_for_idle(apps=APP_NAMES, status="active", raise_on_blocked=True)
+        juju.integrate(f"{APPLICATION_APP_NAME}:{NO_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
+        wait_for_idle(juju, apps=APP_NAMES, status="active", raise_on_blocked=True)
 
         # Break the relation.
-        await ops_test.model.applications[DATABASE_APP_NAME].remove_relation(
+        juju.remove_relation(
             f"{DATABASE_APP_NAME}", f"{APPLICATION_APP_NAME}:{NO_DATABASE_RELATION_NAME}"
         )
-        await ops_test.model.wait_for_idle(apps=APP_NAMES, status="active", raise_on_blocked=True)
+        wait_for_idle(juju, apps=APP_NAMES, status="active", raise_on_blocked=True)
 
 
 @pytest.mark.abort_on_fail
-async def test_invalid_extra_user_roles(ops_test: OpsTest):
-    async with ops_test.fast_forward():
-        # Base is ignored
-        await ops_test.model.deploy(
-            DATA_INTEGRATOR_APP_NAME, channel="latest/edge", series="noble"
-        )
-        await ops_test.model.wait_for_idle(apps=[DATA_INTEGRATOR_APP_NAME], status="blocked")
+def test_invalid_extra_user_roles(juju: jubilant.Juju):
+    with fast_forward(juju):
+        juju.deploy(DATA_INTEGRATOR_APP_NAME, channel="latest/edge", base=CHARM_BASE)
+        wait_for_idle(juju, apps=[DATA_INTEGRATOR_APP_NAME], status="blocked")
 
         another_data_integrator_app_name = f"another-{DATA_INTEGRATOR_APP_NAME}"
         data_integrator_apps_names = [DATA_INTEGRATOR_APP_NAME, another_data_integrator_app_name]
-        # Base is ignored
-        await ops_test.model.deploy(
+        juju.deploy(
             DATA_INTEGRATOR_APP_NAME,
-            application_name=another_data_integrator_app_name,
+            app=another_data_integrator_app_name,
             channel="latest/edge",
-            series="noble",
+            base=CHARM_BASE,
         )
-        await ops_test.model.wait_for_idle(
-            apps=[another_data_integrator_app_name], status="blocked"
-        )
+        wait_for_idle(juju, apps=[another_data_integrator_app_name], status="blocked")
         for app in data_integrator_apps_names:
-            await ops_test.model.applications[app].set_config({
-                "database-name": app.replace("-", "_"),
-                "extra-user-roles": "test",
-            })
-        await ops_test.model.wait_for_idle(apps=data_integrator_apps_names, status="blocked")
+            juju.config(
+                app,
+                {
+                    "database-name": app.replace("-", "_"),
+                    "extra-user-roles": "test",
+                },
+            )
+        wait_for_idle(juju, apps=data_integrator_apps_names, status="blocked")
         for app in data_integrator_apps_names:
-            await ops_test.model.add_relation(f"{app}:postgresql", f"{DATABASE_APP_NAME}:database")
-        await ops_test.model.wait_for_idle(apps=[DATABASE_APP_NAME])
-        await ops_test.model.block_until(
-            lambda: any(
-                unit.workload_status_message == INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE
-                for unit in ops_test.model.applications[DATABASE_APP_NAME].units
+            juju.integrate(f"{app}:postgresql", f"{DATABASE_APP_NAME}:database")
+        wait_for_idle(juju, apps=[DATABASE_APP_NAME])
+        juju.wait(
+            lambda status: any(
+                unit.workload_status.message == INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE
+                for unit in status.apps[DATABASE_APP_NAME].units.values()
             ),
             timeout=1000,
+            delay=0.5,
+            successes=1,
         )
 
         # Verify that the charm remains blocked if there are still other relations with invalid
         # extra user roles.
-        await ops_test.model.applications[DATABASE_APP_NAME].destroy_relation(
+        juju.remove_relation(
             f"{DATABASE_APP_NAME}:database", f"{DATA_INTEGRATOR_APP_NAME}:postgresql"
         )
-        await ops_test.model.wait_for_idle(apps=[DATABASE_APP_NAME])
-        await ops_test.model.block_until(
-            lambda: any(
-                unit.workload_status_message == INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE
-                for unit in ops_test.model.applications[DATABASE_APP_NAME].units
+        wait_for_idle(juju, apps=[DATABASE_APP_NAME])
+        juju.wait(
+            lambda status: any(
+                unit.workload_status.message == INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE
+                for unit in status.apps[DATABASE_APP_NAME].units.values()
             ),
             timeout=1000,
+            delay=0.5,
+            successes=1,
         )
 
         # Verify that active status is restored after all relations are removed.
-        await ops_test.model.applications[DATABASE_APP_NAME].destroy_relation(
+        juju.remove_relation(
             f"{DATABASE_APP_NAME}:database", f"{another_data_integrator_app_name}:postgresql"
         )
-        await ops_test.model.wait_for_idle(
+        wait_for_idle(
+            juju,
             apps=[DATABASE_APP_NAME],
             status="active",
             raise_on_blocked=False,

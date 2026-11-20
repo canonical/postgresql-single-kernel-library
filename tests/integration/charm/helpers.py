@@ -1187,9 +1187,60 @@ def get_machine_from_unit(juju: jubilant.Juju, unit_name: str) -> str:
     return juju.cli("exec", "--unit", unit_name, "--", "hostname").strip()
 
 
+def start_machine(machine_name: str) -> None:
+    """Start the LXD machine where a unit runs."""
+    subprocess.check_call(f"lxc start {machine_name}".split())
+
+
 def stop_machine(machine_name: str) -> None:
     """Stop the LXD machine where a unit runs."""
     subprocess.check_call(f"lxc stop {machine_name}".split())
+
+
+def assert_sync_standbys(unit_ip: str, standbys: int) -> None:
+    """Check for at least the original number of synchronous standbys."""
+    for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            cluster = get_patroni_cluster(unit_ip)
+            cluster_standbys = 0
+            for member in cluster["members"]:
+                if member["role"] == "sync_standby":
+                    cluster_standbys += 1
+            assert cluster_standbys >= standbys, "Less than expected standbys"
+
+
+def check_database_users_existence(
+    juju: jubilant.Juju,
+    users_that_should_exist: list[str],
+    users_that_should_not_exist: list[str],
+    admin: bool = False,
+    database_app_name: str | None = None,
+) -> None:
+    """Check database users using the original first unit and SQL assertions."""
+    if database_app_name is None:
+        database_app_name = get_postgresql_app_name(juju)
+    unit_name = next(iter(juju.status().apps[database_app_name].units))
+    unit_address = get_unit_address(juju, unit_name)
+    password = get_password(juju, database_app_name)
+
+    output = execute_query(
+        unit_address,
+        password,
+        (
+            "SELECT CONCAT(usename, ':', usesuper) FROM pg_catalog.pg_user;"
+            if admin
+            else "SELECT usename FROM pg_catalog.pg_user;"
+        ),
+    )
+
+    for user in users_that_should_exist:
+        if admin:
+            assert f"{user}:t" in output
+        else:
+            assert user in output
+
+    for user in users_that_should_not_exist:
+        assert user not in output
 
 
 def get_patroni_setting(juju: jubilant.Juju, setting: str, tls: bool = False) -> int | None:
