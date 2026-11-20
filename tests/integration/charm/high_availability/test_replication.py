@@ -6,6 +6,7 @@ import psycopg2
 import pytest
 from lightkube.core.client import Client
 from lightkube.resources.core_v1 import Pod
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, retry_if_exception_type, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -22,12 +23,11 @@ from tests.integration.charm.helpers import (
 )
 from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 
 @pytest.mark.abort_on_fail
 def test_build_and_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy three unit of PostgreSQL."""
     wait_for_apps = False
@@ -43,7 +43,7 @@ def test_build_and_deploy(
                 base=CHARM_BASE,
                 config={"profile": "testing"},
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
     # Deploy the continuous writes application charm if it wasn't already deployed.
     if APPLICATION_NAME not in juju.status().apps:
@@ -65,7 +65,7 @@ def test_build_and_deploy(
 def test_reelection(
     juju: jubilant.Juju,
     app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     juju_continuous_writes,
     juju_primary_start_timeout,
 ) -> None:
@@ -78,7 +78,7 @@ def test_reelection(
     start_ha_continuous_writes(juju, app)
 
     primary_name = get_primary_from_app(juju, app)
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         # Remove the primary unit.
         juju.remove_unit(primary_name)
     else:
@@ -99,7 +99,7 @@ def test_reelection(
             new_primary_name = get_primary_from_app(juju, app, down_unit=primary_name)
             assert new_primary_name != primary_name, "primary reelection hasn't happened"
 
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         # Verify that all units are part of the same cluster.
         member_ips = fetch_cluster_members(juju)
         app = primary_name.split("/")[0]
@@ -135,7 +135,7 @@ def test_no_data_replicated_between_clusters(
     charm,
     app_name: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     juju_continuous_writes,
 ) -> None:
     """Check that writes in one cluster are not replicated to another cluster."""
@@ -154,7 +154,7 @@ def test_no_data_replicated_between_clusters(
                 base=CHARM_BASE,
                 config={"profile": "testing"},
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
             wait_for_idle(juju, apps=[new_cluster_app], status="active", timeout=1500)
 

@@ -9,6 +9,7 @@ import pytest
 from lightkube.core.client import Client
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.core_v1 import PersistentVolumeClaim
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -33,7 +34,6 @@ from tests.integration.charm.helpers import (
     scale_ha_application,
 )
 from tests.integration.helpers.juju import fast_forward, wait_for_idle
-from tests.integration.types import Substrate
 
 TEST_DATABASE_NAME = "test_database"
 DUP_DATABASE_APP_NAME = "postgres-test-dup"
@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.abort_on_fail
 def test_app_force_removal(
-    juju: jubilant.Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ):
     """Remove unit with force while storage is alive."""
     global primary_pvs, primary_pvcs
@@ -62,10 +62,10 @@ def test_app_force_removal(
             app=app_name,
             num_units=1,
             base=CHARM_BASE,
-            storage=VM_STORAGE if substrate == Substrate.vm else None,
+            storage=VM_STORAGE if substrate == Substrates.VM else None,
             config={"profile": "testing"},
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
 
         logger.info("waiting for idle")
@@ -82,7 +82,7 @@ def test_app_force_removal(
             with attempt:
                 assert is_postgresql_ready(juju, primary_name)
 
-        if substrate == Substrate.k8s:
+        if substrate == Substrates.K8S:
             logger.info(f"get pvc for {primary_name}")
             primary_pvcs = get_pvcs(juju, primary_name)
 
@@ -116,7 +116,7 @@ def test_app_force_removal(
         assert check_db(juju, app_name, TEST_DATABASE_NAME)
 
         # Force remove unit without storage removal
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             logger.info("force removing charm")
             juju.remove_unit(primary_name, force=True, destroy_storage=False)
         else:
@@ -134,7 +134,7 @@ def test_app_force_removal(
 
 
 @pytest.mark.abort_on_fail
-def test_app_garbage_ignorance(juju: jubilant.Juju, app_name: str, substrate: Substrate):
+def test_app_garbage_ignorance(juju: jubilant.Juju, app_name: str, substrate: Substrates):
     """Test charm deploy in dirty environment with garbage storage."""
     global primary_pvs, primary_pvcs
     with fast_forward(juju):
@@ -143,11 +143,11 @@ def test_app_garbage_ignorance(juju: jubilant.Juju, app_name: str, substrate: Su
         for attempt in Retrying(stop=stop_after_delay(30 * 3), wait=wait_fixed(3), reraise=True):
             with attempt:
                 garbage_storages = get_detached_storages(juju)
-                if substrate == Substrate.vm:
+                if substrate == Substrates.VM:
                     assert len(garbage_storages) == 4
                 logger.info(f"Collected storages: {garbage_storages}")
 
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             logger.info("add unit with attached storage")
             add_unit_with_storage(juju, app_name, garbage_storages)
         else:
@@ -190,7 +190,7 @@ def test_app_garbage_ignorance(juju: jubilant.Juju, app_name: str, substrate: Su
         logger.info("checking db")
         assert check_db(juju, app_name, TEST_DATABASE_NAME)
 
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             logger.info("removing charm")
             juju.remove_unit(primary_name)
         else:

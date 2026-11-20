@@ -8,6 +8,7 @@ import jubilant
 import psycopg2
 import pytest
 from psycopg2.sql import SQL, Identifier
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import (
     DATA_INTEGRATOR_APP_NAME,
@@ -18,7 +19,6 @@ from tests.integration.charm.helpers import (
 )
 from tests.integration.helpers.juju import get_credentials, get_unit_address, relations
 from tests.integration.helpers.postgresql import check_connected_user, db_connect
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def test_deploy(
     charm,
     app_name: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     predefined_roles_combinations,
 ) -> None:
     """Deploy and relate the charms."""
@@ -51,7 +51,7 @@ def test_deploy(
             config={"profile": "testing"},
             num_units=1,
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
 
     combinations = [*predefined_roles_combinations, (ROLE_BACKUP,), (ROLE_DBA,)]
@@ -90,11 +90,11 @@ def test_deploy(
 
 
 def test_operations(  # noqa: C901
-    juju: jubilant.Juju, app_name: str, predefined_roles, substrate: Substrate
+    juju: jubilant.Juju, app_name: str, predefined_roles, substrate: Substrates
 ) -> None:
     """Check that the data integrator user can perform the expected operations in each database."""
     # Prefix of the relation users (and of the schemas the test creates for them).
-    schema_prefix = "relation-" if substrate == Substrate.vm else "relation_id_"
+    schema_prefix = "relation-" if substrate == Substrates.VM else "relation_id_"
     primary = get_primary(juju, f"{app_name}/0")
     host = get_unit_address(juju, primary)
     operator_password = get_password(juju, app_name)

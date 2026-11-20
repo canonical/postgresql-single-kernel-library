@@ -7,20 +7,19 @@ from pathlib import Path
 import jubilant
 import pytest
 from jubilant import Juju
-
-from tests.integration.types import Substrate
+from single_kernel_postgresql.config.enums import Substrates
 
 TEST_CHARMS_PATH = Path(__file__).parents[2] / "charms"
 
 
-def fetch_charm(substrate: Substrate, architecture: str) -> str:
+def fetch_charm(substrate: Substrates, architecture: str) -> str:
     """Fetch the packed test charm for a specific architecture, ignoring the host one."""
-    charm_dir = TEST_CHARMS_PATH / f"postgresql_{substrate}_test_charm"
+    charm_dir = TEST_CHARMS_PATH / f"postgresql_{substrate.value}_test_charm"
     packed_charms = list(charm_dir.glob(f"*-{architecture}.charm"))
     if not packed_charms:
         pytest.fail(
             f"No {architecture} charm found in {charm_dir}, build it with:"
-            f" cd tests/charms/postgresql_{substrate}_test_charm"
+            f" cd tests/charms/postgresql_{substrate.value}_test_charm"
             f" && CHARMCRAFT_EXPERIMENTAL_MONOREPO=1 charmcraft pack -p ubuntu@24.04:{architecture}"
         )
     return str(packed_charms[0].resolve(strict=True))
@@ -35,7 +34,7 @@ def _unit_is_blocked(status: jubilant.Status, app_name: str) -> bool:
 
 
 def _deploy_and_wait_for_blocked(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     juju.deploy(
         charm,
@@ -43,7 +42,7 @@ def _deploy_and_wait_for_blocked(
         base="ubuntu@24.04",
         config={"profile": "testing"},
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     # The wrong-architecture charm sets BlockedStatus and exits on every hook, so
     # it never converges to a fully idle state (less so under slow CI machine
@@ -52,7 +51,7 @@ def _deploy_and_wait_for_blocked(
 
 
 def test_arm_charm_on_amd_host(
-    juju: Juju, app_name: str, charm_resources, architecture: str, substrate: Substrate
+    juju: Juju, app_name: str, charm_resources, architecture: str, substrate: Substrates
 ) -> None:
     """Try deploying an arm64 charm on an amd64 host."""
     if architecture != "amd64":
@@ -62,7 +61,7 @@ def test_arm_charm_on_amd_host(
 
 
 def test_amd_charm_on_arm_host(
-    juju: Juju, app_name: str, charm_resources, architecture: str, substrate: Substrate
+    juju: Juju, app_name: str, charm_resources, architecture: str, substrate: Substrates
 ) -> None:
     """Try deploying an amd64 charm on an arm64 host."""
     if architecture != "arm64":

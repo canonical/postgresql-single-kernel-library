@@ -8,6 +8,7 @@ import pytest
 import requests
 from kubernetes import config, dynamic
 from kubernetes.client import api_client
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import (
     APPLICATION_NAME,
@@ -19,7 +20,6 @@ from tests.integration.charm.helpers import (
     start_ha_continuous_writes,
 )
 from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ pytestmark = pytest.mark.k8s_only
 
 @pytest.mark.abort_on_fail
 def test_build_and_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy three unit of PostgreSQL."""
     # It is possible for users to provide their own cluster for HA testing. Hence, check if there
@@ -45,7 +45,7 @@ def test_build_and_deploy(
                 base=CHARM_BASE,
                 config={"profile": "testing"},
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
     # Deploy the continuous writes application charm if it wasn't already deployed.
     if APPLICATION_NAME not in juju.status().apps:

@@ -6,6 +6,7 @@ from time import sleep
 
 import jubilant
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -26,13 +27,12 @@ from tests.integration.charm.helpers import (
     storage_type,
 )
 from tests.integration.helpers.juju import fast_forward, wait_for_idle
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
 PATRONI_PROCESS = {
-    Substrate.vm: "/snap/charmed-postgresql/[0-9]*/usr/bin/patroni",
-    Substrate.k8s: "/usr/bin/patroni",
+    Substrates.VM: "/snap/charmed-postgresql/[0-9]*/usr/bin/patroni",
+    Substrates.K8S: "/usr/bin/patroni",
 }
 POSTGRESQL_PROCESS = "postgres"
 # The Patroni path depends on the substrate, so the tests are parametrized by name.
@@ -49,7 +49,7 @@ VM_STORAGE = {
 
 @pytest.mark.abort_on_fail
 def test_build_and_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy three unit of PostgreSQL."""
     wait_for_apps = False
@@ -63,10 +63,10 @@ def test_build_and_deploy(
                 app=app_name,
                 num_units=3,
                 base=CHARM_BASE,
-                storage=VM_STORAGE if substrate == Substrate.vm else None,
+                storage=VM_STORAGE if substrate == Substrates.VM else None,
                 config={"profile": "testing"},
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
     # Deploy the continuous writes application charm if it wasn't already deployed.
     if APPLICATION_NAME not in juju.status().apps:
@@ -145,7 +145,7 @@ def test_storage_re_use(juju: jubilant.Juju, app_name: str, juju_continuous_writ
 def test_interruption_db_process(
     juju: jubilant.Juju,
     app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     process: str,
     signal: str,
     juju_continuous_writes,

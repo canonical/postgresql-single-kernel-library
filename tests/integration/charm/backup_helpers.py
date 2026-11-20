@@ -17,6 +17,7 @@ import botocore.regions
 import jubilant
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR
 from tenacity import Retrying, stop_after_attempt, wait_exponential
 
@@ -29,7 +30,6 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +273,7 @@ def backup_deploy(
     charm: str,
     app_name: str,
     charm_resources: dict[str, str] | None,
-    substrate: Substrate,
+    substrate: Substrates,
     s3_integrator_app_name: str,
     tls_certificates_app_name: str | None,
     tls_channel: str | None,
@@ -299,7 +299,7 @@ def backup_deploy(
         config={"profile": "testing"},
         num_units=2,
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
 
     if use_tls:
@@ -328,7 +328,7 @@ def backup_operations(
     charm: str,
     app_name: str,
     charm_resources: dict[str, str] | None,
-    substrate: Substrate,
+    substrate: Substrates,
     s3_integrator_app_name: str,
     tls_certificates_app_name: str | None,
     tls_channel: str | None,
@@ -400,7 +400,7 @@ def backup_operations(
 
     # Scale down to be able to restore (on K8s only the last pod can be removed).
     with fast_forward(juju):
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             juju.remove_unit(replica)
             juju.wait(
                 lambda status: len(status.get_units(database_app_name)) == 1, timeout=10 * 60
@@ -448,7 +448,7 @@ def pitr_backup_operations(
     charm: str,
     app_name: str,
     charm_resources: dict[str, str] | None,
-    substrate: Substrate,
+    substrate: Substrates,
     s3_integrator_app_name: str,
     tls_certificates_app_name: str | None,
     tls_channel: str | None,
@@ -513,7 +513,7 @@ def pitr_backup_operations(
     logger.info("1: scaling down to do restore")
     # On K8s only the last pod can be removed.
     with fast_forward(juju, "60s"):
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             juju.remove_unit(replica)
             juju.wait(
                 lambda status: (

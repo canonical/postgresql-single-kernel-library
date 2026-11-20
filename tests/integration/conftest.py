@@ -8,11 +8,10 @@ from collections.abc import Generator
 
 import jubilant
 import pytest
-
-from tests.integration.types import Substrate
+from single_kernel_postgresql.config.enums import Substrates
 
 # Juju model type for each substrate, used to check the controller matches --substrate.
-MODEL_TYPES = {Substrate.vm: "iaas", Substrate.k8s: "caas"}
+MODEL_TYPES = {Substrates.VM: "iaas", Substrates.K8S: "caas"}
 
 # Stash key of a module whose abort_on_fail test failed (value: nodeid of that test).
 ABORTED_BY = pytest.StashKey[str]()
@@ -41,7 +40,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
     parser.addoption(
         "--substrate",
-        choices=[substrate.value for substrate in Substrate],
+        choices=[substrate.value for substrate in Substrates],
         required=True,
         help="Substrate to run the integration tests on.",
     )
@@ -77,21 +76,21 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    substrate = Substrate(config.getoption("--substrate"))
+    substrate = Substrates(config.getoption("--substrate"))
     for item in items:
-        if substrate != Substrate.vm and item.get_closest_marker("vm_only"):
+        if substrate != Substrates.VM and item.get_closest_marker("vm_only"):
             item.add_marker(pytest.mark.skip(reason="VM only test"))
-        if substrate != Substrate.k8s and item.get_closest_marker("k8s_only"):
+        if substrate != Substrates.K8S and item.get_closest_marker("k8s_only"):
             item.add_marker(pytest.mark.skip(reason="K8s only test"))
 
 
 @pytest.fixture(scope="session", autouse=True)
-def substrate(request: pytest.FixtureRequest) -> Substrate:
+def substrate(request: pytest.FixtureRequest) -> Substrates:
     """The substrate selected with --substrate.
 
     Overrides the fixture in tests/conftest.py, which runs every test on both substrates.
     """
-    return Substrate(request.config.getoption("--substrate"))
+    return Substrates(request.config.getoption("--substrate"))
 
 
 @pytest.fixture(scope="session")
@@ -103,7 +102,7 @@ def architecture() -> str:
 
 
 @pytest.fixture(scope="module")
-def juju(request: pytest.FixtureRequest, substrate: Substrate) -> Generator[jubilant.Juju]:
+def juju(request: pytest.FixtureRequest, substrate: Substrates) -> Generator[jubilant.Juju]:
     """Juju model for the test module: --model if given, a temporary one otherwise."""
     controller = request.config.getoption("--controller")
     model = request.config.getoption("--model")
@@ -119,10 +118,10 @@ def juju(request: pytest.FixtureRequest, substrate: Substrate) -> Generator[jubi
             yield juju
 
 
-def _check_model_type(juju: jubilant.Juju, substrate: Substrate) -> None:
+def _check_model_type(juju: jubilant.Juju, substrate: Substrates) -> None:
     model_type = juju.status().model.type
     if model_type != MODEL_TYPES[substrate]:
         pytest.fail(
-            f"--substrate={substrate} needs a {MODEL_TYPES[substrate]} model, but the model is"
-            f" {model_type}: use --controller to pick a {substrate} controller"
+            f"--substrate={substrate.value} needs a {MODEL_TYPES[substrate]} model, but the model is"
+            f" {model_type}: use --controller to pick a {substrate.value} controller"
         )

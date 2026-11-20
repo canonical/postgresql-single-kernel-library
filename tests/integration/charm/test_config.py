@@ -6,6 +6,7 @@ import logging
 import jubilant
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import get_password
 from tests.integration.helpers.juju import (
@@ -15,14 +16,13 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import execute_query
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.mark.abort_on_fail
 def test_config_parameters(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy one unit of PostgreSQL and then test config with wrong parameters."""
     # Build and deploy the PostgreSQL charm.
@@ -34,7 +34,7 @@ def test_config_parameters(
             config={"profile": "testing"},
             num_units=1,
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
         juju.wait(
             lambda status: (

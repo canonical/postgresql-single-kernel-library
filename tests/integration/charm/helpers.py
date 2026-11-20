@@ -30,6 +30,7 @@ from lightkube import Client
 from lightkube.core.client import GlobalResource
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.core_v1 import PersistentVolume, PersistentVolumeClaim, Pod, Service
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PEER_RELATION, SYSTEM_USERS_PASSWORD_CONFIG
 from tenacity import (
     RetryError,
@@ -51,7 +52,6 @@ from tests.integration.helpers.juju import (
     wait_for_idle,
 )
 from tests.integration.helpers.postgresql import db_connect, execute_query
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +218,7 @@ def get_cluster_roles(juju: jubilant.Juju, unit_name: str) -> dict[str, list[str
     return members
 
 
-def check_cluster_members(juju: jubilant.Juju, app_name: str, substrate: Substrate) -> None:
+def check_cluster_members(juju: jubilant.Juju, app_name: str, substrate: Substrates) -> None:
     """Check that the Patroni cluster members are the application units.
 
     On VM the member hosts are also checked against the unit addresses.
@@ -237,14 +237,14 @@ def check_cluster_members(juju: jubilant.Juju, app_name: str, substrate: Substra
             assert [member["name"] for member in members] == [
                 name.replace("/", "-") for name in units
             ]
-            if substrate == Substrate.vm:
+            if substrate == Substrates.VM:
                 assert [member["host"] for member in members] == [
                     unit.public_address for unit in units.values()
                 ]
 
 
 def scale_application(
-    juju: jubilant.Juju, app_name: str, count: int, substrate: Substrate
+    juju: jubilant.Juju, app_name: str, count: int, substrate: Substrates
 ) -> None:
     """Scale an application to a number of units and wait for it to be active.
 
@@ -255,7 +255,7 @@ def scale_application(
     if change > 0:
         juju.add_unit(app_name, num_units=change)
     elif change < 0:
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             juju.remove_unit(*units[:-change], destroy_storage=True)
         else:
             juju.remove_unit(app_name, num_units=-change)
@@ -296,10 +296,10 @@ def switchover(
 
 
 def run_command_on_unit(
-    juju: jubilant.Juju, unit_name: str, command: str, substrate: Substrate
+    juju: jubilant.Juju, unit_name: str, command: str, substrate: Substrates
 ) -> str:
     """Run a shell command on the workload of a unit (the postgresql container on K8s)."""
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         return juju.exec(command, unit=unit_name).stdout
     return juju.ssh(unit_name, command, container="postgresql")
 
@@ -357,7 +357,7 @@ def build_connection_string(
     juju: jubilant.Juju,
     application_name: str,
     relation_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     *,
     relation_id: int | None = None,
     relation_alias: str | None = None,
@@ -391,7 +391,7 @@ def build_connection_string(
         relation_alias,
     )
     host = endpoints.split(",")[0].split(":")[0]
-    if substrate == Substrate.k8s:
+    if substrate == Substrates.K8S:
         # The endpoint is the service hostname: use its cluster IP.
         client = Client(namespace=(juju.model or "").split(":")[-1])
         host = client.get(Service, name=host.split(".")[0]).spec.clusterIP
@@ -525,7 +525,7 @@ def check_tls_replication(juju: jubilant.Juju, unit_name: str, enabled: bool) ->
 
 
 def check_tls_patroni_api(
-    juju: jubilant.Juju, unit_name: str, enabled: bool, substrate: Substrate
+    juju: jubilant.Juju, unit_name: str, enabled: bool, substrate: Substrates
 ) -> bool:
     """Return whether the Patroni REST API of a unit answers through TLS.
 
@@ -533,11 +533,11 @@ def check_tls_patroni_api(
     it isn't, since the unit IP doesn't match the certificate hostname (a k8s hostname).
     """
     unit_address = get_unit_address(juju, unit_name)
-    tls_ca = get_tls_ca(juju, unit_name, "peer") if substrate == Substrate.vm else ""
+    tls_ca = get_tls_ca(juju, unit_name, "peer") if substrate == Substrates.VM else ""
 
     # If there is no TLS CA in the relation, something is wrong in
     # the relation between the TLS Certificates Operator and PostgreSQL.
-    if substrate == Substrate.vm and enabled and not tls_ca:
+    if substrate == Substrates.VM and enabled and not tls_ca:
         return False
 
     try:
@@ -547,7 +547,7 @@ def check_tls_patroni_api(
             with attempt, tempfile.NamedTemporaryFile() as temp_ca_file:
                 temp_ca_file.write(tls_ca.encode("utf-8"))
                 temp_ca_file.seek(0)
-                verify = temp_ca_file.name if substrate == Substrate.vm and enabled else False
+                verify = temp_ca_file.name if substrate == Substrates.VM and enabled else False
                 health_info = requests.get(f"https://{unit_address}:8008/health", verify=verify)
                 return health_info.status_code == 200
     except RetryError:
@@ -654,7 +654,7 @@ def run_upgrade(
     juju: jubilant.Juju,
     app_name: str,
     charm: str,
-    substrate: Substrate,
+    substrate: Substrates,
     resources: dict[str, str] | None,
 ) -> None:
     """Refresh an application to the charm under test and wait for the refresh to finish.
@@ -663,7 +663,7 @@ def run_upgrade(
     resume-refresh runs on the second unit; on K8s the highest numbered pod is refreshed
     first and resume-refresh runs on the leader.
     """
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         _run_upgrade_vm(juju, app_name, charm)
     else:
         _run_upgrade_k8s(juju, app_name, charm, resources)

@@ -3,16 +3,16 @@
 # See LICENSE file for licensing details.
 import jubilant
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_attempt, wait_fixed
 
 from tests.integration.charm.helpers import CHARM_BASE, get_cluster_roles
 from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
-from tests.integration.types import Substrate
 
 
 @pytest.mark.abort_on_fail
 def test_build_and_deploy(
-    juju: jubilant.Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy three units of PostgreSQL."""
     with fast_forward(juju):
@@ -23,7 +23,7 @@ def test_build_and_deploy(
             base=CHARM_BASE,
             config={"profile": "testing"},
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
         juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=1500)
 
