@@ -19,7 +19,26 @@ ABORTED_BY = pytest.StashKey[str]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    # --controller, --model and --keep-models come from pytest-operator.
+    parser.addoption(
+        "--controller",
+        action="store",
+        help="Juju controller to use; defaults to the current controller.",
+    )
+    parser.addoption(
+        "--model",
+        action="store",
+        help="Juju model to use; defaults to a temporary model for each test module.",
+    )
+    parser.addoption(
+        "--keep-models",
+        action="store_true",
+        help="Keep temporary models after the tests.",
+    )
+    parser.addoption(
+        "--no-deploy",
+        action="store_true",
+        help="Skip tests marked skip_if_deployed; requires --model.",
+    )
     parser.addoption(
         "--substrate",
         choices=[substrate.value for substrate in Substrate],
@@ -29,6 +48,11 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    if config.getoption("--no-deploy") and not config.getoption("--model"):
+        raise pytest.UsageError("must specify --model when using --no-deploy")
+    config.addinivalue_line(
+        "markers", "skip_if_deployed: skip deployment when --no-deploy is specified"
+    )
     config.addinivalue_line("markers", "vm_only: run the test only on the VM substrate")
     config.addinivalue_line("markers", "k8s_only: run the test only on the K8s substrate")
     config.addinivalue_line(
@@ -45,6 +69,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
+    if item.get_closest_marker("skip_if_deployed") and item.config.getoption("--no-deploy"):
+        pytest.skip("Skipping deployment because --no-deploy was specified.")
     aborted_by = item.getparent(pytest.Module).stash.get(ABORTED_BY, None)
     if aborted_by:
         pytest.skip(f"aborted: {aborted_by} failed")
