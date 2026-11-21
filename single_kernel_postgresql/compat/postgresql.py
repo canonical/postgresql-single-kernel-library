@@ -334,6 +334,18 @@ class PostgreSQLBase:
             ):
                 db_roles.append(f"charmed_{database}_admin")
                 db_roles.append(f"charmed_{database}_dml")
+                # Make the owner role the session default for this user in this database.
+                # The login hook does the same SET ROLE at login, but the login_hook
+                # extension skips it while recovery is in progress, so a session on a
+                # replica (and a pooled connection opened there) would stay the bare user.
+                # pg_db_role_setting is a shared catalog, so standbys apply this too.
+                connect_statements.append(
+                    SQL("ALTER ROLE {} IN DATABASE {} SET role = {};").format(
+                        Identifier(user),
+                        Identifier(database),
+                        Identifier(f"charmed_{database}_owner"),
+                    )
+                )
             else:
                 connect_statements.append(
                     SQL("GRANT CONNECT ON DATABASE {} TO {};").format(
