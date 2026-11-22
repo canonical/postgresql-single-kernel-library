@@ -1338,11 +1338,25 @@ class PostgreSQLEventsHandler(Object):
             event.fail("Suprerfluous force flag with unit scope")
             return
         try:
-            self.patroni_manager.switchover(self.state.model.unit.name, wait=False)
+            self.patroni_manager.switchover(self.state.model.unit.name)
         except SwitchoverNotSyncError:
             event.fail("Unit is not sync standby")
+            return
         except SwitchoverFailedError:
             event.fail("Switchover failed or timed out, check the logs for details")
+            return
+        try:
+            for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3)):
+                with attempt:
+                    if (
+                        len(self.patroni_manager.get_running_cluster_members())
+                        < self.state.application.planned_units
+                    ):
+                        raise SwitchoverFailedError("demoted primary has not rejoined yet")
+        except RetryError:
+            logger.warning("Not all members are running after the switchover")
+        self.state.peer.data["timestamp"] = str(datetime.now())
+        self._set_active_status()
 
     def _client_endpoint_inputs(self) -> dict:
         """Gather the update_endpoints inputs the manager takes caller-side (port)."""
