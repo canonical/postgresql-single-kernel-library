@@ -17,6 +17,7 @@ from tests.integration.charm.helpers import (
     get_db_standby_leader_unit,
 )
 from tests.integration.helpers.juju import (
+    StatusFn,
     get_app_leader,
     get_app_units,
     retry_if_cli_error,
@@ -207,16 +208,7 @@ def test_create_replication(first_model: str, second_model: str) -> None:
     )
 
     logging.info("Waiting for the applications to settle")
-    retry_if_cli_error(
-        lambda: model_1.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_1), timeout=20 * MINUTE_SECS
-        )
-    )
-    retry_if_cli_error(
-        lambda: model_2.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=20 * MINUTE_SECS
-        )
-    )
+    wait_for_replication_settled(model_1, DB_APP_1, model_2, DB_APP_2)
 
 
 def test_data_replication(
@@ -226,16 +218,7 @@ def test_data_replication(
     logging.info("Testing data replication")
     model_1 = Juju(model=first_model)
     model_2 = Juju(model=second_model)
-    retry_if_cli_error(
-        lambda: model_1.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_1), timeout=20 * MINUTE_SECS
-        )
-    )
-    retry_if_cli_error(
-        lambda: model_2.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=20 * MINUTE_SECS
-        )
-    )
+    wait_for_replication_settled(model_1, DB_APP_1, model_2, DB_APP_2)
 
     results = get_db_max_written_values(first_model, second_model, first_model, DB_TEST_APP_1)
 
@@ -258,16 +241,7 @@ def test_standby_promotion(first_model: str, second_model: str) -> None:
     rerelate_test_app(model_2, DB_APP_2, DB_TEST_APP_2)
 
     model_1 = Juju(model=first_model)
-    retry_if_cli_error(
-        lambda: model_1.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_1), timeout=20 * MINUTE_SECS
-        )
-    )
-    retry_if_cli_error(
-        lambda: model_2.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=20 * MINUTE_SECS
-        )
-    )
+    wait_for_replication_settled(model_2, DB_APP_2, model_1, DB_APP_1)
 
     results = get_db_max_written_values(first_model, second_model, second_model, DB_TEST_APP_2)
     assert len(results) == 6
@@ -325,16 +299,7 @@ def test_unrelate_and_relate(first_model: str, second_model: str) -> None:
     rerelate_test_app(model_1, DB_APP_1, DB_TEST_APP_1)
 
     logging.info("Waiting for the applications to settle")
-    retry_if_cli_error(
-        lambda: model_1.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_1), timeout=20 * MINUTE_SECS
-        )
-    )
-    retry_if_cli_error(
-        lambda: model_2.wait(
-            ready=wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=20 * MINUTE_SECS
-        )
-    )
+    wait_for_replication_settled(model_1, DB_APP_1, model_2, DB_APP_2)
 
     results = get_db_max_written_values(first_model, second_model, first_model, DB_TEST_APP_1)
     assert len(results) == 6
@@ -452,6 +417,42 @@ def test_scale_up(first_model: str, second_model: str) -> None:
     assert len(results) == 6
     assert all(results[0] == x for x in results), "Data is not consistent across units"
     assert results[0] > 1, "No data was written to the database"
+
+
+def replication_role_settled(app: str, role: str) -> StatusFn:
+    """Return a wait condition: app active and idle, with a unit reporting the cluster role.
+
+    The units of a cluster that is being (re)built as a standby are all active and
+    idle for a while in the middle of the process, before the database is restarted
+    as a standby: a wait on the status alone passes there, and the next step then
+    runs against a cluster that is not usable yet (promote-to-primary fails with
+    'Cluster not initialised yet.'). The role in the unit status message ('Primary'
+    or 'Standby', possibly followed by '(degraded)') is only set once the cluster
+    took its role.
+    """
+    return lambda status: (
+        wait_for_apps_status(jubilant.all_active, app)(status)
+        and any(
+            unit.workload_status.message.startswith(role)
+            for unit in status.apps[app].units.values()
+        )
+    )
+
+
+def wait_for_replication_settled(
+    primary_model: Juju, primary_app: str, standby_model: Juju, standby_app: str
+) -> None:
+    """Wait until both clusters took their role in the async replication."""
+    retry_if_cli_error(
+        lambda: primary_model.wait(
+            ready=replication_role_settled(primary_app, "Primary"), timeout=20 * MINUTE_SECS
+        )
+    )
+    retry_if_cli_error(
+        lambda: standby_model.wait(
+            ready=replication_role_settled(standby_app, "Standby"), timeout=20 * MINUTE_SECS
+        )
+    )
 
 
 def get_db_max_written_values(
