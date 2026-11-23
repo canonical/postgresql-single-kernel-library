@@ -1,7 +1,7 @@
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.core.state import CharmState
@@ -28,3 +28,19 @@ def test_patroni_url_keeps_ipv4_endpoint_unbracketed():
     state = CharmState(charm=mock_charm, substrate=Substrates.VM, s3_requirer=Mock())
 
     assert state.patroni_url == "https://192.0.2.10:8008"
+
+
+def test_config_normalisation():
+    mock_charm = Mock()
+    mock_charm.framework.model.config = {
+        "experimental_max_connections": 100,
+        "experimental-max-connections": 200,
+        "synchronous_mode_strict": False,
+        "synchronous-mode-strict": None,
+    }
+    with patch("single_kernel_postgresql.core.state.CharmConfig") as _charm_config:
+        state = CharmState(charm=mock_charm, substrate=Substrates.VM, s3_requirer=Mock())
+        _ = state.config
+        _charm_config.assert_called_once_with(
+            experimental_max_connections=200, synchronous_mode_strict=False
+        )

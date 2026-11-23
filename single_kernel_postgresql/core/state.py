@@ -71,16 +71,16 @@ class CharmState(Object):
     @cached_property
     def config(self) -> CharmConfig:
         """Return a config instance validated and parsed using the provided pydantic class."""
-        config = {
-            # Prefer value of option name with dash (-) and fallback to name with underscore (_)
-            config_option: self.model.config.get(
-                config_option.replace("_", "-"), self.model.config.get(config_option)
-            )
-            for config_option in CharmConfig.keys()  # noqa: SIM118
-        }
         config: dict[str, Any] = {
-            config_option: value for config_option, value in config.items() if value is not None
+            config_option: config_value
+            for config_option, config_value in self.model.config.items()
+            if "-" not in config_option and config_value is not None
         }
+        config.update({
+            config_option.replace("-", "_"): config_value
+            for config_option, config_value in self.model.config.items()
+            if "-" in config_option and config_value is not None
+        })
         return CharmConfig(**config)
 
     @property
