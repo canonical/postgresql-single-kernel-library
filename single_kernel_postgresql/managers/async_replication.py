@@ -831,12 +831,15 @@ class AsyncReplicationManager(BaseManager):
             event.defer()
             return False
         if not self.was_backup_made:
-            # Store current data in a tar.gz file.
-            logger.info(
-                "Creating backup of pgdata folder" if k8s else "Creating backup of data folder"
-            )
-            filename = self.workload.create_data_backup_tarball()
-            logger.warning("Please review the backup file %s and handle its removal", filename)
+            if self.workload.exists(self.workload.paths.data):
+                # Store current data in a tar.gz file.
+                logger.info(
+                    "Creating backup of pgdata folder" if k8s else "Creating backup of data folder"
+                )
+                filename = self.workload.create_data_backup_tarball()
+                logger.warning("Please review the backup file %s and handle its removal", filename)
+            else:
+                logger.warning("Skipping the data backup: %s not found", self.workload.paths.data)
         if not k8s:
             self.state.application.data["suppress-oversee-users"] = "true"
         self.set_backup_flag()

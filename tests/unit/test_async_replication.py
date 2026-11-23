@@ -441,6 +441,7 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
             "create_data_backup_tarball",
             return_value="backup.tar.gz",
         ),
+        patch.object(type(harness.charm.workload), "exists", return_value=True),
         patch.object(
             type(harness.charm.workload), "clear_data_directories"
         ) as clear_data_directories,
@@ -749,6 +750,7 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
             "create_data_backup_tarball",
             return_value="backup.tar.gz",
         ) as create_tarball,
+        patch.object(type(harness.charm.workload), "exists", return_value=True),
         patch.object(type(harness.charm.workload), "clear_data_directories"),
         patch.object(PatroniManager, "stop_patroni", return_value=True),
         patch.object(PatroniManager, "get_standby_leader", return_value=None),
@@ -758,6 +760,33 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
         harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
 
     create_tarball.assert_called_once()
+    assert harness.get_relation_data(async_rel, harness.charm.app.name)["backup-data"] == "True"
+
+
+def test_relation_changed_skips_the_backup_when_pgdata_is_missing(substrate, harness, async_rel):
+    """A leader that lost its data folder reconfigures instead of failing the hook."""
+    harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
+
+    with (
+        patch.object(
+            type(harness.charm.workload), "get_system_identifier", return_value=("7001", None)
+        ),
+        patch.object(
+            type(harness.charm.workload),
+            "create_data_backup_tarball",
+            side_effect=RuntimeError("tar: Cannot stat: No such file or directory"),
+        ) as create_tarball,
+        patch.object(type(harness.charm.workload), "exists", return_value=False),
+        patch.object(type(harness.charm.workload), "clear_data_directories"),
+        patch.object(PatroniManager, "stop_patroni", return_value=True),
+        patch.object(PatroniManager, "get_standby_leader", return_value=None),
+        patch.object(harness.charm, "update_config"),
+        _standby_teardown_patches(harness, substrate),
+    ):
+        harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
+
+    create_tarball.assert_not_called()
+    assert _unit_peer_data(harness)["stopped"] == "True"
     assert harness.get_relation_data(async_rel, harness.charm.app.name)["backup-data"] == "True"
 
 
