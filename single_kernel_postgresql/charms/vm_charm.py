@@ -4,6 +4,11 @@
 
 """PostgreSQL VM Charm."""
 
+# Run the architecture check before importing dependencies with native binaries.
+# isort: off
+from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
+# isort: on
+
 import json
 import logging
 import os
@@ -19,7 +24,6 @@ from charmlibs import snap
 from ops import ActiveStatus, BlockedStatus, StatusBase
 from tenacity import RetryError
 
-from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import (
     APP_SCOPE,
