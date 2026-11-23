@@ -103,7 +103,7 @@ def test_restart(juju: jubilant.Juju, juju_continuous_writes, app_name: str) -> 
             for unit_name, unit in app.units.items()
             if unit_name == non_primary
         ),
-        timeout=float("inf"),
+        timeout=600,
         delay=0.5,
         successes=1,
     )
