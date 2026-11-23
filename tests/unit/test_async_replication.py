@@ -836,6 +836,7 @@ def test_relation_changed_k8s_leader_resets_the_cluster_once_all_units_stopped(
             side_effect=lambda: calls.append("clear"),
         ),
         patch.object(type(harness.charm.workload), "init_storage") as init_storage,
+        patch.object(type(harness.charm), "fix_leader_annotation") as fix_leader_annotation,
     ):
         start.side_effect = lambda _: calls.append("start")
         harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
@@ -845,6 +846,9 @@ def test_relation_changed_k8s_leader_resets_the_cluster_once_all_units_stopped(
     assert calls == ["delete", "clear", "start", "start"]
     init_storage.assert_called_once()
     assert _unit_peer_data(harness)["standby-pgdata-cleared"] == "True"
+    # Claiming the leader lock for a member bootstrapping from an empty data folder
+    # makes Patroni release it and give the bootstrap up.
+    fix_leader_annotation.assert_not_called()
     assert harness.model.unit.status == WaitingStatus(
         "Still starting the database in the standby leader"
     )

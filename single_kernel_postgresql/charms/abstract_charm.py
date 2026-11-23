@@ -148,7 +148,6 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             set_primary_status_message=self.set_primary_status_message,
             set_app_status=self._recompute_async_app_status,
             create_pgdata=self.create_pgdata,
-            fix_leader_annotation=self.fix_leader_annotation,
             re_emit_relation_changed=self._re_emit_async_relation_changed,
             k8s_manager=k8s_manager,
             watcher=watcher,

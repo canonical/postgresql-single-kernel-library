@@ -1009,8 +1009,10 @@ class PostgreSQLEventsHandler(Object):
                 self.config_manager.reconcile_extensions(self.postgresql())
                 return True
 
-            logger.debug("Attempting to fix leader annotation")
-            self.charm.fix_leader_annotation()
+            # A unit stopped to become a standby must not claim the Patroni leader lock.
+            if not self.state.peer.is_unit_stopped:
+                logger.debug("Attempting to fix leader annotation")
+                self.charm.fix_leader_annotation()
 
             logger.debug("on_update_status early exit: Unit is in Blocked/Waiting status")
             return False

@@ -105,7 +105,6 @@ class AsyncReplicationManager(BaseManager):
         set_primary_status_message: "Callable[[], None]",
         set_app_status: "Callable[[], None]",
         create_pgdata: "Callable[[], None]",
-        fix_leader_annotation: "Callable[[], bool]",
         re_emit_relation_changed: "Callable[[], None]",
         k8s_manager: "K8sManager | None" = None,
         watcher: "WatcherEventsHandler | None" = None,
@@ -123,7 +122,6 @@ class AsyncReplicationManager(BaseManager):
             set_primary_status_message: the charm's primary status-message bridge.
             set_app_status: the bridge recomputing the async-replication app status.
             create_pgdata: the K8s pgdata-recreation bridge.
-            fix_leader_annotation: the K8s leader-annotation bridge.
             re_emit_relation_changed: the bridge re-emitting the async relation-changed
                 event through the handler (framework plumbing stays event-side).
             k8s_manager: the lightkube resource manager (K8s substrate only).
@@ -136,7 +134,6 @@ class AsyncReplicationManager(BaseManager):
         self.set_primary_status_message = set_primary_status_message
         self.set_app_status = set_app_status
         self.create_pgdata = create_pgdata
-        self.fix_leader_annotation = fix_leader_annotation
         self.re_emit_relation_changed = re_emit_relation_changed
         self.k8s_manager = k8s_manager
         self.watcher = watcher
@@ -956,9 +953,6 @@ class AsyncReplicationManager(BaseManager):
                         self.patroni_manager.reload_patroni_configuration()
                 raise NotReadyError()
             else:
-                if k8s:
-                    # If the standby leader fails to start, fix the leader annotation and defer the event.
-                    self.fix_leader_annotation()
                 self.set_unit_status(
                     WaitingStatus("Still starting the database in the standby leader")
                 )

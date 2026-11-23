@@ -407,6 +407,17 @@ def test_update_status_blocked_non_s3_fixes_leader_annotation(handler, container
     fix_annotation.assert_called_once_with()
 
 
+def test_update_status_keeps_leader_annotation_of_a_stopped_unit(handler, harness, container):
+    """A unit stopped to become a standby must not claim the Patroni leader lock."""
+    rel_id = harness.model.get_relation(PEER_RELATION).id
+    with harness.hooks_disabled():
+        harness.update_relation_data(rel_id, harness.charm.unit.name, {"stopped": "True"})
+    handler.state.model.unit.status = WaitingStatus("Waiting for the standby leader")
+    with patch.object(type(handler.charm), "fix_leader_annotation") as fix_annotation:
+        assert handler._on_update_status_early_exit_checks(container) is False
+    fix_annotation.assert_not_called()
+
+
 def test_update_status_retries_extension_disable(handler, container):
     handler.state.model.unit.status = BlockedStatus(EXTENSION_OBJECT_MESSAGE)
     with patch.object(type(handler.config_manager), "reconcile_extensions") as reconcile:

@@ -86,7 +86,6 @@ def manager(harness):
             set_primary_status_message=Mock(),
             set_app_status=Mock(),
             create_pgdata=Mock(),
-            fix_leader_annotation=Mock(return_value=False),
             re_emit_relation_changed=Mock(),
             k8s_manager=Mock(),
             watcher=None,
