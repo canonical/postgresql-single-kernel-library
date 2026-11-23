@@ -204,7 +204,7 @@ def test_app_garbage_ignorance(juju: jubilant.Juju, app_name: str, substrate: Su
             juju.remove_application(app_name)
             juju.wait(
                 lambda status: app_name not in status.apps,
-                timeout=float("inf"),
+                timeout=1000,
                 delay=0.5,
                 successes=1,
             )

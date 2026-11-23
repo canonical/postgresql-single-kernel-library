@@ -94,7 +94,7 @@ def test_cluster_restore(juju: jubilant.Juju):
     juju.remove_application(FIRST_APPLICATION)
     juju.wait(
         lambda status: FIRST_APPLICATION not in status.apps,
-        timeout=float("inf"),
+        timeout=1000,
         delay=0.5,
         successes=1,
     )
