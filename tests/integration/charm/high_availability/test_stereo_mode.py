@@ -167,7 +167,7 @@ def test_build_and_deploy_stereo_mode(juju: jubilant.Juju, charm, app_name: str)
                     lambda status, app=app: app not in status.apps,
                     delay=0.5,
                     successes=1,
-                    timeout=float("inf"),
+                    timeout=1000,
                 )
 
     with fast_forward(juju):
@@ -723,7 +723,7 @@ def test_multi_cluster_watcher(juju: jubilant.Juju, charm, app_name: str) -> Non
                 lambda status: SECOND_PG_APP_NAME not in status.apps,
                 delay=0.5,
                 successes=1,
-                timeout=float("inf"),
+                timeout=1000,
             )
 
     # Verify original watcher is still healthy after removing the second cluster
@@ -760,7 +760,7 @@ def test_watcher_production_profile_az_blocked(juju: jubilant.Juju, charm, app_n
             lambda status: WATCHER_APP_NAME not in status.apps,
             delay=0.5,
             successes=1,
-            timeout=float("inf"),
+            timeout=1000,
         )
 
     try:
@@ -823,7 +823,7 @@ def test_watcher_production_profile_az_blocked(juju: jubilant.Juju, charm, app_n
                 lambda status: production_watcher not in status.apps,
                 delay=0.5,
                 successes=1,
-                timeout=float("inf"),
+                timeout=1000,
             )
 
         # Restore the original testing watcher
