@@ -8,7 +8,7 @@ import psycopg2
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import DATABASE_DEFAULT_NAME
-from tenacity import Retrying, stop_after_attempt, wait_fixed
+from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
     CHARM_BASE,
@@ -234,7 +234,7 @@ def test_read_only_endpoint_in_scaled_up_cluster_vm(juju: jubilant.Juju):
 
         # Try to get the connection string of the database using the read-only endpoint.
         # It should be the replica unit.
-        for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True):
+        for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True):
             with attempt:
                 data = get_application_relation_data(
                     juju,

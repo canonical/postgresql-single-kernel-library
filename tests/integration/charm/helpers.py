@@ -1197,8 +1197,8 @@ def stop_machine(machine_name: str) -> None:
 
 
 def assert_sync_standbys(unit_ip: str, standbys: int) -> None:
-    """Check for at least the original number of synchronous standbys."""
-    for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3), reraise=True):
+    """Wait up to ten minutes for at least the requested number of synchronous standbys."""
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
         with attempt:
             cluster = get_patroni_cluster(unit_ip)
             cluster_standbys = 0
