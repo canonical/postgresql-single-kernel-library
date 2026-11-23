@@ -33,7 +33,7 @@ from tests.integration.charm.helpers import (
     remove_unit_force,
     scale_ha_application,
 )
-from tests.integration.helpers.juju import fast_forward, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
 
 TEST_DATABASE_NAME = "test_database"
 DUP_DATABASE_APP_NAME = "postgres-test-dup"
@@ -69,7 +69,7 @@ def test_app_force_removal(
         )
 
         logger.info("waiting for idle")
-        wait_for_idle(juju, apps=[app_name], status="active", timeout=1500)
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=1500)
         assert (
             next(iter(juju.status().apps[app_name].units.values())).workload_status.current
             == "active"
@@ -156,7 +156,7 @@ def test_app_garbage_ignorance(juju: jubilant.Juju, app_name: str, substrate: Su
 
             # Timeout is increeced due to k8s Init:CrashLoopBackOff status of postgresql pod
             logger.info("waiting for idle")
-            wait_for_idle(juju, status="active", timeout=2000)
+            juju.wait(wait_for_apps_status(jubilant.all_active), timeout=2000)
             assert (
                 next(iter(juju.status().apps[app_name].units.values())).workload_status.current
                 == "active"
@@ -243,8 +243,8 @@ def test_app_resources_conflicts_v3(juju: jubilant.Juju, charm: str):
 
         logger.info("waiting for duplicate application to be waiting")
         try:
-            wait_for_idle(
-                juju, apps=[DUP_DATABASE_APP_NAME], timeout=60, idle_period=30, status="waiting"
+            juju.wait(
+                wait_for_apps_status(jubilant.all_waiting, DUP_DATABASE_APP_NAME), timeout=60
             )
         except TimeoutError:
             logger.info("Application is not in waiting state. Checking logs...")
@@ -274,7 +274,7 @@ def test_app_resources_conflicts(juju: jubilant.Juju, charm: str, charm_resource
         )
 
         logger.info("waiting for idle")
-        wait_for_idle(juju, status="active", timeout=1000)
+        juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1000)
         assert (
             next(
                 iter(juju.status().apps[DUP_DATABASE_APP_NAME].units.values())
@@ -330,7 +330,9 @@ def test_app_resources_conflicts(juju: jubilant.Juju, charm: str, charm_resource
 
         logger.info("waiting for duplicate application to be blocked")
         try:
-            wait_for_idle(juju, apps=[DUP_DATABASE_APP_NAME], timeout=500, status="blocked")
+            juju.wait(
+                wait_for_apps_status(jubilant.all_blocked, DUP_DATABASE_APP_NAME), timeout=500
+            )
         except TimeoutError:
             logger.info("Application is not in blocked state. Checking logs...")
 

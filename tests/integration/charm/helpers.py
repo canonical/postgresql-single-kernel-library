@@ -49,7 +49,6 @@ from tests.integration.helpers.juju import (
     get_secret_by_label,
     get_unit_address,
     wait_for_apps_status,
-    wait_for_idle,
 )
 from tests.integration.helpers.postgresql import db_connect, execute_query
 
@@ -1480,9 +1479,7 @@ def start_ha_continuous_writes(
     ]
     if not relations:
         model.integrate(app, f"{APPLICATION_NAME}:database")
-        wait_for_idle(
-            model, apps=[APPLICATION_NAME, app], status="active", timeout=1000, idle_period=30
-        )
+        model.wait(wait_for_apps_status(jubilant.all_active, APPLICATION_NAME, app), timeout=1000)
     for attempt in Retrying(stop=stop_after_delay(60 * 5), wait=wait_fixed(3), reraise=True):
         with attempt:
             unit = next(iter(model.status().apps[APPLICATION_NAME].units))
@@ -1622,8 +1619,11 @@ def is_secondary_up_to_date(
                     assert results[0] == expected_writes and results[1] == expected_writes
                 elif results[0] != expected_writes or results[1] != expected_writes:
                     with fast_forward(juju, interval="30s"):
-                        wait_for_idle(
-                            juju, apps=[unit_name.split("/")[0]], idle_period=15, timeout=1000
+                        juju.wait(
+                            lambda status: jubilant.all_agents_idle(
+                                status, unit_name.split("/")[0]
+                            ),
+                            timeout=1000,
                         )
                         raise Exception
     except RetryError:
@@ -1670,7 +1670,7 @@ def scale_ha_application(
     count: int,
     model: jubilant.Juju | None = None,
 ) -> None:
-    """Scale using the original HA storage policy and exact-unit idle waits."""
+    """Scale using the original HA storage policy, then wait for the unit count and active status."""
     if model is None:
         model = juju
     if juju.status().model.type != "caas":
@@ -1680,13 +1680,12 @@ def scale_ha_application(
             model.add_unit(application_name, num_units=change)
         elif change < 0:
             model.remove_unit(*units[0:-change])
-        wait_for_idle(
-            model,
-            apps=[application_name],
-            status="active",
+        model.wait(
+            lambda status: (
+                len(status.apps[application_name].units) == count
+                and wait_for_apps_status(jubilant.all_active, application_name)(status)
+            ),
             timeout=2000,
-            idle_period=30,
-            wait_for_exact_units=count,
         )
         return
 
@@ -1699,13 +1698,12 @@ def scale_ha_application(
             successes=1,
         )
     else:
-        wait_for_idle(
-            model,
-            apps=[application_name],
-            status="active",
+        model.wait(
+            lambda status: (
+                len(status.apps[application_name].units) == count
+                and wait_for_apps_status(jubilant.all_active, application_name)(status)
+            ),
             timeout=1200,
-            wait_for_exact_units=count,
-            idle_period=2,
         )
 
 
@@ -1760,7 +1758,7 @@ def add_unit_with_storage(juju: jubilant.Juju, app: str, storages: list[str]) ->
         add_unit_cmd.append(f"--attach-storage={storage}")
     juju.cli(*add_unit_cmd)
     with fast_forward(juju):
-        wait_for_idle(juju, apps=[app], status="active", timeout=2000)
+        juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=2000)
 
     # When removing all units sometimes the last unit remain in the list
     current_units = set(juju.status().apps[app].units)
@@ -1995,13 +1993,7 @@ def remove_unit_force(juju: jubilant.Juju, num_units: int):
             successes=1,
         )
     else:
-        wait_for_idle(
-            juju,
-            apps=[app_name_str],
-            status="active",
-            timeout=1000,
-            wait_for_exact_units=scale,
-        )
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name_str), timeout=1000)
 
 
 def is_postgresql_ready(
@@ -2132,7 +2124,7 @@ def send_signal_to_process(  # noqa: C901
     app = get_postgresql_app_name(juju)
     if len(juju.status().apps[app].units) < 2:
         juju.add_unit(app, num_units=1)
-        wait_for_idle(juju, apps=[app], status="active", timeout=1000)
+        juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=1000)
 
     opt = "-f" if "/" in process else "-x"
     if juju.status().model.type != "caas":

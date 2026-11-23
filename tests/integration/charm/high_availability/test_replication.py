@@ -21,7 +21,7 @@ from tests.integration.charm.helpers import (
     scale_ha_application,
     start_ha_continuous_writes,
 )
-from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_apps_status
 from tests.integration.helpers.postgresql import db_connect
 
 
@@ -59,7 +59,7 @@ def test_build_and_deploy(
     if wait_for_apps:
         with fast_forward(juju):
             juju.integrate(app_name, f"{APPLICATION_NAME}:database")
-            wait_for_idle(juju, status="active", timeout=1500)
+            juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
 
 
 def test_reelection(
@@ -88,7 +88,7 @@ def test_reelection(
 
     # Wait and get the primary again (which can be any unit, including the previous primary).
     with fast_forward(juju):
-        wait_for_idle(juju, apps=[app], status="active")
+        juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=600)
 
     # Check whether writes are increasing.
     are_writes_increasing(juju, primary_name)
@@ -156,7 +156,7 @@ def test_no_data_replicated_between_clusters(
                 resources=charm_resources,
                 trust=substrate == Substrates.K8S,
             )
-            wait_for_idle(juju, apps=[new_cluster_app], status="active", timeout=1500)
+            juju.wait(wait_for_apps_status(jubilant.all_active, new_cluster_app), timeout=1500)
 
     # Start an application that continuously writes data to the database.
     start_ha_continuous_writes(juju, app)
