@@ -76,6 +76,7 @@ def restore_manager(harness, substrate, workload, backup_manager, monkeypatch):
         patroni_manager=MagicMock(),
         update_config=MagicMock(return_value=True),
         backup_manager=backup_manager,
+        set_unit_status=MagicMock(),
         is_standby_cluster=None if substrate == "k8s" else MagicMock(return_value=False),
     )
     manager.patroni_manager.get_patroni_restart_condition.return_value = "always"
@@ -573,8 +574,10 @@ def test_block_on_pitr_failure_persists_flag_and_store_record(restore_manager):
     """Blocking on PITR failure marks the per-unit flag and the status store."""
     restore_manager.block_on_pitr_failure()
     assert restore_manager.state.peer.data["pitr-failed"] == "True"
-    records = restore_manager.state.statuses.get("unit", restore_manager.name).root
-    assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+    # TODO restore when advanced statuses are re-enabled
+    # records = restore_manager.state.statuses.get("unit", restore_manager.name).root
+    # assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+    restore_manager.set_unit_status.assert_called_once_with(BlockedStatus(CANNOT_RESTORE_PITR))
 
 
 def test_pitr_failure_replays_blocked_through_collect(restore_manager):

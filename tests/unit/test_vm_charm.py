@@ -204,7 +204,9 @@ def test_config_error_survives_collect_and_recompute(charm, harness):
         # The update-status recompute clears the store per manager and re-adds
         # whatever get_statuses(recompute=True) returns; the durable flag must
         # bring the blocked record back.
-        charm.status_handler._on_update_status(Mock())
+        # TODO switch back when advanced statuses are re-enabled
+        # charm.status_handler._on_update_status(Mock())
+        charm.postgresql_events_handler._on_update_status(Mock())
         records = charm.state.statuses.get("unit", charm.config_manager.name).root
         assert any(
             r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
@@ -360,7 +362,9 @@ def test_database_request_error_survives_collect(charm, harness):
 
         # The update-status recompute wipes per-manager store records; the flag
         # must bring the blocked back.
-        charm.status_handler._on_update_status(Mock())
+        # TODO switch back when advanced statuses are re-enabled
+        # charm.status_handler._on_update_status(Mock())
+        charm.postgresql_events_handler._on_update_status(Mock())
         harness.evaluate_status()
         assert charm.unit.status == BlockedStatus("invalid database name")
 

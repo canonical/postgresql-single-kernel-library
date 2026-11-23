@@ -24,6 +24,7 @@ with suppress(ImportError):
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
+from ops import ActiveStatus, BlockedStatus
 from ops.pebble import ChangeError, ExecError
 
 from single_kernel_postgresql.config.enums import Substrates
@@ -57,6 +58,10 @@ from single_kernel_postgresql.utils.backup import (
 from single_kernel_postgresql.workload.base import PebbleLayerSpec
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ops import StatusBase
+
     from single_kernel_postgresql.core.state import CharmState
     from single_kernel_postgresql.managers.backup import BackupManager
     from single_kernel_postgresql.workload.base import BaseWorkload
@@ -97,6 +102,7 @@ class RestoreManager(BaseManager):
         patroni_manager: PatroniManager,
         update_config: UpdateConfigFunction,
         backup_manager: "BackupManager",
+        set_unit_status: "Callable[[StatusBase], None]",
         is_standby_cluster: IsStandbyClusterFunction | None = None,
     ):
         """Manager of PostgreSQL backup restores.
@@ -110,9 +116,12 @@ class RestoreManager(BaseManager):
         """
         super().__init__(state, workload, "restore")
         self.patroni_manager = patroni_manager
-        self.update_config = update_config
         self.backup_manager = backup_manager
         self._is_standby_cluster_bridge = is_standby_cluster
+
+        # Charm fucts
+        self.update_config = update_config
+        self.set_unit_status = set_unit_status
 
     # -- Substrate-bridged predicates -------------------------------------------
 
@@ -758,17 +767,21 @@ class RestoreManager(BaseManager):
         persisted through the status machinery instead.
         """
         self.state.peer.data[PITR_FAILED_KEY] = "True"
-        self.state.add_status_if_not_present(
-            StatusObject(status="blocked", message=CANNOT_RESTORE_PITR),
-            scope="unit",
-            component=self.name,
-        )
+        # TODO re-enable with advanced statuses
+        # self.state.add_status_if_not_present(
+        #     StatusObject(status="blocked", message=CANNOT_RESTORE_PITR),
+        #     scope="unit",
+        #     component=self.name,
+        # )
+        self.set_unit_status(BlockedStatus(CANNOT_RESTORE_PITR))
 
     def clear_pitr_failure(self) -> None:
         """Clear the persisted failed-PITR state once its condition resolves."""
         self.state.peer.data.pop(PITR_FAILED_KEY, None)
-        self.state.remove_status_if_present(
-            StatusObject(status="blocked", message=CANNOT_RESTORE_PITR),
-            scope="unit",
-            component=self.name,
-        )
+        # TODO re-enable with advanced statuses
+        # self.state.remove_status_if_present(
+        #     StatusObject(status="blocked", message=CANNOT_RESTORE_PITR),
+        #     scope="unit",
+        #     component=self.name,
+        # )
+        self.set_unit_status(ActiveStatus())

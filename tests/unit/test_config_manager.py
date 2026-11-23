@@ -1253,7 +1253,9 @@ def test_extension_object_block_survives_collect_and_recompute(harness_config, h
 
         # The update-status recompute wipes the store records; the flag must
         # bring the blocked back.
-        harness.charm.status_handler._on_update_status(Mock())
+        # TODO switch back when advanced statuses are re-enabled
+        # harness.charm.status_handler._on_update_status(Mock())
+        harness.charm.postgresql_events_handler._on_update_status(Mock())
         harness.evaluate_status()
         assert harness.charm.unit.status == BlockedStatus(EXTENSION_OBJECT_MESSAGE)
 
