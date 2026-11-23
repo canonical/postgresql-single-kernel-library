@@ -340,7 +340,7 @@ class ConfigManager(BaseManager):
 
         # Build PostgreSQL parameters.
         pg_parameters = postgresql_client.build_postgresql_parameters(
-            self.state.config.model_dump(), available_memory, limit_memory
+            self.state.config.model_dump(exclude_none=True), available_memory, limit_memory
         )
 
         # Calculate and merge worker process configurations
