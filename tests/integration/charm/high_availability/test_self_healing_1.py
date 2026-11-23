@@ -26,7 +26,7 @@ from tests.integration.charm.helpers import (
     start_ha_continuous_writes,
     storage_type,
 )
-from tests.integration.helpers.juju import fast_forward, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +82,8 @@ def test_build_and_deploy(
     if wait_for_apps:
         juju.integrate(app_name, f"{APPLICATION_NAME}:database")
         with fast_forward(juju):
-            wait_for_idle(
-                juju,
-                apps=[APPLICATION_NAME, app_name],
-                status="active",
-                timeout=1500,
-                idle_period=30,
+            juju.wait(
+                wait_for_apps_status(jubilant.all_active, APPLICATION_NAME, app_name), timeout=1500
             )
 
 
@@ -109,7 +105,7 @@ def test_storage_re_use(juju: jubilant.Juju, app_name: str, juju_continuous_writ
     # removing the only replica can be disastrous
     if len(juju.status().apps[app].units) < 2:
         juju.add_unit(app, num_units=1)
-        wait_for_idle(juju, apps=[app], status="active", timeout=1500)
+        juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=1500)
 
     # Start an application that continuously writes data to the database.
     start_ha_continuous_writes(juju, app)
@@ -119,11 +115,8 @@ def test_storage_re_use(juju: jubilant.Juju, app_name: str, juju_continuous_writ
         if is_replica(juju, unit):
             break
     unit_storage_id = get_storage_ids(juju, unit)
-    expected_units = len(juju.status().apps[app].units) - 1
     juju.remove_unit(unit)
-    wait_for_idle(
-        juju, apps=[app], status="active", timeout=1000, wait_for_exact_units=expected_units
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=1000)
     new_unit = add_unit_with_storage(juju, app, unit_storage_id)
 
     assert reused_replica_storage(juju, new_unit), (

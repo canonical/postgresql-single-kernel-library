@@ -36,7 +36,7 @@ from tests.integration.charm.helpers import (
     start_ha_continuous_writes,
     wait_network_restore,
 )
-from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_apps_status
 from tests.integration.helpers.postgresql import db_connect
 
 logger = logging.getLogger(__name__)
@@ -91,12 +91,8 @@ def test_build_and_deploy(
     if wait_for_apps:
         juju.integrate(app_name, f"{APPLICATION_NAME}:database")
         with fast_forward(juju):
-            wait_for_idle(
-                juju,
-                apps=[APPLICATION_NAME, app_name],
-                status="active",
-                timeout=1500,
-                idle_period=30,
+            juju.wait(
+                wait_for_apps_status(jubilant.all_active, APPLICATION_NAME, app_name), timeout=1500
             )
 
 
@@ -279,14 +275,7 @@ def test_network_cut(
         # IP are made).
         logger.info("waiting for cluster to become idle after updating member IP")
         with fast_forward(juju, "60s"):
-            wait_for_idle(
-                juju,
-                apps=[app],
-                status="active",
-                timeout=1000,
-                idle_period=30,
-                raise_on_error=False,
-            )
+            juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=1000)
 
         # Wait the LXD unit has its IP updated.
         logger.info("waiting for IP address to be updated on Juju unit")
@@ -380,7 +369,7 @@ def test_network_cut_without_ip_change(
     # Wait until the cluster becomes idle.
     logger.info("waiting for cluster to become idle")
     with fast_forward(juju):
-        wait_for_idle(juju, apps=[app], status="active")
+        juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=600)
 
     # Verify that the database service got restarted and is ready in the old primary.
     logger.info(f"waiting for the database service to be ready on {primary_name}")

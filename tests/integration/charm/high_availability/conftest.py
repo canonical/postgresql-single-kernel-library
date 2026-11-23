@@ -16,7 +16,7 @@ from tests.integration.charm.helpers import (
     change_ha_patroni_setting,
     get_postgresql_app_name,
 )
-from tests.integration.helpers.juju import fast_forward, get_app_leader, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, get_app_leader, wait_for_apps_status
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +65,7 @@ def juju_restart_policy(juju: jubilant.Juju, substrate: Substrates) -> None:
             "tests/integration/charm/high_availability/manifests/extend_pebble_restart_delay.yml",
         )
         with fast_forward(juju):
-            wait_for_idle(
-                juju,
-                apps=[app],
-                status="active",
-                raise_on_blocked=True,
-                timeout=5 * 60,
-                idle_period=30,
-            )
+            juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=5 * 60)
     yield
 
 

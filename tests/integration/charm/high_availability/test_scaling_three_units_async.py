@@ -18,7 +18,7 @@ from tests.integration.charm.helpers import (
     start_ha_continuous_writes,
     stop_machine,
 )
-from tests.integration.helpers.juju import fast_forward, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def test_build_and_deploy(juju: jubilant.Juju, charm, app_name: str) -> None:
         )
 
         juju.integrate(app_name, f"{APPLICATION_NAME}:database")
-        wait_for_idle(juju, status="active", timeout=1500)
+        juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
 
 
 @pytest.mark.parametrize(
@@ -95,7 +95,7 @@ def test_removing_unit(
                 delay=0.5,
                 successes=1,
             )
-            wait_for_idle(juju, timeout=600, idle_period=45)
+            juju.wait(jubilant.all_agents_idle, timeout=600)
 
             juju.run(
                 next(iter(juju.status().apps[app_name].units)),
@@ -113,11 +113,11 @@ def test_removing_unit(
             )
             logger.warning(f"Patroni self-healed without raft reinitialisation for roles {roles}")
 
-    wait_for_idle(juju, status="active", timeout=600, idle_period=45)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=600)
 
     logger.info("Scaling back up")
     juju.add_unit(app_name, num_units=len(roles))
-    wait_for_idle(juju, status="active", timeout=1500)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
 
     are_writes_increasing(juju, units)
 

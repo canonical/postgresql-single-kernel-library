@@ -30,7 +30,7 @@ from tests.integration.charm.helpers import (
     start_ha_continuous_writes,
     update_restart_condition,
 )
-from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_apps_status
 
 logger = logging.getLogger(__name__)
 
@@ -86,12 +86,8 @@ def test_build_and_deploy(
     if wait_for_apps:
         juju.integrate(app_name, f"{APPLICATION_NAME}:database")
         with fast_forward(juju):
-            wait_for_idle(
-                juju,
-                apps=[APPLICATION_NAME, app_name],
-                status="active",
-                timeout=1500,
-                idle_period=30,
+            juju.wait(
+                wait_for_apps_status(jubilant.all_active, APPLICATION_NAME, app_name), timeout=1500
             )
 
 
@@ -243,7 +239,7 @@ def test_full_cluster_restart(
             assert new_primary_name is not None, "Could not get primary from any unit"
 
     with fast_forward(juju, "60s"):
-        wait_for_idle(juju, status="active", timeout=1000)
+        juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1000)
         are_writes_increasing(juju)
 
     # Verify that all units are part of the same cluster.
