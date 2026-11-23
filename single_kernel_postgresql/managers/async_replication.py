@@ -837,11 +837,7 @@ class AsyncReplicationManager(BaseManager):
             )
             filename = self.workload.create_data_backup_tarball()
             logger.warning("Please review the backup file %s and handle its removal", filename)
-        if k8s:
-            # Remove the Kubernetes resources left by the previous cluster.
-            if self.k8s_manager is not None:
-                self.k8s_manager.delete_patroni_cluster_resources()
-        else:
+        if not k8s:
             self.state.application.data["suppress-oversee-users"] = "true"
         self.set_backup_flag()
         return True
@@ -867,12 +863,6 @@ class AsyncReplicationManager(BaseManager):
                 if not self._configure_standby_cluster(event):
                     return False
 
-                if k8s:
-                    # Only the leader clears pgdata here. Non-leaders will clear pgdata
-                    # after the standby leader has started (in _wait_for_standby_leader)
-                    # to avoid system ID mismatch issues.
-                    self._clear_pgdata()
-
             if not k8s:
                 # The VM charm clears pgdata and the raft state on every unit, so each
                 # one re-initialises from the new primary.
@@ -880,6 +870,27 @@ class AsyncReplicationManager(BaseManager):
 
             self.state.peer.data.update({"stopped": "True"})
         return True
+
+    def _reset_standby_leader(self) -> None:
+        """Drop the previous cluster state on the leader once all units stopped (K8s only).
+
+        A member still running Patroni recreates the Patroni resources from its old data
+        (system identifier and leader lock), which leaves the standby leader unable to
+        bootstrap from the primary cluster. Non-leaders clear pgdata after the standby
+        leader has started (in _wait_for_standby_leader).
+        """
+        if (
+            self.state.substrate != Substrates.K8S
+            or not self.state.model.unit.is_leader()
+            or not self.state.peer.is_unit_stopped
+            or self.is_following_promoted_cluster()
+            or self.state.peer.data.get("standby-pgdata-cleared") == "True"
+        ):
+            return
+        if self.k8s_manager is not None:
+            self.k8s_manager.delete_patroni_cluster_resources()
+        self._clear_pgdata()
+        self.state.peer.data.update({"standby-pgdata-cleared": "True"})
 
     def _stop_patroni_with_retries(self, event: RelationChangedEvent) -> bool:
         """Stop Patroni, retrying a few times; True when the event is deferred."""

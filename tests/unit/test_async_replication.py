@@ -131,6 +131,22 @@ def _unit_peer_data(harness):
     return harness.get_relation_data(_peer_rel_id(harness), harness.charm.unit.name)
 
 
+@contextmanager
+def _standby_teardown_patches(harness, substrate):
+    """Patch the substrate teardown calls; yields the K8s resources-deletion mock."""
+    if substrate == "k8s":
+        with (
+            patch.object(type(harness.charm.workload), "stop"),
+            patch.object(
+                harness.charm.k8s_manager, "delete_patroni_cluster_resources"
+            ) as delete_resources,
+        ):
+            yield delete_resources
+    else:
+        with patch.object(type(harness.charm.workload), "remove_raft_state"):
+            yield None
+
+
 def _store_promoted_cluster_counter(harness, counter):
     """Store the promoted-cluster-counter in this application's peer databag."""
     harness.update_relation_data(
@@ -416,18 +432,6 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
 ):
     harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
 
-    @contextmanager
-    def _standby_teardown_patches():
-        if substrate == "k8s":
-            with (
-                patch.object(type(harness.charm.workload), "stop"),
-                patch.object(harness.charm.k8s_manager, "delete_patroni_cluster_resources"),
-            ):
-                yield
-        else:
-            with patch.object(type(harness.charm.workload), "remove_raft_state"):
-                yield
-
     with (
         patch.object(
             type(harness.charm.workload), "get_system_identifier", return_value=("7001", None)
@@ -437,12 +441,13 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
             "create_data_backup_tarball",
             return_value="backup.tar.gz",
         ),
-        patch.object(type(harness.charm.workload), "clear_data_directories"),
-        patch.object(type(harness.charm.workload), "init_storage") as init_storage,
+        patch.object(
+            type(harness.charm.workload), "clear_data_directories"
+        ) as clear_data_directories,
         patch.object(PatroniManager, "stop_patroni", return_value=True),
         patch.object(PatroniManager, "get_standby_leader", return_value=None),
         patch.object(harness.charm, "update_config"),
-        _standby_teardown_patches(),
+        _standby_teardown_patches(harness, substrate) as delete_resources,
     ):
         harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
 
@@ -451,8 +456,11 @@ def test_relation_changed_leader_stops_and_defers_until_all_units_stopped(
         # The VM flow publishes the counter for the demoted cluster's pre-check.
         assert harness.get_relation_data(async_rel, harness.model.unit.name)["stopped"] == "1"
     else:
-        # D3: the K8s leader recreates pgdata right after clearing it.
-        init_storage.assert_called_once()
+        # A member still running Patroni would recreate the Patroni resources from its
+        # old data, so the K8s leader keeps them (and its pgdata) until all units stopped.
+        delete_resources.assert_not_called()
+        clear_data_directories.assert_not_called()
+        assert "standby-pgdata-cleared" not in _unit_peer_data(harness)
     assert harness.model.unit.status == WaitingStatus(
         "Waiting for the database to be stopped in all units"
     )
@@ -732,18 +740,6 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
     """The standby reconfiguration backs up pgdata before the system id changes."""
     harness.add_relation_unit(_peer_rel_id(harness), f"{PEER_APP}/1")
 
-    @contextmanager
-    def _standby_teardown_patches():
-        if substrate == "k8s":
-            with (
-                patch.object(type(harness.charm.workload), "stop"),
-                patch.object(harness.charm.k8s_manager, "delete_patroni_cluster_resources"),
-            ):
-                yield
-        else:
-            with patch.object(type(harness.charm.workload), "remove_raft_state"):
-                yield
-
     with (
         patch.object(
             type(harness.charm.workload), "get_system_identifier", return_value=("7001", None)
@@ -754,18 +750,75 @@ def test_relation_changed_tars_pgdata_when_system_ids_differ(substrate, harness,
             return_value="backup.tar.gz",
         ) as create_tarball,
         patch.object(type(harness.charm.workload), "clear_data_directories"),
-        patch.object(type(harness.charm.workload), "init_storage") as init_storage,
         patch.object(PatroniManager, "stop_patroni", return_value=True),
         patch.object(PatroniManager, "get_standby_leader", return_value=None),
         patch.object(harness.charm, "update_config"),
-        _standby_teardown_patches(),
+        _standby_teardown_patches(harness, substrate),
     ):
         harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
 
     create_tarball.assert_called_once()
-    if substrate == "k8s":
-        # D3: the K8s leader recreates pgdata right after clearing it.
-        init_storage.assert_called_once()
+    assert harness.get_relation_data(async_rel, harness.charm.app.name)["backup-data"] == "True"
+
+
+def _stopped_standby_leader_patches(harness):
+    """Patches for a K8s leader running the standby flow past the all-units-stopped gate."""
+    return (
+        patch.object(PatroniManager, "get_standby_leader", return_value=None),
+        patch.object(
+            PatroniManager, "member_started", new_callable=PropertyMock, return_value=False
+        ),
+        patch.object(
+            type(harness.charm.workload), "postgresql_service_registered", return_value=True
+        ),
+        patch.object(type(harness.charm.workload), "start_service"),
+        patch.object(harness.charm.async_replication_manager, "update_config"),
+    )
+
+
+def test_relation_changed_k8s_leader_resets_the_cluster_once_all_units_stopped(
+    substrate, harness, async_rel
+):
+    """The Patroni resources and the leader pgdata go away only after every unit stopped."""
+    if substrate != "k8s":
+        pytest.skip("the VM flow reinitialises every unit while stopping it")
+    peer_rel = harness.model.get_relation(PEER_RELATION)
+    with harness.hooks_disabled():
+        for unit in {u.name for u in peer_rel.units} | {harness.charm.unit.name}:
+            harness.update_relation_data(_peer_rel_id(harness), unit, {"stopped": "True"})
+    calls = []
+    standby_leader, member_started, registered, start_service, update_config = (
+        _stopped_standby_leader_patches(harness)
+    )
+    with (
+        standby_leader,
+        member_started,
+        registered,
+        update_config,
+        start_service as start,
+        patch.object(
+            harness.charm.k8s_manager,
+            "delete_patroni_cluster_resources",
+            side_effect=lambda: calls.append("delete"),
+        ),
+        patch.object(
+            type(harness.charm.workload),
+            "clear_data_directories",
+            side_effect=lambda: calls.append("clear"),
+        ),
+        patch.object(type(harness.charm.workload), "init_storage") as init_storage,
+    ):
+        start.side_effect = lambda _: calls.append("start")
+        harness.update_relation_data(async_rel, REMOTE_APP, {"promoted-cluster-counter": "1"})
+        # The deferred event runs again while the standby leader is still bootstrapping.
+        harness.charm.framework.reemit()
+
+    assert calls == ["delete", "clear", "start", "start"]
+    init_storage.assert_called_once()
+    assert _unit_peer_data(harness)["standby-pgdata-cleared"] == "True"
+    assert harness.model.unit.status == WaitingStatus(
+        "Still starting the database in the standby leader"
+    )
 
 
 def test_relation_changed_defers_when_the_standby_secret_is_missing(harness):

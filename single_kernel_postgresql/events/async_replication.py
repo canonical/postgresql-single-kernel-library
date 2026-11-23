@@ -341,6 +341,7 @@ class PostgreSQLAsyncReplication(Object):
 
         if self.manager._wait_for_all_units_stopped(event):
             return
+        self.manager._reset_standby_leader()
 
         if self.manager._wait_for_standby_leader(event):
             return
