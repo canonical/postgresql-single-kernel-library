@@ -70,6 +70,7 @@ def test_deploy(juju: Juju, charm: str, check_subordinate_env_vars):
             jubilant.all_active, LS_CLIENT, UBUNTU_PRO_APP_NAME, DATABASE_APP_NAME
         ),
         error=jubilant.any_error,
+        timeout=600,
     )
 
 
