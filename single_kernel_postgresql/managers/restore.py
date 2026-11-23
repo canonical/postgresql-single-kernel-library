@@ -24,7 +24,7 @@ with suppress(ImportError):
 
 from data_platform_helpers.advanced_statuses import StatusObject
 from data_platform_helpers.advanced_statuses.types import Scope as AdvancedStatusesScope
-from ops import ActiveStatus, BlockedStatus
+from ops import BlockedStatus
 from ops.pebble import ChangeError, ExecError
 
 from single_kernel_postgresql.config.enums import Substrates
@@ -103,6 +103,7 @@ class RestoreManager(BaseManager):
         update_config: UpdateConfigFunction,
         backup_manager: "BackupManager",
         set_unit_status: "Callable[[StatusBase], None]",
+        set_primary_status_message,
         is_standby_cluster: IsStandbyClusterFunction | None = None,
     ):
         """Manager of PostgreSQL backup restores.
@@ -122,6 +123,7 @@ class RestoreManager(BaseManager):
         # Charm fucts
         self.update_config = update_config
         self.set_unit_status = set_unit_status
+        self.set_primary_status_message = set_primary_status_message
 
     # -- Substrate-bridged predicates -------------------------------------------
 
@@ -784,4 +786,4 @@ class RestoreManager(BaseManager):
         #     scope="unit",
         #     component=self.name,
         # )
-        self.set_unit_status(ActiveStatus())
+        self.set_primary_status_message()

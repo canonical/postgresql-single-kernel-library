@@ -77,6 +77,7 @@ def restore_manager(harness, substrate, workload, backup_manager, monkeypatch):
         update_config=MagicMock(return_value=True),
         backup_manager=backup_manager,
         set_unit_status=MagicMock(),
+        set_primary_status_message=MagicMock(),
         is_standby_cluster=None if substrate == "k8s" else MagicMock(return_value=False),
     )
     manager.patroni_manager.get_patroni_restart_condition.return_value = "always"

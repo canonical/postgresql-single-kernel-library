@@ -278,6 +278,7 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             update_config=self.update_config,
             backup_manager=self.backup_manager,
             set_unit_status=self.set_unit_status,
+            set_primary_status_message=self.set_primary_status_message,
             is_standby_cluster=self._is_standby_cluster,
         )
         self.observer_manager = ObserverManager(self.state, self.workload)
