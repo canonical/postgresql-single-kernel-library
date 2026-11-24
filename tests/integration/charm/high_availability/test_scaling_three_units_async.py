@@ -98,7 +98,7 @@ def test_removing_unit(
             juju.wait(jubilant.all_agents_idle, timeout=600)
 
             juju.run(
-                next(iter(juju.status().apps[app_name].units)),
+                left_unit,
                 "promote-to-primary",
                 {"scope": "unit", "force": True},
                 # Raft reinitialisation can exceed juju run's default 60s wait.
