@@ -48,6 +48,7 @@ from single_kernel_postgresql.core.state import CharmState
 if TYPE_CHECKING:
     # Substrate-only seams are injected; they must never enter the other substrate's
     # import graph, hence the type-checking-only imports.
+    from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm
     from single_kernel_postgresql.events.watcher import WatcherEventsHandler
     from single_kernel_postgresql.managers.k8s import K8sManager
 from single_kernel_postgresql.managers.async_replication import (
@@ -76,7 +77,7 @@ class PostgreSQLAsyncReplication(Object):
 
     def __init__(
         self,
-        charm,
+        charm: "AbstractPostgreSQLCharm",
         state: CharmState,
         manager: AsyncReplicationManager,
         patroni_manager: PatroniManager,
@@ -349,6 +350,15 @@ class PostgreSQLAsyncReplication(Object):
             return
 
         self.manager._handle_database_start(event)
+        self._reconfigure_cluster(event)
+
+    def _reconfigure_cluster(self, event: RelationChangedEvent) -> None:
+        """Trigger reconfigure if not all followers are joned."""
+        if self.state.model.unit.is_leader() and not self.manager.are_peers_started():
+            if self.state.substrate == Substrates.VM:
+                self.charm.membership_manager.reconfigure_cluster(event)
+            else:
+                self.charm.membership_manager.add_members_k8s(event)
 
     # -- Secrets
 

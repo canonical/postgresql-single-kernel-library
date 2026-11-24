@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -761,19 +760,21 @@ class AsyncReplicationManager(BaseManager):
 
     def _start_standby_database(self, event: RelationChangedEvent) -> bool:
         """Update the configuration and start the database; True when the event is deferred."""
-        if self.state.substrate == Substrates.K8S:
-            if not cast("K8sWorkload", self.workload).postgresql_service_registered():
-                logger.debug("Early exit on_async_relation_changed: container hasn't started yet.")
-                event.defer()
-                return True
-            # Update the asynchronous replication configuration and start the database.
-            self.update_config()
-            self.workload.start_service(K8S_POSTGRESQL_SERVICE_NAME)
-        else:
-            # Update the asynchronous replication configuration and start the database.
-            self.update_config()
-            if not self.patroni_manager.start_patroni():
-                raise AsyncReplicationError("Failed to start patroni service.")
+        if (
+            self.state.substrate == Substrates.K8S
+            and not cast("K8sWorkload", self.workload).postgresql_service_registered()
+        ):
+            logger.debug("Early exit on_async_relation_changed: container hasn't started yet.")
+            event.defer()
+            return True
+        # Update the asynchronous replication configuration and start the database.
+        self.update_config()
+        if self.state.model.unit.is_leader():
+            if self.state.substrate == Substrates.K8S:
+                self.workload.start_service(K8S_POSTGRESQL_SERVICE_NAME)
+            else:
+                if not self.patroni_manager.start_patroni():
+                    raise AsyncReplicationError("Failed to start patroni service.")
         return False
 
     def _configure_primary_cluster(
@@ -863,7 +864,12 @@ class AsyncReplicationManager(BaseManager):
 
             if self.state.model.unit.is_leader():
                 # Remove the "cluster_initialised" flag to avoid self-healing in the update status hook.
-                self.state.application.data.update({"cluster_initialised": ""})
+                self.state.application.data.update({
+                    "cluster_initialised": "",
+                    "endpoints"
+                    if k8s
+                    else "members_ips": f'["{self.state.endpoint if k8s else self.state.unit_ip}"]',
+                })
                 if not self._configure_standby_cluster(event):
                     return False
 
@@ -932,8 +938,8 @@ class AsyncReplicationManager(BaseManager):
                     "unit-promoted-cluster-counter": self.get_highest_promoted_cluster_counter_value(),
                 })
 
-                if self.state.model.unit.is_leader() and self._handle_leader_database_start(event):
-                    return
+                if self.state.model.unit.is_leader():
+                    self._handle_leader_database_start()
 
                 self.set_primary_status_message()
             elif not self.state.model.unit.is_leader():
@@ -954,36 +960,36 @@ class AsyncReplicationManager(BaseManager):
             logger.debug("Deferring on_async_relation_changed: database hasn't started yet.")
             event.defer()
 
-    def _handle_leader_database_start(self, event: RelationChangedEvent) -> bool:
+    def _handle_leader_database_start(self) -> None:
         """Leader-side handling after the database started; True when the event is deferred."""
         k8s = self.state.substrate == Substrates.K8S
-        peers = self.state.peer_relation.units if self.state.peer_relation else []
         if not k8s:
             self.update_config()
-        if all(
+
+        self.state.application.data.update({"cluster_initialised": "True"})
+        if self.watcher is not None:
+            self.watcher.enable_watcher()
+
+    def are_peers_started(self) -> bool:
+        """Check that all peer units have started for the current counter."""
+        peers = self.state.peer_relation.units if self.state.peer_relation else []
+        return all(
             self.state.peer_relation.data[unit].get("unit-promoted-cluster-counter")  # type: ignore
             == self.get_highest_promoted_cluster_counter_value()
             for unit in {*peers, self.state.model.unit}
-        ):
-            self.state.application.data.update({"cluster_initialised": "True"})
-            if self.watcher is not None:
-                self.watcher.enable_watcher()
-        elif self.is_following_promoted_cluster():
-            self.set_unit_status(
-                WaitingStatus("Waiting for the database to be started in all units")
-            )
-            event.defer()
-            return True
-        return False
+        )
 
     def _wait_for_standby_leader(self, event: RelationChangedEvent) -> bool:
         """Wait for the standby leader to be up and running."""
+        if self.state.model.unit.is_leader():
+            return False
+
         k8s = self.state.substrate == Substrates.K8S
         try:
             standby_leader = self.patroni_manager.get_standby_leader(check_whether_is_running=True)
         except RetryError:
             standby_leader = None
-        if not self.state.model.unit.is_leader() and standby_leader is None:
+        if standby_leader is None:
             if not k8s and self.patroni_manager.is_member_isolated:
                 self.patroni_manager.restart_patroni()
                 self.set_unit_status(WaitingStatus("Restarting Patroni to rejoin the cluster"))
@@ -1002,11 +1008,7 @@ class AsyncReplicationManager(BaseManager):
         # For non-leader units, clear pgdata once the standby leader is confirmed running
         # (K8s only). This ensures replicas get the correct system ID from the standby
         # leader. Only clear pgdata once - use a flag to track if we've already done it.
-        if (
-            k8s
-            and not self.state.model.unit.is_leader()
-            and self.state.peer.data.get("standby-pgdata-cleared") != "True"
-        ):
+        if k8s and self.state.peer.data.get("standby-pgdata-cleared") != "True":
             self._clear_pgdata()
             self.state.peer.data.update({"standby-pgdata-cleared": "True"})
 
