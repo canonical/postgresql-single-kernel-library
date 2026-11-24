@@ -2,6 +2,19 @@
 # See LICENSE file for licensing details.
 """Skeleton for the abstract charm."""
 
+# Imports below the architecture check are intentional: they may load native binaries.
+# isort: off
+from ops.main import main
+
+from single_kernel_postgresql.utils.arch import (
+    WrongArchitectureWarningCharm,
+    is_wrong_architecture,
+)
+
+if is_wrong_architecture():
+    main(WrongArchitectureWarningCharm)
+# isort: on
+
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable

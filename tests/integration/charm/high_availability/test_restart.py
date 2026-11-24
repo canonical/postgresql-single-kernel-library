@@ -3,24 +3,22 @@
 # See LICENSE file for licensing details.
 import logging
 
-import pytest as pytest
+import jubilant
+import pytest
 import requests
 from kubernetes import config, dynamic
 from kubernetes.client import api_client
-from pytest_operator.plugin import OpsTest
 
-from tests.integration.charm.ha_tests.helpers import (
-    are_writes_increasing,
-    check_writes,
-    remove_charm_code,
-    start_continuous_writes,
-)
-from tests.integration.charm.pytest_operator_helpers import (
+from tests.integration.charm.helpers import (
     APPLICATION_NAME,
     CHARM_BASE,
-    get_primary,
-    get_unit_address,
+    are_writes_increasing,
+    check_writes,
+    get_primary_from_app,
+    remove_charm_code,
+    start_ha_continuous_writes,
 )
+from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
 from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
@@ -32,17 +30,17 @@ pytestmark = pytest.mark.k8s_only
 
 
 @pytest.mark.abort_on_fail
-async def test_build_and_deploy(
-    ops_test: OpsTest, charm, app_name: str, charm_resources, substrate: Substrate
+def test_build_and_deploy(
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
 ) -> None:
     """Build and deploy three unit of PostgreSQL."""
     # It is possible for users to provide their own cluster for HA testing. Hence, check if there
     # is a pre-existing cluster.
-    if app_name not in ops_test.model.applications:
-        async with ops_test.fast_forward():
-            await ops_test.model.deploy(
+    if app_name not in juju.status().apps:
+        with fast_forward(juju):
+            juju.deploy(
                 charm,
-                application_name=app_name,
+                app=app_name,
                 num_units=CLUSTER_SIZE,
                 base=CHARM_BASE,
                 config={"profile": "testing"},
@@ -50,18 +48,19 @@ async def test_build_and_deploy(
                 trust=substrate == Substrate.k8s,
             )
     # Deploy the continuous writes application charm if it wasn't already deployed.
-    if APPLICATION_NAME not in ops_test.model.applications:
-        async with ops_test.fast_forward():
-            await ops_test.model.deploy(
+    if APPLICATION_NAME not in juju.status().apps:
+        with fast_forward(juju):
+            juju.deploy(
                 APPLICATION_NAME,
-                application_name=APPLICATION_NAME,
+                app=APPLICATION_NAME,
                 base=CHARM_BASE,
                 channel="latest/edge",
             )
 
-    await ops_test.model.relate(app_name, f"{APPLICATION_NAME}:database")
-    async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(
+    juju.integrate(app_name, f"{APPLICATION_NAME}:database")
+    with fast_forward(juju):
+        wait_for_idle(
+            juju,
             apps=[app_name],
             status="active",
             timeout=1000,
@@ -70,70 +69,73 @@ async def test_build_and_deploy(
 
 
 @pytest.mark.abort_on_fail
-async def test_restart(ops_test: OpsTest, continuous_writes, app_name: str) -> None:
+def test_restart(juju: jubilant.Juju, juju_continuous_writes, app_name: str) -> None:
     """Test restart of all the units simultaneously."""
     logger.info("starting continuous writes to the database")
-    await start_continuous_writes(ops_test, app_name)
+    start_ha_continuous_writes(juju, app_name)
 
     logger.info("checking whether writes are increasing")
-    await are_writes_increasing(ops_test)
+    are_writes_increasing(juju)
 
     logger.info(
         "removing charm code from one non-primary unit to simulate a crash and prevent firing the update-charm hook"
     )
-    primary = await get_primary(ops_test, app_name)
-    status = await ops_test.model.get_status()
-    for unit in status.applications[app_name].units:
+    primary = get_primary_from_app(juju, app_name)
+    status = juju.status()
+    for unit in status.apps[app_name].units:
         if unit != primary:
             non_primary = unit
             break
-    await remove_charm_code(ops_test, non_primary)
+    remove_charm_code(juju, non_primary)
     logger.info(f"removed charm code from {non_primary}")
 
     logger.info("restarting all the units by deleting their pods")
     client = dynamic.DynamicClient(api_client.ApiClient(configuration=config.load_kube_config()))
     api = client.resources.get(api_version="v1", kind="Pod")
     api.delete(
-        namespace=ops_test.model.info.name,
+        namespace=juju.status().model.name,
         label_selector=f"app.kubernetes.io/name={app_name}",
     )
-    await ops_test.model.block_until(
-        lambda: all(
-            unit.workload_status == "error"
-            for unit in ops_test.model.units.values()
-            if unit.name == non_primary
-        )
+    juju.wait(
+        lambda status: all(
+            unit.workload_status.current == "error"
+            for app in status.apps.values()
+            for unit_name, unit in app.units.items()
+            if unit_name == non_primary
+        ),
+        timeout=600,
+        delay=0.5,
+        successes=1,
     )
 
     # Resolve the error on the non-primary unit.
-    for unit in ops_test.model.units.values():
-        if unit.name == non_primary and unit.workload_status == "error":
-            logger.info(f"resolving {non_primary} error")
-            await unit.resolved(retry=False)
-            break
+    for app in juju.status().apps.values():
+        for unit_name, unit in app.units.items():
+            if unit_name == non_primary and unit.workload_status.current == "error":
+                logger.info(f"resolving {non_primary} error")
+                juju.cli("resolved", "--no-retry", unit_name)
+                break
 
-    async with ops_test.fast_forward():
-        await ops_test.model.wait_for_idle(
-            apps=[app_name], status="active", raise_on_error=False, timeout=300
-        )
+    with fast_forward(juju):
+        wait_for_idle(juju, apps=[app_name], status="active", raise_on_error=False, timeout=300)
 
     # Check that all replication slots are present in the primary
     # (by checking the list of cluster members).
     logger.info(
         "checking that all the replication slots are present in the primary by checking the list of cluster members"
     )
-    primary = await get_primary(ops_test, app_name)
-    address = await get_unit_address(ops_test, primary)
+    primary = get_primary_from_app(juju, app_name)
+    address = get_unit_address(juju, primary)
     members = requests.get(f"https://{address}:8008/cluster", verify=False).json()["members"]
 
     assert [member["name"] for member in members] == [
-        unit.name.replace("/", "-") for unit in ops_test.model.applications[app_name].units
+        unit_name.replace("/", "-") for unit_name in juju.status().apps[app_name].units
     ]
 
     logger.info("ensure continuous_writes after the crashed unit")
-    await are_writes_increasing(ops_test)
+    are_writes_increasing(juju)
 
     # Verify that no writes to the database were missed after stopping the writes
     # (check that all the units have all the writes).
     logger.info("checking whether no writes were lost")
-    await check_writes(ops_test)
+    check_writes(juju)

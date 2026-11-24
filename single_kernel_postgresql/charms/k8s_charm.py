@@ -4,6 +4,11 @@
 
 """PostgreSQL Kubernetes Charm."""
 
+# Run the architecture check before importing dependencies with native binaries.
+# isort: off
+from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
+# isort: on
+
 import json
 import logging
 import os
@@ -19,7 +24,6 @@ from lightkube.resources.core_v1 import Endpoints
 from ops import ActiveStatus, BlockedStatus, ModelError, StatusBase
 from ops.pebble import ChangeError, Layer, LayerDict, ServiceDict, ServiceStatus
 
-from single_kernel_postgresql.charms.abstract_charm import AbstractPostgreSQLCharm, PostgreSQL
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.exceptions import DeployedWithoutTrustError
 from single_kernel_postgresql.config.literals import (

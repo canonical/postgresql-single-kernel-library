@@ -4,15 +4,15 @@
 
 import logging
 
+import jubilant
 import pytest
-from juju import tag
 from lightkube.core.client import Client
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.core_v1 import PersistentVolumeClaim
-from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
-from tests.integration.charm.ha_tests.helpers import (
+from tests.integration.charm.helpers import (
+    CHARM_BASE,
     add_unit_with_storage,
     apply_pvc_config,
     change_pvc_pv_name,
@@ -30,35 +30,36 @@ from tests.integration.charm.ha_tests.helpers import (
     is_storage_exists,
     remove_pv_claimref,
     remove_unit_force,
+    scale_ha_application,
 )
-from tests.integration.charm.pytest_operator_helpers import CHARM_BASE, scale_application
+from tests.integration.helpers.juju import fast_forward, wait_for_idle
 from tests.integration.types import Substrate
 
 TEST_DATABASE_NAME = "test_database"
 DUP_DATABASE_APP_NAME = "postgres-test-dup"
 
 VM_STORAGE = {
-    "archive": {"pool": "lxd-btrfs", "size": 2048},
-    "data": {"pool": "lxd-btrfs", "size": 2048},
-    "logs": {"pool": "lxd-btrfs", "size": 2048},
-    "temp": {"pool": "lxd-btrfs", "size": 2048},
+    "archive": "lxd-btrfs,2048M",
+    "data": "lxd-btrfs,2048M",
+    "logs": "lxd-btrfs,2048M",
+    "temp": "lxd-btrfs,2048M",
 }
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.mark.abort_on_fail
-async def test_app_force_removal(
-    ops_test: OpsTest, charm: str, app_name: str, charm_resources, substrate: Substrate
+def test_app_force_removal(
+    juju: jubilant.Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
 ):
     """Remove unit with force while storage is alive."""
     global primary_pvs, primary_pvcs
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         # Deploy the charm.
         logger.info("deploying charm")
-        await ops_test.model.deploy(
+        juju.deploy(
             charm,
-            application_name=app_name,
+            app=app_name,
             num_units=1,
             base=CHARM_BASE,
             storage=VM_STORAGE if substrate == Substrate.vm else None,
@@ -68,29 +69,32 @@ async def test_app_force_removal(
         )
 
         logger.info("waiting for idle")
-        await ops_test.model.wait_for_idle(apps=[app_name], status="active", timeout=1500)
-        assert ops_test.model.applications[app_name].units[0].workload_status == "active"
+        wait_for_idle(juju, apps=[app_name], status="active", timeout=1500)
+        assert (
+            next(iter(juju.status().apps[app_name].units.values())).workload_status.current
+            == "active"
+        )
 
-        primary_name = ops_test.model.applications[app_name].units[0].name
+        primary_name = next(iter(juju.status().apps[app_name].units))
 
         logger.info("waiting for postgresql")
         for attempt in Retrying(stop=stop_after_delay(15 * 3), wait=wait_fixed(3), reraise=True):
             with attempt:
-                assert await is_postgresql_ready(ops_test, primary_name)
+                assert is_postgresql_ready(juju, primary_name)
 
         if substrate == Substrate.k8s:
             logger.info(f"get pvc for {primary_name}")
-            primary_pvcs = get_pvcs(ops_test, primary_name)
+            primary_pvcs = get_pvcs(juju, primary_name)
 
             assert primary_pvcs
 
             logger.info(f"get pv for {primary_name}")
-            primary_pvs = get_pvs(ops_test, primary_name)
+            primary_pvs = get_pvs(juju, primary_name)
 
             assert len(primary_pvs)
 
         logger.info("getting storage id")
-        storage_ids = await get_storage_ids(ops_test, primary_name)
+        storage_ids = get_storage_ids(juju, primary_name)
 
         assert len(storage_ids)
 
@@ -101,25 +105,23 @@ async def test_app_force_removal(
                 stop=stop_after_delay(15 * 3), wait=wait_fixed(3), reraise=True
             ):
                 with attempt:
-                    assert await is_storage_exists(ops_test, storage_id)
+                    assert is_storage_exists(juju, storage_id)
 
         # Create test database to check there is no resources conflicts
         logger.info("creating db")
-        await create_db(ops_test, app_name, TEST_DATABASE_NAME)
+        create_db(juju, app_name, TEST_DATABASE_NAME)
 
         # Check that test database is not exists for new unit
         logger.info("checking db")
-        assert await check_db(ops_test, app_name, TEST_DATABASE_NAME)
+        assert check_db(juju, app_name, TEST_DATABASE_NAME)
 
         # Force remove unit without storage removal
         if substrate == Substrate.vm:
             logger.info("force removing charm")
-            await ops_test.model.destroy_unit(
-                primary_name, force=True, destroy_storage=False, max_wait=1500
-            )
+            juju.remove_unit(primary_name, force=True, destroy_storage=False)
         else:
             logger.info("scale to 0 with force")
-            await remove_unit_force(ops_test, 1)
+            remove_unit_force(juju, 1)
 
         # Storage should remain
         logger.info("verifying that storage exists")
@@ -128,44 +130,47 @@ async def test_app_force_removal(
                 stop=stop_after_delay(15 * 3), wait=wait_fixed(3), reraise=True
             ):
                 with attempt:
-                    assert await is_storage_exists(ops_test, storage_id)
+                    assert is_storage_exists(juju, storage_id)
 
 
 @pytest.mark.abort_on_fail
-async def test_app_garbage_ignorance(ops_test: OpsTest, app_name: str, substrate: Substrate):
+def test_app_garbage_ignorance(juju: jubilant.Juju, app_name: str, substrate: Substrate):
     """Test charm deploy in dirty environment with garbage storage."""
     global primary_pvs, primary_pvcs
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         logger.info("checking garbage storage")
         garbage_storages = None
         for attempt in Retrying(stop=stop_after_delay(30 * 3), wait=wait_fixed(3), reraise=True):
             with attempt:
-                garbage_storages = await get_detached_storages(ops_test)
+                garbage_storages = get_detached_storages(juju)
                 if substrate == Substrate.vm:
                     assert len(garbage_storages) == 4
                 logger.info(f"Collected storages: {garbage_storages}")
 
         if substrate == Substrate.vm:
             logger.info("add unit with attached storage")
-            await add_unit_with_storage(ops_test, app_name, garbage_storages)
+            add_unit_with_storage(juju, app_name, garbage_storages)
         else:
             logger.info("scale to 1")
-            await scale_application(ops_test, app_name, 1)
+            scale_ha_application(juju, app_name, 1)
 
             # Timeout is increeced due to k8s Init:CrashLoopBackOff status of postgresql pod
             logger.info("waiting for idle")
-            await ops_test.model.wait_for_idle(status="active", timeout=2000)
-            assert ops_test.model.applications[app_name].units[0].workload_status == "active"
+            wait_for_idle(juju, status="active", timeout=2000)
+            assert (
+                next(iter(juju.status().apps[app_name].units.values())).workload_status.current
+                == "active"
+            )
 
-        primary_name = ops_test.model.applications[app_name].units[0].name
+        primary_name = next(iter(juju.status().apps[app_name].units))
 
         logger.info("waiting for postgresql")
         for attempt in Retrying(stop=stop_after_delay(15 * 3), wait=wait_fixed(3), reraise=True):
             with attempt:
-                assert await is_postgresql_ready(ops_test, primary_name)
+                assert is_postgresql_ready(juju, primary_name)
 
         logger.info("getting storage id")
-        storage_ids = await get_storage_ids(ops_test, primary_name)
+        storage_ids = get_storage_ids(juju, primary_name)
 
         assert len(storage_ids)
 
@@ -179,61 +184,67 @@ async def test_app_garbage_ignorance(ops_test: OpsTest, app_name: str, substrate
                 stop=stop_after_delay(15 * 3), wait=wait_fixed(3), reraise=True
             ):
                 with attempt:
-                    assert await is_storage_exists(ops_test, storage_id)
+                    assert is_storage_exists(juju, storage_id)
 
         # Check that test database exists for new unit
         logger.info("checking db")
-        assert await check_db(ops_test, app_name, TEST_DATABASE_NAME)
+        assert check_db(juju, app_name, TEST_DATABASE_NAME)
 
         if substrate == Substrate.vm:
             logger.info("removing charm")
-            await ops_test.model.destroy_unit(primary_name)
+            juju.remove_unit(primary_name)
         else:
             logger.info("scale to 0")
-            await scale_application(ops_test, app_name, 0)
+            scale_ha_application(juju, app_name, 0)
 
             logger.info("changing pv reclaim policy")
-            primary_pvs = change_pvs_reclaim_policy(ops_test, primary_pvs, "Retain")
+            primary_pvs = change_pvs_reclaim_policy(juju, primary_pvs, "Retain")
 
             logger.info("remove application")
-            await ops_test.model.remove_application(app_name, block_until_done=True)
+            juju.remove_application(app_name)
+            juju.wait(
+                lambda status: app_name not in status.apps,
+                timeout=1000,
+                delay=0.5,
+                successes=1,
+            )
 
             for _, primary_pvc in primary_pvcs.items():
                 logger.info(f"delete pvc {primary_pvc.metadata.name}")
-                delete_pvc(ops_test, primary_pvc)
+                delete_pvc(juju, primary_pvc)
 
 
 @pytest.mark.vm_only
 @pytest.mark.abort_on_fail
 @pytest.mark.skip(reason="Unstable")
-async def test_app_resources_conflicts_v3(ops_test: OpsTest, charm: str):
+def test_app_resources_conflicts_v3(juju: jubilant.Juju, charm: str):
     """Test application deploy in dirty environment with garbage storage from another application."""
-    async with ops_test.fast_forward():
+    with fast_forward(juju):
         logger.info("checking garbage storage")
         garbage_storages = None
         for attempt in Retrying(stop=stop_after_delay(30 * 3), wait=wait_fixed(3), reraise=True):
             with attempt:
-                garbage_storages = await get_detached_storages(ops_test)
+                garbage_storages = get_detached_storages(juju)
                 assert len(garbage_storages) == 4
                 logger.info(f"Collected storages: {garbage_storages}")
 
         logger.info("deploying duplicate application with attached storage")
-        await ops_test.model.deploy(
+        juju.deploy(
             charm,
-            application_name=DUP_DATABASE_APP_NAME,
+            app=DUP_DATABASE_APP_NAME,
             num_units=1,
             base=CHARM_BASE,
-            attach_storage=[tag.storage(storage) for storage in garbage_storages],
+            attach_storage=garbage_storages,
             config={"profile": "testing"},
         )
 
         # Reducing the update status frequency to speed up the triggering of deferred events.
-        await ops_test.model.set_config({"update-status-hook-interval": "10s"})
+        juju.model_config({"update-status-hook-interval": "10s"})
 
         logger.info("waiting for duplicate application to be waiting")
         try:
-            await ops_test.model.wait_for_idle(
-                apps=[DUP_DATABASE_APP_NAME], timeout=60, idle_period=30, status="waiting"
+            wait_for_idle(
+                juju, apps=[DUP_DATABASE_APP_NAME], timeout=60, idle_period=30, status="waiting"
             )
         except TimeoutError:
             logger.info("Application is not in waiting state. Checking logs...")
@@ -241,21 +252,21 @@ async def test_app_resources_conflicts_v3(ops_test: OpsTest, charm: str):
         for attempt in Retrying(stop=stop_after_delay(60 * 10), wait=wait_fixed(3), reraise=True):
             with attempt:
                 # Since application have postgresql db in storage from external application it should not be able to connect due to new password
-                assert not await check_password_auth(
-                    ops_test, ops_test.model.applications[DUP_DATABASE_APP_NAME].units[0].name
+                assert not check_password_auth(
+                    juju, next(iter(juju.status().apps[DUP_DATABASE_APP_NAME].units))
                 )
 
 
 @pytest.mark.k8s_only
 @pytest.mark.abort_on_fail
-async def test_app_resources_conflicts(ops_test: OpsTest, charm: str, charm_resources):  # noqa: C901
+def test_app_resources_conflicts(juju: jubilant.Juju, charm: str, charm_resources):  # noqa: C901
     """Test application deploy in dirty environment with garbage storage from another application."""
     global primary_pvs, primary_pvcs
-    async with ops_test.fast_forward():
-        await ops_test.model.deploy(
+    with fast_forward(juju):
+        juju.deploy(
             charm,
             resources=charm_resources,
-            application_name=DUP_DATABASE_APP_NAME,
+            app=DUP_DATABASE_APP_NAME,
             num_units=1,
             base=CHARM_BASE,
             trust=True,
@@ -263,22 +274,25 @@ async def test_app_resources_conflicts(ops_test: OpsTest, charm: str, charm_reso
         )
 
         logger.info("waiting for idle")
-        await ops_test.model.wait_for_idle(status="active", timeout=1000)
+        wait_for_idle(juju, status="active", timeout=1000)
         assert (
-            ops_test.model.applications[DUP_DATABASE_APP_NAME].units[0].workload_status == "active"
+            next(
+                iter(juju.status().apps[DUP_DATABASE_APP_NAME].units.values())
+            ).workload_status.current
+            == "active"
         )
 
-        dup_primary_name = ops_test.model.applications[DUP_DATABASE_APP_NAME].units[0].name
+        dup_primary_name = next(iter(juju.status().apps[DUP_DATABASE_APP_NAME].units))
 
         assert dup_primary_name
 
         logger.info(f"get pvc for {dup_primary_name}")
-        dup_primary_pvcs = get_pvcs(ops_test, dup_primary_name)
+        dup_primary_pvcs = get_pvcs(juju, dup_primary_name)
 
         assert len(dup_primary_pvcs)
 
         logger.info("scale to 0")
-        await scale_application(ops_test, DUP_DATABASE_APP_NAME, 0)
+        scale_ha_application(juju, DUP_DATABASE_APP_NAME, 0)
 
         for pvc_storage_name, pvc in dup_primary_pvcs.items():
             logger.info(f"load and change pv-name config for pvc {pvc.metadata.name}")
@@ -288,9 +302,9 @@ async def test_app_resources_conflicts(ops_test: OpsTest, charm: str, charm_reso
 
         for _, dup_primary_pvc in dup_primary_pvcs.items():
             logger.info(f"delete pvc {dup_primary_pvc.metadata.name}")
-            delete_pvc(ops_test, dup_primary_pvc)
+            delete_pvc(juju, dup_primary_pvc)
 
-        client = Client(namespace=ops_test.model.name)
+        client = Client(namespace=juju.status().model.name)
         for _, dup_primary_pvc in dup_primary_pvcs.items():
             logger.info(f"waiting for pvc {dup_primary_pvc.metadata.name} to be deleted")
             for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True):
@@ -305,20 +319,18 @@ async def test_app_resources_conflicts(ops_test: OpsTest, charm: str, charm_reso
 
         for _, primary_pv in primary_pvs.items():
             logger.info(f"remove claimref from pv {primary_pv.metadata.name}")
-            remove_pv_claimref(ops_test, primary_pv)
+            remove_pv_claimref(juju, primary_pv)
 
         for _, dup_primary_pvc in dup_primary_pvcs.items():
             logger.info(f"apply pvc {dup_primary_pvc.metadata.name}")
-            apply_pvc_config(ops_test, dup_primary_pvc)
+            apply_pvc_config(juju, dup_primary_pvc)
 
         logger.info("scale to 1")
-        await ops_test.model.applications[DUP_DATABASE_APP_NAME].scale(1)
+        juju.cli("scale-application", DUP_DATABASE_APP_NAME, "1")
 
         logger.info("waiting for duplicate application to be blocked")
         try:
-            await ops_test.model.wait_for_idle(
-                apps=[DUP_DATABASE_APP_NAME], timeout=500, status="blocked"
-            )
+            wait_for_idle(juju, apps=[DUP_DATABASE_APP_NAME], timeout=500, status="blocked")
         except TimeoutError:
             logger.info("Application is not in blocked state. Checking logs...")
 
@@ -326,4 +338,4 @@ async def test_app_resources_conflicts(ops_test: OpsTest, charm: str, charm_reso
         logger.info("checking operator password auth")
         for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3), reraise=True):
             with attempt:
-                assert await check_system_id_mismatch(ops_test, dup_primary_name)
+                assert check_system_id_mismatch(juju, dup_primary_name)
