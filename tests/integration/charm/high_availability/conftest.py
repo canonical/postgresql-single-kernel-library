@@ -3,6 +3,7 @@
 # See LICENSE file for licensing details.
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 import jubilant
 import pytest
@@ -14,7 +15,8 @@ from tests.integration.charm.helpers import (
     change_ha_patroni_setting,
     get_postgresql_app_name,
 )
-from tests.integration.helpers.juju import get_app_leader
+from tests.integration.helpers.juju import fast_forward, get_app_leader, wait_for_idle
+from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,76 @@ def juju_primary_start_timeout(juju: jubilant.Juju) -> None:
         patroni_password,
         use_random_unit=True,
     )
+
+
+@pytest.fixture()
+def juju_restart_policy(juju: jubilant.Juju, substrate: Substrate) -> None:
+    """Set the same Pebble restart policy on all units (K8s only)."""
+    if substrate == Substrate.vm:
+        yield
+        return
+
+    app = helpers.get_postgresql_app_name(juju)
+    for unit in juju.status().apps[app].units:
+        helpers.modify_pebble_restart_delay(
+            juju,
+            unit,
+            "tests/integration/charm/ha_tests/manifests/extend_pebble_restart_delay.yml",
+        )
+        with fast_forward(juju):
+            wait_for_idle(
+                juju,
+                apps=[app],
+                status="active",
+                raise_on_blocked=True,
+                timeout=5 * 60,
+                idle_period=30,
+            )
+    yield
+
+
+@pytest.fixture()
+def juju_loop_wait(juju: jubilant.Juju) -> None:
+    """Restore the original loop_wait configuration after the test."""
+    initial_loop_wait = helpers.get_patroni_setting(juju, "loop_wait")
+    yield
+    patroni_password = helpers.get_password(juju, helpers.get_postgresql_app_name(juju), "patroni")
+    helpers.change_ha_patroni_setting(
+        juju, "loop_wait", initial_loop_wait, patroni_password, use_random_unit=True
+    )
+
+
+@pytest.fixture()
+def juju_reset_restart_condition(juju: jubilant.Juju, substrate: Substrate):
+    """Set and restore the systemd restart condition concurrently on all VM units."""
+    if substrate == Substrate.k8s:
+        yield
+        return
+
+    app = helpers.get_postgresql_app_name(juju)
+    units = list(juju.status().apps[app].units)
+    with ThreadPoolExecutor(max_workers=len(units)) as executor:
+        futures = [
+            executor.submit(
+                helpers.update_restart_condition, juju, unit, helpers.RESTART_CONDITION
+            )
+            for unit in units
+        ]
+        for future in futures:
+            future.result()
+
+    yield
+
+    units = list(juju.status().apps[app].units)
+    with ThreadPoolExecutor(max_workers=len(units)) as executor:
+        futures = [
+            executor.submit(
+                helpers.update_restart_condition, juju, unit, helpers.ORIGINAL_RESTART_CONDITION
+            )
+            for unit in units
+        ]
+        for future in futures:
+            future.result()
 
 
 @pytest.fixture()
