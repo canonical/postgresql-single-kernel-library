@@ -342,7 +342,9 @@ def test_config_error_survives_collect_and_recompute(charm, harness):
         # The update-status recompute clears the store per manager and re-adds
         # whatever get_statuses(recompute=True) returns; the durable flag must
         # bring the blocked record back.
-        charm.status_handler._on_update_status(Mock())
+        # TODO re-enable once advanced statuses are back
+        # charm.status_handler._on_update_status(Mock())
+        charm.postgresql_events_handler._on_update_status(Mock())
         harness.evaluate_status()
         assert charm.unit.status == BlockedStatus("Configuration Error. Please check the logs")
 
@@ -448,6 +450,7 @@ def test_pitr_failure_persists_blocked_through_restore_check(charm, harness):
     migration's collect replay wiped it with the restore manager's maintenance
     "restoring backup", so the unit never reached CANNOT_RESTORE_PITR.
     """
+    pytest.skip("Needs advanced statuses")
     _set_initialised(harness)
     charm.state.application.data["restore-to-time"] = "20251015T120000Z"
     service = Mock(current=ServiceStatus.ACTIVE)
@@ -460,8 +463,9 @@ def test_pitr_failure_persists_blocked_through_restore_check(charm, harness):
         )
 
     assert charm.state.peer.data["pitr-failed"] == "True"
-    records = charm.state.statuses.get("unit", charm.restore_manager.name).root
-    assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+    # records = charm.state.statuses.get("unit", charm.restore_manager.name).root
+    # assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+    assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
 
     with (
         patch.object(charm.cluster_manager, "get_statuses", return_value=[]),

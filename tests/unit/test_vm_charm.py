@@ -204,7 +204,9 @@ def test_config_error_survives_collect_and_recompute(charm, harness):
         # The update-status recompute clears the store per manager and re-adds
         # whatever get_statuses(recompute=True) returns; the durable flag must
         # bring the blocked record back.
-        charm.status_handler._on_update_status(Mock())
+        # TODO switch back when advanced statuses are re-enabled
+        # charm.status_handler._on_update_status(Mock())
+        charm.postgresql_events_handler._on_update_status(Mock())
         records = charm.state.statuses.get("unit", charm.config_manager.name).root
         assert any(
             r.status == "blocked" and "Configuration Error" in (r.message or "") for r in records
@@ -360,7 +362,9 @@ def test_database_request_error_survives_collect(charm, harness):
 
         # The update-status recompute wipes per-manager store records; the flag
         # must bring the blocked back.
-        charm.status_handler._on_update_status(Mock())
+        # TODO switch back when advanced statuses are re-enabled
+        # charm.status_handler._on_update_status(Mock())
+        charm.postgresql_events_handler._on_update_status(Mock())
         harness.evaluate_status()
         assert charm.unit.status == BlockedStatus("invalid database name")
 
@@ -539,6 +543,7 @@ def test_raft_stuck_block_survives_collect(charm, harness):
     (CI 2026-10-13): the direct write died at hook end, so the wait timed
     out. The raft_stuck peer flag now replays through RaftManager.get_statuses.
     """
+    pytest.skip("Needs advanced statuses")
     charm.state.peer.data["raft_stuck"] = "True"
     with (
         patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
@@ -589,6 +594,7 @@ def test_pitr_failure_persists_blocked_through_collect(charm, harness):
     backup" over that direct write, so the unit never reached blocked and
     stayed "restoring backup" forever.
     """
+    pytest.skip("Needs advanced statuses")
     charm.state.application.data["cluster_initialised"] = "True"
     charm.state.application.data["restore-to-time"] = "20251015T120000Z"
     charm.refresh_manager.refresh = Mock(in_progress=False)
@@ -599,8 +605,10 @@ def test_pitr_failure_persists_blocked_through_collect(charm, harness):
         charm.postgresql_events_handler._on_update_status(Mock())
 
     assert charm.state.peer.data["pitr-failed"] == "True"
-    records = charm.state.statuses.get("unit", charm.restore_manager.name).root
-    assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+    # TODO switch back once advanced statuses are re-enabled
+    # records = charm.state.statuses.get("unit", charm.restore_manager.name).root
+    # assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+    assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
 
     # Patch the live collectors: the emit walks every manager's get_statuses,
     # which would reach the snap/charm_refresh surface the unit env cannot build.

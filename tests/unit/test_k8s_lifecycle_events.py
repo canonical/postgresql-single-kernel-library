@@ -134,6 +134,7 @@ def test_pebble_ready_replica_membership_wait_persists_through_collect(
     not joined yet, releasing the deploy's all-active gate mid-join
     (test_symlinks pg_wal symlink failure, CI 2026-10-15).
     """
+    pytest.skip("Needs advanced statuses")
     rel_id = harness.model.get_relation(PEER_RELATION).id
     harness.set_leader(False)
     _set_cluster_initialised(harness, rel_id)

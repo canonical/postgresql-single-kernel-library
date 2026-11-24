@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
-from data_platform_helpers.advanced_statuses import StatusHandler
+# from data_platform_helpers.advanced_statuses import StatusHandler
 from ops import StatusBase
 from ops.charm import CharmBase, UpdateStatusEvent
 from ops.log import JujuLogHandler
@@ -290,6 +290,8 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
             patroni_manager=self.patroni_manager,
             update_config=self.update_config,
             backup_manager=self.backup_manager,
+            set_unit_status=self.set_unit_status,
+            set_primary_status_message=self.set_primary_status_message,
             is_standby_cluster=self._is_standby_cluster,
         )
         self.observer_manager = ObserverManager(self.state, self.workload)
@@ -346,22 +348,23 @@ class AbstractPostgreSQLCharm(CharmBase, ABC):
         # collect-unit-status observe, the refresh manager owns the reconciliation.
         self.framework.observe(self.on.collect_unit_status, self._reconcile_refresh_status)
 
+        # TODO re-enable advanced statuses when fixed
         # Status Handler
-        self.status_handler = StatusHandler(
-            self,
-            self.refresh_manager,
-            self.cluster_manager,
-            self.tls_manager,
-            self.config_manager,
-            self.patroni_manager,
-            self.logical_replication_manager,
-            self.database_manager,
-            self.raft_manager,
-            self.backup_manager,
-            self.restore_manager,
-            self.observer_manager,
-            self.async_replication_manager,
-        )
+        # self.status_handler = StatusHandler(
+        #     self,
+        #     self.refresh_manager,
+        #     self.cluster_manager,
+        #     self.tls_manager,
+        #     self.config_manager,
+        #     self.patroni_manager,
+        #     self.logical_replication_manager,
+        #     self.database_manager,
+        #     self.raft_manager,
+        #     self.backup_manager,
+        #     self.restore_manager,
+        #     self.observer_manager,
+        #     self.async_replication_manager,
+        # )
 
         # Rolling-restart manager (the rolling_ops charm lib is vendored in the
         # library package now): the thin consuming charms used to construct it and

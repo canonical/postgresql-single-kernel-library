@@ -23,10 +23,10 @@ import logging
 import os
 import pwd
 from datetime import UTC, datetime
+from typing import Any
 
 import psycopg2
 import psycopg2.errors
-from ops import ConfigData
 from psycopg2.sql import SQL, Identifier, Literal
 from tenacity import (
     Retrying,
@@ -1497,7 +1497,7 @@ $$ LANGUAGE plpgsql security definer;"""  # noqa: S608
 
     @staticmethod
     def build_postgresql_parameters(
-        config_options: ConfigData, available_memory: int, limit_memory: int | None = None
+        config_options: dict[str, Any], available_memory: int, limit_memory: int | None = None
     ) -> dict | None:
         """Builds the PostgreSQL parameters.
 

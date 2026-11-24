@@ -401,7 +401,7 @@ def test_build_postgresql_parameters_merges_worker_config_and_wal_compression_de
         assert result["max_worker_processes"] == "8"
         assert result["wal_compression"] == "on"
         postgresql_client.build_postgresql_parameters.assert_called_once_with(
-            config.state.model_config, 8_000_000_000, None
+            config.state.config.model_dump(exclude_none=True), 8_000_000_000, None
         )
 
 
@@ -424,7 +424,7 @@ def test_build_postgresql_parameters_profile_limit_memory_converts_mb_to_bytes_a
         _config.return_value = _build_config(profile_limit_memory=2_000)
         config._build_postgresql_parameters(postgresql_client, 4, 16_000_000_000)
         postgresql_client.build_postgresql_parameters.assert_called_once_with(
-            config.state.model_config, 16_000_000_000, 2_000_000_000
+            config.state.config.model_dump(exclude_none=True), 16_000_000_000, 2_000_000_000
         )
 
 
@@ -1253,7 +1253,9 @@ def test_extension_object_block_survives_collect_and_recompute(harness_config, h
 
         # The update-status recompute wipes the store records; the flag must
         # bring the blocked back.
-        harness.charm.status_handler._on_update_status(Mock())
+        # TODO switch back when advanced statuses are re-enabled
+        # harness.charm.status_handler._on_update_status(Mock())
+        harness.charm.postgresql_events_handler._on_update_status(Mock())
         harness.evaluate_status()
         assert harness.charm.unit.status == BlockedStatus(EXTENSION_OBJECT_MESSAGE)
 
