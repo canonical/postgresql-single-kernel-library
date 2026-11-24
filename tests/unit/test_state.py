@@ -36,11 +36,18 @@ def test_config_normalisation():
         "experimental_max_connections": 100,
         "experimental-max-connections": 200,
         "synchronous_mode_strict": False,
-        "synchronous-mode-strict": None,
+        "response-lc-monetary": "en_US",
     }
     with patch("single_kernel_postgresql.core.state.CharmConfig") as _charm_config:
         state = CharmState(charm=mock_charm, substrate=Substrates.VM, s3_requirer=Mock())
+        _charm_config.keys.return_value = [
+            "experimental_max_connections",
+            "synchronous_mode_strict",
+            "response_lc_monetary",
+        ]
         _ = state.config
         _charm_config.assert_called_once_with(
-            experimental_max_connections=200, synchronous_mode_strict=False
+            experimental_max_connections=200,
+            synchronous_mode_strict=False,
+            response_lc_monetary="en_US",
         )

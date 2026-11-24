@@ -18,6 +18,7 @@ from single_kernel_postgresql.config.literals import (
 )
 from single_kernel_postgresql.config.statuses import GeneralStatuses
 from single_kernel_postgresql.events.watcher import WatcherEventsHandler
+from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR
 
 
 @pytest.fixture(autouse=True)
@@ -535,33 +536,34 @@ def test_remove_raft_member_stuck_cluster_re_emits_peer_changed(charm, harness):
     assert charm.state.peer.data["raft_stuck"] == "True"
 
 
-# def test_raft_stuck_block_survives_collect(charm, harness):
-#     """The raft-majority-loss blocked must survive the collect.
+def test_raft_stuck_block_survives_collect(charm, harness):
+    """The raft-majority-loss blocked must survive the collect.
 
-#     test_removing_stereo_primary waits for blocked + "Raft majority loss"
-#     (CI 2026-10-13): the direct write died at hook end, so the wait timed
-#     out. The raft_stuck peer flag now replays through RaftManager.get_statuses.
-#     """
-#     charm.state.peer.data["raft_stuck"] = "True"
-#     with (
-#         patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
-#         patch.object(charm.refresh_manager, "reconcile_refresh_status"),
-#     ):
-#         harness.evaluate_status()
-#         assert charm.unit.status == BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE)
+    test_removing_stereo_primary waits for blocked + "Raft majority loss"
+    (CI 2026-10-13): the direct write died at hook end, so the wait timed
+    out. The raft_stuck peer flag now replays through RaftManager.get_statuses.
+    """
+    pytest.skip("Needs advanced statuses")
+    charm.state.peer.data["raft_stuck"] = "True"
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE)
 
-#         charm.status_handler._on_update_status(Mock())
-#         harness.evaluate_status()
-#         assert charm.unit.status == BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE)
+        charm.status_handler._on_update_status(Mock())
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus(RAFT_MAJORITY_LOSS_MESSAGE)
 
-#     # The promote-to-primary flow clears the flag and the unit unblocks.
-#     charm.state.peer.data.pop("raft_stuck")
-#     with (
-#         patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
-#         patch.object(charm.refresh_manager, "reconcile_refresh_status"),
-#     ):
-#         harness.evaluate_status()
-#     assert charm.unit.status == ActiveStatus()
+    # The promote-to-primary flow clears the flag and the unit unblocks.
+    charm.state.peer.data.pop("raft_stuck")
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+    assert charm.unit.status == ActiveStatus()
 
 
 def test_config_validation_clear_does_not_lift_a_plugin_block(charm, harness):
@@ -583,38 +585,39 @@ def test_config_validation_clear_does_not_lift_a_plugin_block(charm, harness):
     assert charm.state.peer.data["configuration-error"] == EXTENSION_OBJECT_MESSAGE
 
 
-# def test_pitr_failure_persists_blocked_through_collect(charm, harness):
-#     """The failed-PITR blocked must surface through the status machinery.
+def test_pitr_failure_persists_blocked_through_collect(charm, harness):
+    """The failed-PITR blocked must surface through the status machinery.
 
-#     CI 2026-10-15 trunk-parity regression: trunk wrote the CANNOT_RESTORE_PITR
-#     blocked directly and it survived (no collect handler); the migration's
-#     collect replay re-added the restore manager's maintenance "restoring
-#     backup" over that direct write, so the unit never reached blocked and
-#     stayed "restoring backup" forever.
-#     """
-#     charm.state.application.data["cluster_initialised"] = "True"
-#     charm.state.application.data["restore-to-time"] = "20251015T120000Z"
-#     charm.refresh_manager.refresh = Mock(in_progress=False)
-#     with (
-#         patch.object(charm.restore_manager, "is_pitr_failed", return_value=(True, True)),
-#         patch.object(charm.restore_manager, "log_pitr_last_transaction_time"),
-#     ):
-#         charm.postgresql_events_handler._on_update_status(Mock())
+    CI 2026-10-15 trunk-parity regression: trunk wrote the CANNOT_RESTORE_PITR
+    blocked directly and it survived (no collect handler); the migration's
+    collect replay re-added the restore manager's maintenance "restoring
+    backup" over that direct write, so the unit never reached blocked and
+    stayed "restoring backup" forever.
+    """
+    pytest.skip("Needs advanced statuses")
+    charm.state.application.data["cluster_initialised"] = "True"
+    charm.state.application.data["restore-to-time"] = "20251015T120000Z"
+    charm.refresh_manager.refresh = Mock(in_progress=False)
+    with (
+        patch.object(charm.restore_manager, "is_pitr_failed", return_value=(True, True)),
+        patch.object(charm.restore_manager, "log_pitr_last_transaction_time"),
+    ):
+        charm.postgresql_events_handler._on_update_status(Mock())
 
-#     assert charm.state.peer.data["pitr-failed"] == "True"
-#     # TODO switch back once advanced statuses are re-enabled
-#     # records = charm.state.statuses.get("unit", charm.restore_manager.name).root
-#     # assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
-#     assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
+    assert charm.state.peer.data["pitr-failed"] == "True"
+    # TODO switch back once advanced statuses are re-enabled
+    # records = charm.state.statuses.get("unit", charm.restore_manager.name).root
+    # assert any(r.status == "blocked" and r.message == CANNOT_RESTORE_PITR for r in records)
+    assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
 
-#     # Patch the live collectors: the emit walks every manager's get_statuses,
-#     # which would reach the snap/charm_refresh surface the unit env cannot build.
-#     with (
-#         patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
-#         patch.object(charm.refresh_manager, "reconcile_refresh_status"),
-#     ):
-#         harness.evaluate_status()
-#         assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
+    # Patch the live collectors: the emit walks every manager's get_statuses,
+    # which would reach the snap/charm_refresh surface the unit env cannot build.
+    with (
+        patch.object(charm.cluster_manager, "get_statuses", return_value=[]),
+        patch.object(charm.refresh_manager, "reconcile_refresh_status"),
+    ):
+        harness.evaluate_status()
+        assert charm.unit.status == BlockedStatus(CANNOT_RESTORE_PITR)
 
 
 @pytest.mark.parametrize("active", [True, False])
