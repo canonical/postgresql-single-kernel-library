@@ -3,7 +3,7 @@
 # See LICENSE file for licensing details.
 from asyncio import gather
 
-import pytest as pytest
+import pytest
 from pytest_operator.plugin import OpsTest
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
@@ -30,9 +30,9 @@ from tests.integration.types import Substrate
 
 
 @pytest.fixture()
-async def chaos_mesh(ops_test: OpsTest, substrate: Substrate) -> None:
-    """Deploys chaos mesh to the namespace and uninstalls it at the end (K8s only)."""
-    if substrate == Substrate.vm:
+async def chaos_mesh(ops_test: OpsTest, substrate: Substrate, architecture: str) -> None:
+    """Deploys chaos mesh to the namespace and uninstalls it at the end (K8s amd64 only)."""
+    if substrate == Substrate.vm or architecture != "amd64":
         yield
         return
 
