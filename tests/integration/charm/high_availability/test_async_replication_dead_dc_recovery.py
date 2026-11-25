@@ -35,11 +35,13 @@ from tests.integration.charm.helpers import (
     get_async_secret_labels,
     get_db_max_written_value,
     get_db_standby_leader_unit,
+    get_patroni_cluster,
     start_continuous_writes,
 )
 from tests.integration.helpers.juju import (
     get_app_leader,
     get_app_units,
+    get_unit_address,
     split_model,
     wait_for_apps_status,
     wait_resilient,
@@ -156,12 +158,33 @@ def test_deploy(
             num_units=1,
         )
         model.integrate(f"{app}:watcher-offer", f"{watcher}:watcher")
-        model.integrate(f"{test_app}:database", f"{app}:database")
 
     for model_name, app, watcher, test_app in clusters:
-        Juju(model=model_name).wait(
+        model = Juju(model=model_name)
+        model.wait(
+            ready=lambda status, app=app, watcher=watcher: (
+                len(status.apps[app].units) == 2
+                and len(status.apps[watcher].units) == 1
+                and wait_for_apps_status(jubilant.all_active, app, watcher)(status)
+            ),
+            timeout=25 * MINUTE_SECS,
+            successes=31,
+        )
+        # Do not deliver the client relation while PostgreSQL is still read-only at startup.
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+            with attempt:
+                unit = next(iter(get_app_units(model, app)))
+                members = get_patroni_cluster(get_unit_address(model, unit))["members"]
+                assert (
+                    len(members) == 2
+                    and all(member["state"] in ("running", "streaming") for member in members)
+                    and sorted(member["role"] for member in members) == ["leader", "sync_standby"]
+                ), f"Cluster not ready for client relation: {members}"
+        model.integrate(f"{test_app}:database", f"{app}:database")
+        model.wait(
             ready=wait_for_apps_status(jubilant.all_active, app, watcher, test_app),
             timeout=25 * MINUTE_SECS,
+            successes=31,
         )
 
 

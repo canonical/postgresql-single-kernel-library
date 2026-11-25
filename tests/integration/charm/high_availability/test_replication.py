@@ -16,6 +16,7 @@ from tests.integration.charm.helpers import (
     check_writes,
     fetch_cluster_members,
     get_password,
+    get_patroni_cluster,
     get_primary_from_app,
     is_cluster_updated,
     scale_ha_application,
@@ -73,6 +74,18 @@ def test_reelection(
     app = app_name
     if len(juju.status().apps[app].units) < 2:
         scale_ha_application(juju, app, 2)
+
+    # Failover needs an operational synchronous standby before the primary is killed.
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            units = juju.status().apps[app].units
+            members = get_patroni_cluster(get_unit_address(juju, next(iter(units))))["members"]
+            assert (
+                len(members) == len(units)
+                and all(member["state"] in ("running", "streaming") for member in members)
+                and sum(member["role"] == "leader" for member in members) == 1
+                and any(member["role"] == "sync_standby" for member in members)
+            ), f"Cluster not ready for failover: {members}"
 
     # Start an application that continuously writes data to the database.
     start_ha_continuous_writes(juju, app)

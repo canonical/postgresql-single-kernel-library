@@ -7,6 +7,7 @@ import jubilant
 import pytest
 from jubilant import Juju
 from single_kernel_postgresql.config.enums import Substrates
+from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import get_password
 from tests.integration.helpers.juju import (
@@ -340,13 +341,15 @@ def test_worker_process_configs(juju: Juju, app_name: str) -> None:
         "cpu-max-parallel-apply-workers-per-subscription": "max_parallel_apply_workers_per_subscription",
     }
 
-    for config_name, expected_value in worker_configs.items():
-        pg_param = config_to_pg_param.get(config_name, config_name.replace("-", "_"))
-        result = execute_query(unit_address, password, f"SHOW {pg_param}")
-        actual_value = str(result[0]) if result else ""
-        assert actual_value == expected_value, (
-            f"{pg_param}: expected {expected_value}, got {actual_value}"
-        )
+    for attempt in Retrying(stop=stop_after_delay(300), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            for config_name, expected_value in worker_configs.items():
+                pg_param = config_to_pg_param.get(config_name, config_name.replace("-", "_"))
+                result = execute_query(unit_address, password, f"SHOW {pg_param}")
+                actual_value = str(result[0]) if result else ""
+                assert actual_value == expected_value, (
+                    f"{pg_param}: expected {expected_value}, got {actual_value}"
+                )
 
     # Test setting "auto" values
     auto_configs = {

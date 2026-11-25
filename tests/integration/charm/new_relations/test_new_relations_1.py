@@ -17,6 +17,7 @@ from tests.integration.charm.helpers import (
     check_database_users_existence,
     get_application_relation_data,
     get_machine_from_unit,
+    get_patroni_cluster,
     get_primary_from_app,
     scale_ha_application,
     start_machine,
@@ -118,7 +119,33 @@ def test_database_relation_with_charm_libraries_k8s(
         )
         # Relate the charms and wait for them exchanging some connection data.
         juju.integrate(f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
-        juju.wait(wait_for_apps_status(jubilant.all_active, DATABASE_APP_NAME), timeout=1000)
+        juju.wait(
+            lambda status: (
+                len(status.apps[DATABASE_APP_NAME].units) == 3
+                and wait_for_apps_status(jubilant.all_active, DATABASE_APP_NAME)(status)
+            ),
+            timeout=1000,
+            successes=31,
+        )
+        model_name = split_model(juju.model)[1]
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+            with attempt:
+                primary = get_primary_from_app(juju, DATABASE_APP_NAME)
+                members = get_patroni_cluster(get_unit_address(juju, primary))["members"]
+                assert (
+                    len(members) == 3
+                    and all(member["state"] in ("running", "streaming") for member in members)
+                    and sum(member["role"] == "leader" for member in members) == 1
+                ), f"Cluster not ready: {members}"
+                assert (
+                    get_application_relation_data(
+                        juju,
+                        APPLICATION_APP_NAME,
+                        FIRST_DATABASE_RELATION_NAME,
+                        "read-only-endpoints",
+                    )
+                    == f"{DATABASE_APP_NAME}-replicas.{model_name}.svc.cluster.local:5432"
+                )
 
         # The pinned libjuju has list_secrets, so the original always checks this.
         logger.info("checking for secrets")

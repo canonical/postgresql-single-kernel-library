@@ -3,7 +3,6 @@
 # See LICENSE file for licensing details.
 import logging
 import re
-from time import sleep
 
 import jubilant
 import psycopg2
@@ -11,7 +10,7 @@ import pytest
 from jubilant import Juju
 from single_kernel_postgresql.config.enums import Substrates
 
-from tests.integration.charm.helpers import get_primary, get_refresh_versions
+from tests.integration.charm.helpers import get_primary, get_refresh_versions, is_postgresql_ready
 from tests.integration.helpers.juju import (
     fast_forward,
     get_app_units,
@@ -59,9 +58,15 @@ def test_pg_hba(
             juju.integrate(DATA_INTEGRATOR_APP_NAME, app_name)
 
         juju.wait(
-            wait_for_apps_status(jubilant.all_active, DATA_INTEGRATOR_APP_NAME, app_name),
+            lambda status: (
+                len(status.apps[app_name].units) == 2
+                and wait_for_apps_status(jubilant.all_active, DATA_INTEGRATOR_APP_NAME, app_name)(
+                    status
+                )
+            ),
             error=jubilant.any_error,
             timeout=1000,
+            successes=31,
         )
 
         primary = get_primary(juju, f"{app_name}/0")
@@ -108,10 +113,10 @@ def test_pg_hba(
             if connection:
                 connection.close()
 
-        sleep(90)
-
         for unit_name in get_app_units(juju, app_name):
             try:
+                # Wait for PostgreSQL, not a fixed delay, before checking user/HBA rules.
+                assert is_postgresql_ready(juju, unit_name), f"PostgreSQL not ready on {unit_name}"
                 address = get_unit_address(juju, unit_name)
 
                 logger.info(

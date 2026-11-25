@@ -19,9 +19,14 @@ import pytest
 from jubilant import Juju
 from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.utils.backup import CANNOT_RESTORE_PITR
-from tenacity import Retrying, stop_after_attempt, wait_exponential
+from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_exponential, wait_fixed
 
-from tests.integration.charm.helpers import get_password, get_primary, scale_application
+from tests.integration.charm.helpers import (
+    get_password,
+    get_patroni_cluster,
+    get_primary,
+    scale_application,
+)
 from tests.integration.helpers.juju import (
     fast_forward,
     get_app_units,
@@ -479,7 +484,17 @@ def pitr_backup_operations(
         config,
     )
 
-    primary = get_primary(juju, f"{database_app_name}/0")
+    # Active workload statuses can precede the replica joining Patroni.
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            primary = get_primary(juju, f"{database_app_name}/0")
+            members = get_patroni_cluster(get_unit_address(juju, primary))["members"]
+            assert (
+                len(get_app_units(juju, database_app_name)) == 2
+                and len(members) == 2
+                and all(member["state"] in ("running", "streaming") for member in members)
+                and sum(member["role"] == "leader" for member in members) == 1
+            ), f"Cluster not ready for backup: {members}"
     replica = next(unit for unit in get_app_units(juju, database_app_name) if unit != primary)
     password = get_password(juju, database_app_name)
     address = get_unit_address(juju, primary)
