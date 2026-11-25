@@ -158,7 +158,7 @@ def harness(substrate, test_charm_path):
         )
     else:
         harness = Harness(
-            _test_charm_class(test_charm_path, "k8s_test_charm").PostgreSQLK8sTestCharm,
+            _test_charm_class(test_charm_path, "k8s_test_charm").PostgresqlOperatorCharm,
             meta=meta,
             actions=actions,
         )
