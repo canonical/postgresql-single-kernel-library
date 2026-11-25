@@ -13,7 +13,7 @@ import jubilant
 import psycopg2
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
-from tenacity import Retrying, stop_after_delay, wait_fixed
+from tenacity import Retrying, retry_if_exception, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import CHARM_BASE, build_connection_string
 from tests.integration.helpers.juju import fast_forward, get_app_leader, wait_for_apps_status
@@ -221,11 +221,23 @@ def test_multihop_circular_blocked(juju: jubilant.Juju, substrate: Substrates):
     Scenario: Cluster A -> B -> C -> A (all for public.users)
     Expected: The final A subscription is blocked with circular replication error
     """
-    # Setup A -> B replication.
+    # Setup A -> B replication. The previous relation may still be dying in Juju.
     with fast_forward(juju):
-        juju.integrate(
-            f"{APP_NAME_A}:logical-replication-offer", f"{APP_NAME_B}:logical-replication"
-        )
+        for attempt in Retrying(
+            stop=stop_after_delay(500),
+            wait=wait_fixed(3),
+            retry=retry_if_exception(
+                lambda error: (
+                    isinstance(error, jubilant.CLIError)
+                    and "is dying, but not yet removed" in (error.stderr or "")
+                )
+            ),
+            reraise=True,
+        ):
+            with attempt:
+                juju.integrate(
+                    f"{APP_NAME_A}:logical-replication-offer", f"{APP_NAME_B}:logical-replication"
+                )
         juju.wait(wait_for_apps_status(jubilant.all_active, APP_NAME_A, APP_NAME_B), timeout=500)
 
     config_b = APP_CONFIG.copy()

@@ -37,7 +37,16 @@ def test_storage_released_on_removal(juju: Juju, charm, app_name: str):
         storage=ROOTFS_STORAGE,
         force=True,
     )
-    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), error=jubilant.any_error)
+    juju.wait(
+        lambda status: (
+            wait_for_apps_status(jubilant.all_active, app_name)(status)
+            and len(status.apps[app_name].units) == 1
+            and status.apps[app_name].units[f"{app_name}/0"].workload_status.message == "Primary"
+        ),
+        error=jubilant.any_error,
+        timeout=1500,
+        successes=31,
+    )
 
     logger.info("Removing %s and waiting for a clean teardown", app_name)
     juju.remove_application(app_name, destroy_storage=True)

@@ -24,6 +24,7 @@ from tests.integration.charm.helpers import (
     get_cluster_roles,
     get_db_primary_unit,
     get_password,
+    get_patroni_cluster,
     get_primary,
     scale_application,
     switchover,
@@ -138,7 +139,17 @@ def test_deploy(
     # Reducing the update status frequency to speed up the triggering of deferred events.
     juju.model_config({"update-status-hook-interval": "10s"})
 
-    _wait_for_active_units(juju, app_name, len(UNIT_IDS), timeout=1500)
+    _wait_for_active_units(juju, app_name, len(UNIT_IDS), timeout=1500, successes=31)
+    if substrate == Substrates.K8S:
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+            with attempt:
+                address = get_unit_address(juju, f"{app_name}/0")
+                members = get_patroni_cluster(address)["members"]
+                assert (
+                    len(members) == len(UNIT_IDS)
+                    and all(member["state"] in ("running", "streaming") for member in members)
+                    and sum(member["role"] == "leader" for member in members) == 1
+                ), f"Cluster not ready: {members}"
     for unit in get_app_units(juju, app_name).values():
         assert unit.workload_status.current == "active"
 
