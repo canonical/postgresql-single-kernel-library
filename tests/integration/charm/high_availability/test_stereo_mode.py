@@ -268,19 +268,19 @@ def test_replica_shutdown_with_watcher(
 
     # Wait for the cluster to stabilize after unit removal
     # The primary needs time to reconfigure the cluster and update secrets
-    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=300)
+    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=300, successes=31)
 
     # Verify writes continue (primary should still be available)
     # With watcher, we should maintain quorum
     are_writes_increasing(juju, down_unit=replica)
 
     # Wait for cluster to stabilize
-    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=600)
+    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=600, successes=31)
 
     # Scale back up
     logger.info("Scaling back up after replica shutdown")
     juju.add_unit(app_name, num_units=1)
-    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500, successes=16)
 
     # Wait for the new replica to become a sync_standby
     # This ensures the cluster is fully ready for the next test
@@ -429,7 +429,16 @@ def test_watcher_shutdown_no_outage(
     # Re-deploy watcher
     logger.info("Re-deploying watcher")
     juju.add_unit(WATCHER_APP_NAME, num_units=1)
-    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=600)
+    # Wait for the replacement, so Raft verification cannot select the removed watcher.
+    juju.wait(
+        lambda status: (
+            watcher_unit not in status.apps[WATCHER_APP_NAME].units
+            and len(status.apps[WATCHER_APP_NAME].units) == 1
+            and wait_for_apps_status(jubilant.all_active, WATCHER_APP_NAME)(status)
+        ),
+        timeout=600,
+        successes=16,
+    )
 
     # Verify the Raft cluster is properly formed with the new watcher
     # This is critical - without this verification, subsequent tests might fail

@@ -65,7 +65,11 @@ def juju_restart_policy(juju: jubilant.Juju, substrate: Substrates) -> None:
             "tests/integration/charm/high_availability/manifests/extend_pebble_restart_delay.yml",
         )
         with fast_forward(juju):
-            juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=5 * 60)
+            juju.wait(
+                wait_for_apps_status(jubilant.all_active, app),
+                timeout=5 * 60,
+                successes=31,
+            )
     yield
 
 
