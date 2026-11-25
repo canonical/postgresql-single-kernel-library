@@ -7,6 +7,7 @@ from time import sleep
 
 import jubilant
 import pytest
+from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
     APPLICATION_NAME,
@@ -15,6 +16,8 @@ from tests.integration.charm.helpers import (
     check_writes,
     get_ha_cluster_roles,
     get_machine_from_unit,
+    get_patroni_cluster,
+    get_unit_ip,
     start_ha_continuous_writes,
     stop_machine,
 )
@@ -49,6 +52,19 @@ def test_build_and_deploy(juju: jubilant.Juju, charm, app_name: str) -> None:
 
         juju.integrate(app_name, f"{APPLICATION_NAME}:database")
         juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
+
+    # Active units can precede Patroni finishing the replicas.
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            members = get_patroni_cluster(
+                get_unit_ip(juju, next(iter(juju.status().apps[app_name].units)))
+            )["members"]
+            assert (
+                len(members) == 3
+                and all(member["state"] in ("running", "streaming") for member in members)
+                and sorted(member["role"] for member in members)
+                == ["leader", "replica", "sync_standby"]
+            ), f"Cluster not ready: {members}"
 
 
 @pytest.mark.parametrize(
@@ -118,6 +134,19 @@ def test_removing_unit(
     logger.info("Scaling back up")
     juju.add_unit(app_name, num_units=len(roles))
     juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
+
+    # Active units can precede Patroni finishing the new replicas.
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            members = get_patroni_cluster(
+                get_unit_ip(juju, next(iter(juju.status().apps[app_name].units)))
+            )["members"]
+            assert (
+                len(members) == 3
+                and all(member["state"] in ("running", "streaming") for member in members)
+                and sorted(member["role"] for member in members)
+                == ["leader", "replica", "sync_standby"]
+            ), f"Cluster not ready: {members}"
 
     are_writes_increasing(juju, units)
 

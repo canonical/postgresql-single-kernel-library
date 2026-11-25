@@ -69,7 +69,16 @@ def test_app_force_removal(
         )
 
         logger.info("waiting for idle")
-        juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=1500)
+        juju.wait(
+            lambda status: (
+                wait_for_apps_status(jubilant.all_active, app_name)(status)
+                and all(
+                    unit.workload_status.message == "Primary"
+                    for unit in status.apps[app_name].units.values()
+                )
+            ),
+            timeout=1500,
+        )
         assert (
             next(iter(juju.status().apps[app_name].units.values())).workload_status.current
             == "active"
@@ -156,7 +165,16 @@ def test_app_garbage_ignorance(juju: jubilant.Juju, app_name: str, substrate: Su
 
             # Timeout is increeced due to k8s Init:CrashLoopBackOff status of postgresql pod
             logger.info("waiting for idle")
-            juju.wait(wait_for_apps_status(jubilant.all_active), timeout=2000)
+            juju.wait(
+                lambda status: (
+                    wait_for_apps_status(jubilant.all_active)(status)
+                    and all(
+                        unit.workload_status.message == "Primary"
+                        for unit in status.apps[app_name].units.values()
+                    )
+                ),
+                timeout=2000,
+            )
             assert (
                 next(iter(juju.status().apps[app_name].units.values())).workload_status.current
                 == "active"
@@ -274,7 +292,16 @@ def test_app_resources_conflicts(juju: jubilant.Juju, charm: str, charm_resource
         )
 
         logger.info("waiting for idle")
-        juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1000)
+        juju.wait(
+            lambda status: (
+                wait_for_apps_status(jubilant.all_active)(status)
+                and all(
+                    unit.workload_status.message == "Primary"
+                    for unit in status.apps[DUP_DATABASE_APP_NAME].units.values()
+                )
+            ),
+            timeout=1000,
+        )
         assert (
             next(
                 iter(juju.status().apps[DUP_DATABASE_APP_NAME].units.values())
