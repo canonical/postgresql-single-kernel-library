@@ -44,7 +44,7 @@ from single_kernel_postgresql.utils.postgresql import (
     PostgreSQLGrantDatabasePrivilegesToUserError,
     PostgreSQLListUsersError,
 )
-from tenacity import RetryError
+from tenacity import RetryError, stop_after_attempt
 
 TIMELINE_PATCH = "single_kernel_postgresql.utils.postgresql.PostgreSQL.get_current_timeline"
 
@@ -896,9 +896,52 @@ def test_promote_cluster_scope_delegates_to_async_manager(handler):
 
 
 def test_promote_unit_scope_switches_over(handler):
-    with patch.object(type(handler.patroni_manager), "switchover") as switchover:
-        handler._on_promote_to_primary(Mock(params={"scope": "unit"}))
-    switchover.assert_called_once_with(handler.state.model.unit.name, wait=False)
+    """The switchover is waited for, then the role label is propagated.
+
+    K8s has no cluster-topology observer: without the peer-data bump no hook runs
+    on the other units after the switchover, and the 'Primary' label stays on the
+    old primary until the next update-status.
+    """
+    handler.state.peer.data.pop("timestamp", None)
+    calls = []
+    running_members = iter((["a", "b"], ["a", "b"], ["a", "b", "c"]))
+    with (
+        patch.object(
+            type(handler.patroni_manager),
+            "switchover",
+            side_effect=lambda *a, **k: calls.append("switchover"),
+        ) as switchover,
+        patch.object(handler, "_set_active_status", side_effect=lambda: calls.append("status")),
+        patch.object(
+            type(handler.patroni_manager),
+            "get_running_cluster_members",
+            side_effect=lambda: calls.append("members") or next(running_members),
+        ),
+        patch.object(
+            PostgreSQLApplication, "planned_units", new_callable=PropertyMock, return_value=3
+        ),
+        patch("tenacity.nap.time.sleep"),
+    ):
+        event = Mock(params={"scope": "unit"})
+        handler._on_promote_to_primary(event)
+    # Waited for (no wait=False): the roles must be final before they are reported.
+    switchover.assert_called_once_with(handler.state.model.unit.name)
+    # The label is computed only once the demoted primary rejoined (third poll).
+    assert calls == ["switchover", "members", "members", "members", "status"]
+    assert handler.state.peer.data.get("timestamp")
+    event.fail.assert_not_called()
+
+
+def test_promote_unit_scope_failure_does_not_propagate(handler):
+    handler.state.peer.data.pop("timestamp", None)
+    for error in (SwitchoverNotSyncError, SwitchoverFailedError("x")):
+        with (
+            patch.object(type(handler.patroni_manager), "switchover", side_effect=error),
+            patch.object(handler, "_set_active_status") as set_active_status,
+        ):
+            handler._on_promote_to_primary(Mock(params={"scope": "unit"}))
+        set_active_status.assert_not_called()
+        assert "timestamp" not in handler.state.peer.data
 
 
 def test_promote_unit_scope_failure_messages(handler):
@@ -1075,3 +1118,25 @@ def test_replica_can_start_probes_the_primary_endpoint(handler, harness):
     ):
         assert handler._replica_can_start() is True
     handler.patroni_manager.is_replication_hba_ready.assert_called_once_with("10.1.1.1")
+
+
+def test_promote_unit_scope_reports_roles_when_member_does_not_rejoin(handler):
+    """A demoted primary that stays down must not fail or block the action."""
+    handler.state.peer.data.pop("timestamp", None)
+    with (
+        patch.object(type(handler.patroni_manager), "switchover"),
+        patch.object(handler, "_set_active_status") as set_active_status,
+        patch.object(
+            type(handler.patroni_manager), "get_running_cluster_members", return_value=["a", "b"]
+        ),
+        patch.object(
+            PostgreSQLApplication, "planned_units", new_callable=PropertyMock, return_value=3
+        ),
+        patch("single_kernel_postgresql.events.postgresql.stop_after_delay", stop_after_attempt),
+        patch("tenacity.nap.time.sleep"),
+    ):
+        event = Mock(params={"scope": "unit"})
+        handler._on_promote_to_primary(event)
+    set_active_status.assert_called_once_with()
+    assert handler.state.peer.data.get("timestamp")
+    event.fail.assert_not_called()
