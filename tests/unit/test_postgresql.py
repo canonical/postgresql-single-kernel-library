@@ -833,7 +833,20 @@ def test_create_user():
         pg.create_user("username", "password", True, True, ["role3"], "db1", True)
 
         _process_extra_user_roles.assert_called_once_with("username", ["role3"])
-        assert _cursor.execute.call_count == 10
+        assert _cursor.execute.call_count == 11
+        # The default role is a catalog setting, so replicas apply it too (the login
+        # hook does nothing while recovery is in progress).
+        _cursor.execute.assert_any_call(
+            Composed([
+                SQL("ALTER ROLE "),
+                Identifier("username"),
+                SQL(" IN DATABASE "),
+                Identifier("db1"),
+                SQL(" SET role = "),
+                Identifier("charmed_db1_owner"),
+                SQL(";"),
+            ])
+        )
         _cursor.execute.assert_any_call(
             Composed([
                 SQL("SELECT TRUE FROM pg_roles WHERE rolname="),
@@ -1036,7 +1049,29 @@ def test_add_user_to_databases():
         execute = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.execute
 
         pg.add_user_to_databases("test-user", ["db1", "db2"])
-        assert execute.call_count == 8
+        assert execute.call_count == 10
+        execute.assert_any_call(
+            Composed([
+                SQL("ALTER ROLE "),
+                Identifier("test-user"),
+                SQL(" IN DATABASE "),
+                Identifier("db1"),
+                SQL(" SET role = "),
+                Identifier("charmed_db1_owner"),
+                SQL(";"),
+            ])
+        )
+        execute.assert_any_call(
+            Composed([
+                SQL("ALTER ROLE "),
+                Identifier("test-user"),
+                SQL(" IN DATABASE "),
+                Identifier("db2"),
+                SQL(" SET role = "),
+                Identifier("charmed_db2_owner"),
+                SQL(";"),
+            ])
+        )
         execute.assert_any_call(SQL("RESET ROLE;"))
         execute.assert_any_call(SQL("BEGIN;"))
         execute.assert_any_call(SQL("SET LOCAL log_statement = 'none';"))
@@ -1097,7 +1132,16 @@ def test_remove_user_from_databases():
         execute = _connect_to_database.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value.execute
 
         pg.remove_user_from_databases("test-user", ["db1", "db2"])
-        assert execute.call_count == 8
+        assert execute.call_count == 10
+        execute.assert_any_call(
+            Composed([
+                SQL("ALTER ROLE "),
+                Identifier("test-user"),
+                SQL(" IN DATABASE "),
+                Identifier("db1"),
+                SQL(" RESET role;"),
+            ])
+        )
         execute.assert_any_call(
             Composed([
                 SQL("REVOKE CONNECT ON DATABASE "),
