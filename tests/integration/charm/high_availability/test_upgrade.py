@@ -190,9 +190,22 @@ def test_fail_and_rollback(
         juju.wait(jubilant.all_agents_idle, timeout=5 * MINUTE_SECS)
 
         logging.info("Run resume-refresh action")
-        juju.run(
-            unit=get_app_leader(juju, app_name), action="resume-refresh", wait=5 * MINUTE_SECS
-        )
+        try:
+            juju.run(
+                unit=get_app_leader(juju, app_name), action="resume-refresh", wait=5 * MINUTE_SECS
+            )
+        except jubilant.TaskError as exc:
+            # Resuming can restart the action's pod before Juju records completion.
+            # Only accept termination after the charm explicitly reports success;
+            # the final wait and writes check below still verify the rollback.
+            task = exc.task
+            if not (
+                task.return_code == -1
+                and task.message == "terminated"
+                and str(task.results.get("result", "")).startswith("Refresh resumed.")
+            ):
+                raise
+            logging.info("Refresh resumed before the action's agent terminated")
 
     logging.info("Wait for upgrade to complete")
     juju.wait(ready=wait_for_apps_status(jubilant.all_active, app_name), timeout=20 * MINUTE_SECS)
