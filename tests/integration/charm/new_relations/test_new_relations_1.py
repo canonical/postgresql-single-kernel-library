@@ -544,8 +544,8 @@ def test_read_only_endpoint_in_scaled_up_cluster_k8s(juju: jubilant.Juju):
         scale_ha_application(juju, DATABASE_APP_NAME, 3)
 
         # Try to get the connection string of the database using the read-only endpoint.
-        # It should be available again.
-        for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True):
+        # It should be available again. Unit readiness can precede endpoint propagation.
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
             with attempt:
                 data = get_application_relation_data(
                     juju,
