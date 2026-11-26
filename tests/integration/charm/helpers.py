@@ -1641,17 +1641,23 @@ def is_cluster_updated(
         "there are more than one primary in the cluster."
     )
     logger.info("checking that all units are part of the same cluster")
-    member_ips = fetch_cluster_members(juju, use_ip_from_inside)
     app = primary_name.split("/")[0]
-    ip_addresses = [
-        (
-            get_ip_from_inside_the_unit(juju, unit_name)
-            if use_ip_from_inside
-            else get_unit_ip(juju, unit_name)
-        )
-        for unit_name in juju.status().apps[app].units
-    ]
-    assert set(member_ips) == set(ip_addresses), "not all units are part of the same cluster."
+    # Patroni membership views can differ briefly after restoring network access.
+    # Retry the full comparison before stopping/checking continuous writes.
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            member_ips = fetch_cluster_members(juju, use_ip_from_inside)
+            ip_addresses = [
+                (
+                    get_ip_from_inside_the_unit(juju, unit_name)
+                    if use_ip_from_inside
+                    else get_unit_ip(juju, unit_name)
+                )
+                for unit_name in juju.status().apps[app].units
+            ]
+            assert set(member_ips) == set(ip_addresses), (
+                "not all units are part of the same cluster."
+            )
     logger.info("checking that no writes to the database were missed after stopping the writes")
     for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True):
         with attempt:

@@ -586,6 +586,14 @@ def test_restablish_relation(juju: jubilant.Juju, substrate: Substrates):
         juju.integrate(f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
         juju.wait(wait_for_apps_status(jubilant.all_active, *APP_NAMES), timeout=600)
 
+        # Workload statuses can remain active while the new relation data propagates.
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+            with attempt:
+                for key in ("endpoints", "read-only-endpoints"):
+                    assert get_application_relation_data(
+                        juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, key
+                    ), f"Restored relation has no {key} yet"
+
     # Get the connection string to connect to the database using the read-only endpoint.
     connection_string = build_connection_string(
         juju,

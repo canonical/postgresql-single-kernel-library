@@ -503,7 +503,8 @@ def pitr_backup_operations(
     _create_pitr_table(address, password)
 
     logger.info("1: creating backup b1")
-    task = juju.run(replica, "create-backup")
+    # Backups can exceed Juju's default action wait of 60 seconds.
+    task = juju.run(replica, "create-backup", wait=600)
     assert task.results.get("backup-status"), "backup hasn't succeeded"
     with fast_forward(juju):
         _wait_for_active(juju, successes=15)
