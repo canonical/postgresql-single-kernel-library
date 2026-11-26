@@ -9,7 +9,6 @@ from asyncio import run
 from contextlib import suppress
 from ssl import create_default_context
 from time import sleep
-from urllib.parse import urljoin
 
 import psycopg2
 import yaml
