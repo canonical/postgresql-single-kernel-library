@@ -392,12 +392,14 @@ def test_wal_compression_config(juju: Juju, app_name: str) -> None:
         timeout=300,
     )
 
-    result = execute_query(unit_address, password, "SHOW wal_compression")
-    # Verify it's a known compression algorithm
+    # Active/idle can precede PostgreSQL applying the new configuration.
     known_algorithms = ["pglz", "lz4", "zstd"]
-    assert result[0] in known_algorithms, (
-        f"Expected a known compression algorithm, got '{result[0]}'"
-    )
+    for attempt in Retrying(stop=stop_after_delay(300), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            result = execute_query(unit_address, password, "SHOW wal_compression")
+            assert result[0] in known_algorithms, (
+                f"Expected a known compression algorithm, got '{result[0]}'"
+            )
 
     # Test disabling WAL compression
     juju.config(app_name, {"cpu-wal-compression": "false"})
@@ -407,5 +409,7 @@ def test_wal_compression_config(juju: Juju, app_name: str) -> None:
         timeout=300,
     )
 
-    result = execute_query(unit_address, password, "SHOW wal_compression")
-    assert result[0] == "off"
+    for attempt in Retrying(stop=stop_after_delay(300), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            result = execute_query(unit_address, password, "SHOW wal_compression")
+            assert result[0] == "off"
