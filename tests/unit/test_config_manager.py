@@ -206,7 +206,7 @@ def test_render_patroni_yml_file(substrate, config):
                 storage_path="/var/lib/pg/data",
                 logs_storage_path="/var/lib/pg/logs",
                 pgdata_path="/var/lib/pg/data/16/main",
-                max_connections=sentinel.experimental_max_connections,
+                max_connections=100,
             )
             _render_file.assert_called_once_with(
                 substrate, "/var/lib/pg/data/patroni.yaml", sentinel.template_output, 0o644
@@ -262,7 +262,7 @@ def test_render_patroni_yml_file(substrate, config):
                 watcher_addr=None,
                 pg_cron_available=True,
                 shared_preload_libraries="timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron",
-                max_connections=sentinel.experimental_max_connections,
+                max_connections=100,
             )
             _render_file.assert_called_once_with(
                 substrate,
