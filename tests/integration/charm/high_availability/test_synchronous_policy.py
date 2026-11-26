@@ -38,7 +38,13 @@ def test_promote_to_primary(juju: jubilant.Juju, app_name: str) -> None:
     """Switch the primary over to a sync standby and check the Primary label follows it."""
     database_app = juju.status().apps[app_name]
     any_unit_name = next(iter(database_app.units))
-    original_roles = get_cluster_roles(juju, any_unit_name)
+    # Active units can precede Patroni registering the synchronous standbys.
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            original_roles = get_cluster_roles(juju, any_unit_name)
+            assert (
+                len(original_roles["primaries"]) == 1 and len(original_roles["sync_standbys"]) == 2
+            ), f"Expected 1 primary and 2 sync standbys, got: {original_roles}"
     old_primary = original_roles["primaries"][0]
     new_primary = original_roles["sync_standbys"][0]
 
