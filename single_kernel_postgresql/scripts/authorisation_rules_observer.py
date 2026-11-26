@@ -5,20 +5,18 @@
 
 import subprocess
 import sys
-from asyncio import as_completed, create_task, run, wait
-from contextlib import suppress
-from ssl import create_default_context
+from asyncio import run
 from time import sleep
-from urllib.parse import urljoin
 
 import psycopg2
 import yaml
-from httpx import AsyncClient
 
-API_REQUEST_TIMEOUT = 5
-PATRONI_CLUSTER_STATUS_ENDPOINT = "cluster"
-PATRONI_CONFIG_STATUS_ENDPOINT = "config"
-TLS_CA_BUNDLE_FILE = "peer_ca_bundle.pem"
+from single_kernel_postgresql.config.literals import (
+    PATRONI_CLUSTER_STATUS_ENDPOINT,
+    TLS_CA_BUNDLE_FILE,
+)
+from single_kernel_postgresql.utils import parallel_patroni_get_request
+
 PATRONI_CONF_FILE_PATH = "/var/lib/pg/data/patroni.yaml"
 
 # File path for the spawned cluster topology observer process to write logs.
@@ -27,19 +25,6 @@ LOG_FILE_PATH = "/var/log/authorisation_rules_observer.log"
 
 class UnreachableUnitsError(Exception):
     """Cannot reach any known cluster member."""
-
-
-async def _httpx_get_request(url: str):
-    ssl_ctx = create_default_context()
-    with suppress(FileNotFoundError):
-        # Certificate bundle is not secret
-        ssl_ctx.load_verify_locations(cafile=f"/tmp/{TLS_CA_BUNDLE_FILE}")  # noqa: S108
-    async with AsyncClient(timeout=API_REQUEST_TIMEOUT, verify=ssl_ctx, trust_env=False) as client:
-        try:
-            return (await client.get(url)).json()
-        except Exception as e:
-            print(f"Failed to contact {url} with {e}")
-            return None
 
 
 def dispatch(run_cmd, unit, charm_dir, custom_event):
@@ -97,41 +82,32 @@ async def main():
 
     Watch the Patroni API cluster info. When changes are detected, dispatch the change event.
     """
-    patroni_urls, run_cmd, unit, charm_dir = sys.argv[1:]
+    patroni_endpoints, run_cmd, unit, charm_dir = sys.argv[1:]
 
     previous_databases = None
-    urls = [urljoin(url, PATRONI_CLUSTER_STATUS_ENDPOINT) for url in patroni_urls.split(",")]
+    endpoints = patroni_endpoints.split(",")
     member_name = unit.replace("/", "-")
+    # Certificate bundle is not secret
+    cafile = f"/tmp/{TLS_CA_BUNDLE_FILE}"  # noqa: S108
     while True:
-        # Disable TLS chain verification
-        context = create_default_context()
-        with suppress(FileNotFoundError):
-            # Certificate bundle is not secret
-            context.load_verify_locations(cafile=f"/tmp/{TLS_CA_BUNDLE_FILE}")  # noqa: S108
-
-        cluster_status = None
-        tasks = [create_task(_httpx_get_request(url)) for url in urls]
-        for task in as_completed(tasks):
-            if result := await task:
-                for task in tasks:
-                    task.cancel()
-                await wait(tasks)
-                cluster_status = result
-                break
-        if not cluster_status:
+        if not (
+            cluster_status := parallel_patroni_get_request(
+                f"/{PATRONI_CLUSTER_STATUS_ENDPOINT}", endpoints, cafile, None, True
+            )
+        ):
             raise UnreachableUnitsError("Unable to reach cluster members")
+
+        endpoints = []
         is_primary = False
         for member in cluster_status["members"]:
-            member_url = urljoin(member["api_url"], PATRONI_CLUSTER_STATUS_ENDPOINT)
             # Call the current unit first
             if member["name"] == member_name:
-                urls.insert(0, member_url)
+                endpoints.insert(0, member["host"])
                 # Check if the current member is the primary.
                 if member["role"] == "leader":
                     is_primary = True
             else:
-                urls.append(member_url)
-
+                endpoints.append(member["host"])
         if is_primary:
             previous_databases = check_for_database_changes(
                 run_cmd, unit, charm_dir, previous_databases

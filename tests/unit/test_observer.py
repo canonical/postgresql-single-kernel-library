@@ -142,7 +142,7 @@ def test_start_observer(observer_manager, substrate, harness, monkeypatch):
         observer_script = _popen.call_args.args[0][2]
         urls = _popen.call_args.args[0][3]
         assert observer_script.startswith("single_kernel_postgresql.scripts.")
-        assert urls == "https://1.1.1.1:8008,https://2.2.2.2:8008"
+        assert urls == "1.1.1.1,2.2.2.2"
         assert _popen.call_args.args[0][4] == JUJU_RUN_CMD
 
 
