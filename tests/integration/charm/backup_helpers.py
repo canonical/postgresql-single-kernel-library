@@ -562,6 +562,8 @@ def pitr_backup_operations(
                 status.get_units(database_app_name)[remaining_unit].workload_status.message
                 == CANNOT_RESTORE_PITR
             ),
+            # The charm can replace this message with a generic restore failure.
+            successes=1,
             timeout=1000,
         )
     logger.info(
