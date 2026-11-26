@@ -71,14 +71,18 @@ def test_start_observer(observer_manager, substrate, harness, monkeypatch):
             return_value="1.1.1.1",
         ),
         patch(
-            "single_kernel_postgresql.core.state.CharmState.patroni_url",
-            new_callable=PropertyMock,
-            return_value="https://1.1.1.1:8008",
-        ),
-        patch(
             "single_kernel_postgresql.core.state.CharmState.peer_members_ips",
             new_callable=PropertyMock,
             return_value={"2.2.2.2"},
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.endpoints",
+            new_callable=PropertyMock,
+            # On K8s the endpoints are service hostnames.
+            return_value=[
+                "postgresql-0.postgresql-endpoints.test-model.svc.cluster.local",
+                "postgresql-1.postgresql-endpoints.test-model.svc.cluster.local",
+            ],
         ),
         patch(
             "single_kernel_postgresql.core.peer_relation.PostgreSQLApplication.is_cluster_initialised",
@@ -140,9 +144,17 @@ def test_start_observer(observer_manager, substrate, harness, monkeypatch):
         _popen.assert_called_once()
         _open.assert_called_once()
         observer_script = _popen.call_args.args[0][2]
-        urls = _popen.call_args.args[0][3]
+        endpoints = _popen.call_args.args[0][3]
         assert observer_script.startswith("single_kernel_postgresql.scripts.")
-        assert urls == "1.1.1.1,2.2.2.2"
+        if substrate == "vm":
+            # On VM the endpoints are the unit IP followed by its peers' IPs.
+            assert endpoints == "1.1.1.1,2.2.2.2"
+        else:
+            # On K8s they come from the application endpoints (mocked above).
+            assert endpoints == (
+                "postgresql-0.postgresql-endpoints.test-model.svc.cluster.local,"
+                "postgresql-1.postgresql-endpoints.test-model.svc.cluster.local"
+            )
         assert _popen.call_args.args[0][4] == JUJU_RUN_CMD
 
 
@@ -168,14 +180,18 @@ def test_start_observer_already_running(observer_manager, harness, monkeypatch):
             return_value="1.1.1.1",
         ),
         patch(
-            "single_kernel_postgresql.core.state.CharmState.patroni_url",
-            new_callable=PropertyMock,
-            return_value="https://1.1.1.1:8008",
-        ),
-        patch(
             "single_kernel_postgresql.core.state.CharmState.peer_members_ips",
             new_callable=PropertyMock,
             return_value={"2.2.2.2"},
+        ),
+        patch(
+            "single_kernel_postgresql.core.state.CharmState.endpoints",
+            new_callable=PropertyMock,
+            # On K8s the endpoints are service hostnames.
+            return_value=[
+                "postgresql-0.postgresql-endpoints.test-model.svc.cluster.local",
+                "postgresql-1.postgresql-endpoints.test-model.svc.cluster.local",
+            ],
         ),
         # The merge gates the observer on an initialised cluster and, on K8s,
         # a connected container.
@@ -273,18 +289,18 @@ def test_cluster_topology_main():
     with (
         patch(
             "single_kernel_postgresql.scripts.cluster_topology_observer.check_for_database_changes"
-        ),
+        ) as _check_for_database_changes,
         patch.object(
             sys,
             "argv",
-            ["cmd", "http://server1:8008,http://server2:8008", "run_cmd", "unit/0", "charm_dir"],
+            ["cmd", "10.0.0.1,10.0.0.2", "run_cmd", "unit/0", "charm_dir"],
         ),
         patch(
             "single_kernel_postgresql.scripts.cluster_topology_observer.sleep", return_value=None
         ),
         patch(
-            "single_kernel_postgresql.scripts.cluster_topology_observer.AsyncClient"
-        ) as _async_client,
+            "single_kernel_postgresql.scripts.cluster_topology_observer.parallel_patroni_get_request"
+        ) as _parallel_patroni_get_request,
         patch(
             "single_kernel_postgresql.scripts.cluster_topology_observer.subprocess"
         ) as _subprocess,
@@ -292,31 +308,40 @@ def test_cluster_topology_main():
             "single_kernel_postgresql.scripts.cluster_topology_observer.create_default_context"
         ) as _context,
     ):
-        mock1 = Mock()
-        mock1.json.return_value = {
-            "members": [
-                {"name": "unit-0", "api_url": "http://server1:8008/patroni", "role": "leader"},
-            ]
-        }
-        mock2 = Mock()
-        mock2.json.return_value = {
-            "members": [
-                {"name": "unit-0", "api_url": "https://server3:8008/patroni", "role": "standby"},
-            ]
-        }
-        _get = _async_client.return_value.__aenter__.return_value.get
-        # Iterations consume from this list until the first success; the
-        # repeated mock1 makes the first iteration succeed no matter the task
-        # completion order, mock2 triggers the topology-change dispatch and
-        # the trailing errors exhaust the list with UnreachableUnitsError.
-        _get.side_effect = [mock1, mock1, mock2, Exception, Exception]
+        # The first iteration captures the initial topology and, this unit
+        # being the leader, checks the databases. The second iteration
+        # detects the topology change and dispatches the event. The final
+        # failure to reach any member raises UnreachableUnitsError.
+        _parallel_patroni_get_request.side_effect = [
+            {
+                "members": [
+                    {"name": "unit-0", "host": "10.0.0.1", "role": "leader"},
+                    {"name": "unit-1", "host": "10.0.0.3", "role": "standby"},
+                ]
+            },
+            {
+                "members": [
+                    {"name": "unit-1", "host": "10.0.0.3", "role": "leader"},
+                    {"name": "unit-0", "host": "10.0.0.1", "role": "standby"},
+                ]
+            },
+            None,
+        ]
 
         with pytest.raises(UnreachableUnitsError):
             asyncio.run(main())
 
-        _async_client.assert_any_call(timeout=5, verify=_context.return_value, trust_env=False)
-        _get.assert_any_call("http://server1:8008/cluster")
-        _get.assert_any_call("http://server2:8008/cluster")
+        # The first call uses the endpoints passed by the manager; the next
+        # calls use the members' hosts rebuilt from the cluster status, with
+        # the current unit called first.
+        cafile = "/var/snap/charmed-postgresql/current/etc/patroni/peer_ca_bundle.pem"
+        _parallel_patroni_get_request.assert_any_call(
+            "/cluster", ["10.0.0.1", "10.0.0.2"], cafile, None, True
+        )
+        _parallel_patroni_get_request.assert_any_call(
+            "/cluster", ["10.0.0.1", "10.0.0.3"], cafile, None, True
+        )
+        assert _check_for_database_changes.call_count == 1
 
         _subprocess.run.assert_called_once_with([
             "run_cmd",
@@ -606,46 +631,49 @@ def test_authorisation_rules_main(substrate):
         patch.object(
             sys,
             "argv",
-            ["cmd", "http://server1:8008,http://server2:8008", "run_cmd", "unit/0", "charm_dir"],
+            ["cmd", "10.0.0.1,10.0.0.2", "run_cmd", "unit/0", "charm_dir"],
         ),
         patch(
             "single_kernel_postgresql.scripts.authorisation_rules_observer.sleep",
             return_value=None,
         ),
         patch(
-            "single_kernel_postgresql.scripts.authorisation_rules_observer.AsyncClient"
-        ) as _async_client,
-        patch(
-            "single_kernel_postgresql.scripts.authorisation_rules_observer.create_default_context"
-        ) as _context,
+            "single_kernel_postgresql.scripts.authorisation_rules_observer.parallel_patroni_get_request"
+        ) as _parallel_patroni_get_request,
     ):
-        mock1 = Mock()
-        mock1.json.return_value = {
-            "members": [
-                {"name": "unit-2", "api_url": "http://server3:8008/patroni", "role": "standby"},
-                {"name": "unit-0", "api_url": "http://server1:8008/patroni", "role": "leader"},
-            ]
-        }
-        mock2 = Mock()
-        mock2.json.return_value = {
-            "members": [
-                {"name": "unit-2", "api_url": "https://server3:8008/patroni", "role": "leader"},
-            ]
-        }
-        _get = _async_client.return_value.__aenter__.return_value.get
-        # Iterations consume from this list until the first success; the
-        # repeated mock1 makes the first iteration succeed no matter the task
-        # completion order, mock2 keeps the loop running and the trailing
-        # errors exhaust the list with UnreachableUnitsError.
-        _get.side_effect = [mock1, mock1, mock2, Exception, Exception]
+        # The first iteration finds this unit as the leader, so the databases
+        # are checked. The second iteration finds it demoted, so only the
+        # endpoints are rebuilt. The final failure to reach any member raises
+        # UnreachableUnitsError.
+        _parallel_patroni_get_request.side_effect = [
+            {
+                "members": [
+                    {"name": "unit-2", "host": "10.0.0.3", "role": "standby"},
+                    {"name": "unit-0", "host": "10.0.0.1", "role": "leader"},
+                ]
+            },
+            {
+                "members": [
+                    {"name": "unit-2", "host": "10.0.0.3", "role": "leader"},
+                    {"name": "unit-0", "host": "10.0.0.1", "role": "standby"},
+                ]
+            },
+            None,
+        ]
 
         with pytest.raises(AuthorisationRulesUnreachableUnitsError):
             asyncio.run(authorisation_rules_main())
 
-        _async_client.assert_any_call(timeout=5, verify=_context.return_value, trust_env=False)
-        _get.assert_any_call("http://server1:8008/cluster")
-        _get.assert_any_call("http://server2:8008/cluster")
-        assert _check_for_database_changes.called
+        # The first call uses the endpoints passed by the manager; the next
+        # calls use the members' hosts rebuilt from the cluster status, with
+        # the current unit called first.
+        _parallel_patroni_get_request.assert_any_call(
+            "/cluster", ["10.0.0.1", "10.0.0.2"], "/tmp/peer_ca_bundle.pem", None, True
+        )
+        _parallel_patroni_get_request.assert_any_call(
+            "/cluster", ["10.0.0.1", "10.0.0.3"], "/tmp/peer_ca_bundle.pem", None, True
+        )
+        assert _check_for_database_changes.call_count == 1
 
 
 @pytest.mark.parametrize(
