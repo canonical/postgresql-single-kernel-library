@@ -705,16 +705,24 @@ def _run_upgrade_k8s(
     previous_revision = juju.status().apps[app_name].charm_rev
     logging.info("Refresh the charm")
     juju.refresh(app=app_name, path=charm, resources=resources)
-    logging.info("Wait for refresh to block as paused or incompatible")
+    logging.info("Wait for refresh incompatibility check")
     units = get_app_units(juju, app_name)
     unit_names = sorted(units.keys())
     try:
+        # An earlier blocked status (e.g. OCI resource validation) is not the
+        # version-compatibility decision and must not make the test skip this check.
         juju.wait(
-            lambda status: status.apps[app_name].units[unit_names[-1]].is_blocked,
+            lambda status: (
+                status.apps[app_name].units[unit_names[-1]].is_blocked
+                and "Refresh incompatible"
+                in status.apps[app_name].units[unit_names[-1]].workload_status.message
+            ),
             timeout=5 * MINUTE_SECS,
         )
+    except TimeoutError:
+        logging.info("No version incompatibility observed; wait for the refreshed unit")
+    else:
         juju.wait(jubilant.all_agents_idle, timeout=5 * MINUTE_SECS)
-
         if (
             "Refresh incompatible"
             in juju.status().apps[app_name].units[unit_names[-1]].workload_status.message
@@ -726,8 +734,6 @@ def _run_upgrade_k8s(
                 params={"check-compatibility": False},
                 wait=5 * MINUTE_SECS,
             )
-    except TimeoutError:
-        logging.info("Upgrade started without incompatibility")
 
     juju.wait(
         lambda status: status.apps[app_name].units[unit_names[-1]].is_active,
