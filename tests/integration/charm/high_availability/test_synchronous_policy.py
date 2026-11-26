@@ -6,7 +6,7 @@ import logging
 import jubilant
 import pytest
 from single_kernel_postgresql.config.enums import Substrates
-from tenacity import Retrying, stop_after_attempt, wait_fixed
+from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import CHARM_BASE, get_cluster_roles
 from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
@@ -76,11 +76,14 @@ def test_promote_to_primary(juju: jubilant.Juju, app_name: str) -> None:
     finally:
         juju.model_config({"update-status-hook-interval": "5m"})
 
-    new_roles = get_cluster_roles(juju, any_unit_name)
-    assert new_roles["primaries"] == [new_primary]
-    assert old_primary in new_roles["sync_standbys"]
-    assert len(new_roles["sync_standbys"]) == 2
-    assert len(new_roles["replicas"]) == 0
+    # The Primary label can move before the old primary rejoins as a sync standby.
+    for attempt in Retrying(stop=stop_after_delay(180), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            new_roles = get_cluster_roles(juju, any_unit_name)
+            assert new_roles["primaries"] == [new_primary]
+            assert old_primary in new_roles["sync_standbys"]
+            assert len(new_roles["sync_standbys"]) == 2
+            assert len(new_roles["replicas"]) == 0
 
 
 def test_default_all(juju: jubilant.Juju, app_name: str) -> None:
