@@ -182,102 +182,16 @@ jobs:
         if: ${{ matrix.job.substrate == 'vm' && (success() || (failure() && steps.spread.outcome == 'failure')) }}
         # sudo needed since spread runs scripts as root
         run: sudo lxc image list
-      - name: List models
-        timeout-minutes: 1
+      - name: Collect logs
+        timeout-minutes: 30
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        id: models
-        # One step per model and command below, so that the logs can be read on the GitHub web UI
-        # (they are also uploaded as an artifact). "testing" is the default model created by
-        # concierge; the async replication tests add "testing-other", kept on CI by
-        # PYTEST_ADDOPTS=--keep-models (spread.yaml). sudo needed since spread runs scripts as root
+        # One collapsible group per command and model (every Juju model, e.g. "testing" and the
+        # "testing-other" model of the async replication tests, kept on CI by
+        # PYTEST_ADDOPTS=--keep-models in spread.yaml), also saved to ~/logs/ for the artifact.
+        # sudo needed since spread runs scripts as root
         run: |
           mkdir ~/logs/
-          sudo juju models
-          if sudo juju show-model testing-other > /dev/null 2>&1; then
-            echo "other=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: juju status testing
-        timeout-minutes: 2
-        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" status testing
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: juju debug-log testing
-        timeout-minutes: 5
-        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" debug-log testing
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: jhack tail testing
-        timeout-minutes: 5
-        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" jhack testing
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: juju show-status-log testing
-        timeout-minutes: 5
-        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" status-log testing
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: Patroni and PostgreSQL logs testing
-        timeout-minutes: 10
-        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" workload-logs testing
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: juju status testing-other
-        timeout-minutes: 2
-        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && steps.models.outputs.other == 'true' }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" status testing-other
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: juju debug-log testing-other
-        timeout-minutes: 5
-        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && steps.models.outputs.other == 'true' }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" debug-log testing-other
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: jhack tail testing-other
-        timeout-minutes: 5
-        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && steps.models.outputs.other == 'true' }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" jhack testing-other
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: juju show-status-log testing-other
-        timeout-minutes: 5
-        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && steps.models.outputs.other == 'true' }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" status-log testing-other
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: Patroni and PostgreSQL logs testing-other
-        timeout-minutes: 10
-        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && steps.models.outputs.other == 'true' }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" workload-logs testing-other
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: k8s pods and events
-        timeout-minutes: 2
-        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" k8s-cluster
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: k8s describe pods
-        timeout-minutes: 3
-        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" k8s-describe
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: k8s pod logs
-        timeout-minutes: 10
-        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" k8s-pod-logs
-        env:
-          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
-      - name: Cilium status
-        timeout-minutes: 3
-        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
-        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" cilium
+          sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" all
         env:
           VAR_SUBSTRATE: ${{ matrix.job.substrate }}
       - name: Fix logs ownership
