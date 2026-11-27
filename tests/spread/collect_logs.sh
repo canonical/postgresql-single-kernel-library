@@ -79,18 +79,20 @@ model_dir="$OUT_DIR/${MODEL:-k8s}"
 case "$COMMAND" in
     status)
         if [ "$SUBSTRATE" = vm ]; then
-            run "$model_dir/juju-status.txt" juju status --model "$MODEL" --relations --storage
+            run "$model_dir/juju-status.txt" juju status --model "$MODEL" --color --relations --storage
         else
-            run "$model_dir/juju-status.txt" juju status --model "$MODEL" --relations
+            run "$model_dir/juju-status.txt" juju status --model "$MODEL" --color --relations
         fi
         timeout "$CMD_TIMEOUT" juju status --model "$MODEL" --format yaml > "$model_dir/juju-status.yaml" 2>&1
         ;;
     debug-log)
-        run "$model_dir/juju-debug-log.txt" juju debug-log --model "$MODEL" --replay --no-tail
+        run "$model_dir/juju-debug-log.txt" juju debug-log --model "$MODEL" --color --replay --no-tail
         ;;
     jhack)
         # jhack reads the logs from stdin when it is not a TTY (as on CI), so feed it the debug-log
-        run_stdin "$model_dir/jhack-tail.txt" "$(cat "$model_dir/juju-debug-log.txt" 2>/dev/null)" \
+        # (without the colour codes added by `juju debug-log --color`)
+        run_stdin "$model_dir/jhack-tail.txt" \
+            "$(sed 's/\x1b\[[0-9;]*m//g' "$model_dir/juju-debug-log.txt" 2>/dev/null)" \
             jhack tail --printer raw
         ;;
     status-log)
