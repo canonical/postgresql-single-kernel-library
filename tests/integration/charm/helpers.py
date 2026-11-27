@@ -30,10 +30,12 @@ from lightkube import Client
 from lightkube.core.client import GlobalResource
 from lightkube.core.exceptions import ApiError
 from lightkube.resources.core_v1 import PersistentVolume, PersistentVolumeClaim, Pod, Service
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import PEER_RELATION, SYSTEM_USERS_PASSWORD_CONFIG
 from tenacity import (
     RetryError,
     Retrying,
+    retry_if_exception,
     stop_after_attempt,
     stop_after_delay,
     wait_exponential,
@@ -48,10 +50,8 @@ from tests.integration.helpers.juju import (
     get_secret_by_label,
     get_unit_address,
     wait_for_apps_status,
-    wait_for_idle,
 )
 from tests.integration.helpers.postgresql import db_connect, execute_query
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +218,7 @@ def get_cluster_roles(juju: jubilant.Juju, unit_name: str) -> dict[str, list[str
     return members
 
 
-def check_cluster_members(juju: jubilant.Juju, app_name: str, substrate: Substrate) -> None:
+def check_cluster_members(juju: jubilant.Juju, app_name: str, substrate: Substrates) -> None:
     """Check that the Patroni cluster members are the application units.
 
     On VM the member hosts are also checked against the unit addresses.
@@ -237,14 +237,14 @@ def check_cluster_members(juju: jubilant.Juju, app_name: str, substrate: Substra
             assert [member["name"] for member in members] == [
                 name.replace("/", "-") for name in units
             ]
-            if substrate == Substrate.vm:
+            if substrate == Substrates.VM:
                 assert [member["host"] for member in members] == [
                     unit.public_address for unit in units.values()
                 ]
 
 
 def scale_application(
-    juju: jubilant.Juju, app_name: str, count: int, substrate: Substrate
+    juju: jubilant.Juju, app_name: str, count: int, substrate: Substrates
 ) -> None:
     """Scale an application to a number of units and wait for it to be active.
 
@@ -255,7 +255,7 @@ def scale_application(
     if change > 0:
         juju.add_unit(app_name, num_units=change)
     elif change < 0:
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             juju.remove_unit(*units[:-change], destroy_storage=True)
         else:
             juju.remove_unit(app_name, num_units=-change)
@@ -296,10 +296,10 @@ def switchover(
 
 
 def run_command_on_unit(
-    juju: jubilant.Juju, unit_name: str, command: str, substrate: Substrate
+    juju: jubilant.Juju, unit_name: str, command: str, substrate: Substrates
 ) -> str:
     """Run a shell command on the workload of a unit (the postgresql container on K8s)."""
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         return juju.exec(command, unit=unit_name).stdout
     return juju.ssh(unit_name, command, container="postgresql")
 
@@ -357,7 +357,7 @@ def build_connection_string(
     juju: jubilant.Juju,
     application_name: str,
     relation_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     *,
     relation_id: int | None = None,
     relation_alias: str | None = None,
@@ -391,7 +391,7 @@ def build_connection_string(
         relation_alias,
     )
     host = endpoints.split(",")[0].split(":")[0]
-    if substrate == Substrate.k8s:
+    if substrate == Substrates.K8S:
         # The endpoint is the service hostname: use its cluster IP.
         client = Client(namespace=(juju.model or "").split(":")[-1])
         host = client.get(Service, name=host.split(".")[0]).spec.clusterIP
@@ -525,7 +525,7 @@ def check_tls_replication(juju: jubilant.Juju, unit_name: str, enabled: bool) ->
 
 
 def check_tls_patroni_api(
-    juju: jubilant.Juju, unit_name: str, enabled: bool, substrate: Substrate
+    juju: jubilant.Juju, unit_name: str, enabled: bool, substrate: Substrates
 ) -> bool:
     """Return whether the Patroni REST API of a unit answers through TLS.
 
@@ -533,11 +533,11 @@ def check_tls_patroni_api(
     it isn't, since the unit IP doesn't match the certificate hostname (a k8s hostname).
     """
     unit_address = get_unit_address(juju, unit_name)
-    tls_ca = get_tls_ca(juju, unit_name, "peer") if substrate == Substrate.vm else ""
+    tls_ca = get_tls_ca(juju, unit_name, "peer") if substrate == Substrates.VM else ""
 
     # If there is no TLS CA in the relation, something is wrong in
     # the relation between the TLS Certificates Operator and PostgreSQL.
-    if substrate == Substrate.vm and enabled and not tls_ca:
+    if substrate == Substrates.VM and enabled and not tls_ca:
         return False
 
     try:
@@ -547,7 +547,7 @@ def check_tls_patroni_api(
             with attempt, tempfile.NamedTemporaryFile() as temp_ca_file:
                 temp_ca_file.write(tls_ca.encode("utf-8"))
                 temp_ca_file.seek(0)
-                verify = temp_ca_file.name if substrate == Substrate.vm and enabled else False
+                verify = temp_ca_file.name if substrate == Substrates.VM and enabled else False
                 health_info = requests.get(f"https://{unit_address}:8008/health", verify=verify)
                 return health_info.status_code == 200
     except RetryError:
@@ -654,7 +654,7 @@ def run_upgrade(
     juju: jubilant.Juju,
     app_name: str,
     charm: str,
-    substrate: Substrate,
+    substrate: Substrates,
     resources: dict[str, str] | None,
 ) -> None:
     """Refresh an application to the charm under test and wait for the refresh to finish.
@@ -663,7 +663,7 @@ def run_upgrade(
     resume-refresh runs on the second unit; on K8s the highest numbered pod is refreshed
     first and resume-refresh runs on the leader.
     """
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         _run_upgrade_vm(juju, app_name, charm)
     else:
         _run_upgrade_k8s(juju, app_name, charm, resources)
@@ -706,29 +706,51 @@ def _run_upgrade_k8s(
     previous_revision = juju.status().apps[app_name].charm_rev
     logging.info("Refresh the charm")
     juju.refresh(app=app_name, path=charm, resources=resources)
-    logging.info("Wait for refresh to block as paused or incompatible")
+    logging.info("Wait for refresh incompatibility check")
     units = get_app_units(juju, app_name)
     unit_names = sorted(units.keys())
     try:
+        # An earlier blocked status (e.g. OCI resource validation) is not the
+        # version-compatibility decision and must not make the test skip this check.
         juju.wait(
-            lambda status: status.apps[app_name].units[unit_names[-1]].is_blocked,
+            lambda status: (
+                status.apps[app_name].units[unit_names[-1]].is_blocked
+                and "Refresh incompatible"
+                in status.apps[app_name].units[unit_names[-1]].workload_status.message
+            ),
             timeout=5 * MINUTE_SECS,
         )
+    except TimeoutError:
+        logging.info("No version incompatibility observed; wait for the refreshed unit")
+    else:
         juju.wait(jubilant.all_agents_idle, timeout=5 * MINUTE_SECS)
-
         if (
             "Refresh incompatible"
             in juju.status().apps[app_name].units[unit_names[-1]].workload_status.message
         ):
             logging.info("Application refresh is blocked due to incompatibility")
-            juju.run(
-                unit=unit_names[-1],
-                action="force-refresh-start",
-                params={"check-compatibility": False},
-                wait=5 * MINUTE_SECS,
-            )
-    except TimeoutError:
-        logging.info("Upgrade started without incompatibility")
+            # The refreshed pod cannot start PostgreSQL until this action allows it.
+            # Retry only the observed transient precheck failure, without a health gate
+            # or repeating juju.refresh.
+            for attempt in Retrying(
+                stop=stop_after_delay(10 * MINUTE_SECS),
+                wait=wait_fixed(10),
+                retry=retry_if_exception(
+                    lambda error: (
+                        isinstance(error, jubilant.TaskError)
+                        and "Pre-refresh check failed: PostgreSQL is not running on unit "
+                        in str(error)
+                    )
+                ),
+                reraise=True,
+            ):
+                with attempt:
+                    juju.run(
+                        unit=unit_names[-1],
+                        action="force-refresh-start",
+                        params={"check-compatibility": False},
+                        wait=5 * MINUTE_SECS,
+                    )
 
     juju.wait(
         lambda status: status.apps[app_name].units[unit_names[-1]].is_active,
@@ -1198,8 +1220,8 @@ def stop_machine(machine_name: str) -> None:
 
 
 def assert_sync_standbys(unit_ip: str, standbys: int) -> None:
-    """Check for at least the original number of synchronous standbys."""
-    for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(3), reraise=True):
+    """Wait up to ten minutes for at least the requested number of synchronous standbys."""
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
         with attempt:
             cluster = get_patroni_cluster(unit_ip)
             cluster_standbys = 0
@@ -1480,9 +1502,7 @@ def start_ha_continuous_writes(
     ]
     if not relations:
         model.integrate(app, f"{APPLICATION_NAME}:database")
-        wait_for_idle(
-            model, apps=[APPLICATION_NAME, app], status="active", timeout=1000, idle_period=30
-        )
+        model.wait(wait_for_apps_status(jubilant.all_active, APPLICATION_NAME, app), timeout=1000)
     for attempt in Retrying(stop=stop_after_delay(60 * 5), wait=wait_fixed(3), reraise=True):
         with attempt:
             unit = next(iter(model.status().apps[APPLICATION_NAME].units))
@@ -1622,8 +1642,11 @@ def is_secondary_up_to_date(
                     assert results[0] == expected_writes and results[1] == expected_writes
                 elif results[0] != expected_writes or results[1] != expected_writes:
                     with fast_forward(juju, interval="30s"):
-                        wait_for_idle(
-                            juju, apps=[unit_name.split("/")[0]], idle_period=15, timeout=1000
+                        juju.wait(
+                            lambda status: jubilant.all_agents_idle(
+                                status, unit_name.split("/")[0]
+                            ),
+                            timeout=1000,
                         )
                         raise Exception
     except RetryError:
@@ -1641,17 +1664,23 @@ def is_cluster_updated(
         "there are more than one primary in the cluster."
     )
     logger.info("checking that all units are part of the same cluster")
-    member_ips = fetch_cluster_members(juju, use_ip_from_inside)
     app = primary_name.split("/")[0]
-    ip_addresses = [
-        (
-            get_ip_from_inside_the_unit(juju, unit_name)
-            if use_ip_from_inside
-            else get_unit_ip(juju, unit_name)
-        )
-        for unit_name in juju.status().apps[app].units
-    ]
-    assert set(member_ips) == set(ip_addresses), "not all units are part of the same cluster."
+    # Patroni membership views can differ briefly after restoring network access.
+    # Retry the full comparison before stopping/checking continuous writes.
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            member_ips = fetch_cluster_members(juju, use_ip_from_inside)
+            ip_addresses = [
+                (
+                    get_ip_from_inside_the_unit(juju, unit_name)
+                    if use_ip_from_inside
+                    else get_unit_ip(juju, unit_name)
+                )
+                for unit_name in juju.status().apps[app].units
+            ]
+            assert set(member_ips) == set(ip_addresses), (
+                "not all units are part of the same cluster."
+            )
     logger.info("checking that no writes to the database were missed after stopping the writes")
     for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(5), reraise=True):
         with attempt:
@@ -1670,7 +1699,7 @@ def scale_ha_application(
     count: int,
     model: jubilant.Juju | None = None,
 ) -> None:
-    """Scale using the original HA storage policy and exact-unit idle waits."""
+    """Scale using the original HA storage policy, then wait for the unit count and active status."""
     if model is None:
         model = juju
     if juju.status().model.type != "caas":
@@ -1680,13 +1709,12 @@ def scale_ha_application(
             model.add_unit(application_name, num_units=change)
         elif change < 0:
             model.remove_unit(*units[0:-change])
-        wait_for_idle(
-            model,
-            apps=[application_name],
-            status="active",
+        model.wait(
+            lambda status: (
+                len(status.apps[application_name].units) == count
+                and wait_for_apps_status(jubilant.all_active, application_name)(status)
+            ),
             timeout=2000,
-            idle_period=30,
-            wait_for_exact_units=count,
         )
         return
 
@@ -1699,13 +1727,12 @@ def scale_ha_application(
             successes=1,
         )
     else:
-        wait_for_idle(
-            model,
-            apps=[application_name],
-            status="active",
+        model.wait(
+            lambda status: (
+                len(status.apps[application_name].units) == count
+                and wait_for_apps_status(jubilant.all_active, application_name)(status)
+            ),
             timeout=1200,
-            wait_for_exact_units=count,
-            idle_period=2,
         )
 
 
@@ -1760,7 +1787,7 @@ def add_unit_with_storage(juju: jubilant.Juju, app: str, storages: list[str]) ->
         add_unit_cmd.append(f"--attach-storage={storage}")
     juju.cli(*add_unit_cmd)
     with fast_forward(juju):
-        wait_for_idle(juju, apps=[app], status="active", timeout=2000)
+        juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=2000)
 
     # When removing all units sometimes the last unit remain in the list
     current_units = set(juju.status().apps[app].units)
@@ -1995,13 +2022,7 @@ def remove_unit_force(juju: jubilant.Juju, num_units: int):
             successes=1,
         )
     else:
-        wait_for_idle(
-            juju,
-            apps=[app_name_str],
-            status="active",
-            timeout=1000,
-            wait_for_exact_units=scale,
-        )
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name_str), timeout=1000)
 
 
 def is_postgresql_ready(
@@ -2132,7 +2153,7 @@ def send_signal_to_process(  # noqa: C901
     app = get_postgresql_app_name(juju)
     if len(juju.status().apps[app].units) < 2:
         juju.add_unit(app, num_units=1)
-        wait_for_idle(juju, apps=[app], status="active", timeout=1000)
+        juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=1000)
 
     opt = "-f" if "/" in process else "-x"
     if juju.status().model.type != "caas":
@@ -2509,7 +2530,7 @@ def deploy_chaos_mesh(namespace: str) -> None:
     env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
     subprocess.check_output(
         " ".join([
-            "tests/integration/charm/ha_tests/scripts/deploy_chaos_mesh.sh",
+            "tests/integration/charm/high_availability/scripts/deploy_chaos_mesh.sh",
             namespace,
         ]),
         shell=True,
@@ -2522,7 +2543,7 @@ def destroy_chaos_mesh(namespace: str) -> None:
     env = os.environ
     env["KUBECONFIG"] = os.path.expanduser("~/.kube/config")
     subprocess.check_output(
-        f"tests/integration/charm/ha_tests/scripts/destroy_chaos_mesh.sh {namespace}",
+        f"tests/integration/charm/high_availability/scripts/destroy_chaos_mesh.sh {namespace}",
         shell=True,
         env=env,
     )
@@ -2538,7 +2559,7 @@ def isolate_instance_from_cluster(juju: jubilant.Juju, unit_name: str) -> None:
 
     with tempfile.NamedTemporaryFile() as temp_file:
         with open(
-            "tests/integration/charm/ha_tests/manifests/chaos_network_loss.yml"
+            "tests/integration/charm/high_availability/manifests/chaos_network_loss.yml"
         ) as chaos_network_loss_file:
             template = string.Template(chaos_network_loss_file.read())
             chaos_network_loss = template.substitute(

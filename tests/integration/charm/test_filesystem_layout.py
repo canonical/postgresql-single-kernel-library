@@ -8,9 +8,10 @@ import logging
 
 import jubilant
 import pytest
+from tenacity import Retrying, stop_after_delay, wait_fixed
 
-from tests.integration.charm.helpers import CHARM_BASE
-from tests.integration.helpers.juju import retry_if_cli_error
+from tests.integration.charm.helpers import CHARM_BASE, get_patroni_cluster
+from tests.integration.helpers.juju import get_unit_address, retry_if_cli_error
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,16 @@ def test_build_and_deploy(juju: jubilant.Juju, charm, app_name: str, charm_resou
         return True
 
     retry_if_cli_error(lambda: juju.wait(_all_active_idle, timeout=1500))
+    # Active/idle can precede replica initialization and creation of the WAL symlink.
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            address = get_unit_address(juju, f"{app_name}/0")
+            members = get_patroni_cluster(address)["members"]
+            assert (
+                len(members) == len(UNIT_IDS)
+                and all(member["state"] in ("running", "streaming") for member in members)
+                and sum(member["role"] == "leader" for member in members) == 1
+            ), f"Cluster not ready for filesystem checks: {members}"
     status = juju.status()
     for unit_id in UNIT_IDS:
         unit_name = f"{app_name}/{unit_id}"

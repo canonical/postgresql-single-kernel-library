@@ -15,6 +15,7 @@ from lightkube import Client
 from lightkube.resources.core_v1 import Endpoints, Pod, Service
 from psycopg2 import sql
 from single_kernel_postgresql.config import literals
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.locales import K8S_LOCALES, SNAP_LOCALES
 from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_exponential, wait_fixed
 
@@ -23,6 +24,7 @@ from tests.integration.charm.helpers import (
     get_cluster_roles,
     get_db_primary_unit,
     get_password,
+    get_patroni_cluster,
     get_primary,
     scale_application,
     switchover,
@@ -34,7 +36,6 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ def _wait_for_app_removal(juju: Juju, app_name: str) -> None:
 
 @pytest.mark.abort_on_fail
 def test_deploy(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Deploy the charm-under-test.
 
@@ -132,13 +133,23 @@ def test_deploy(
         config={"profile": "testing"},
         num_units=len(UNIT_IDS),
         resources=charm_resources,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
 
     # Reducing the update status frequency to speed up the triggering of deferred events.
     juju.model_config({"update-status-hook-interval": "10s"})
 
-    _wait_for_active_units(juju, app_name, len(UNIT_IDS), timeout=1500)
+    _wait_for_active_units(juju, app_name, len(UNIT_IDS), timeout=1500, successes=31)
+    if substrate == Substrates.K8S:
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+            with attempt:
+                address = get_unit_address(juju, f"{app_name}/0")
+                members = get_patroni_cluster(address)["members"]
+                assert (
+                    len(members) == len(UNIT_IDS)
+                    and all(member["state"] in ("running", "streaming") for member in members)
+                    and sum(member["role"] == "leader" for member in members) == 1
+                ), f"Cluster not ready: {members}"
     for unit in get_app_units(juju, app_name).values():
         assert unit.workload_status.current == "active"
 
@@ -185,7 +196,7 @@ def test_exporter_is_up(juju: Juju, app_name: str, unit_id: int):
 
 
 @pytest.mark.parametrize("unit_id", UNIT_IDS)
-def test_settings_are_correct(juju: Juju, app_name: str, substrate: Substrate, unit_id: int):
+def test_settings_are_correct(juju: Juju, app_name: str, substrate: Substrates, unit_id: int):
     password = get_password(juju, app_name)
 
     # Connect to PostgreSQL.
@@ -229,7 +240,7 @@ def test_settings_are_correct(juju: Juju, app_name: str, substrate: Substrate, u
     connection.close()
 
     # Validate each configuration set by Patroni on PostgreSQL.
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         assert settings["cluster_name"] == app_name
         assert settings["data_directory"] == VM_POSTGRESQL_DATA_DIR
         assert settings["listen_addresses"] == host
@@ -260,21 +271,21 @@ def test_settings_are_correct(juju: Juju, app_name: str, substrate: Substrate, u
     assert settings["postgresql"]["use_pg_rewind"] is True
     assert settings["postgresql"]["remove_data_directory_on_rewind_failure"] is False
     assert settings["postgresql"]["remove_data_directory_on_diverged_timelines"] is False
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         assert settings["loop_wait"] == 10
         assert settings["retry_timeout"] == 10
     assert settings["maximum_lag_on_failover"] == 1048576
 
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         logger.warning("Asserting port ranges")
         unit = get_app_units(juju, app_name)[unit_name]
         assert unit.open_ports
         assert unit.open_ports[0] == "5432/tcp"
 
 
-def test_postgresql_locales(juju: Juju, app_name: str, substrate: Substrate) -> None:
+def test_postgresql_locales(juju: Juju, app_name: str, substrate: Substrates) -> None:
     unit_name = _first_unit(juju, app_name)
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         raw_locales = juju.exec(
             "ls", "/snap/charmed-postgresql/current/usr/lib/locale", unit=unit_name
         ).stdout
@@ -293,9 +304,9 @@ def test_postgresql_locales(juju: Juju, app_name: str, substrate: Substrate) -> 
     assert locales == sorted(expected_locales)
 
 
-def test_postgresql_parameters_change(juju: Juju, app_name: str, substrate: Substrate) -> None:
+def test_postgresql_parameters_change(juju: Juju, app_name: str, substrate: Substrates) -> None:
     """Test that's possible to change PostgreSQL parameters."""
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         # VM keeps the deprecated "_" options, whose defaults override the "-" ones
         # when rendering patroni.yml (e.g. response_lc_monetary="C").
         juju.config(
@@ -372,7 +383,7 @@ def test_cluster_is_stable_after_leader_deletion(juju: Juju, app_name: str) -> N
     get_primary(juju, replica)
 
 
-def test_scale_down_and_up(juju: Juju, app_name: str, substrate: Substrate):
+def test_scale_down_and_up(juju: Juju, app_name: str, substrate: Substrates):
     """Test data is replicated to new units after a scale up."""
     # Ensure the initial number of units in the application.
     initial_scale = len(UNIT_IDS)
@@ -393,7 +404,7 @@ def test_scale_down_and_up(juju: Juju, app_name: str, substrate: Substrate):
 
     # On K8s only the last pods can be removed, so the leader and primary
     # deletions are only tested on VM.
-    if substrate == Substrate.vm:
+    if substrate == Substrates.VM:
         # Test the deletion of the unit that is both the leader and the primary.
         any_unit_name = _first_unit(juju, app_name)
         primary = get_primary(juju, any_unit_name)

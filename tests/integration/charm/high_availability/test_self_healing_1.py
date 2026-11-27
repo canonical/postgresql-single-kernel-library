@@ -6,6 +6,7 @@ from time import sleep
 
 import jubilant
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -25,14 +26,13 @@ from tests.integration.charm.helpers import (
     start_ha_continuous_writes,
     storage_type,
 )
-from tests.integration.helpers.juju import fast_forward, wait_for_idle
-from tests.integration.types import Substrate
+from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
 
 logger = logging.getLogger(__name__)
 
 PATRONI_PROCESS = {
-    Substrate.vm: "/snap/charmed-postgresql/[0-9]*/usr/bin/patroni",
-    Substrate.k8s: "/usr/bin/patroni",
+    Substrates.VM: "/snap/charmed-postgresql/[0-9]*/usr/bin/patroni",
+    Substrates.K8S: "/usr/bin/patroni",
 }
 POSTGRESQL_PROCESS = "postgres"
 # The Patroni path depends on the substrate, so the tests are parametrized by name.
@@ -49,7 +49,7 @@ VM_STORAGE = {
 
 @pytest.mark.abort_on_fail
 def test_build_and_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy three unit of PostgreSQL."""
     wait_for_apps = False
@@ -63,10 +63,10 @@ def test_build_and_deploy(
                 app=app_name,
                 num_units=3,
                 base=CHARM_BASE,
-                storage=VM_STORAGE if substrate == Substrate.vm else None,
+                storage=VM_STORAGE if substrate == Substrates.VM else None,
                 config={"profile": "testing"},
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
     # Deploy the continuous writes application charm if it wasn't already deployed.
     if APPLICATION_NAME not in juju.status().apps:
@@ -82,12 +82,8 @@ def test_build_and_deploy(
     if wait_for_apps:
         juju.integrate(app_name, f"{APPLICATION_NAME}:database")
         with fast_forward(juju):
-            wait_for_idle(
-                juju,
-                apps=[APPLICATION_NAME, app_name],
-                status="active",
-                timeout=1500,
-                idle_period=30,
+            juju.wait(
+                wait_for_apps_status(jubilant.all_active, APPLICATION_NAME, app_name), timeout=1500
             )
 
 
@@ -109,7 +105,7 @@ def test_storage_re_use(juju: jubilant.Juju, app_name: str, juju_continuous_writ
     # removing the only replica can be disastrous
     if len(juju.status().apps[app].units) < 2:
         juju.add_unit(app, num_units=1)
-        wait_for_idle(juju, apps=[app], status="active", timeout=1500)
+        juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=1500)
 
     # Start an application that continuously writes data to the database.
     start_ha_continuous_writes(juju, app)
@@ -119,11 +115,8 @@ def test_storage_re_use(juju: jubilant.Juju, app_name: str, juju_continuous_writ
         if is_replica(juju, unit):
             break
     unit_storage_id = get_storage_ids(juju, unit)
-    expected_units = len(juju.status().apps[app].units) - 1
     juju.remove_unit(unit)
-    wait_for_idle(
-        juju, apps=[app], status="active", timeout=1000, wait_for_exact_units=expected_units
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, app), timeout=1000)
     new_unit = add_unit_with_storage(juju, app, unit_storage_id)
 
     assert reused_replica_storage(juju, new_unit), (
@@ -145,7 +138,7 @@ def test_storage_re_use(juju: jubilant.Juju, app_name: str, juju_continuous_writ
 def test_interruption_db_process(
     juju: jubilant.Juju,
     app_name: str,
-    substrate: Substrate,
+    substrate: Substrates,
     process: str,
     signal: str,
     juju_continuous_writes,

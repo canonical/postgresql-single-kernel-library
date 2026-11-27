@@ -3,14 +3,15 @@
 # See LICENSE file for licensing details.
 import logging
 import re
-from time import sleep
 
 import jubilant
 import psycopg2
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
+from tenacity import Retrying, retry_if_exception_type, stop_after_delay, wait_fixed
 
-from tests.integration.charm.helpers import get_primary, get_refresh_versions
+from tests.integration.charm.helpers import get_primary, get_refresh_versions, is_postgresql_ready
 from tests.integration.helpers.juju import (
     fast_forward,
     get_app_units,
@@ -20,7 +21,6 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +32,28 @@ SECOND_RELATION_USER = "relation_id_1"
 PASSWORD = "test-password"
 
 
+def _wait_for_hba(address: str) -> None:
+    """Wait for both allowed logins to work after the users/HBA rules propagate."""
+    for attempt in Retrying(
+        stop=stop_after_delay(300),
+        wait=wait_fixed(3),
+        retry=retry_if_exception_type(psycopg2.OperationalError),
+        reraise=True,
+    ):
+        with attempt:
+            for user, database in (
+                (FIRST_RELATION_USER, FIRST_DATABASE),
+                (SECOND_RELATION_USER, SECOND_DATABASE),
+            ):
+                connection = db_connect(
+                    host=address, password=PASSWORD, user=user, database=database
+                )
+                connection.close()
+
+
 @pytest.mark.abort_on_fail
 def test_pg_hba(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     with fast_forward(juju):
         logger.info("Deploying charms")
@@ -46,7 +65,7 @@ def test_pg_hba(
                 config={"profile": "testing"},
                 num_units=2,
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
         if DATA_INTEGRATOR_APP_NAME not in juju.status().apps:
             juju.deploy(
@@ -59,9 +78,15 @@ def test_pg_hba(
             juju.integrate(DATA_INTEGRATOR_APP_NAME, app_name)
 
         juju.wait(
-            wait_for_apps_status(jubilant.all_active, DATA_INTEGRATOR_APP_NAME, app_name),
+            lambda status: (
+                len(status.apps[app_name].units) == 2
+                and wait_for_apps_status(jubilant.all_active, DATA_INTEGRATOR_APP_NAME, app_name)(
+                    status
+                )
+            ),
             error=jubilant.any_error,
             timeout=1000,
+            successes=31,
         )
 
         primary = get_primary(juju, f"{app_name}/0")
@@ -108,11 +133,11 @@ def test_pg_hba(
             if connection:
                 connection.close()
 
-        sleep(90)
-
         for unit_name in get_app_units(juju, app_name):
             try:
+                assert is_postgresql_ready(juju, unit_name), f"PostgreSQL not ready on {unit_name}"
                 address = get_unit_address(juju, unit_name)
+                _wait_for_hba(address)
 
                 logger.info(
                     f"Checking that the user {FIRST_RELATION_USER} can connect to the database {FIRST_DATABASE} on {unit_name}"

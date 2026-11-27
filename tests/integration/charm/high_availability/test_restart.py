@@ -8,6 +8,7 @@ import pytest
 import requests
 from kubernetes import config, dynamic
 from kubernetes.client import api_client
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import (
     APPLICATION_NAME,
@@ -18,8 +19,7 @@ from tests.integration.charm.helpers import (
     remove_charm_code,
     start_ha_continuous_writes,
 )
-from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
-from tests.integration.types import Substrate
+from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_apps_status
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ pytestmark = pytest.mark.k8s_only
 
 @pytest.mark.abort_on_fail
 def test_build_and_deploy(
-    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy three unit of PostgreSQL."""
     # It is possible for users to provide their own cluster for HA testing. Hence, check if there
@@ -45,7 +45,7 @@ def test_build_and_deploy(
                 base=CHARM_BASE,
                 config={"profile": "testing"},
                 resources=charm_resources,
-                trust=substrate == Substrate.k8s,
+                trust=substrate == Substrates.K8S,
             )
     # Deploy the continuous writes application charm if it wasn't already deployed.
     if APPLICATION_NAME not in juju.status().apps:
@@ -59,13 +59,7 @@ def test_build_and_deploy(
 
     juju.integrate(app_name, f"{APPLICATION_NAME}:database")
     with fast_forward(juju):
-        wait_for_idle(
-            juju,
-            apps=[app_name],
-            status="active",
-            timeout=1000,
-            raise_on_error=False,
-        )
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=1000)
 
 
 @pytest.mark.abort_on_fail
@@ -117,7 +111,7 @@ def test_restart(juju: jubilant.Juju, juju_continuous_writes, app_name: str) -> 
                 break
 
     with fast_forward(juju):
-        wait_for_idle(juju, apps=[app_name], status="active", raise_on_error=False, timeout=300)
+        juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=300)
 
     # Check that all replication slots are present in the primary
     # (by checking the list of cluster members).

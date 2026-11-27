@@ -8,6 +8,7 @@ import jubilant
 import pytest
 from jubilant import Juju
 from single_kernel_postgresql.config import literals
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_exponential, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -28,7 +29,6 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import db_connect
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +50,9 @@ K8S_POSTGRESQL_LOGS_DIR = f"/{literals.K8S_LOGS_STORAGE_PATH}/{literals.K8S_PG_L
 REWIND_TLS_LOG = "connection authorized: user=rewind database=postgres SSL enabled"
 
 
-def check_tls_rewind(juju: Juju, app_name: str, substrate: Substrate) -> None:
+def check_tls_rewind(juju: Juju, app_name: str, substrate: Substrates) -> None:
     """Check that pg_rewind connected through TLS, looking at the logs of every unit."""
-    logs_dir = VM_POSTGRESQL_LOGS_DIR if substrate == Substrate.vm else K8S_POSTGRESQL_LOGS_DIR
+    logs_dir = VM_POSTGRESQL_LOGS_DIR if substrate == Substrates.VM else K8S_POSTGRESQL_LOGS_DIR
     logs = ""
     for unit_name in get_app_units(juju, app_name):
         logger.info(f"checking if pg_rewind used TLS on {unit_name}")
@@ -69,7 +69,7 @@ def check_tls_rewind(juju: Juju, app_name: str, substrate: Substrate) -> None:
 
 @pytest.mark.abort_on_fail
 def test_deploy(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Deploy three units of PostgreSQL."""
     with fast_forward(juju):
@@ -80,14 +80,14 @@ def test_deploy(
             config={"profile": "testing"},
             num_units=DATABASE_UNITS,
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
         # No wait between deploying charms, since we can't guarantee users will wait. Furthermore,
         # bundles don't wait between deploying charms.
 
 
 @pytest.mark.abort_on_fail
-def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrate) -> None:
+def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrates) -> None:
     """Test that TLS is enabled when relating to the TLS Certificates Operator."""
     with fast_forward(juju):
         # Deploy TLS Certificates operator.
@@ -133,7 +133,7 @@ def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrate) -> None:
             timeout=10 * 60,
             successes=30,
         )
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             # Make the fail-over happen faster.
             change_primary_start_timeout(juju, primary, 0, patroni_password)
 
@@ -143,7 +143,7 @@ def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrate) -> None:
         )
 
     with fast_forward(juju, "24h"):
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             promote_command = f"sudo charmed-postgresql.pg-ctl -D {VM_POSTGRESQL_DATA_DIR} promote"
         else:
             promote_command = (
@@ -183,7 +183,7 @@ def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrate) -> None:
 
         # Stop the initial primary.
         logger.info(f"stopping database on {primary}")
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             # Kill both Patroni and PostgreSQL OS processes (the snap restarts Patroni).
             run_command_on_unit(
                 juju,
@@ -208,7 +208,7 @@ def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrate) -> None:
         ):
             with attempt:
                 assert primary_changed(juju, primary), "primary not changed"
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             change_primary_start_timeout(juju, primary, 300, patroni_password)
 
         # Check the logs to ensure TLS is being used by pg_rewind.
@@ -230,10 +230,10 @@ def test_tls_enabled(juju: Juju, app_name: str, substrate: Substrate) -> None:
         )
 
 
-def test_remove_tls(juju: Juju, app_name: str, substrate: Substrate) -> None:
+def test_remove_tls(juju: Juju, app_name: str, substrate: Substrates) -> None:
     with fast_forward(juju):
         # Remove the relation.
-        if substrate == Substrate.vm:
+        if substrate == Substrates.VM:
             juju.remove_relation(
                 f"{app_name}:client-certificates", f"{tls_certificates_app_name}:certificates"
             )

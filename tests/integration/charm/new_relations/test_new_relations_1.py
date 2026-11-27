@@ -6,8 +6,9 @@ import time
 import jubilant
 import psycopg2
 import pytest
+from single_kernel_postgresql.config.enums import Substrates
 from single_kernel_postgresql.config.literals import DATABASE_DEFAULT_NAME
-from tenacity import Retrying, stop_after_attempt, wait_fixed
+from tenacity import Retrying, stop_after_attempt, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
     CHARM_BASE,
@@ -16,6 +17,7 @@ from tests.integration.charm.helpers import (
     check_database_users_existence,
     get_application_relation_data,
     get_machine_from_unit,
+    get_patroni_cluster,
     get_primary_from_app,
     scale_ha_application,
     start_machine,
@@ -26,9 +28,8 @@ from tests.integration.helpers.juju import (
     get_app_leader,
     get_unit_address,
     split_model,
-    wait_for_idle,
+    wait_for_apps_status,
 )
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +75,10 @@ def test_deploy_charms(juju: jubilant.Juju, charm):
             config={"profile": "testing"},
         )
 
-        wait_for_idle(
-            juju,
-            apps=[DATABASE_APP_NAME, ANOTHER_DATABASE_APP_NAME],
-            status="active",
+        juju.wait(
+            wait_for_apps_status(
+                jubilant.all_active, DATABASE_APP_NAME, ANOTHER_DATABASE_APP_NAME
+            ),
             timeout=3000,
         )
 
@@ -85,7 +86,7 @@ def test_deploy_charms(juju: jubilant.Juju, charm):
 @pytest.mark.k8s_only
 @pytest.mark.abort_on_fail
 def test_database_relation_with_charm_libraries_k8s(
-    juju: jubilant.Juju, charm, charm_resources, substrate: Substrate
+    juju: jubilant.Juju, charm, charm_resources, substrate: Substrates
 ):
     """Test basic functionality of database relation interface."""
     # Deploy both charms (multiple units for each application to test that later they correctly
@@ -118,14 +119,33 @@ def test_database_relation_with_charm_libraries_k8s(
         )
         # Relate the charms and wait for them exchanging some connection data.
         juju.integrate(f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
-        wait_for_idle(
-            juju,
-            apps=[DATABASE_APP_NAME],
-            status="active",
-            raise_on_blocked=True,
-            raise_on_error=False,
+        juju.wait(
+            lambda status: (
+                len(status.apps[DATABASE_APP_NAME].units) == 3
+                and wait_for_apps_status(jubilant.all_active, DATABASE_APP_NAME)(status)
+            ),
             timeout=1000,
+            successes=31,
         )
+        model_name = split_model(juju.model)[1]
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+            with attempt:
+                primary = get_primary_from_app(juju, DATABASE_APP_NAME)
+                members = get_patroni_cluster(get_unit_address(juju, primary))["members"]
+                assert (
+                    len(members) == 3
+                    and all(member["state"] in ("running", "streaming") for member in members)
+                    and sum(member["role"] == "leader" for member in members) == 1
+                ), f"Cluster not ready: {members}"
+                assert (
+                    get_application_relation_data(
+                        juju,
+                        APPLICATION_APP_NAME,
+                        FIRST_DATABASE_RELATION_NAME,
+                        "read-only-endpoints",
+                    )
+                    == f"{DATABASE_APP_NAME}-replicas.{model_name}.svc.cluster.local:5432"
+                )
 
         # The pinned libjuju has list_secrets, so the original always checks this.
         logger.info("checking for secrets")
@@ -199,7 +219,7 @@ def test_primary_read_only_endpoint_in_standalone_cluster_vm(juju: jubilant.Juju
 
         # Relate the charms and wait for them exchanging some connection data.
         juju.integrate(f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
-        wait_for_idle(juju, apps=APP_NAMES, status="active")
+        juju.wait(wait_for_apps_status(jubilant.all_active, *APP_NAMES), timeout=600)
 
         # Check that on juju 3 we have secrets and no username and password in the rel databag
         logger.info("checking for secrets")
@@ -241,7 +261,7 @@ def test_read_only_endpoint_in_scaled_up_cluster_vm(juju: jubilant.Juju):
 
         # Try to get the connection string of the database using the read-only endpoint.
         # It should be the replica unit.
-        for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True):
+        for attempt in Retrying(stop=stop_after_delay(120), wait=wait_fixed(3), reraise=True):
             with attempt:
                 data = get_application_relation_data(
                     juju,
@@ -253,7 +273,7 @@ def test_read_only_endpoint_in_scaled_up_cluster_vm(juju: jubilant.Juju):
 
 
 @pytest.mark.vm_only
-def test_database_relation_with_charm_libraries_vm(juju: jubilant.Juju, substrate: Substrate):
+def test_database_relation_with_charm_libraries_vm(juju: jubilant.Juju, substrate: Substrates):
     """Test basic functionality of database relation interface."""
     # Get the connection string to connect to the database using the read/write endpoint.
     connection_string = build_connection_string(
@@ -325,13 +345,11 @@ def test_filter_out_degraded_replicas(juju: jubilant.Juju):
             assert data == f"{get_unit_address(juju, primary)}:5432"
 
     start_machine(machine)
-    wait_for_idle(
-        juju, apps=[DATABASE_APP_NAME], status="active", timeout=200, raise_on_error=False
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, DATABASE_APP_NAME), timeout=200)
 
 
 def test_two_applications_doesnt_share_the_same_relation_data(
-    juju: jubilant.Juju, substrate: Substrate
+    juju: jubilant.Juju, substrate: Substrates
 ):
     """Test that two different application connect to the database with different credentials."""
     # Set some variables to use in this test.
@@ -352,7 +370,7 @@ def test_two_applications_doesnt_share_the_same_relation_data(
     juju.integrate(
         f"{another_application_app_name}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME
     )
-    wait_for_idle(juju, apps=all_app_names, status="active", idle_period=30)
+    juju.wait(wait_for_apps_status(jubilant.all_active, *all_app_names), timeout=600)
 
     # Assert the two application have different relation (connection) data.
     application_connection_string = build_connection_string(
@@ -390,7 +408,7 @@ def test_two_applications_doesnt_share_the_same_relation_data(
 
 
 def test_an_application_can_connect_to_multiple_database_clusters(
-    juju: jubilant.Juju, substrate: Substrate
+    juju: jubilant.Juju, substrate: Substrates
 ):
     """Test that an application can connect to different clusters of the same database."""
     # Relate the application with both database clusters
@@ -402,7 +420,7 @@ def test_an_application_can_connect_to_multiple_database_clusters(
         f"{APPLICATION_APP_NAME}:{MULTIPLE_DATABASE_CLUSTERS_RELATION_NAME}",
         ANOTHER_DATABASE_APP_NAME,
     )
-    wait_for_idle(juju, apps=APP_NAMES, status="active", idle_period=30)
+    juju.wait(wait_for_apps_status(jubilant.all_active, *APP_NAMES), timeout=600)
 
     # integrate returns no relation object: recover each ID by endpoint and related app.
     relation_data = juju.show_unit(f"{APPLICATION_APP_NAME}/0").relation_info
@@ -477,11 +495,11 @@ def test_an_application_can_connect_to_multiple_database_clusters(
 
 
 @pytest.mark.abort_on_fail
-def test_an_application_can_request_multiple_databases(juju: jubilant.Juju, substrate: Substrate):
+def test_an_application_can_request_multiple_databases(juju: jubilant.Juju, substrate: Substrates):
     """Test that an application can request additional databases using the same interface."""
     # Relate the charms using another relation and wait for them exchanging some connection data.
     juju.integrate(f"{APPLICATION_APP_NAME}:{SECOND_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
-    wait_for_idle(juju, apps=APP_NAMES, status="active", timeout=15 * 60, idle_period=30)
+    juju.wait(wait_for_apps_status(jubilant.all_active, *APP_NAMES), timeout=15 * 60)
 
     # Get the connection strings to connect to both databases.
     for attempt in Retrying(stop=stop_after_attempt(15), wait=wait_fixed(3), reraise=True):
@@ -526,8 +544,8 @@ def test_read_only_endpoint_in_scaled_up_cluster_k8s(juju: jubilant.Juju):
         scale_ha_application(juju, DATABASE_APP_NAME, 3)
 
         # Try to get the connection string of the database using the read-only endpoint.
-        # It should be available again.
-        for attempt in Retrying(stop=stop_after_attempt(3), wait=wait_fixed(3), reraise=True):
+        # It should be available again. Unit readiness can precede endpoint propagation.
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
             with attempt:
                 data = get_application_relation_data(
                     juju,
@@ -552,7 +570,7 @@ def test_relation_broken(juju: jubilant.Juju):
         juju.remove_relation(
             f"{DATABASE_APP_NAME}", f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}"
         )
-        wait_for_idle(juju, apps=APP_NAMES, status="active", raise_on_blocked=True)
+        juju.wait(wait_for_apps_status(jubilant.all_active, *APP_NAMES), timeout=600)
 
         # Check that the relation user was removed from the database.
         check_database_users_existence(
@@ -561,12 +579,20 @@ def test_relation_broken(juju: jubilant.Juju):
 
 
 @pytest.mark.k8s_only
-def test_restablish_relation(juju: jubilant.Juju, substrate: Substrate):
+def test_restablish_relation(juju: jubilant.Juju, substrate: Substrates):
     """Test that a previously broken relation would be functional if restored."""
     # Relate the charms and wait for them exchanging some connection data.
     with fast_forward(juju):
         juju.integrate(f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
-        wait_for_idle(juju, apps=APP_NAMES, status="active", idle_period=30, raise_on_blocked=True)
+        juju.wait(wait_for_apps_status(jubilant.all_active, *APP_NAMES), timeout=600)
+
+        # Workload statuses can remain active while the new relation data propagates.
+        for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+            with attempt:
+                for key in ("endpoints", "read-only-endpoints"):
+                    assert get_application_relation_data(
+                        juju, APPLICATION_APP_NAME, FIRST_DATABASE_RELATION_NAME, key
+                    ), f"Restored relation has no {key} yet"
 
     # Get the connection string to connect to the database using the read-only endpoint.
     connection_string = build_connection_string(
@@ -603,7 +629,7 @@ def test_restablish_relation(juju: jubilant.Juju, substrate: Substrate):
 @pytest.mark.vm_only
 @pytest.mark.abort_on_fail
 def test_relation_data_is_updated_correctly_when_scaling(
-    juju: jubilant.Juju, substrate: Substrate
+    juju: jubilant.Juju, substrate: Substrates
 ):
     """Test that relation data, like connection data, is updated correctly when scaling."""
     # Retrieve the list of current database unit names.
@@ -612,9 +638,7 @@ def test_relation_data_is_updated_correctly_when_scaling(
     with fast_forward(juju, interval="60s"):
         # Add two more units.
         juju.add_unit(DATABASE_APP_NAME, num_units=2)
-        wait_for_idle(
-            juju, apps=[DATABASE_APP_NAME], status="active", timeout=3000, wait_for_exact_units=4
-        )
+        juju.wait(wait_for_apps_status(jubilant.all_active, DATABASE_APP_NAME), timeout=3000)
 
         first_unit = next(iter(juju.status().apps[DATABASE_APP_NAME].units.values()))
         assert_sync_standbys(first_unit.public_address, 2)
@@ -622,13 +646,9 @@ def test_relation_data_is_updated_correctly_when_scaling(
         # Remove the original units.
         leader_unit = get_app_leader(juju, DATABASE_APP_NAME)
         juju.remove_unit(*[unit for unit in units_to_remove if unit != leader_unit])
-        wait_for_idle(
-            juju, apps=[DATABASE_APP_NAME], status="active", timeout=600, wait_for_exact_units=3
-        )
+        juju.wait(wait_for_apps_status(jubilant.all_active, DATABASE_APP_NAME), timeout=600)
         juju.remove_unit(leader_unit)
-        wait_for_idle(
-            juju, apps=[DATABASE_APP_NAME], status="active", timeout=600, wait_for_exact_units=2
-        )
+        juju.wait(wait_for_apps_status(jubilant.all_active, DATABASE_APP_NAME), timeout=600)
 
         # Get the updated connection data and assert it can be used
         # to write and read some data properly.
@@ -679,9 +699,7 @@ def test_relation_data_is_updated_correctly_when_scaling(
             f"{DATABASE_APP_NAME}:database",
             f"{APPLICATION_APP_NAME}:{FIRST_DATABASE_RELATION_NAME}",
         )
-        wait_for_idle(
-            juju, apps=[DATABASE_APP_NAME], status="active", timeout=1000, idle_period=30
-        )
+        juju.wait(wait_for_apps_status(jubilant.all_active, DATABASE_APP_NAME), timeout=1000)
         with pytest.raises(psycopg2.OperationalError):
             psycopg2.connect(primary_connection_string)
 
@@ -692,20 +710,22 @@ def test_relation_with_no_database_name(juju: jubilant.Juju):
     with fast_forward(juju):
         # Relate the charms using a relation that doesn't provide a database name.
         juju.integrate(f"{APPLICATION_APP_NAME}:{NO_DATABASE_RELATION_NAME}", DATABASE_APP_NAME)
-        wait_for_idle(juju, apps=APP_NAMES, status="active", raise_on_blocked=True)
+        juju.wait(wait_for_apps_status(jubilant.all_active, *APP_NAMES), timeout=600)
 
         # Break the relation.
         juju.remove_relation(
             f"{DATABASE_APP_NAME}", f"{APPLICATION_APP_NAME}:{NO_DATABASE_RELATION_NAME}"
         )
-        wait_for_idle(juju, apps=APP_NAMES, status="active", raise_on_blocked=True)
+        juju.wait(wait_for_apps_status(jubilant.all_active, *APP_NAMES), timeout=600)
 
 
 @pytest.mark.abort_on_fail
 def test_invalid_extra_user_roles(juju: jubilant.Juju):
     with fast_forward(juju):
         juju.deploy(DATA_INTEGRATOR_APP_NAME, channel="latest/edge", base=CHARM_BASE)
-        wait_for_idle(juju, apps=[DATA_INTEGRATOR_APP_NAME], status="blocked")
+        juju.wait(
+            wait_for_apps_status(jubilant.all_blocked, DATA_INTEGRATOR_APP_NAME), timeout=600
+        )
 
         another_data_integrator_app_name = f"another-{DATA_INTEGRATOR_APP_NAME}"
         data_integrator_apps_names = [DATA_INTEGRATOR_APP_NAME, another_data_integrator_app_name]
@@ -715,7 +735,10 @@ def test_invalid_extra_user_roles(juju: jubilant.Juju):
             channel="latest/edge",
             base=CHARM_BASE,
         )
-        wait_for_idle(juju, apps=[another_data_integrator_app_name], status="blocked")
+        juju.wait(
+            wait_for_apps_status(jubilant.all_blocked, another_data_integrator_app_name),
+            timeout=600,
+        )
         for app in data_integrator_apps_names:
             juju.config(
                 app,
@@ -724,10 +747,12 @@ def test_invalid_extra_user_roles(juju: jubilant.Juju):
                     "extra-user-roles": "test",
                 },
             )
-        wait_for_idle(juju, apps=data_integrator_apps_names, status="blocked")
+        juju.wait(
+            wait_for_apps_status(jubilant.all_blocked, *data_integrator_apps_names), timeout=600
+        )
         for app in data_integrator_apps_names:
             juju.integrate(f"{app}:postgresql", f"{DATABASE_APP_NAME}:database")
-        wait_for_idle(juju, apps=[DATABASE_APP_NAME])
+        juju.wait(lambda status: jubilant.all_agents_idle(status, DATABASE_APP_NAME), timeout=600)
         juju.wait(
             lambda status: any(
                 unit.workload_status.message == INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE
@@ -743,7 +768,7 @@ def test_invalid_extra_user_roles(juju: jubilant.Juju):
         juju.remove_relation(
             f"{DATABASE_APP_NAME}:database", f"{DATA_INTEGRATOR_APP_NAME}:postgresql"
         )
-        wait_for_idle(juju, apps=[DATABASE_APP_NAME])
+        juju.wait(lambda status: jubilant.all_agents_idle(status, DATABASE_APP_NAME), timeout=600)
         juju.wait(
             lambda status: any(
                 unit.workload_status.message == INVALID_EXTRA_USER_ROLE_BLOCKING_MESSAGE
@@ -758,10 +783,4 @@ def test_invalid_extra_user_roles(juju: jubilant.Juju):
         juju.remove_relation(
             f"{DATABASE_APP_NAME}:database", f"{another_data_integrator_app_name}:postgresql"
         )
-        wait_for_idle(
-            juju,
-            apps=[DATABASE_APP_NAME],
-            status="active",
-            raise_on_blocked=False,
-            timeout=1000,
-        )
+        juju.wait(wait_for_apps_status(jubilant.all_active, DATABASE_APP_NAME), timeout=1000)

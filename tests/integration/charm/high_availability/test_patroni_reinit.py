@@ -11,6 +11,7 @@ import pytest
 import requests
 from jubilant import Juju
 from single_kernel_postgresql.config import literals
+from single_kernel_postgresql.config.enums import Substrates
 from tenacity import Retrying, retry_if_exception, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
@@ -23,7 +24,6 @@ from tests.integration.helpers.juju import (
     get_unit_address,
     wait_for_apps_status,
 )
-from tests.integration.types import Substrate
 
 logging.getLogger("jubilant.wait").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def _grep_patroni_logs(juju: Juju, unit: str, pattern: str) -> str:
 
 
 def test_deploy(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Deploy a 3-unit PostgreSQL cluster and the continuous-writes test application."""
     logger.info("Deploying PostgreSQL cluster (%s, 3 units)", app_name)
@@ -82,7 +82,7 @@ def test_deploy(
         config={"profile": "testing"},
         resources=charm_resources,
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
 
     logger.info("Deploying test application (%s)", DB_TEST_APP_NAME)
@@ -98,7 +98,10 @@ def test_deploy(
 
     logger.info("Waiting for all applications to become active")
     juju.wait(
-        ready=wait_for_apps_status(jubilant.all_active, app_name, DB_TEST_APP_NAME),
+        ready=lambda status: (
+            len(status.apps[app_name].units) == 3
+            and wait_for_apps_status(jubilant.all_active, app_name, DB_TEST_APP_NAME)(status)
+        ),
         timeout=20 * MINUTE_SECS,
     )
 
@@ -273,12 +276,30 @@ def test_patroni_reinit_after_pg_control_deletion_k8s(
     # Kubernetes namespace equals the Juju model name.
     namespace = (juju.model or "").split(":")[-1]
 
-    logger.info("Verifying initial health of replica %s", replica_unit)
-    for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(5), reraise=True):
+    # Active agents can precede the replica finishing its initial base backup.
+    logger.info("Waiting for replica %s to be healthy and streaming", replica_unit)
+    for attempt in Retrying(
+        stop=stop_after_delay(10 * MINUTE_SECS), wait=wait_fixed(5), reraise=True
+    ):
         with attempt:
-            resp = requests.get(f"https://{replica_ip}:8008/health", verify=False)
+            resp = requests.get(f"https://{replica_ip}:8008/health", verify=False, timeout=10)
             assert resp.status_code == 200, (
                 f"Replica {replica_unit} unhealthy before test: HTTP {resp.status_code}"
+            )
+            cluster_resp = requests.get(
+                f"https://{primary_ip}:8008/cluster", verify=False, timeout=10
+            )
+            cluster_resp.raise_for_status()
+            replica_state = next(
+                (
+                    member["state"]
+                    for member in cluster_resp.json()["members"]
+                    if member["name"] == replica_member_name
+                ),
+                None,
+            )
+            assert replica_state == "streaming", (
+                f"Replica {replica_unit} not streaming before test: {replica_state!r}"
             )
 
     logger.info("Verifying continuous writes are flowing")
@@ -334,14 +355,17 @@ def test_patroni_reinit_after_pg_control_deletion_k8s(
         stop=stop_after_delay(5 * MINUTE_SECS), wait=wait_fixed(10), reraise=True
     ):
         with attempt:
-            resp = requests.get(f"https://{replica_ip}:8008/health", verify=False)
+            resp = requests.get(f"https://{replica_ip}:8008/health", verify=False, timeout=10)
             assert resp.status_code == 200, (
                 f"Replica {replica_unit} still unhealthy after reinit: HTTP {resp.status_code}"
             )
 
     for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(5), reraise=True):
         with attempt:
-            cluster_resp = requests.get(f"https://{primary_ip}:8008/cluster", verify=False)
+            cluster_resp = requests.get(
+                f"https://{primary_ip}:8008/cluster", verify=False, timeout=10
+            )
+            cluster_resp.raise_for_status()
             members = cluster_resp.json()["members"]
             replica_state = next(
                 (m["state"] for m in members if m["name"] == replica_member_name), None

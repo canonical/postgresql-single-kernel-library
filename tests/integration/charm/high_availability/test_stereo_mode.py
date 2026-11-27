@@ -38,7 +38,7 @@ from tests.integration.charm.helpers import (
     restore_network_for_unit_without_ip_change,
     stop_machine,
 )
-from tests.integration.helpers.juju import fast_forward, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
 
 WATCHER_APP_NAME = "postgresql-watcher"
 SECOND_PG_APP_NAME = "postgresql-b"
@@ -155,7 +155,7 @@ def test_build_and_deploy_stereo_mode(juju: jubilant.Juju, charm, app_name: str)
 
         if pg_units == 2 and watcher_deployed and test_app_deployed:
             logger.info("Stereo mode already deployed with expected state, verifying...")
-            wait_for_idle(juju, status="active", timeout=300)
+            juju.wait(wait_for_apps_status(jubilant.all_active), timeout=300)
             return
 
         # If state is incorrect, we need to clean up and redeploy
@@ -227,7 +227,7 @@ def test_build_and_deploy_stereo_mode(juju: jubilant.Juju, charm, app_name: str)
             else:
                 raise
 
-        wait_for_idle(juju, status="active", timeout=1800)
+        juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1800)
 
     # Verify deployment
     assert len(juju.status().apps[app_name].units) == 2
@@ -268,31 +268,19 @@ def test_replica_shutdown_with_watcher(
 
     # Wait for the cluster to stabilize after unit removal
     # The primary needs time to reconfigure the cluster and update secrets
-    wait_for_idle(
-        juju,
-        apps=[app_name],
-        status="active",
-        timeout=300,
-        idle_period=30,
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=300, successes=31)
 
     # Verify writes continue (primary should still be available)
     # With watcher, we should maintain quorum
     are_writes_increasing(juju, down_unit=replica)
 
     # Wait for cluster to stabilize
-    wait_for_idle(
-        juju,
-        apps=[app_name],
-        status="active",
-        timeout=600,
-        idle_period=30,
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=600, successes=31)
 
     # Scale back up
     logger.info("Scaling back up after replica shutdown")
     juju.add_unit(app_name, num_units=1)
-    wait_for_idle(juju, status="active", timeout=1500)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500, successes=16)
 
     # Wait for the new replica to become a sync_standby
     # This ensures the cluster is fully ready for the next test
@@ -350,13 +338,7 @@ def test_primary_shutdown_with_watcher(
 
     # With watcher providing quorum, failover should happen automatically
     # Wait for the model to stabilize first
-    wait_for_idle(
-        juju,
-        apps=[app_name],
-        status="active",
-        timeout=600,
-        idle_period=30,
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=600)
 
     # Wait for the replica to be promoted to primary
     # Patroni needs time to detect leader failure and elect new leader (30-90s)
@@ -373,13 +355,7 @@ def test_primary_shutdown_with_watcher(
 
     # Wait for the charm to reconfigure after failover
     # This ensures the relation endpoints are updated for the test app to reconnect
-    wait_for_idle(
-        juju,
-        apps=[app_name],
-        status="active",
-        timeout=300,
-        idle_period=30,
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=300)
 
     # Scale back up FIRST - with synchronous_mode_strict=true, the primary cannot
     # accept writes when there's no sync_standby available. We need 2 units before
@@ -388,7 +364,7 @@ def test_primary_shutdown_with_watcher(
     juju.add_unit(app_name, num_units=1)
     # Wait longer for the new unit to fully join the cluster
     # The new unit needs to: start PostgreSQL, join Raft cluster, become sync_standby
-    wait_for_idle(juju, status="active", timeout=1800, idle_period=60)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1800)
 
     # Wait for the new replica to become a sync_standby
     # This can take a while as the new unit needs to fully sync and be recognized
@@ -444,13 +420,7 @@ def test_watcher_shutdown_no_outage(
     are_writes_increasing(juju)
 
     # PostgreSQL cluster should remain active
-    wait_for_idle(
-        juju,
-        apps=[app_name],
-        status="active",
-        timeout=300,
-        idle_period=30,
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=300)
 
     # Verify cluster roles unchanged
     new_roles = get_ha_cluster_roles(juju, any_unit)
@@ -459,7 +429,16 @@ def test_watcher_shutdown_no_outage(
     # Re-deploy watcher
     logger.info("Re-deploying watcher")
     juju.add_unit(WATCHER_APP_NAME, num_units=1)
-    wait_for_idle(juju, status="active", timeout=600)
+    # Wait for the replacement, so Raft verification cannot select the removed watcher.
+    juju.wait(
+        lambda status: (
+            watcher_unit not in status.apps[WATCHER_APP_NAME].units
+            and len(status.apps[WATCHER_APP_NAME].units) == 1
+            and wait_for_apps_status(jubilant.all_active, WATCHER_APP_NAME)(status)
+        ),
+        timeout=600,
+        successes=16,
+    )
 
     # Verify the Raft cluster is properly formed with the new watcher
     # This is critical - without this verification, subsequent tests might fail
@@ -507,7 +486,7 @@ def test_primary_network_isolation_with_watcher(
 
         # Wait for failover to happen - Patroni needs time to detect leader failure
         # and elect a new leader. This can take 30-90 seconds depending on TTL settings.
-        # Use explicit retry loop instead of just wait_for_idle.
+        # Use an explicit retry loop instead of just waiting for idle/active agents.
         new_primary = None
         for attempt in Retrying(stop=stop_after_delay(180), wait=wait_fixed(10), reraise=True):
             with attempt:
@@ -525,15 +504,9 @@ def test_primary_network_isolation_with_watcher(
 
     # Wait for cluster to stabilize with restored network
     # The old primary may take time to rejoin after getting a new IP address,
-    # so we use raise_on_error=False and wait longer
+    # so wait only for idle agents with a longer timeout.
     with fast_forward(juju, "60s"):
-        wait_for_idle(
-            juju,
-            apps=[app_name],
-            timeout=900,
-            idle_period=30,
-            raise_on_error=False,  # Old primary may be in error while rejoining
-        )
+        juju.wait(lambda status: jubilant.all_agents_idle(status, app_name), timeout=900)
 
     # Wait for the old primary to rejoin as replica
     # This can take a while as it needs to recover with a new IP
@@ -610,13 +583,7 @@ def test_replica_network_isolation_with_watcher(
         restore_network_for_unit_without_ip_change(replica_machine)
 
     # Wait for cluster to stabilize - replica should rejoin
-    wait_for_idle(
-        juju,
-        apps=[app_name],
-        status="active",
-        timeout=600,
-        idle_period=30,
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, app_name), timeout=600)
 
     # Verify cluster has a primary after restore (may or may not be the same one,
     # since Patroni can switchover during network restore/rejoin)
@@ -673,7 +640,7 @@ def test_watcher_network_isolation(
         restore_network_for_unit(watcher_machine)
 
     # Wait for full recovery
-    wait_for_idle(juju, status="active", timeout=600)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=600)
     verify_raft_cluster_health(juju, app_name, WATCHER_APP_NAME)
 
     # Use use_ip_from_inside=True because the watcher got a new IP after network restore
@@ -690,7 +657,7 @@ def test_multi_cluster_watcher(juju: jubilant.Juju, charm, app_name: str) -> Non
     """
     try:
         # Deploy a second PostgreSQL cluster
-        wait_for_idle(juju, apps=[SECOND_PG_APP_NAME], status="active", timeout=330)
+        juju.wait(wait_for_apps_status(jubilant.all_active, SECOND_PG_APP_NAME), timeout=330)
 
         # Relate the watcher to the second cluster
         logger.info("Relating watcher to second PostgreSQL cluster")
@@ -700,10 +667,10 @@ def test_multi_cluster_watcher(juju: jubilant.Juju, charm, app_name: str) -> Non
         # ensure_watcher_in_raft to add the watcher to the second cluster's Raft
         with fast_forward(juju):
             # Wait for the watcher to connect to both clusters
-            wait_for_idle(
-                juju,
-                apps=[app_name, SECOND_PG_APP_NAME, WATCHER_APP_NAME],
-                status="active",
+            juju.wait(
+                wait_for_apps_status(
+                    jubilant.all_active, app_name, SECOND_PG_APP_NAME, WATCHER_APP_NAME
+                ),
                 timeout=600,
             )
 
@@ -727,12 +694,7 @@ def test_multi_cluster_watcher(juju: jubilant.Juju, charm, app_name: str) -> Non
             )
 
     # Verify original watcher is still healthy after removing the second cluster
-    wait_for_idle(
-        juju,
-        apps=[app_name, WATCHER_APP_NAME],
-        status="active",
-        timeout=300,
-    )
+    juju.wait(wait_for_apps_status(jubilant.all_active, app_name, WATCHER_APP_NAME), timeout=300)
 
 
 @pytest.mark.abort_on_fail
@@ -776,23 +738,15 @@ def test_watcher_production_profile_az_blocked(juju: jubilant.Juju, charm, app_n
         )
 
         # Wait for initial install
-        wait_for_idle(
-            juju,
-            apps=[production_watcher],
-            timeout=600,
-            raise_on_error=False,
-        )
+        juju.wait(lambda status: jubilant.all_agents_idle(status, production_watcher), timeout=600)
 
         # Relate to the existing PostgreSQL cluster
         juju.integrate(f"{app_name}:watcher-offer", f"{production_watcher}:watcher")
 
         # Wait for the watcher to settle (it may block or go active depending on AZ)
         with fast_forward(juju):
-            wait_for_idle(
-                juju,
-                apps=[production_watcher],
-                timeout=600,
-                raise_on_error=False,
+            juju.wait(
+                lambda status: jubilant.all_agents_idle(status, production_watcher), timeout=600
             )
 
         # Check the watcher's status
@@ -836,16 +790,8 @@ def test_watcher_production_profile_az_blocked(juju: jubilant.Juju, charm, app_n
             channel="16/edge",
             config={"profile": "testing"},
         )
-        wait_for_idle(
-            juju,
-            apps=[WATCHER_APP_NAME],
-            timeout=600,
-            raise_on_error=False,
-        )
+        juju.wait(lambda status: jubilant.all_agents_idle(status, WATCHER_APP_NAME), timeout=600)
         juju.integrate(f"{app_name}:watcher-offer", f"{WATCHER_APP_NAME}:watcher")
-        wait_for_idle(
-            juju,
-            apps=[app_name, WATCHER_APP_NAME],
-            status="active",
-            timeout=600,
+        juju.wait(
+            wait_for_apps_status(jubilant.all_active, app_name, WATCHER_APP_NAME), timeout=600
         )

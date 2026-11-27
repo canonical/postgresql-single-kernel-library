@@ -17,7 +17,7 @@ from tests.integration.charm.helpers import (
     reused_full_cluster_recovery_storage,
     set_password,
 )
-from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, get_unit_address, wait_for_apps_status
 
 FIRST_APPLICATION = "first-cluster"
 SECOND_APPLICATION = "second-cluster"
@@ -58,14 +58,14 @@ def test_build_and_deploy(juju: jubilant.Juju, charm) -> None:
             config={"profile": "testing"},
         )
 
-        wait_for_idle(juju, status="active", timeout=1500)
+        juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
 
         # TODO have a better way to bootstrap clusters with existing storage
         for user in ["monitoring", "operator", "replication", "rewind"]:
             password = get_password(juju, FIRST_APPLICATION, user)
             set_password(juju, SECOND_APPLICATION, username=user, password=password)
             # wait for the password changes to be processed
-            wait_for_idle(juju, apps=[SECOND_APPLICATION], status="active", timeout=1500)
+            juju.wait(wait_for_apps_status(jubilant.all_active, SECOND_APPLICATION), timeout=1500)
 
         second_primary = next(iter(juju.status().apps[SECOND_APPLICATION].units))
         juju.remove_unit(second_primary)

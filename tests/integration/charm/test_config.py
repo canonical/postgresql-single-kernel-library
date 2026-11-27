@@ -6,6 +6,8 @@ import logging
 import jubilant
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
+from tenacity import Retrying, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import get_password
 from tests.integration.helpers.juju import (
@@ -15,14 +17,13 @@ from tests.integration.helpers.juju import (
     wait_for_apps_status,
 )
 from tests.integration.helpers.postgresql import execute_query
-from tests.integration.types import Substrate
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.mark.abort_on_fail
 def test_config_parameters(
-    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrate
+    juju: Juju, charm: str, app_name: str, charm_resources, substrate: Substrates
 ) -> None:
     """Build and deploy one unit of PostgreSQL and then test config with wrong parameters."""
     # Build and deploy the PostgreSQL charm.
@@ -34,7 +35,7 @@ def test_config_parameters(
             config={"profile": "testing"},
             num_units=1,
             resources=charm_resources,
-            trust=substrate == Substrate.k8s,
+            trust=substrate == Substrates.K8S,
         )
         juju.wait(
             lambda status: (
@@ -340,13 +341,15 @@ def test_worker_process_configs(juju: Juju, app_name: str) -> None:
         "cpu-max-parallel-apply-workers-per-subscription": "max_parallel_apply_workers_per_subscription",
     }
 
-    for config_name, expected_value in worker_configs.items():
-        pg_param = config_to_pg_param.get(config_name, config_name.replace("-", "_"))
-        result = execute_query(unit_address, password, f"SHOW {pg_param}")
-        actual_value = str(result[0]) if result else ""
-        assert actual_value == expected_value, (
-            f"{pg_param}: expected {expected_value}, got {actual_value}"
-        )
+    for attempt in Retrying(stop=stop_after_delay(300), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            for config_name, expected_value in worker_configs.items():
+                pg_param = config_to_pg_param.get(config_name, config_name.replace("-", "_"))
+                result = execute_query(unit_address, password, f"SHOW {pg_param}")
+                actual_value = str(result[0]) if result else ""
+                assert actual_value == expected_value, (
+                    f"{pg_param}: expected {expected_value}, got {actual_value}"
+                )
 
     # Test setting "auto" values
     auto_configs = {
@@ -389,12 +392,14 @@ def test_wal_compression_config(juju: Juju, app_name: str) -> None:
         timeout=300,
     )
 
-    result = execute_query(unit_address, password, "SHOW wal_compression")
-    # Verify it's a known compression algorithm
+    # Active/idle can precede PostgreSQL applying the new configuration.
     known_algorithms = ["pglz", "lz4", "zstd"]
-    assert result[0] in known_algorithms, (
-        f"Expected a known compression algorithm, got '{result[0]}'"
-    )
+    for attempt in Retrying(stop=stop_after_delay(300), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            result = execute_query(unit_address, password, "SHOW wal_compression")
+            assert result[0] in known_algorithms, (
+                f"Expected a known compression algorithm, got '{result[0]}'"
+            )
 
     # Test disabling WAL compression
     juju.config(app_name, {"cpu-wal-compression": "false"})
@@ -404,5 +409,7 @@ def test_wal_compression_config(juju: Juju, app_name: str) -> None:
         timeout=300,
     )
 
-    result = execute_query(unit_address, password, "SHOW wal_compression")
-    assert result[0] == "off"
+    for attempt in Retrying(stop=stop_after_delay(300), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            result = execute_query(unit_address, password, "SHOW wal_compression")
+            assert result[0] == "off"

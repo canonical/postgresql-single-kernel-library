@@ -3,9 +3,9 @@
 # See LICENSE file for licensing details.
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.backup_helpers import AWS, pitr_backup_operations
-from tests.integration.types import Substrate
 
 S3_INTEGRATOR_APP_NAME = "s3-integrator"
 TLS_CERTIFICATES_APP_NAME = "self-signed-certificates"
@@ -18,7 +18,7 @@ def test_pitr_backup_aws(
     charm: str,
     app_name: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     aws_cloud_configs: tuple[dict, dict],
 ) -> None:
     """Build, deploy two units of PostgreSQL and do backup in AWS. Then, write new data into DB, switch WAL file and test point-in-time-recovery restore action."""

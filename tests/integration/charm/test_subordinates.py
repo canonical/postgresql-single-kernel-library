@@ -8,12 +8,12 @@ import os
 import jubilant
 import pytest
 from jubilant import Juju
+from single_kernel_postgresql.config.enums import Substrates
 
 from tests.integration.charm.helpers import (
     scale_application,
 )
 from tests.integration.helpers.juju import wait_for_apps_status
-from tests.integration.types import Substrate
 
 DATABASE_APP_NAME = "pg"
 LS_CLIENT = "landscape-client"
@@ -74,7 +74,7 @@ def test_deploy(juju: Juju, charm: str, check_subordinate_env_vars):
     )
 
 
-def test_scale_up(juju: Juju, substrate: Substrate, check_subordinate_env_vars):
+def test_scale_up(juju: Juju, substrate: Substrates, check_subordinate_env_vars):
     scale_application(juju, DATABASE_APP_NAME, 4, substrate)
 
     juju.wait(
@@ -86,7 +86,7 @@ def test_scale_up(juju: Juju, substrate: Substrate, check_subordinate_env_vars):
     )
 
 
-def test_scale_down(juju: Juju, substrate: Substrate, check_subordinate_env_vars):
+def test_scale_down(juju: Juju, substrate: Substrates, check_subordinate_env_vars):
     scale_application(juju, DATABASE_APP_NAME, 3, substrate)
 
     juju.wait(

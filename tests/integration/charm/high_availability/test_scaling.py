@@ -16,7 +16,7 @@ from tests.integration.charm.helpers import (
     get_primary_from_app,
     start_ha_continuous_writes,
 )
-from tests.integration.helpers.juju import fast_forward, wait_for_idle
+from tests.integration.helpers.juju import fast_forward, wait_for_apps_status
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ def test_build_and_deploy(juju: jubilant.Juju, charm, app_name: str) -> None:
         )
 
         juju.integrate(app_name, f"{APPLICATION_NAME}:database")
-        wait_for_idle(juju, status="active", timeout=1800)
+        juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1800)
 
 
 @pytest.mark.abort_on_fail
@@ -59,7 +59,7 @@ def test_removing_stereo_primary(
 ) -> None:
     # Start an application that continuously writes data to the database.
     app = app_name
-    # wait_for_idle can pass while a standby is still creating its replica.
+    # Idle/active agents can coexist with a standby still creating its replica.
     original_roles = None
     try:
         for attempt in Retrying(stop=stop_after_delay(60 * 10), wait=wait_fixed(10)):
@@ -99,11 +99,11 @@ def test_removing_stereo_primary(
     # Raft reinitialisation can exceed juju run's default 60s wait; libjuju waited indefinitely.
     juju.run(left_unit, "promote-to-primary", {"scope": "unit", "force": True}, wait=600)
 
-    wait_for_idle(juju, status="active", timeout=600, idle_period=45)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=600)
 
     logger.info("Scaling back up")
     juju.add_unit(app_name, num_units=1)
-    wait_for_idle(juju, status="active", timeout=1500)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
 
     are_writes_increasing(juju, primary)
 
@@ -130,11 +130,11 @@ def test_removing_stereo_sync_standby(
     # Wait for the unit to disappear, as libjuju's destroy_unit(max_wait=1500) did.
     juju.wait(lambda status: secondary not in status.apps[app_name].units, timeout=1500)
 
-    wait_for_idle(juju, status="active", timeout=600, idle_period=45)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=600)
 
     logger.info("Scaling back up")
     juju.add_unit(app_name, num_units=1)
-    wait_for_idle(juju, status="active", timeout=1500)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
 
     are_writes_increasing(juju, primary)
 
@@ -149,7 +149,7 @@ def test_removing_stereo_sync_standby(
 @pytest.mark.abort_on_fail
 def test_scale_to_five_units(juju: jubilant.Juju, app_name: str) -> None:
     juju.add_unit(app_name, num_units=3)
-    wait_for_idle(juju, status="active", timeout=2000)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=2000)
 
 
 @pytest.mark.abort_on_fail
@@ -188,7 +188,7 @@ def test_removing_raft_majority(
     # Raft reinitialisation can exceed juju run's default 60s wait; libjuju waited indefinitely.
     juju.run(left_unit, "promote-to-primary", {"scope": "unit", "force": True}, wait=600)
 
-    wait_for_idle(juju, status="active", timeout=900, idle_period=45)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=900)
 
     are_writes_increasing(
         juju,
@@ -201,7 +201,7 @@ def test_removing_raft_majority(
 
     logger.info("Scaling back up")
     juju.add_unit(app_name, num_units=3)
-    wait_for_idle(juju, status="active", timeout=2000)
+    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=2000)
 
     check_writes(juju)
     new_roles = get_ha_cluster_roles(juju, next(iter(juju.status().apps[app_name].units)))

@@ -9,7 +9,8 @@ from collections.abc import Generator
 import jubilant
 import pytest
 from jubilant import Juju
-from tenacity import Retrying, stop_after_attempt
+from single_kernel_postgresql.config.enums import Substrates
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, stop_after_delay, wait_fixed
 
 from tests.integration.charm.helpers import (
     get_db_max_written_value,
@@ -23,7 +24,6 @@ from tests.integration.helpers.juju import (
     split_model,
     wait_for_apps_status,
 )
-from tests.integration.types import Substrate
 
 DB_APP_1 = "db1"
 DB_APP_2 = "db2"
@@ -93,7 +93,7 @@ def test_deploy(
     second_model: str,
     app_name: str,
     architecture: str,
-    substrate: Substrate,
+    substrate: Substrates,
 ) -> None:
     """Simple test to ensure that the PostgreSQL application charms get deployed."""
     configuration = {"profile": "testing"}
@@ -109,7 +109,7 @@ def test_deploy(
         config=configuration,
         constraints=constraints,
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
     model_2 = Juju(model=second_model)
     model_2.deploy(
@@ -120,7 +120,7 @@ def test_deploy(
         config=configuration,
         constraints=constraints,
         num_units=3,
-        trust=substrate == Substrate.k8s,
+        trust=substrate == Substrates.K8S,
     )
 
     logging.info("Deploying the test application")
@@ -212,7 +212,7 @@ def test_upgrade_from_edge(
     second_model: str,
     charm: str,
     charm_resources,
-    substrate: Substrate,
+    substrate: Substrates,
     first_model_continuous_writes,
 ) -> None:
     """Upgrade the two PostgreSQL clusters and assert the shared secret id is stable."""
@@ -227,6 +227,8 @@ def test_upgrade_from_edge(
     run_pre_refresh_checks(model_1, DB_APP_1)
     run_upgrade(model_1, DB_APP_1, charm, substrate, charm_resources)
 
+    # Refreshing the publisher can temporarily restart replication on the subscriber.
+    model_2.wait(wait_for_apps_status(jubilant.all_active, DB_APP_2), timeout=20 * MINUTE_SECS)
     run_pre_refresh_checks(model_2, DB_APP_2)
     run_upgrade(model_2, DB_APP_2, charm, substrate, charm_resources)
 
@@ -279,11 +281,31 @@ def get_db_max_written_values(first_model: str, second_model: str) -> list[int]:
 
 def run_pre_refresh_checks(juju: Juju, app_name: str) -> None:
     """Run the pre-refresh-check actions."""
-    app_leader = get_app_leader(juju, app_name)
-
     logging.info("Run pre-upgrade-check action")
-    retry_if_cli_error(
-        lambda: juju.run(
-            unit=app_leader, action="pre-refresh-check", wait=5 * MINUTE_SECS
-        ).raise_on_failure()
-    )
+    # Active statuses can precede Patroni readiness. Retry only the known
+    # transient precheck failures; other action failures must still fail the test.
+    for attempt in Retrying(
+        retry=retry_if_exception(
+            lambda exc: (
+                isinstance(exc, jubilant.TaskError)
+                and any(
+                    message in exc.task.message
+                    for message in (
+                        "PostgreSQL is not running on 1+ units",
+                        "Unable to switch primary",
+                    )
+                )
+            )
+        ),
+        stop=stop_after_delay(10 * MINUTE_SECS),
+        wait=wait_fixed(10),
+        reraise=True,
+    ):
+        with attempt:
+            retry_if_cli_error(
+                lambda: juju.run(
+                    unit=get_app_leader(juju, app_name),
+                    action="pre-refresh-check",
+                    wait=5 * MINUTE_SECS,
+                ).raise_on_failure()
+            )
