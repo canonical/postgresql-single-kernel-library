@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -723,7 +722,7 @@ class ConfigManager(BaseManager):
             async_standby_endpoints: Primary async cluster endpoint.
             async_partner_addresses: Primary async cluster endpoint.
             watcher_raft_address: IP address of a related Raft watcher.
-            max_connections: Calculated max connections or None for default.
+            max_connections: Calculated max connections.
 
         Returns:
             Whether the configuration was (re-)rendered to disk.
