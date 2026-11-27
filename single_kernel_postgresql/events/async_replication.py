@@ -342,7 +342,6 @@ class PostgreSQLAsyncReplication(Object):
         if self.manager._wait_for_all_units_stopped(event):
             return
 
-        self.charm.observer_manager.start_observer()
         if self.manager._wait_for_standby_leader(event):
             return
 
