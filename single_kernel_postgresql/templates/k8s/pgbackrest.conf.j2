@@ -50,5 +50,8 @@ pg{{ ns.count }}-user={{ user }}
 {%- endfor %}
 {%- endif %}
 
+[global:backup]
+process-max={{ backup_process_max }}
+
 [global:restore]
-process-max={{process_max}}
+process-max={{ restore_process_max }}

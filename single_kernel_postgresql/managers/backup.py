@@ -106,6 +106,17 @@ class _StanzaTimeoutExhaustedError(TimeoutError):
     """
 
 
+def calculate_backup_process_max(cpu_cores: int, is_primary: bool) -> int:
+    """Return the pgBackRest ``process-max`` to use for a backup.
+
+    A backup on the primary (single-unit setup) competes with client traffic,
+    so it is limited to 25% of the cores: ``min(8, max(1, cores // 4))``.
+    A backup on a non-primary (cluster setup) may use up to 50%:
+    ``min(8, max(1, cores // 2))``.
+    """
+    return min(8, max(1, cpu_cores // (4 if is_primary else 2)))
+
+
 class BackupManager(BaseManager):
     """In this class, we manage PostgreSQL backups."""
 
@@ -372,7 +383,12 @@ class BackupManager(BaseManager):
             storage_path=config.storage_path,
             user=BACKUP_USER,
             retention_full=s3_parameters["delete-older-than-days"],
-            process_max=max(cpu_count - 2, 1),
+            restore_process_max=max(cpu_count - 2, 1),
+            # A backup only runs on the primary in a single-unit setup
+            # (see _can_unit_perform_backup).
+            backup_process_max=calculate_backup_process_max(
+                cpu_count, is_primary=len(self._peer_members) == 0
+            ),
         )
         self.workload.write_text(
             rendered,
