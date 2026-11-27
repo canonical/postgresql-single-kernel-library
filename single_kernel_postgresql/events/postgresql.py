@@ -996,8 +996,15 @@ class PostgreSQLEventsHandler(Object):
         self._check_pgdata_storage_size()
 
         unit_status = self.state.peer.unit.status
+
         if (
-            isinstance(unit_status, BlockedStatus) and unit_status.message not in S3_BLOCK_MESSAGES
+            isinstance(unit_status, BlockedStatus)
+            and unit_status.message not in S3_BLOCK_MESSAGES
+            and self.state.peer.unit.status.message != LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS
+            and self.state.peer.unit.status.message
+            != self.state.application.data.get("logical-replication-validation-status-message")
+            and self.state.peer.unit.status.message
+            != self.state.application.data.get("logical-replication-last-block-message")
         ) or (
             isinstance(unit_status, WaitingStatus)
             and not self.state.application.is_cluster_restoring_backup
