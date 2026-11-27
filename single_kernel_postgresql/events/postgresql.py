@@ -596,6 +596,20 @@ class PostgreSQLEventsHandler(Object):
             logger.debug("Early exit on_start: Unit blocked")
             return False
 
+        if (
+            (primary_cluster := self.async_replication_manager.get_primary_cluster())
+            and self.state.model.app != primary_cluster
+            and self.state.peer_relation
+            and self.state.peer_relation.data[self.state.model.unit].get(
+                "unit-promoted-cluster-counter"
+            )
+            != self.async_replication_manager.get_highest_promoted_cluster_counter_value()
+        ):
+            logger.info(
+                "Early exit on_start: Cluster replication switch detected. Waiting for replication to start"
+            )
+            return False
+
         return True
 
     def _on_start(self, event: StartEvent) -> None:
