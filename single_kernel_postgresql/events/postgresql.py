@@ -998,7 +998,7 @@ class PostgreSQLEventsHandler(Object):
         unit_status = self.state.peer.unit.status
 
         if (
-            isinstance(unit_status, BlockedStatus) 
+            isinstance(unit_status, BlockedStatus)
             and unit_status.message not in S3_BLOCK_MESSAGES
             and self.state.peer.unit.status.message != LOGICAL_REPLICATION_VALIDATION_ERROR_STATUS
             and self.state.peer.unit.status.message
