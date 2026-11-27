@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright 2026 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -947,12 +948,10 @@ class AsyncReplicationManager(BaseManager):
                 self.set_unit_status(
                     WaitingStatus("Still starting the database in the standby leader")
                 )
-                self.state.peer.data["timestamp"] = str(datetime.now())
                 event.defer()
         except NotReadyError:
             self.set_unit_status(WaitingStatus("Waiting for the database to start"))
             logger.debug("Deferring on_async_relation_changed: database hasn't started yet.")
-            self.state.peer.data["timestamp"] = str(datetime.now())
             event.defer()
 
     def _handle_leader_database_start(self, event: RelationChangedEvent) -> bool:
@@ -974,7 +973,6 @@ class AsyncReplicationManager(BaseManager):
                 WaitingStatus("Waiting for the database to be started in all units")
             )
             event.defer()
-            self.state.peer.data["timestamp"] = str(datetime.now())
             return True
         return False
 
@@ -998,7 +996,6 @@ class AsyncReplicationManager(BaseManager):
                 WaitingStatus("Waiting for the standby leader start the database")
             )
             logger.debug("Deferring on_async_relation_changed: standby leader hasn't started yet.")
-            self.state.peer.data["timestamp"] = str(datetime.now())
             event.defer()
             return True
 
