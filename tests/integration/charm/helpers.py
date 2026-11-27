@@ -35,6 +35,7 @@ from single_kernel_postgresql.config.literals import PEER_RELATION, SYSTEM_USERS
 from tenacity import (
     RetryError,
     Retrying,
+    retry_if_exception,
     stop_after_attempt,
     stop_after_delay,
     wait_exponential,
@@ -728,12 +729,39 @@ def _run_upgrade_k8s(
             in juju.status().apps[app_name].units[unit_names[-1]].workload_status.message
         ):
             logging.info("Application refresh is blocked due to incompatibility")
-            juju.run(
-                unit=unit_names[-1],
-                action="force-refresh-start",
-                params={"check-compatibility": False},
-                wait=5 * MINUTE_SECS,
-            )
+            # Idle agents do not guarantee PostgreSQL has recovered from the refresh.
+            # Retry only readiness failures and the observed transient precheck failure;
+            # never repeat juju.refresh or bypass the action's other safety checks.
+            for attempt in Retrying(
+                stop=stop_after_delay(10 * MINUTE_SECS),
+                wait=wait_fixed(10),
+                retry=retry_if_exception(
+                    lambda error: (
+                        isinstance(error, (AssertionError, requests.RequestException))
+                        or (
+                            isinstance(error, jubilant.TaskError)
+                            and "Pre-refresh check failed: PostgreSQL is not running on unit "
+                            in str(error)
+                        )
+                    )
+                ),
+                reraise=True,
+            ):
+                with attempt:
+                    for unit_name in unit_names:
+                        unit_ip = get_unit_address(juju, unit_name)
+                        health = requests.get(
+                            f"https://{unit_ip}:8008/health", verify=False, timeout=10
+                        )
+                        assert health.status_code == 200, (
+                            f"PostgreSQL on {unit_name} is not ready: HTTP {health.status_code}"
+                        )
+                    juju.run(
+                        unit=unit_names[-1],
+                        action="force-refresh-start",
+                        params={"check-compatibility": False},
+                        wait=5 * MINUTE_SECS,
+                    )
 
     juju.wait(
         lambda status: status.apps[app_name].units[unit_names[-1]].is_active,

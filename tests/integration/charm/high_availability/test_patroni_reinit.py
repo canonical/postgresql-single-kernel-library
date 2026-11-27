@@ -98,7 +98,10 @@ def test_deploy(
 
     logger.info("Waiting for all applications to become active")
     juju.wait(
-        ready=wait_for_apps_status(jubilant.all_active, app_name, DB_TEST_APP_NAME),
+        ready=lambda status: (
+            len(status.apps[app_name].units) == 3
+            and wait_for_apps_status(jubilant.all_active, app_name, DB_TEST_APP_NAME)(status)
+        ),
         timeout=20 * MINUTE_SECS,
     )
 
@@ -273,12 +276,30 @@ def test_patroni_reinit_after_pg_control_deletion_k8s(
     # Kubernetes namespace equals the Juju model name.
     namespace = (juju.model or "").split(":")[-1]
 
-    logger.info("Verifying initial health of replica %s", replica_unit)
-    for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(5), reraise=True):
+    # Active agents can precede the replica finishing its initial base backup.
+    logger.info("Waiting for replica %s to be healthy and streaming", replica_unit)
+    for attempt in Retrying(
+        stop=stop_after_delay(10 * MINUTE_SECS), wait=wait_fixed(5), reraise=True
+    ):
         with attempt:
-            resp = requests.get(f"https://{replica_ip}:8008/health", verify=False)
+            resp = requests.get(f"https://{replica_ip}:8008/health", verify=False, timeout=10)
             assert resp.status_code == 200, (
                 f"Replica {replica_unit} unhealthy before test: HTTP {resp.status_code}"
+            )
+            cluster_resp = requests.get(
+                f"https://{primary_ip}:8008/cluster", verify=False, timeout=10
+            )
+            cluster_resp.raise_for_status()
+            replica_state = next(
+                (
+                    member["state"]
+                    for member in cluster_resp.json()["members"]
+                    if member["name"] == replica_member_name
+                ),
+                None,
+            )
+            assert replica_state == "streaming", (
+                f"Replica {replica_unit} not streaming before test: {replica_state!r}"
             )
 
     logger.info("Verifying continuous writes are flowing")
@@ -334,14 +355,17 @@ def test_patroni_reinit_after_pg_control_deletion_k8s(
         stop=stop_after_delay(5 * MINUTE_SECS), wait=wait_fixed(10), reraise=True
     ):
         with attempt:
-            resp = requests.get(f"https://{replica_ip}:8008/health", verify=False)
+            resp = requests.get(f"https://{replica_ip}:8008/health", verify=False, timeout=10)
             assert resp.status_code == 200, (
                 f"Replica {replica_unit} still unhealthy after reinit: HTTP {resp.status_code}"
             )
 
     for attempt in Retrying(stop=stop_after_delay(60), wait=wait_fixed(5), reraise=True):
         with attempt:
-            cluster_resp = requests.get(f"https://{primary_ip}:8008/cluster", verify=False)
+            cluster_resp = requests.get(
+                f"https://{primary_ip}:8008/cluster", verify=False, timeout=10
+            )
+            cluster_resp.raise_for_status()
             members = cluster_resp.json()["members"]
             replica_state = next(
                 (m["state"] for m in members if m["name"] == replica_member_name), None
