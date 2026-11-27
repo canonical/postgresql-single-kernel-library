@@ -136,6 +136,12 @@ def test_removing_unit(
         logger.info(f"Deleting unit {unit}")
         juju.remove_unit(unit, force=True, destroy_storage=False)
 
+    # remove-unit returns before the units disappear from Juju's status.
+    juju.wait(
+        lambda status: all(unit not in status.apps[app_name].units for unit in units),
+        timeout=1500,
+    )
+
     if len(roles) > 1:
         for left_unit in juju.status().apps[app_name].units:
             if left_unit not in units:
@@ -173,17 +179,26 @@ def test_removing_unit(
 
     logger.info("Scaling back up")
     juju.add_unit(app_name, num_units=len(roles))
-    juju.wait(wait_for_apps_status(jubilant.all_active), timeout=1500)
+    juju.wait(
+        lambda status: (
+            len(status.apps[app_name].units) == 3
+            and wait_for_apps_status(jubilant.all_active)(status)
+        ),
+        timeout=1500,
+    )
 
     are_writes_increasing(juju, units)
 
-    new_roles = get_ha_cluster_roles(juju, next(iter(juju.status().apps[app_name].units)))
-    assert len(new_roles["primaries"]) == 1
-    assert len(new_roles["sync_standbys"]) == 2
-    assert len(new_roles["replicas"]) == 0
-    if "primaries" in roles:
-        assert new_roles["primaries"][0] in original_roles["sync_standbys"]
-    else:
-        assert new_roles["primaries"][0] == original_roles["primaries"][0]
+    # The new units can be active before Patroni registers them as sync standbys.
+    for attempt in Retrying(stop=stop_after_delay(600), wait=wait_fixed(3), reraise=True):
+        with attempt:
+            new_roles = get_ha_cluster_roles(juju, next(iter(juju.status().apps[app_name].units)))
+            assert len(new_roles["primaries"]) == 1
+            assert len(new_roles["sync_standbys"]) == 2
+            assert len(new_roles["replicas"]) == 0
+            if "primaries" in roles:
+                assert new_roles["primaries"][0] in original_roles["sync_standbys"]
+            else:
+                assert new_roles["primaries"][0] == original_roles["primaries"][0]
 
     check_writes(juju)
