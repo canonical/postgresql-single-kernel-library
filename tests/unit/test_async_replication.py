@@ -275,6 +275,23 @@ def test_promote_to_primary_fails_without_a_primary_cluster(harness, async_rel):
     )
 
 
+def test_promote_to_primary_fails_on_a_non_leader_unit(harness, async_rel):
+    """Cluster promotion writes app data, so a non-leader must fail the action cleanly."""
+    harness.set_leader(False)
+    with pytest.raises(ActionFailed) as exc:
+        harness.run_action("promote-to-primary", {"scope": "cluster", "force": True})
+    assert exc.value.message == (
+        "Cluster promotion must be run on the Juju leader unit of the standby cluster."
+    )
+
+
+def test_create_replication_fails_on_a_non_leader_unit(harness, async_rel):
+    harness.set_leader(False)
+    with pytest.raises(ActionFailed) as exc:
+        harness.run_action("create-replication", {"name": "default"})
+    assert exc.value.message == "create-replication must be run on the Juju leader unit."
+
+
 def test_promote_to_primary_promotes_a_read_only_standby(substrate, harness, async_rel):
     harness.charm.app.status = BlockedStatus(READ_ONLY_MODE_BLOCKING_MESSAGE)
     with (
