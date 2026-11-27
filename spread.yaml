@@ -2,7 +2,7 @@ project: postgresql-single-kernel-library
 
 # Integration tests of the VM and K8s test charms (tests/charms/), run on GitHub Actions.
 # Each task runs on both backends: github-ci-vm (lxd) and github-ci-k8s (Canonical K8s).
-# The test charms are built beforehand (scripts/build_charm.sh) and downloaded into
+# The test charms are built beforehand (data-platform-workflows build_charm.yaml) and downloaded into
 # tests/charms/<charm>/ by .github/workflows/integration_test.yaml.
 backends:
   github-ci-vm:
@@ -85,6 +85,9 @@ kill-timeout: 3h
 environment:
   PATH: $PATH:$(pipx environment --value PIPX_BIN_DIR)
   CONCIERGE_JUJU_CHANNEL/juju36: 3.6/stable
+  # Keep the extra models (e.g. the second model of the async replication tests) so that the CI
+  # "Collect logs" step can still read them; the runner is thrown away afterwards
+  PYTEST_ADDOPTS: --keep-models
 prepare: |
   snap refresh --hold
   chown -R root:root "$SPREAD_PATH"

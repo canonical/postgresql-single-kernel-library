@@ -5,8 +5,8 @@ on:
         description: |
           Prefix for the test charm package GitHub artifacts
 
-          Built in ci.yaml with scripts/build_charm.sh: one artifact per substrate and
-          architecture (`<prefix>-vm-amd64`, `<prefix>-vm-arm64`, `<prefix>-k8s-amd64`, ...)
+          Built in ci.yaml with data-platform-workflows build_charm.yaml: one artifact per test
+          charm and platform (`<prefix>-tests-charms-postgresql_vm_test_charm--platform-ubuntu@24.04-amd64`, ...)
         required: true
         type: string
     secrets:
@@ -152,10 +152,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           # All architectures: test_wrong_arch.py deploys the charm of the other architecture
-          pattern: ${{ inputs.artifact-prefix }}-${{ matrix.job.substrate }}-*
+          pattern: ${{ inputs.artifact-prefix }}-tests-charms-postgresql_${{ matrix.job.substrate }}_test_charm--platform-*
           merge-multiple: true
-          # Where the `charm` fixture (tests/integration/charm/conftest.py) looks for it
-          path: tests/charms/postgresql_${{ matrix.job.substrate }}_test_charm/
+          # The artifacts keep the path from the repository root, so the charms land in
+          # tests/charms/postgresql_<substrate>_test_charm/, where the `charm` fixture
+          # (tests/integration/charm/conftest.py) looks for them
+          path: .
       - name: Run spread job
         timeout-minutes: 180
         id: spread
@@ -180,34 +182,74 @@ jobs:
         if: ${{ matrix.job.substrate == 'vm' && (success() || (failure() && steps.spread.outcome == 'failure')) }}
         # sudo needed since spread runs scripts as root
         run: sudo lxc image list
-      - name: Select model
+      - name: List models
         timeout-minutes: 1
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        id: juju-switch
+        # One step per command below; each one runs for every Juju model (e.g. "testing" and the
+        # "testing-other" model of the async replication tests, kept on CI by
+        # PYTEST_ADDOPTS=--keep-models in spread.yaml), with one collapsible group per model or unit.
+        # The output is also saved to ~/logs/ for the artifact. sudo needed since spread runs scripts as root
         run: |
-          # sudo needed since spread runs scripts as root
-          # "testing" is default model created by concierge
-          sudo juju switch testing
           mkdir ~/logs/
+          sudo juju models
       - name: juju status
-        timeout-minutes: 1
+        timeout-minutes: 2
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        run: |
-          if [ "${VAR_SUBSTRATE}" = vm ]; then
-            sudo juju status --color --relations --storage | tee ~/logs/juju-status.txt
-          else
-            sudo juju status --color --relations | tee ~/logs/juju-status.txt
-          fi
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" status
         env:
           VAR_SUBSTRATE: ${{ matrix.job.substrate }}
       - name: juju debug-log
-        timeout-minutes: 3
+        timeout-minutes: 5
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        run: sudo juju debug-log --color --replay --no-tail | tee ~/logs/juju-debug-log.txt
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" debug-log
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
       - name: jhack tail
-        timeout-minutes: 3
+        timeout-minutes: 5
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        run: sudo jhack tail --printer raw --replay --no-watch | tee ~/logs/jhack-tail.txt
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" jhack
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: juju show-status-log
+        timeout-minutes: 5
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" status-log
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: Patroni and PostgreSQL logs
+        timeout-minutes: 10
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" workload-logs
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: k8s pods and events
+        timeout-minutes: 2
+        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" k8s-cluster
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: k8s describe pods
+        timeout-minutes: 3
+        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" k8s-describe
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: k8s pod logs
+        timeout-minutes: 10
+        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" k8s-pod-logs
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: Cilium status
+        timeout-minutes: 3
+        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" cilium
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: Fix logs ownership
+        timeout-minutes: 1
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo chown -R "$(id -u):$(id -g)" ~/logs
       - name: Upload logs
         timeout-minutes: 5
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
