@@ -769,6 +769,7 @@ class AsyncReplicationManager(BaseManager):
             # Update the asynchronous replication configuration and start the database.
             self.update_config()
             self.workload.start_service(K8S_POSTGRESQL_SERVICE_NAME)
+            self.state.peer.data["timestamp"] = str(datetime.now())
         else:
             # Update the asynchronous replication configuration and start the database.
             self.update_config()
