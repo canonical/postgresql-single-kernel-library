@@ -2,7 +2,7 @@ project: postgresql-single-kernel-library
 
 # Integration tests of the VM and K8s test charms (tests/charms/), run on GitHub Actions.
 # Each task runs on both backends: github-ci-vm (lxd) and github-ci-k8s (Canonical K8s).
-# The test charms are built beforehand (scripts/build_charm.sh) and downloaded into
+# The test charms are built beforehand (data-platform-workflows build_charm.yaml) and downloaded into
 # tests/charms/<charm>/ by .github/workflows/integration_test.yaml.
 backends:
   github-ci-vm:

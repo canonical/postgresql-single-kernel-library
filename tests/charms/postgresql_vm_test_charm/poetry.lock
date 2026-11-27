@@ -1316,6 +1316,29 @@ files = [
 ]
 
 [[package]]
+name = "postgresql-charms-single-kernel"
+version = "16.3.26"
+description = "Shared and reusable code for PostgreSQL-related charms"
+optional = false
+python-versions = ">=3.8,<4.0"
+groups = ["main"]
+files = []
+develop = false
+
+[package.dependencies]
+tenacity = ">=9.0.0"
+
+[package.extras]
+db-driver = ["psycopg2 (>=2.9.10)"]
+k8s = ["cosl (>=0.0.53) ; python_version >= \"3.12\"", "lightkube (>=0.21.0) ; python_version >= \"3.12\"", "lightkube-models (>=1.28.1.4) ; python_version >= \"3.12\""]
+postgresql = ["boto3 (>=1.43.85) ; python_version >= \"3.12\"", "botocore (>=1.43.85) ; python_version >= \"3.12\"", "charm-refresh ; python_version >= \"3.12\"", "charmlibs-interfaces-tls-certificates (>=1.8.3) ; python_version >= \"3.12\"", "charmlibs-pathops (>=1.0.1) ; python_version >= \"3.12\"", "cryptography (>=42.0.0) ; python_version >= \"3.12\"", "data-platform-helpers (>=0.1.7) ; python_version >= \"3.12\"", "httpx ; python_version >= \"3.12\"", "jinja2 (>=3.1.6) ; python_version >= \"3.12\"", "jsonschema (>=4.0.0) ; python_version >= \"3.12\"", "ops[tracing] (>=2.0.0) ; python_version >= \"3.12\"", "pydantic (>=2.0) ; python_version >= \"3.12\"", "requests ; python_version >= \"3.12\"", "tomli ; python_version >= \"3.12\""]
+vm = ["charmlibs-snap (>=2.0.0,<3) ; python_version >= \"3.12\"", "charmlibs-systemd (>=1.0.0.post0) ; python_version >= \"3.12\"", "cosl (>=0.0.53) ; python_version >= \"3.12\"", "psutil (>=7.2.2) ; python_version >= \"3.12\"", "pysyncobj (>=0.3.15) ; python_version >= \"3.12\""]
+
+[package.source]
+type = "directory"
+url = "../../.."
+
+[[package]]
 name = "psutil"
 version = "7.2.2"
 description = "Cross-platform lib for process and system monitoring."
@@ -2086,4 +2109,4 @@ h11 = ">=0.16.0,<1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.12"
-content-hash = "87e467e5b8762b2283e3b07cde92334eafe05f630346f4765e760f6a74258a77"
+content-hash = "c376e2c7980665aeb9d01aa4c0fb90f28065130e342dd8e6762f9a7754d6df5b"

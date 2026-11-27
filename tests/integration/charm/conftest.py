@@ -36,13 +36,14 @@ def app_name(substrate: Substrate) -> str:
 
 @pytest.fixture(scope="session")
 def charm(substrate: Substrate, app_name: str, architecture: str) -> str:
-    """Path to the test charm built by scripts/build_charm.sh."""
+    """Path to the packed test charm (charmcraft pack with monorepo support)."""
     charm_dir = TEST_CHARMS_PATH / f"postgresql_{substrate}_test_charm"
     path = charm_dir / f"{app_name}_ubuntu@24.04-{architecture}.charm"
     if not path.exists():
         pytest.fail(
             f"{path} not found, build it with:"
-            f" scripts/build_charm.sh -c tests/charms/postgresql_{substrate}_test_charm"
+            f" cd tests/charms/postgresql_{substrate}_test_charm"
+            f" && CHARMCRAFT_EXPERIMENTAL_MONOREPO=1 charmcraft pack -p ubuntu@24.04:{architecture}"
         )
     return str(path)
 
