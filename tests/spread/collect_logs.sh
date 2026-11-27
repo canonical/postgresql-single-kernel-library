@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Collect Juju and workload logs after the spread job (used by .github/workflows/integration_test.yaml).
-# The output of each command is printed in its own collapsible group (one per command and model, or per
-# unit/pod), so that it can be read on the GitHub web UI, and saved to <output dir>/<model>/ (K8s cluster
-# output to <output dir>/k8s/) for the logs artifact. Similar to data-platform-workflows
-# tee-log-for-all-models (v42.1.0), but best effort: a failing or hanging command does not stop the rest
-# and the script always exits 0.
+# Collect Juju and workload logs after the spread job (used by .github/workflows/integration_test.yaml,
+# one CI step per command). Like data-platform-workflows tee-log-for-all-models (v42.1.0), the
+# per-model commands run for every Juju model (no hardcoded model names), with one collapsible group
+# per model (or per unit/pod), so that the output can be read on the GitHub web UI. The output is also
+# saved to <output dir>/<model>/ (K8s cluster output to <output dir>/k8s/) for the logs artifact.
+# Best effort: a failing or hanging command does not stop the rest and the script always exits 0.
 #
 # Usage: collect_logs.sh <output dir> <vm|k8s> <command> [model]
 # Without [model], the per-model commands run for every Juju model.
-#   all             everything below (K8s commands only on k8s)
 #   status          juju status
 #   debug-log       juju debug-log (needed by jhack)
 #   jhack           jhack tail of the saved debug-log
@@ -79,7 +78,7 @@ model_units() {
 
 status() {
     local model="$1" dir="$OUT_DIR/$1"
-    group "juju status · $model"
+    group "$model"
     if [ "$SUBSTRATE" = vm ]; then
         run "$dir/juju-status.txt" juju status --model "$model" --color --relations --storage
     else
@@ -91,7 +90,7 @@ status() {
 
 debug_log() {
     local model="$1" dir="$OUT_DIR/$1"
-    group "juju debug-log · $model"
+    group "$model"
     run "$dir/juju-debug-log.txt" juju debug-log --model "$model" --color --replay --no-tail
     endgroup
 }
@@ -100,7 +99,7 @@ jhack_tail() {
     # jhack reads the logs from stdin when it is not a TTY (as on CI), so feed it the debug-log saved
     # by debug_log (without the colour codes added by `juju debug-log --color`)
     local model="$1" dir="$OUT_DIR/$1"
-    group "jhack tail · $model"
+    group "$model"
     run_stdin "$dir/jhack-tail.txt" \
         "$(sed 's/\x1b\[[0-9;]*m//g' "$dir/juju-debug-log.txt" 2>/dev/null)" \
         jhack tail --printer raw
@@ -110,7 +109,7 @@ jhack_tail() {
 status_log() {
     local model="$1" dir="$OUT_DIR/$1" unit
     for unit in $(model_units "$model"); do
-        group "show-status-log · $model · $unit"
+        group "$model · $unit"
         run "$dir/status-log-${unit//\//-}.txt" juju show-status-log --model "$model" "$unit" --days 1
         endgroup
     done
@@ -123,7 +122,7 @@ workload_logs() {
     for unit in $(model_units "$model" "$pg_filter"); do
         for service in patroni postgresql; do
             [ "$service" = patroni ] && name=Patroni || name=PostgreSQL
-            group "$name · $model · $unit"
+            group "$model · $unit · $name"
             if [ "$SUBSTRATE" = vm ]; then
                 run_stdin "$dir/$service-${unit//\//-}.txt" \
                     "$(cat_logs_script "$VM_LOGS_DIR/$service")" \
@@ -140,17 +139,17 @@ workload_logs() {
 }
 
 k8s_cluster() {
-    group "k8s pods"
+    group pods
     run "$K8S_DIR/pods.txt" k8s kubectl get pods --all-namespaces --output wide
     endgroup
-    group "k8s events"
+    group events
     run "$K8S_DIR/events.txt" k8s kubectl get events --all-namespaces --sort-by=.lastTimestamp
     endgroup
 }
 
 k8s_describe() {
     local model="$1"
-    group "k8s describe pods · $model"
+    group "$model"
     run "$K8S_DIR/describe-pods-$model.txt" k8s kubectl --namespace "$model" describe pods
     endgroup
 }
@@ -158,11 +157,11 @@ k8s_describe() {
 k8s_pod_logs() {
     local model="$1" pod
     for pod in $(k8s kubectl --namespace "$model" get pods --output name | cut -d/ -f2); do
-        group "k8s pod logs · $model · $pod"
+        group "$model · $pod"
         run "$K8S_DIR/pod-logs-$model-$pod.txt" \
             k8s kubectl --namespace "$model" logs "$pod" --all-containers --prefix
         endgroup
-        group "k8s pod logs (previous) · $model · $pod"
+        group "$model · $pod (previous)"
         run "$K8S_DIR/pod-logs-previous-$model-$pod.txt" \
             k8s kubectl --namespace "$model" logs "$pod" --all-containers --prefix --previous
         endgroup
@@ -170,11 +169,11 @@ k8s_pod_logs() {
 }
 
 cilium() {
-    group "Cilium status"
+    group status
     run "$K8S_DIR/cilium-status.txt" \
         k8s kubectl --namespace kube-system exec daemonset/cilium -- cilium-dbg status --verbose
     endgroup
-    group "Cilium endpoints"
+    group endpoints
     run "$K8S_DIR/cilium-endpoints.txt" \
         k8s kubectl --namespace kube-system exec daemonset/cilium -- cilium-dbg endpoint list
     endgroup
@@ -192,22 +191,6 @@ K8S_DIR="$OUT_DIR/k8s"
 MODELS="${MODEL:-$(juju_models)}"
 
 case "$COMMAND" in
-    all)
-        group "juju models"
-        run "$OUT_DIR/juju-models.txt" juju models
-        endgroup
-        for_each_model status
-        for_each_model debug_log
-        for_each_model jhack_tail
-        for_each_model status_log
-        for_each_model workload_logs
-        if [ "$SUBSTRATE" = k8s ]; then
-            k8s_cluster
-            for_each_model k8s_describe
-            for_each_model k8s_pod_logs
-            cilium
-        fi
-        ;;
     status) for_each_model status ;;
     debug-log) for_each_model debug_log ;;
     jhack) for_each_model jhack_tail ;;

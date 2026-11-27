@@ -182,16 +182,68 @@ jobs:
         if: ${{ matrix.job.substrate == 'vm' && (success() || (failure() && steps.spread.outcome == 'failure')) }}
         # sudo needed since spread runs scripts as root
         run: sudo lxc image list
-      - name: Collect logs
-        timeout-minutes: 30
+      - name: List models
+        timeout-minutes: 1
         if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
-        # One collapsible group per command and model (every Juju model, e.g. "testing" and the
+        # One step per command below; each one runs for every Juju model (e.g. "testing" and the
         # "testing-other" model of the async replication tests, kept on CI by
-        # PYTEST_ADDOPTS=--keep-models in spread.yaml), also saved to ~/logs/ for the artifact.
-        # sudo needed since spread runs scripts as root
+        # PYTEST_ADDOPTS=--keep-models in spread.yaml), with one collapsible group per model or unit.
+        # The output is also saved to ~/logs/ for the artifact. sudo needed since spread runs scripts as root
         run: |
           mkdir ~/logs/
-          sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" all
+          sudo juju models
+      - name: juju status
+        timeout-minutes: 2
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" status
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: juju debug-log
+        timeout-minutes: 5
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" debug-log
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: jhack tail
+        timeout-minutes: 5
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" jhack
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: juju show-status-log
+        timeout-minutes: 5
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" status-log
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: Patroni and PostgreSQL logs
+        timeout-minutes: 10
+        if: ${{ success() || (failure() && steps.spread.outcome == 'failure') }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" workload-logs
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: k8s pods and events
+        timeout-minutes: 2
+        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" k8s-cluster
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: k8s describe pods
+        timeout-minutes: 3
+        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" k8s-describe
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: k8s pod logs
+        timeout-minutes: 10
+        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" k8s-pod-logs
+        env:
+          VAR_SUBSTRATE: ${{ matrix.job.substrate }}
+      - name: Cilium status
+        timeout-minutes: 3
+        if: ${{ (success() || (failure() && steps.spread.outcome == 'failure')) && matrix.job.substrate == 'k8s' }}
+        run: sudo tests/spread/collect_logs.sh ~/logs "${VAR_SUBSTRATE}" cilium
         env:
           VAR_SUBSTRATE: ${{ matrix.job.substrate }}
       - name: Fix logs ownership
