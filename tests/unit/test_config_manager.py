@@ -206,7 +206,7 @@ def test_render_patroni_yml_file(substrate, config):
                 storage_path="/var/lib/pg/data",
                 logs_storage_path="/var/lib/pg/logs",
                 pgdata_path="/var/lib/pg/data/16/main",
-                max_connections=sentinel.experimental_max_connections,
+                max_connections=100,
             )
             _render_file.assert_called_once_with(
                 substrate, "/var/lib/pg/data/patroni.yaml", sentinel.template_output, 0o644
@@ -262,7 +262,7 @@ def test_render_patroni_yml_file(substrate, config):
                 watcher_addr=None,
                 pg_cron_available=True,
                 shared_preload_libraries="timescaledb,pgaudit,set_user,pg_stat_statements,pg_cron",
-                max_connections=sentinel.experimental_max_connections,
+                max_connections=100,
             )
             _render_file.assert_called_once_with(
                 substrate,
@@ -757,6 +757,10 @@ def orchestrate(config, postgresql_client):
         # render_patroni_yml_file is mocked, but its kwargs are still eagerly evaluated
         # against the state — patch the accessors they read so they don't hit the Mock relation.
         patch(
+            "single_kernel_postgresql.core.state.CharmState.config",
+            new_callable=PropertyMock,
+        ) as _state_config,
+        patch(
             "single_kernel_postgresql.core.peer_relation.PostgreSQLPeer.is_connectivity_enabled",
             new_callable=PropertyMock,
             return_value=True,
@@ -796,6 +800,7 @@ def orchestrate(config, postgresql_client):
         _is_tls.return_value = False
         _hash.return_value = "newhash"
         _peer_cfg_hash.return_value = "oldhash"
+        _state_config.return_value.experimental_max_connections = None
         # patroni_manager is a Mock; member_started / ensure_slots are plain attributes here.
         config.patroni_manager.member_started = True
         config.patroni_manager.ensure_slots_controller_by_patroni.return_value = True

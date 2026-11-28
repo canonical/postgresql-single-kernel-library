@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright 2025 Canonical Ltd.
 # See LICENSE file for licensing details.
 
@@ -439,6 +438,14 @@ class ConfigManager(BaseManager):
             if connection:
                 connection.close()
 
+    def calculate_max_connections(self, cpu_cores: int) -> int:
+        """Calculates the max connections for the deployment."""
+        return (
+            self.state.config.experimental_max_connections
+            if self.state.config.experimental_max_connections
+            else max(4 * cpu_cores, 100)
+        )
+
     def apply_api_config(
         self,
         cpu_cores: int,
@@ -446,13 +453,8 @@ class ConfigManager(BaseManager):
     ) -> bool:
         """Update the parameters controlled by Patroni via its API."""
         # Use config value if set, calculate otherwise
-        max_connections = (
-            self.state.config.experimental_max_connections
-            if self.state.config.experimental_max_connections
-            else max(4 * cpu_cores, 100)
-        )
         cfg_patch: dict[str, int | str | None] = {
-            "max_connections": max_connections,
+            "max_connections": self.calculate_max_connections(cpu_cores),
             "max_prepared_transactions": self.state.config.memory_max_prepared_transactions,
             "max_replication_slots": 25,
             "max_wal_senders": 25,
@@ -578,6 +580,8 @@ class ConfigManager(BaseManager):
         # migration phase); the library default keeps the render working.
         relations_user_databases_map = relations_user_databases_map or {}
 
+        max_connections = self.calculate_max_connections(cpu_cores)
+
         # Update and reload configuration based on TLS files availability.
         logger.info("Updating Patroni config file")
         logger.debug(f"Calling render_patroni_yml_file with parameters = {pg_parameters}")
@@ -601,6 +605,7 @@ class ConfigManager(BaseManager):
             async_standby_endpoints=async_standby_endpoints,
             watcher_raft_address=watcher_raft_address,
             no_peers=no_peers,
+            max_connections=max_connections,
         )
         if no_peers:
             return True
@@ -690,6 +695,7 @@ class ConfigManager(BaseManager):
         async_standby_endpoints: list[str] | None = None,
         # VM watcher rel
         watcher_raft_address: str | None = None,
+        max_connections: int = 100,
     ) -> bool:
         """Render the Patroni configuration file.
 
@@ -716,6 +722,7 @@ class ConfigManager(BaseManager):
             async_standby_endpoints: Primary async cluster endpoint.
             async_partner_addresses: Primary async cluster endpoint.
             watcher_raft_address: IP address of a related Raft watcher.
+            max_connections: Calculated max connections.
 
         Returns:
             Whether the configuration was (re-)rendered to disk.
@@ -770,7 +777,7 @@ class ConfigManager(BaseManager):
             "slots": slots,
             "instance_password_encryption": self.state.config.instance_password_encryption,
             "extra_replication_endpoints": async_standby_endpoints,
-            "max_connections": self.state.config.experimental_max_connections,
+            "max_connections": max_connections,
         }
         if self.state.substrate == Substrates.VM:
             # The installed snap may predate a library the charm pins (e.g.
