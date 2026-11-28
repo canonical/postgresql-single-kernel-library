@@ -5,7 +5,6 @@
 
 import subprocess
 import sys
-from asyncio import run
 from contextlib import suppress
 from ssl import create_default_context
 from time import sleep
@@ -106,7 +105,7 @@ def dispatch(run_cmd, unit, charm_dir, custom_event):
     subprocess.run([run_cmd, "-u", unit, dispatch_sub_cmd.format(custom_event, charm_dir)])  # noqa: S603
 
 
-async def main():
+def main():
     """Main watch and dispatch loop.
 
     Watch the Patroni API cluster info. When changes are detected, dispatch the change event.
@@ -158,4 +157,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    run(main())
+    main()

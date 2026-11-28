@@ -5,7 +5,6 @@
 
 import subprocess
 import sys
-from asyncio import run
 from time import sleep
 
 import psycopg2
@@ -77,7 +76,7 @@ def check_for_database_changes(run_cmd, unit, charm_dir, previous_databases):
             connection.close()
 
 
-async def main():
+def main():
     """Main watch and dispatch loop.
 
     Watch the Patroni API cluster info. When changes are detected, dispatch the change event.
@@ -118,4 +117,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    run(main())
+    main()
